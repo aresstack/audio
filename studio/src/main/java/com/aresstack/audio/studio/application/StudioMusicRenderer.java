@@ -29,6 +29,14 @@ public final class StudioMusicRenderer {
     public Path render(Path arrangement, Path directory, Map<String, InstrumentLibrary> assignments,
                        String fluidSynthExecutable, String sfizzExecutable,
                        GemmaMusicComposer.Progress progress) throws Exception {
+        return render(arrangement, directory, assignments, java.util.Collections.<String, Integer>emptyMap(),
+                fluidSynthExecutable, sfizzExecutable, progress);
+    }
+
+    public Path render(Path arrangement, Path directory, Map<String, InstrumentLibrary> assignments,
+                       Map<String, Integer> programOverrides,
+                       String fluidSynthExecutable, String sfizzExecutable,
+                       GemmaMusicComposer.Progress progress) throws Exception {
         Files.createDirectories(directory);
         progress.update("Creating reference MIDI and Java-synthesis WAVs ...");
         String executable = javaExecutable();
@@ -55,8 +63,11 @@ public final class StudioMusicRenderer {
                     || library.id().equals("musescore-general")
                     || library.id().startsWith("musescore-general::");
             Path trackMidi = directory.resolve(track + "-isolated.mid");
+            int selectedProgram = generalMidi
+                    ? programOverrides.containsKey(track) ? programOverrides.get(track) : -1
+                    : 0;
             midiExporter.isolate(directory.resolve("arrangement.mid"), track,
-                    generalMidi ? -1 : 0, trackMidi);
+                    selectedProgram, trackMidi);
             Path stem = directory.resolve(track + "-sampled.wav");
             sampler.render(library, bank, trackMidi, stem, fluidSynthExecutable, sfizzExecutable);
             stems.add(stem);
