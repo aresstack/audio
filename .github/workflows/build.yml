@@ -70,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends fluidsynth
+          sudo apt-get install -y --no-install-recommends fluidsynth ffmpeg
           mkdir -p build/soundfont-compare build/soundfonts
 
           # Pin soundbank bytes to prevent changes in the upstream branch from changing the output.
