@@ -4,7 +4,7 @@ Small, modular Java audio experiments for [3d4j](https://github.com/aresstack/3d
 
 ## Modules
 
-- **`music`** — Original multitrack composition renderer, recovered from the Gemma/Cubase-style experiment. Accepts an eight-bar, variable-track (1–16) TSV arrangement, exports editable Standard MIDI Format type 1 and mono PCM WAV previews (one per instrument plus mix). Uses the Java Sound API only.
+- **`music`** — Original multitrack composition renderer, recovered from the Gemma/Cubase-style experiment. Accepts an eight-bar, variable-track TSV arrangement (any number of tracks; beyond 15 melodic ones, channels are reused on further MIDI ports), exports editable Standard MIDI Format type 1 and mono PCM WAV previews (one per instrument plus mix). Uses the Java Sound API only.
 - **`instruments`** — Registry of researched libraries (GeneralUser GS, MuseScore General, VSCO 2 CE, VPO, Salamander, Spanish Classical Guitar, FSBS Clean, FreePats, SFZ Instruments), local path storage and license/source links.
 - **`studio`** — Swing test application with KIPITZ/Gemma chat client, resumable multitrack composition, per-track sampled instruments and WAV mixing.
 - **`sounds`** — Game-event effect synthesis. Contains the original KIPITZ/Gemma PowerShell experiment and a Java renderer for the JSON sound plan. Uses Gson for input parsing and the Java Sound API for audio output.
@@ -105,7 +105,7 @@ The downloader uses a bounded HTTP(S) transfer, verifies the known GeneralUser S
 
 ### Scope and limitations
 
-The UI is a lightweight test application, not yet a complete DAW. The Gemma composer still creates eight bars in C major, but accepts 1–16 user-selected MIDI tracks instead of always composing four. Real SF2/SF3/SFZ playback requires the appropriate external renderer (FluidSynth or sfizz_render), not merely the instrument samples. The offline demo with Java synthesis does not.
+The UI is a lightweight test application, not yet a complete DAW. The Gemma composer still creates eight bars in C major, but accepts any number of user-selected tracks instead of always composing four. Real SF2/SF3/SFZ playback requires the appropriate external renderer (FluidSynth or sfizz_render), not merely the instrument samples. The offline demo with Java synthesis does not.
 
 Sample-library licenses differ. Virtual Playing Orchestra draws on multiple origins; Salamander Grand Piano is CC BY 3.0. Not every ARIA-specific SFZ opcode can be used by sfizz. **Polyphone** may convert SFZ into SF2, but articulation and modulation information can be lost.
 
@@ -183,7 +183,7 @@ Three workflows are supported. **Meine Spuren**: edit the strips and click **Kom
 
 Under **Einstellungen → KI-Zugang**, **Parallel** defaults to **32**, independently of 3d4j's default of one. The real request count is limited to the number of configured tracks. The AI proposal and the shared eight-bar plan are each created sequentially, and then all part requests can run concurrently. Reducing parallelism can help with provider rate limits.
 
-General MIDI reserves channel 10 for percussion. The current MIDI renderer supports up to **15 melodic tracks plus one drum track**, and safely rejects incompatible channel layouts. The new TSV track line has five fields: `track<TAB>id<TAB>program<TAB>channel<TAB>role`. Original four-field lines still work. The Java renderer outputs an individual MIDI track and WAV stem per configured row, then mixes them.
+General MIDI reserves channel 10 for percussion and leaves 15 melodic channels per port. There is no upper limit of tracks: the sixteenth melodic track begins again at the first channel, and in `arrangement.mid` tracks that share a channel are told apart by a MIDI port event. Every track is rendered alone and the stems are mixed, so shared channels never collide in the studio; a simple MIDI player that ignores ports will play such a file wrongly. One drum track is supported. The TSV track line has five fields: `track<TAB>id<TAB>program<TAB>channel<TAB>role`. Original four-field lines still work. The Java renderer outputs an individual MIDI track and WAV stem per configured row, then mixes them.
 
 Each composition folder stores the editable list in `tracks.json` and the optional AI proposal in `instrument-proposal.json`. Cached notes for changed instrument descriptions use a prompt fingerprint to avoid reusing the wrong content. Existing `composition-plan.json`, `melody.json`, `harmony.json`, `bass.json`, and `drums.json` remain compatible with the original default arrangement.
 

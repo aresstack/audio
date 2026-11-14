@@ -130,8 +130,8 @@ public final class StageMixService {
                 tracks.add(new MusicTrack(fields[1], role, fields[1], program, "builtin"));
             }
         }
-        if (tracks.isEmpty() || tracks.size() > TrackArrangement.MAX_TRACKS) {
-            throw new IllegalArgumentException("Arrangement must contain 1–16 tracks.");
+        if (tracks.isEmpty()) {
+            throw new IllegalArgumentException("Arrangement must contain at least one track.");
         }
         return tracks;
     }

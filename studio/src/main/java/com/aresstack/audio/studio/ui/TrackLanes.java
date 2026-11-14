@@ -168,7 +168,7 @@ final class TrackLanes extends JPanel {
 
     void setEditingEnabled(boolean enabled) {
         editable = enabled;
-        add.setEnabled(enabled && heads.size() < TrackArrangement.MAX_TRACKS);
+        add.setEnabled(enabled);
     }
 
     void setArrangement(TrackArrangement arrangement) {
@@ -262,7 +262,7 @@ final class TrackLanes extends JPanel {
         foot.setMaximumSize(new Dimension(HEAD_WIDTH, Integer.MAX_VALUE));
         foot.setAlignmentX(0f);
         column.add(foot);
-        add.setEnabled(editable && heads.size() < TrackArrangement.MAX_TRACKS);
+        add.setEnabled(editable);
         count.setText(heads.isEmpty() ? "Keine Spur" : heads.size() + (heads.size() == 1 ? " Spur" : " Spuren"));
         fitHeights();
         column.revalidate();
@@ -289,11 +289,6 @@ final class TrackLanes extends JPanel {
     }
 
     private void addTrack() {
-        if (heads.size() >= TrackArrangement.MAX_TRACKS) {
-            JOptionPane.showMessageDialog(this,
-                    "Mehr als 16 Spuren kann eine MIDI-Datei nicht tragen (15 Kanäle und das Schlagzeug).");
-            return;
-        }
         int sequence = 1;
         while (containsId("voice_" + sequence, null)) {
             sequence++;

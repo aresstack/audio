@@ -174,8 +174,8 @@ public final class StudioMusicRenderer {
                 tracks.add(fields[1]);
             }
         }
-        if (tracks.isEmpty() || tracks.size() > TrackArrangement.MAX_TRACKS) {
-            throw new IllegalArgumentException("Arrangement must contain 1–16 tracks.");
+        if (tracks.isEmpty()) {
+            throw new IllegalArgumentException("Arrangement must contain at least one track.");
         }
         return tracks;
     }

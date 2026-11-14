@@ -47,14 +47,24 @@ public final class TrackArrangementTest {
                 new MusicTrack("drum2", MusicTrack.DRUMS, "Kit two", 0, "builtin")));
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void rejectsSixteenMelodicTracksWithoutPercussion() {
+    @Test
+    public void moreTracksThanAPortHasChannelsBeginAgainAtTheFirstChannel() {
         List<MusicTrack> tracks = new ArrayList<MusicTrack>();
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < 40; i++) {
             tracks.add(new MusicTrack("voice_" + i, MusicTrack.TEXTURE,
                     "Synth texture", i, "builtin"));
         }
-        new TrackArrangement(tracks);
+        tracks.add(new MusicTrack("drums", MusicTrack.DRUMS, "GM drum kit", 0, "builtin"));
+        TrackArrangement arrangement = new TrackArrangement(tracks);
+        Assert.assertEquals(41, arrangement.tracks().size());
+        Assert.assertEquals(15, arrangement.channelFor("voice_14"));
+        Assert.assertEquals("the sixteenth melodic track is on the first channel again", 0,
+                arrangement.channelFor("voice_15"));
+        Assert.assertEquals(10, arrangement.channelFor("voice_39"));
+        Assert.assertEquals(9, arrangement.channelFor("drums"));
+        for (int i = 0; i < 40; i++) {
+            Assert.assertNotEquals("no melodic track on the drum channel", 9, arrangement.channelFor("voice_" + i));
+        }
     }
 
     @Test

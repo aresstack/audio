@@ -77,17 +77,22 @@ public final class MultiTrackMusicRenderer {
             }
         }
         if (arrangement.tempo < 60 || arrangement.tempo > 180
-                || arrangement.parts.isEmpty() || arrangement.parts.size() > 16) {
-            throw new IllegalArgumentException("Require tempo 60..180 and 1..16 MIDI tracks.");
+                || arrangement.parts.isEmpty()) {
+            throw new IllegalArgumentException("Require tempo 60..180 and at least one track.");
         }
-        java.util.Set<Integer> channels = new java.util.HashSet<Integer>();
+        // More tracks than a port has channels share channels; each then goes to a port of its own.
+        java.util.Map<Integer, Integer> used = new java.util.HashMap<Integer, Integer>();
         for (Part part : arrangement.parts.values()) {
             boolean isDrums = "drums".equals(part.role);
             if (part.notes.isEmpty() || part.program < 0 || part.program > 127 || part.channel < 0
-                    || part.channel > 15 || (part.channel == 9) != isDrums
-                    || !channels.add(part.channel)) {
-                throw new IllegalArgumentException("Invalid, empty or channel-conflicting track: "
-                        + part.name);
+                    || part.channel > 15 || (part.channel == 9) != isDrums) {
+                throw new IllegalArgumentException("Invalid or empty track: " + part.name);
+            }
+            Integer before = used.get(part.channel);
+            part.port = before == null ? 0 : before;
+            used.put(part.channel, part.port + 1);
+            if (part.port > 127) {
+                throw new IllegalArgumentException("Too many tracks on one MIDI channel: " + part.name);
             }
         }
         return arrangement;
@@ -103,6 +108,10 @@ public final class MultiTrackMusicRenderer {
         for (Part part : arrangement.parts.values()) {
             Track track = sequence.createTrack();
             addMeta(track, 0x03, part.name.getBytes(StandardCharsets.UTF_8), 0);
+            if (part.port > 0) {
+                // "MIDI port": programs that read the file keep tracks apart that share a channel.
+                addMeta(track, 0x21, new byte[]{(byte) part.port}, 0);
+            }
             if (part.channel != 9) {
                 addMidi(track, ShortMessage.PROGRAM_CHANGE, part.channel, part.program, 0, 0);
             }
@@ -240,6 +249,7 @@ public final class MultiTrackMusicRenderer {
         private final int program;
         private final int channel;
         private final String role;
+        private int port;
         private final List<Note> notes = new ArrayList<Note>();
 
         private Part(String name, int program, int channel, String role) {

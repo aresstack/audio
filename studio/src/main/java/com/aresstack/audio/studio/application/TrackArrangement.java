@@ -6,14 +6,18 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Validate a variable MIDI arrangement and assign unique GM-compatible MIDI channels. */
+/**
+ * Validate a variable arrangement and assign GM-compatible MIDI channels. There is no upper
+ * limit of tracks: a MIDI port has 15 melodic channels, so the sixteenth melodic track begins
+ * again at the first channel, on the next port. Every track is rendered alone, so tracks
+ * that share a channel never get in each other's way.
+ */
 public final class TrackArrangement {
-    public static final int MAX_TRACKS = 16;
     private final List<MusicTrack> tracks;
 
     public TrackArrangement(List<MusicTrack> proposed) {
-        if (proposed == null || proposed.isEmpty() || proposed.size() > MAX_TRACKS) {
-            throw new IllegalArgumentException("Select between 1 and 16 tracks.");
+        if (proposed == null || proposed.isEmpty()) {
+            throw new IllegalArgumentException("Select at least one track.");
         }
         Set<String> ids = new HashSet<String>();
         int drumCount = 0;
@@ -29,9 +33,6 @@ public final class TrackArrangement {
         }
         if (drumCount > 1) {
             throw new IllegalArgumentException("Only one shared GM percussion channel is supported.");
-        }
-        if (checked.size() - drumCount > 15) {
-            throw new IllegalArgumentException("General MIDI provides only 15 melodic channels.");
         }
         this.tracks = Collections.unmodifiableList(checked);
     }
@@ -52,11 +53,9 @@ public final class TrackArrangement {
                     return 9;
                 }
             } else {
-                if (melodicChannel == 9) {
-                    melodicChannel++;
-                }
                 if (track.id().equals(trackId)) {
-                    return melodicChannel;
+                    int channel = melodicChannel % 15; // 15 melodic channels to a port, then the next port
+                    return channel >= 9 ? channel + 1 : channel;
                 }
                 melodicChannel++;
             }
