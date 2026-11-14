@@ -68,6 +68,8 @@ public final class AudioStudioFrame extends JFrame {
     private final JTextField endpoint = new JTextField(38);
     private final JPasswordField apiKey = new JPasswordField(38);
     private final JTextField model = new JTextField("google/gemma-4-31B-it", 23);
+    private final JSpinner tokenLimit = new JSpinner(
+            new SpinnerNumberModel(16384, 256, Integer.MAX_VALUE, 256));
     private final JTextField proxyHost = new JTextField(16);
     private final JTextField proxyPort = new JTextField("", 5);
     private final JComboBox<String> proxyMode = new JComboBox<String>(new String[]{
@@ -135,6 +137,7 @@ public final class AudioStudioFrame extends JFrame {
                 new InstrumentLibraryPanel(registry, this::configureNetworkRoutes,
                         this::refreshInstrumentChoices, this::append));
         tabs.addTab("2 · Komponieren und abspielen", compositionPanel());
+        tabs.addTab("3 · Einstellungen", settingsPanel());
         add(tabs, BorderLayout.CENTER);
         JPanel header = new JPanel(new BorderLayout());
         header.setBorder(BorderFactory.createEmptyBorder(16, 20, 12, 20));
@@ -159,42 +162,6 @@ public final class AudioStudioFrame extends JFrame {
         JPanel fields = new JPanel(new GridBagLayout());
         fields.setBorder(AudioStudioTheme.cardBorder());
         int row = 0;
-        addRow(fields, row++, "KIPITZ Completions URL:", endpoint);
-        JPanel credential = new JPanel(new BorderLayout(6, 0));
-        credential.add(apiKey, BorderLayout.CENTER);
-        JPanel credentialButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
-        JButton keepassList = new JButton("KeePass verbinden / Einträge laden");
-        keepassList.addActionListener(event -> loadKeePassEntries());
-        credentialButtons.add(keepassList);
-        JButton keepassUse = new JButton("Eintrag übernehmen");
-        keepassUse.addActionListener(event -> useKeePassEntry());
-        credentialButtons.add(keePassEntries);
-        credentialButtons.add(keepassUse);
-        credential.add(credentialButtons, BorderLayout.EAST);
-        addRow(fields, row++, "API-Key (lokal gespeichert):", credential);
-        JPanel modelControls = new JPanel(new BorderLayout(6, 0));
-        modelControls.add(model, BorderLayout.CENTER);
-        JButton listModels = new JButton("Modelle laden");
-        listModels.addActionListener(event -> loadModelNames());
-        modelControls.add(listModels, BorderLayout.EAST);
-        addRow(fields, row++, "Modell:", modelControls);
-        addRow(fields, row++, "Proxy-Modus:", proxyMode);
-        JPanel proxyHostAndPort = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        proxyHostAndPort.add(new JLabel("Host:"));
-        proxyHostAndPort.add(proxyHost);
-        proxyHostAndPort.add(new JLabel("Port:"));
-        proxyHostAndPort.add(proxyPort);
-        JButton testProxy = new JButton("Proxyweg prüfen");
-        testProxy.addActionListener(event -> testProxyRoute());
-        proxyHostAndPort.add(testProxy);
-        addRow(fields, row++, "Manueller Proxy:", proxyHostAndPort);
-        addRow(fields, row++, "PAC-Adresse (optional):", proxyPacUrl);
-        addRow(fields, row++, "Ohne Proxy für:", proxyNonProxyHosts);
-        JPanel proxyAuthentication = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        proxyAuthentication.add(proxyBasic);
-        proxyAuthentication.add(new JLabel("KeePass-Eintrag:"));
-        proxyAuthentication.add(proxyCredentialRef);
-        addRow(fields, row++, "Proxy-Anmeldung:", proxyAuthentication);
         addRow(fields, row++, "Musikalische Beschreibung:", new JScrollPane(description));
         JPanel output = new JPanel(new BorderLayout(4, 0));
         output.add(directory, BorderLayout.CENTER);
@@ -210,21 +177,6 @@ public final class AudioStudioFrame extends JFrame {
         chooseButtons.add(selectTsv);
         tsv.add(chooseButtons, BorderLayout.EAST);
         addRow(fields, row++, "Arrangement:", tsv);
-
-        JPanel engines = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        engines.add(new JLabel("FluidSynth:"));
-        engines.add(fluidSynth);
-        engines.add(new JLabel("sfizz:"));
-        engines.add(sfizz);
-        JButton fluidHelp = new JButton("FluidSynth installieren …");
-        fluidHelp.addActionListener(event -> openEngineWebsite("https://www.fluidsynth.org/download/"));
-        engines.add(fluidHelp);
-        JButton sfizzHelp = new JButton("sfizz installieren …");
-        sfizzHelp.addActionListener(event -> openEngineWebsite("https://github.com/sfztools/sfizz/releases"));
-        engines.add(sfizzHelp);
-        addRow(fields, row++, "Sampler:", engines);
-        addRow(fields, row++, "Hinweis:",
-                new JLabel("SF2/SF3 benötigen FluidSynth, SFZ benötigt sfizz; ohne Engine funktioniert die Java-Synthese."));
 
         for (int index = 0; index < PART_NAMES.length; index++) {
             JComboBox<InstrumentLibrary> choice = new JComboBox<InstrumentLibrary>();
@@ -270,12 +222,8 @@ public final class AudioStudioFrame extends JFrame {
         JButton inspect = new JButton("Plan / Spuren");
         inspect.addActionListener(event -> inspectComposition());
         secondary.add(inspect);
-        JButton save = new JButton("Einstellungen speichern");
-        save.addActionListener(event -> saveSettings(true));
-
         JPanel lower = new JPanel(new BorderLayout());
         lower.add(secondary, BorderLayout.WEST);
-        lower.add(save, BorderLayout.EAST);
         JPanel toolbar = new JPanel(new BorderLayout(5, 2));
         toolbar.add(steps, BorderLayout.NORTH);
         toolbar.add(lower, BorderLayout.SOUTH);
@@ -283,6 +231,79 @@ public final class AudioStudioFrame extends JFrame {
         JPanel panel = new JPanel(new BorderLayout(4, 8));
         panel.add(toolbar, BorderLayout.NORTH);
         panel.add(new JScrollPane(fields), BorderLayout.CENTER);
+        return panel;
+    }
+
+    /** Group external AI, KeePass, network and sampler configuration in a dedicated tab. */
+    private JPanel settingsPanel() {
+        JPanel fields = new JPanel(new GridBagLayout());
+        fields.setBorder(AudioStudioTheme.cardBorder());
+        int row = 0;
+        addRow(fields, row++, "KI-Anbieter:", new JLabel("OpenAI-kompatible KIPITZ-API"));
+        addRow(fields, row++, "KIPITZ Completions URL:", endpoint);
+        JPanel credential = new JPanel(new BorderLayout(6, 0));
+        credential.add(apiKey, BorderLayout.CENTER);
+        JPanel credentialButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
+        JButton keepassList = new JButton("KeePass verbinden / Einträge laden");
+        keepassList.addActionListener(event -> loadKeePassEntries());
+        credentialButtons.add(keepassList);
+        JButton keepassUse = new JButton("Eintrag übernehmen");
+        keepassUse.addActionListener(event -> useKeePassEntry());
+        credentialButtons.add(keePassEntries);
+        credentialButtons.add(keepassUse);
+        credential.add(credentialButtons, BorderLayout.EAST);
+        addRow(fields, row++, "API-Key (lokal gespeichert):", credential);
+        JPanel modelControls = new JPanel(new BorderLayout(6, 0));
+        modelControls.add(model, BorderLayout.CENTER);
+        JButton listModels = new JButton("Modelle laden");
+        listModels.addActionListener(event -> loadModelNames());
+        modelControls.add(listModels, BorderLayout.EAST);
+        addRow(fields, row++, "Modell:", modelControls);
+        addRow(fields, row++, "Proxy-Modus:", proxyMode);
+        JPanel proxyHostAndPort = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        proxyHostAndPort.add(new JLabel("Host:"));
+        proxyHostAndPort.add(proxyHost);
+        proxyHostAndPort.add(new JLabel("Port:"));
+        proxyHostAndPort.add(proxyPort);
+        JButton testProxy = new JButton("Proxyweg prüfen");
+        testProxy.addActionListener(event -> testProxyRoute());
+        proxyHostAndPort.add(testProxy);
+        addRow(fields, row++, "Manueller Proxy:", proxyHostAndPort);
+        addRow(fields, row++, "PAC-Adresse (optional):", proxyPacUrl);
+        addRow(fields, row++, "Ohne Proxy für:", proxyNonProxyHosts);
+        JPanel proxyAuthentication = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        proxyAuthentication.add(proxyBasic);
+        proxyAuthentication.add(new JLabel("KeePass-Eintrag:"));
+        proxyAuthentication.add(proxyCredentialRef);
+        addRow(fields, row++, "Proxy-Anmeldung:", proxyAuthentication);
+        addRow(fields, row++, "Token-Limit pro Antwort:", tokenLimit);
+        addRow(fields, row++, "Token-Hinweis:",
+                new JLabel("Maximale Antwortlänge; der kurze Kompositionsplan nutzt höchstens 2.048 Tokens."));
+        addRow(fields, row++, "Audio-Renderer:", new JLabel("Externe Instrumenten-Engines"));
+        JPanel engines = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        engines.add(new JLabel("FluidSynth:"));
+        engines.add(fluidSynth);
+        engines.add(new JLabel("sfizz:"));
+        engines.add(sfizz);
+        JButton fluidHelp = new JButton("FluidSynth installieren …");
+        fluidHelp.addActionListener(event -> openEngineWebsite("https://www.fluidsynth.org/download/"));
+        engines.add(fluidHelp);
+        JButton sfizzHelp = new JButton("sfizz installieren …");
+        sfizzHelp.addActionListener(event -> openEngineWebsite("https://github.com/sfztools/sfizz/releases"));
+        engines.add(sfizzHelp);
+        addRow(fields, row++, "Sampler:", engines);
+        addRow(fields, row++, "Hinweis:",
+                new JLabel("SF2/SF3 benötigen FluidSynth, SFZ benötigt sfizz; ohne Engine funktioniert die Java-Synthese."));
+
+
+        JPanel actionBar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 6));
+        JButton save = new JButton("Einstellungen speichern");
+        save.addActionListener(event -> saveSettings(true));
+        actionBar.add(save);
+
+        JPanel panel = new JPanel(new BorderLayout(4, 8));
+        panel.add(new JScrollPane(fields), BorderLayout.CENTER);
+        panel.add(actionBar, BorderLayout.SOUTH);
         return panel;
     }
 
@@ -314,6 +335,7 @@ public final class AudioStudioFrame extends JFrame {
         Arrays.fill(password, '\0');
         final String selectedUrl = url;
         final String selectedModel = model.getText().trim();
+        final int selectedTokenLimit = (Integer) tokenLimit.getValue();
         final AudioProxyRoutes routes;
         try {
             routes = configureNetworkRoutes();
@@ -333,7 +355,8 @@ public final class AudioStudioFrame extends JFrame {
                 KipitzChatClient client = new KipitzChatClient(selectedUrl, key, selectedModel, routes);
                 activeClient = client;
                 try {
-                    Path tsv = new GemmaMusicComposer(client).compose(prompt, output, progress);
+                    Path tsv = new GemmaMusicComposer(client, selectedTokenLimit)
+                            .compose(prompt, output, progress);
                     return renderArrangement(tsv, output, settings, progress);
                 } finally {
                     activeClient = null;
@@ -608,6 +631,7 @@ public final class AudioStudioFrame extends JFrame {
             endpoint.setText(saved.getProperty("endpoint", ""));
             apiKey.setText(saved.getProperty("apiKey", ""));
             model.setText(saved.getProperty("model", model.getText()));
+            tokenLimit.setValue(ExistingAiSettings.maxTokens(saved));
             proxyHost.setText(saved.getProperty("proxyHost", ""));
             proxyPort.setText(saved.getProperty("proxyPort", ""));
             proxyPacUrl.setText(saved.getProperty("proxyPacUrl", ""));
@@ -660,6 +684,7 @@ public final class AudioStudioFrame extends JFrame {
                 Arrays.fill(password, '\0');
             }
             saved.setProperty("model", model.getText().trim());
+            saved.setProperty("maxTokens", tokenLimit.getValue().toString());
             saved.setProperty("proxyHost", proxyHost.getText().trim());
             saved.setProperty("proxyPort", proxyPort.getText().trim());
             String selectedProxyMode = proxyMode.getSelectedIndex() == 0 ? ""
