@@ -110,6 +110,49 @@ jobs:
           test -s build/soundfont-compare/district-dawn-generaluser.mp3
           test -s build/soundfont-compare/district-dawn-synth.mp3
 
+      - name: Verify built-in Gervill SF2 WAV rendering on Java 8
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          java -cp studio/build/libs/audio-studio.jar \
+            com.aresstack.audio.studio.render.GervillOfflineRenderer \
+            build/soundfont-compare/original/arrangement.mid \
+            build/soundfonts/GeneralUser-GS.sf2 \
+            build/soundfont-compare/district-dawn-gervill-java8.wav
+          test -s build/soundfont-compare/district-dawn-gervill-java8.wav
+          python3 - <<'PY'
+          import struct
+          import wave
+          path = "build/soundfont-compare/district-dawn-gervill-java8.wav"
+          with wave.open(path, "rb") as wav:
+              assert wav.getnchannels() == 2
+              assert wav.getframerate() == 44100
+              data = wav.readframes(min(wav.getnframes(), 44100 * 10))
+          samples = struct.unpack("<" + "h" * (len(data) // 2), data)
+          peak = max(abs(value) for value in samples)
+          assert peak > 100, "Gervill rendered silence rather than the SoundFont instrument"
+          print("Gervill Java 8 valid stereo WAV, peak:", peak)
+          PY
+
+      - name: Restore JDK 21 for modular Gervill check
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Verify Gervill SF2 rendering on Java 21 without native samplers
+        shell: bash
+        run: |
+          set -euo pipefail
+          java --add-exports java.desktop/com.sun.media.sound=ALL-UNNAMED \
+            -cp studio/build/libs/audio-studio.jar \
+            com.aresstack.audio.studio.render.GervillOfflineRenderer \
+            build/soundfont-compare/original/arrangement.mid \
+            build/soundfonts/GeneralUser-GS.sf2 \
+            build/soundfont-compare/district-dawn-gervill-java21.wav
+          test -s build/soundfont-compare/district-dawn-gervill-java21.wav
+
       - name: Smoke-test Swing Studio with actual GeneralUser soundbank
         shell: bash
         run: |
