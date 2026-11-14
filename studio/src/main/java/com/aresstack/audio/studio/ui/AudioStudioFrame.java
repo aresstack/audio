@@ -134,15 +134,28 @@ public final class AudioStudioFrame extends JFrame {
                         this::refreshInstrumentChoices, this::append));
         tabs.addTab("2 · Komponieren und abspielen", compositionPanel());
         add(tabs, BorderLayout.CENTER);
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBorder(BorderFactory.createEmptyBorder(16, 20, 12, 20));
+        JLabel headline = new JLabel("AresStack  |  Audio Studio");
+        headline.setFont(headline.getFont().deriveFont(java.awt.Font.BOLD, 21f));
+        header.add(headline, BorderLayout.NORTH);
+        JLabel subtitle = new JLabel("Komponieren mit KI  ·  Instrumente verwalten  ·  WAV / MIDI rendern");
+        subtitle.setForeground(new java.awt.Color(0x526D7C));
+        header.add(subtitle, BorderLayout.SOUTH);
+        add(header, BorderLayout.NORTH);
+
         JPanel footer = new JPanel(new BorderLayout(8, 8));
         footer.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
         footer.add(new JScrollPane(log), BorderLayout.CENTER);
+        footer.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder("Arbeitsprotokoll"),
+                BorderFactory.createEmptyBorder(4, 6, 6, 6)));
         add(footer, BorderLayout.SOUTH);
     }
 
     private JPanel compositionPanel() {
         JPanel fields = new JPanel(new GridBagLayout());
-        fields.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        fields.setBorder(AudioStudioTheme.cardBorder());
         int row = 0;
         addRow(fields, row++, "KIPITZ Completions URL:", endpoint);
         JPanel credential = new JPanel(new BorderLayout(6, 0));

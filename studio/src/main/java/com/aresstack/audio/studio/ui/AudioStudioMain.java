@@ -31,6 +31,7 @@ public final class AudioStudioMain {
         if (GraphicsEnvironment.isHeadless()) {
             throw new IllegalStateException("Audio Studio requires a graphical desktop.");
         }
+        AudioStudioTheme.install();
         final InstrumentRegistry registry = InstrumentRegistry.standard();
         EventQueue.invokeLater(new Runnable() {
             @Override
