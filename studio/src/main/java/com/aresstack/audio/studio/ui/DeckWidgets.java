@@ -202,18 +202,21 @@ final class DeckWidgets {
         }
     }
 
-    /** A key that chooses a page of the desk: a pill with a lamp, lit while its page is shown, as on a player. */
+    /**
+     * A key that chooses a page of the desk, as the keys under the display of a player: a
+     * block with slightly rounded corners that stands out of the panel, and a light along
+     * its upper edge that is lit while its page is shown. Pressed, it sits lower.
+     */
     static final class PageKey extends JToggleButton {
         PageKey(String text) {
             super(text);
-            setFont(AudioStudioTheme.lettering(10.5f));
+            setFont(AudioStudioTheme.lettering(9.2f));
             setContentAreaFilled(false);
             setBorderPainted(false);
             setFocusPainted(false);
             setOpaque(false);
             setFocusable(false);
-            int width = getFontMetrics(getFont()).stringWidth(text.toUpperCase(java.util.Locale.ROOT)) + 42;
-            setPreferredSize(new Dimension(width, 28));
+            setPreferredSize(new Dimension(96, 32));
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             setRolloverEnabled(true);
         }
@@ -222,20 +225,40 @@ final class DeckWidgets {
         protected void paintComponent(Graphics graphics) {
             Graphics2D g = smooth(graphics);
             boolean chosen = isSelected();
-            float height = getHeight() - 2f;
-            RoundRectangle2D shape = new RoundRectangle2D.Float(1f, 1f, getWidth() - 2f, height, height, height);
-            g.setPaint(chosen ? new GradientPaint(0, 0, new Color(0x4A2A3D), 0, getHeight(), new Color(0x33212C))
-                    : new GradientPaint(0, 0, new Color(getModel().isRollover() ? 0x343743 : 0x2A2D37), 0, getHeight(),
-                    new Color(0x20222A)));
-            g.fill(shape);
-            g.setColor(chosen ? AudioStudioTheme.withAlpha(AudioStudioTheme.ACCENT, 200) : AudioStudioTheme.STROKE);
-            g.draw(shape);
-            paintLamp(g, 15f, getHeight() / 2f, 3.4f, AudioStudioTheme.ACCENT, chosen);
+            boolean down = chosen || getModel().isPressed();
+            float width = getWidth();
+            float height = getHeight();
+            // The shadow the key throws on the panel, then the key itself, bulging: light above, dark below.
+            g.setColor(new Color(0, 0, 0, 120));
+            g.fill(new RoundRectangle2D.Float(0.5f, 2f, width - 1f, height - 2.5f, 7f, 7f));
+            float top = down ? 2f : 0.5f;
+            RoundRectangle2D body = new RoundRectangle2D.Float(0.5f, top, width - 1f, height - 3.5f, 6f, 6f);
+            Color light = new Color(chosen ? 0x40323C : getModel().isRollover() ? 0x4A4E5C : 0x3F434F);
+            Color dark = new Color(chosen ? 0x2A2029 : 0x23252D);
+            g.setPaint(new GradientPaint(0, top, light, 0, top + height - 3.5f, dark));
+            g.fill(body);
+            g.setColor(new Color(0x15161B));
+            g.draw(body);
+            if (!down) {
+                g.setColor(new Color(255, 255, 255, 46));
+                g.draw(new java.awt.geom.Line2D.Float(4f, top + 1.2f, width - 4f, top + 1.2f));
+            }
+            // The light along the upper edge.
+            RoundRectangle2D lamp = new RoundRectangle2D.Float(width / 2f - 13f, top + 4f, 26f, 3f, 3f, 3f);
+            if (chosen) {
+                g.setColor(AudioStudioTheme.withAlpha(AudioStudioTheme.ACCENT, 70));
+                g.fill(new RoundRectangle2D.Float(width / 2f - 17f, top + 2f, 34f, 7f, 7f, 7f));
+                g.setColor(AudioStudioTheme.ACCENT_SOFT);
+            } else {
+                g.setColor(new Color(0x16171C));
+            }
+            g.fill(lamp);
             g.setFont(getFont());
             g.setColor(chosen ? AudioStudioTheme.TEXT : AudioStudioTheme.TEXT_DIM);
             FontMetrics metrics = g.getFontMetrics();
-            g.drawString(getText().toUpperCase(java.util.Locale.ROOT), 27,
-                    (getHeight() + metrics.getAscent() - metrics.getDescent()) / 2f);
+            String text = getText().toUpperCase(java.util.Locale.ROOT);
+            g.drawString(text, (width - metrics.stringWidth(text)) / 2f,
+                    top + 7f + (height - 10.5f + metrics.getAscent() - metrics.getDescent()) / 2f);
             g.dispose();
         }
     }

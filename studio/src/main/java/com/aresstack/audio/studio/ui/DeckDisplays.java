@@ -36,8 +36,8 @@ final class DeckDisplays {
         private float pulse;
 
         Lcd() {
-            setPreferredSize(new Dimension(430, 54));
-            setMinimumSize(new Dimension(300, 54));
+            setPreferredSize(new Dimension(520, 56));
+            setMinimumSize(new Dimension(300, 56));
         }
 
         void setTime(double seconds, double total) {

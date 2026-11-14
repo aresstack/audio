@@ -129,8 +129,8 @@ public final class AudioStudioFrame extends JFrame {
     private final JLabel statusLine = new JLabel("Bereit");
     /** The keys under the display that choose the page, by the name of the page. */
     private final Map<String, DeckWidgets.PageKey> pageKeys = new java.util.LinkedHashMap<String, DeckWidgets.PageKey>();
-    /** The name of the piece in use, small under the name of the studio. */
-    private final JLabel pieceName = new JLabel(" ");
+    /** Beside the choice of the piece under the name of the studio: new, open, and what is seldom needed. */
+    private final JButton songMenuKey = new JButton("▾");
     private final ArrangementView arrangementView = new ArrangementView(new ArrangementView.Listener() {
         @Override
         public void seek(double second) {
@@ -257,28 +257,28 @@ public final class AudioStudioFrame extends JFrame {
         JLabel title = new JLabel("Audio Studio");
         title.setFont(new java.awt.Font(java.awt.Font.SERIF, java.awt.Font.BOLD | java.awt.Font.ITALIC, 27));
         title.setForeground(AudioStudioTheme.TEXT);
-        // Under the name: the piece in use. A click leads to its page.
-        final JLabel line = pieceName;
-        line.setForeground(AudioStudioTheme.TEXT_DIM);
-        line.setFont(line.getFont().deriveFont(12.5f));
+        // Under the name: the choice of the piece, and beside it a small menu for new, open and the like.
+        songChoice.setToolTipText("Die Komposition wählen, an der gearbeitet wird");
+        songChoice.setPreferredSize(new Dimension(196, 28));
+        songMenuKey.setToolTipText("Neue Komposition, öffnen, Ordner zeigen, Plan ansehen, Demo laden");
+        songMenuKey.setMargin(new Insets(2, 4, 2, 4));
+        songMenuKey.setFocusable(false);
+        songMenuKey.setPreferredSize(new Dimension(30, 28));
+        JPanel line = new JPanel(new BorderLayout(4, 0));
+        line.setOpaque(false);
+        line.add(songChoice, BorderLayout.CENTER);
+        line.add(songMenuKey, BorderLayout.EAST);
         line.setAlignmentX(0f);
-        line.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-        line.setToolTipText("Das Stück, an dem gearbeitet wird · Klick: zur Seite Stück");
-        line.addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override
-            public void mousePressed(java.awt.event.MouseEvent event) {
-                showPage("song");
-            }
-        });
+        line.setMaximumSize(new Dimension(232, 28));
         brand.setAlignmentX(0f);
         title.setAlignmentX(0f);
         name.add(javax.swing.Box.createVerticalGlue());
         name.add(brand);
         name.add(title);
-        name.add(javax.swing.Box.createVerticalStrut(4));
+        name.add(javax.swing.Box.createVerticalStrut(6));
         name.add(line);
         name.add(javax.swing.Box.createVerticalGlue());
-        name.setPreferredSize(new Dimension(236, 88));
+        name.setPreferredSize(new Dimension(236, 96));
 
         playKey.addActionListener(event -> togglePlayback());
         stopKey.addActionListener(event -> stopPlayback());
@@ -336,18 +336,14 @@ public final class AudioStudioFrame extends JFrame {
         JPanel inner = new JPanel(new BorderLayout(18, 0));
         inner.setOpaque(false);
         inner.add(name, BorderLayout.WEST);
-        JPanel display = new JPanel(new GridBagLayout());
+        JPanel display = new JPanel(new BorderLayout(0, 7));
         display.setOpaque(false);
-        GridBagConstraints middle = new GridBagConstraints();
-        middle.anchor = GridBagConstraints.WEST;
-        middle.weightx = 1;
-        middle.gridy = 0;
-        display.add(lcd, middle);
+        display.add(lcd, BorderLayout.CENTER);
         // Under the display, as on a player: one key per page of the desk.
-        JPanel keysOfPages = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        JPanel keysOfPages = new JPanel(new java.awt.GridLayout(1, 6, 6, 0));
         keysOfPages.setOpaque(false);
         javax.swing.ButtonGroup onePage = new javax.swing.ButtonGroup();
-        String[][] entries = {{"song", "Stück"}, {"deck", "Arrangement"}, {"stage", "Bühne"},
+        String[][] entries = {{"song", "Komposition"}, {"deck", "Arrangement"}, {"stage", "Bühne"},
                 {"library", "Soundbänke"}, {"settings", "Einstellungen"}, {"console", "Protokoll"}};
         for (final String[] entry : entries) {
             DeckWidgets.PageKey key = new DeckWidgets.PageKey(entry[1]);
@@ -358,19 +354,9 @@ public final class AudioStudioFrame extends JFrame {
         }
         pageKeys.get("song").setSelected(true);
 
-        JPanel upper = new JPanel(new BorderLayout(18, 0));
-        upper.setOpaque(false);
-        upper.add(display, BorderLayout.CENTER);
-        upper.add(right, BorderLayout.EAST);
-        JPanel pagesRow = new JPanel(new BorderLayout());
-        pagesRow.setOpaque(false);
-        pagesRow.setBorder(BorderFactory.createEmptyBorder(0, -6, 0, 0));
-        pagesRow.add(keysOfPages, BorderLayout.WEST);
-        JPanel both = new JPanel(new BorderLayout(0, 6));
-        both.setOpaque(false);
-        both.add(upper, BorderLayout.CENTER);
-        both.add(pagesRow, BorderLayout.SOUTH);
-        inner.add(both, BorderLayout.CENTER);
+        display.add(keysOfPages, BorderLayout.SOUTH);
+        inner.add(display, BorderLayout.CENTER);
+        inner.add(right, BorderLayout.EAST);
         DeckWidgets.Module bar = new DeckWidgets.Module("Transport", inner);
         return bar;
     }
@@ -434,19 +420,19 @@ public final class AudioStudioFrame extends JFrame {
         output.setHeadEnd(sourceChoice);
 
         // The piece: which one, and what it shall be. What is seldom needed is in the menu "Mehr".
-        JButton newSong = new JButton("Neu …");
+        final javax.swing.JPopupMenu moreMenu = new javax.swing.JPopupMenu();
+        javax.swing.JMenuItem newSong = new javax.swing.JMenuItem("Neue Komposition …");
         newSong.setToolTipText("Ein neues, leeres Stück anlegen");
         newSong.addActionListener(event -> createNewComposition());
-        final JButton more = new JButton("Mehr ▾");
-        more.setToolTipText("Öffnen, Ordner zeigen, nur Instrumente vorschlagen, Plan ansehen, Demo laden");
-        final javax.swing.JPopupMenu moreMenu = new javax.swing.JPopupMenu();
-        javax.swing.JMenuItem importFolder = new javax.swing.JMenuItem("Ordner eines Stücks öffnen …");
+        moreMenu.add(newSong);
+        moreMenu.addSeparator();
+        javax.swing.JMenuItem importFolder = new javax.swing.JMenuItem("Ordner einer Komposition öffnen …");
         importFolder.addActionListener(event -> selectDirectory());
         moreMenu.add(importFolder);
         javax.swing.JMenuItem importFile = new javax.swing.JMenuItem("Arrangement-Datei (TSV) öffnen …");
         importFile.addActionListener(event -> selectArrangement());
         moreMenu.add(importFile);
-        javax.swing.JMenuItem showFolder = new javax.swing.JMenuItem("Ordner dieses Stücks zeigen");
+        javax.swing.JMenuItem showFolder = new javax.swing.JMenuItem("Ordner dieser Komposition zeigen");
         showFolder.setToolTipText("Dort liegen WAV, MIDI und die Antworten der KI");
         showFolder.addActionListener(event -> openSongFolder());
         moreMenu.add(showFolder);
@@ -463,7 +449,7 @@ public final class AudioStudioFrame extends JFrame {
         demo.setToolTipText("Das mitgelieferte Stück laden, ohne die KI zu fragen");
         demo.addActionListener(event -> loadDemo());
         moreMenu.add(demo);
-        more.addActionListener(event -> moreMenu.show(more, 0, more.getHeight()));
+        songMenuKey.addActionListener(event -> moreMenu.show(songMenuKey, 0, songMenuKey.getHeight()));
         songChoice.setRenderer(new javax.swing.DefaultListCellRenderer() {
             private final java.text.SimpleDateFormat day = new java.text.SimpleDateFormat("dd.MM.yyyy HH:mm");
 
@@ -485,11 +471,6 @@ public final class AudioStudioFrame extends JFrame {
                 openSong(((com.aresstack.audio.studio.application.SongLibrary.Song) songChoice.getSelectedItem()).folder());
             }
         });
-        songChoice.setToolTipText("Das Stück wählen, an dem gearbeitet wird");
-        songKeys = new JPanel(new java.awt.GridLayout(1, 2, 8, 0));
-        songKeys.setOpaque(false);
-        songKeys.add(newSong);
-        songKeys.add(more);
 
         // Composing: one key, and the choice of who decides on the instruments.
         javax.swing.ButtonGroup who = new javax.swing.ButtonGroup();
@@ -509,26 +490,13 @@ public final class AudioStudioFrame extends JFrame {
         return page;
     }
 
-    private JPanel songKeys;
-
     /**
      * The page of the piece: which piece, and what the AI is told. This is where a piece
      * begins; the arrangement page is where what was composed is adjusted.
      */
     private JPanel songPage() {
-        songChoice.setPreferredSize(new Dimension(360, 30));
-        songKeys.setPreferredSize(new Dimension(230, 30));
-        JPanel choice = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        choice.setOpaque(false);
-        choice.add(songChoice);
-        choice.add(javax.swing.Box.createHorizontalStrut(10));
-        choice.add(songKeys);
         songFacts.setForeground(AudioStudioTheme.TEXT_DIM);
         songFacts.setFont(songFacts.getFont().deriveFont(12f));
-        JPanel top = new JPanel(new BorderLayout(14, 0));
-        top.setOpaque(false);
-        top.add(choice, BorderLayout.WEST);
-        top.add(songFacts, BorderLayout.EAST);
 
         JScrollPane prompt = new JScrollPane(description);
         prompt.setBorder(BorderFactory.createLineBorder(AudioStudioTheme.STROKE, 1, true));
@@ -552,12 +520,13 @@ public final class AudioStudioFrame extends JFrame {
 
         JPanel session = new JPanel(new BorderLayout(0, 16));
         session.setOpaque(false);
-        session.add(top, BorderLayout.NORTH);
         session.add(wish, BorderLayout.CENTER);
         session.add(bottom, BorderLayout.SOUTH);
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
-        page.add(new DeckWidgets.Module("Stück", session), BorderLayout.CENTER);
+        DeckWidgets.Module module = new DeckWidgets.Module("Komposition", session);
+        module.setHeadEnd(songFacts);
+        page.add(module, BorderLayout.CENTER);
         return page;
     }
 
@@ -1480,7 +1449,6 @@ public final class AudioStudioFrame extends JFrame {
             }
             songChoice.setSelectedItem(shown);
             setTitle("AresStack Audio Studio — " + shown.name());
-            pieceName.setText(shown.name());
             songFacts.setText(songFacts(current));
         } finally {
             fillingSongs = false;
