@@ -50,8 +50,10 @@ public final class StudioMusicRenderer {
                         + " file for " + library.name() + " before rendering " + track + ".");
             }
             progress.update("Rendering " + track + " with " + library.name() + " ...");
-            boolean generalMidi = "generaluser".equals(library.id())
-                    || "musescore-general".equals(library.id());
+            boolean generalMidi = library.id().equals("generaluser")
+                    || library.id().startsWith("generaluser::")
+                    || library.id().equals("musescore-general")
+                    || library.id().startsWith("musescore-general::");
             Path trackMidi = directory.resolve(track + "-isolated.mid");
             midiExporter.isolate(directory.resolve("arrangement.mid"), track,
                     generalMidi ? -1 : 0, trackMidi);
