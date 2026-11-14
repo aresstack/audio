@@ -2,7 +2,11 @@
 # Let Gemma compose an original eight-bar song in separate instrument parts.
 # Render an editable multitrack MIDI and preview WAVs using the Java 8 renderer compiled by Gradle.
 
+param([switch]$Regenerate)
+
 $ErrorActionPreference = "Stop"
+
+. (Join-Path $PSScriptRoot "harmonic-pitch.ps1")
 
 if (-not $ApiKey) { throw "ApiKey is not set in this PowerShell session." }
 if (-not $CompletionsUrl) { throw "CompletionsUrl is not set in this PowerShell session." }
@@ -13,6 +17,19 @@ New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 
 function Invoke-KipitzCompletion {
     param([string]$Prompt, [int]$TokenLimit, [string]$StepName)
+
+    $CachedJsonFile = Join-Path $OutputDirectory ($StepName + ".json")
+    if (-not $Regenerate -and (Test-Path $CachedJsonFile)) {
+        try {
+            $CachedResult = Get-Content -Path $CachedJsonFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($null -ne $CachedResult) {
+                Write-Host "Reusing $StepName from $CachedJsonFile (no API call)."
+                return $CachedResult
+            }
+        } catch {
+            Write-Warning "Could not reuse $StepName. Requesting it again: $($_.Exception.Message)"
+        }
+    }
 
     $Body = @{
         model = $Model
@@ -122,6 +139,7 @@ $PartDefinitions = @(
 )
 
 $Parts = @{}
+$HarmonicCorrections = @()
 $Lines = @("tempo`t108")
 $MelodyContext = ""
 
@@ -181,14 +199,12 @@ Return ONLY one JSON object with EXACTLY these fields:
             $BarIndex = [int]($Beat / 4)
             if ($BarIndex -ge 8) { throw "Note starts after the last bar." }
             $Chord = $ExpectedChords[$BarIndex]
-            $ChordClasses = switch ($Chord) {
-                "C" { @(0,4,7) }
-                "G" { @(7,11,2) }
-                "Am" { @(9,0,4) }
-                "F" { @(5,9,0) }
-            }
-            if ($ChordClasses -notcontains ($Pitch % 12)) {
-                throw "Pitch $Pitch clashes with chord $Chord in $PartId, bar $($BarIndex + 1)."
+            $CorrectedPitch = Resolve-HarmonicPitch -Pitch $Pitch -Chord $Chord -PartId $PartId
+            if ($CorrectedPitch -ne $Pitch) {
+                $Correction = "Repaired $PartId bar $($BarIndex + 1) beat $Beat pitch $Pitch -> $CorrectedPitch for $Chord."
+                Write-Warning $Correction
+                $HarmonicCorrections += $Correction
+                $Pitch = $CorrectedPitch
             }
         }
         $StartTick = [int]($Beat * 480)
@@ -200,6 +216,15 @@ Return ONLY one JSON object with EXACTLY these fields:
     }
     $Parts[$PartId] = $Part
     Write-Host "  $PartId notes: $($Notes.Count)"
+}
+
+# Preserve the original model output and record deterministic pitch adjustments separately.
+$CorrectionsFile = Join-Path $OutputDirectory "harmonic-corrections.txt"
+if ($HarmonicCorrections.Count -gt 0) {
+    Set-Content -Path $CorrectionsFile -Value $HarmonicCorrections -Encoding UTF8
+    Write-Host "Applied $($HarmonicCorrections.Count) harmonic pitch corrections; details: $CorrectionsFile"
+} elseif (Test-Path $CorrectionsFile) {
+    Remove-Item -Path $CorrectionsFile -Force
 }
 
 $ArrangementFile = Join-Path $OutputDirectory "arrangement.tsv"
