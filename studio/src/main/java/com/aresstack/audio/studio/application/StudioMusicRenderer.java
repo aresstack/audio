@@ -10,6 +10,9 @@ import com.aresstack.audio.studio.render.SamplerUnavailableException;
 import com.aresstack.audio.studio.render.WaveStemMixer;
 import java.io.File;
 import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -56,7 +59,7 @@ public final class StudioMusicRenderer {
         runner.execute(command, directory.resolve("arrangement.wav"));
 
         List<Path> stems = new ArrayList<Path>();
-        for (String track : Arrays.asList("melody", "harmony", "bass", "drums")) {
+        for (String track : readTrackIds(arrangement)) {
             InstrumentLibrary library = assignments.get(track);
             if (library == null) {
                 stems.add(directory.resolve(track + ".wav"));
@@ -102,6 +105,21 @@ public final class StudioMusicRenderer {
         progress.update("Mixing the instrument tracks ...");
         mixer.mix(stems, mix);
         return mix;
+    }
+
+    /** Trust the written TSV arrangement as the source of truth for output track order. */
+    private static List<String> readTrackIds(Path arrangement) throws Exception {
+        List<String> tracks = new ArrayList<String>();
+        for (String line : Files.readAllLines(arrangement, StandardCharsets.UTF_8)) {
+            String[] fields = line.split("\\t");
+            if (fields.length >= 4 && "track".equals(fields[0])) {
+                tracks.add(fields[1]);
+            }
+        }
+        if (tracks.isEmpty() || tracks.size() > TrackArrangement.MAX_TRACKS) {
+            throw new IllegalArgumentException("Arrangement must contain 1–16 tracks.");
+        }
+        return tracks;
     }
 
     private static String javaExecutable() {

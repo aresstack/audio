@@ -28,7 +28,9 @@ public final class KipitzChatClient {
     private final AudioProxyRoutes routes;
     private final String proxyHost;
     private final int proxyPort;
-    private volatile HttpURLConnection inFlight;
+    private final java.util.Set<HttpURLConnection> activeConnections =
+            java.util.Collections.newSetFromMap(
+                    new java.util.concurrent.ConcurrentHashMap<HttpURLConnection, Boolean>());
 
     public KipitzChatClient(String endpoint, String apiKey, String model, String proxyHost, int proxyPort) {
         this.endpoint = endpoint;
@@ -52,6 +54,9 @@ public final class KipitzChatClient {
     }
 
     public JsonObject generate(String instruction, String prompt, int maxTokens, Path cache) throws IOException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new IOException("AI request was cancelled.");
+        }
         if (Files.isRegularFile(cache)) {
             try {
                 return new JsonParser().parse(new String(Files.readAllBytes(cache), StandardCharsets.UTF_8))
@@ -77,7 +82,7 @@ public final class KipitzChatClient {
         request.add("messages", messages);
 
         HttpURLConnection connection = openConnection();
-        inFlight = connection;
+        activeConnections.add(connection);
         try {
             byte[] body = gson.toJson(request).getBytes(StandardCharsets.UTF_8);
             connection.setRequestMethod("POST");
@@ -117,15 +122,14 @@ public final class KipitzChatClient {
         } catch (RuntimeException malformed) {
             throw new IOException("Could not parse the KIPITZ model response.", malformed);
         } finally {
+            activeConnections.remove(connection);
             connection.disconnect();
-            inFlight = null;
         }
     }
 
     /** Disconnect a pending request when the user cancels the composition. */
     public void cancel() {
-        HttpURLConnection connection = inFlight;
-        if (connection != null) {
+        for (HttpURLConnection connection : activeConnections) {
             connection.disconnect();
         }
     }
@@ -167,6 +171,7 @@ public final class KipitzChatClient {
         }
         URI address = URI.create(normalized.substring(0, normalized.length() - suffix.length()) + "/models");
         HttpURLConnection connection = openConnection(address);
+        activeConnections.add(connection);
         try {
             connection.setConnectTimeout(30000);
             connection.setReadTimeout(60000);
@@ -192,6 +197,7 @@ public final class KipitzChatClient {
         } catch (RuntimeException invalid) {
             throw new IOException("Could not read the model list.", invalid);
         } finally {
+            activeConnections.remove(connection);
             connection.disconnect();
         }
     }
