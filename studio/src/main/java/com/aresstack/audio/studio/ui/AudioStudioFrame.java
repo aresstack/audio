@@ -9,6 +9,7 @@ import com.aresstack.audio.studio.keepass.KeePassEntry;
 import com.aresstack.audio.studio.ai.KipitzChatClient;
 import com.aresstack.audio.studio.application.GemmaMusicComposer;
 import com.aresstack.audio.studio.application.StudioMusicRenderer;
+import com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine;
 import com.aresstack.audio.studio.settings.StudioSettingsStore;
 import com.aresstack.audio.studio.settings.ExistingAiSettings;
 
@@ -85,6 +86,10 @@ public final class AudioStudioFrame extends JFrame {
     private final JTextField directory = new JTextField(Paths.get(System.getProperty("user.home"),
             ".aresstack", "audio", "compositions", "district-dawn").toString(), 38);
     private final JTextField arrangementFile = new JTextField(38);
+    private final JComboBox<String> sf2Engine = new JComboBox<String>(new String[]{
+            "Java / Gervill (integriert, kein zusätzlicher Download)",
+            "FluidSynth (optional, extern)"
+    });
     private final JTextField fluidSynth = new JTextField("fluidsynth", 17);
     private final JTextField sfizz = new JTextField("sfizz_render", 17);
     private final JTextArea description = new JTextArea(
@@ -279,7 +284,10 @@ public final class AudioStudioFrame extends JFrame {
         addRow(fields, row++, "Token-Limit pro Antwort:", tokenLimit);
         addRow(fields, row++, "Token-Hinweis:",
                 new JLabel("Maximale Antwortlänge; der kurze Kompositionsplan nutzt höchstens 2.048 Tokens."));
-        addRow(fields, row++, "Audio-Renderer:", new JLabel("Externe Instrumenten-Engines"));
+        addRow(fields, row++, "Audio-Renderer:", new JLabel("SF2 standardmäßig direkt in Java rendern"));
+        addRow(fields, row++, "SF2-Synthesizer:", sf2Engine);
+        addRow(fields, row++, "SF2-Hinweis:",
+                new JLabel("GeneralUser und andere SF2-Bänke funktionieren ohne FluidSynth-Installation."));
         JPanel engines = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         engines.add(new JLabel("FluidSynth:"));
         engines.add(fluidSynth);
@@ -604,14 +612,17 @@ public final class AudioStudioFrame extends JFrame {
             }
             programs.put(PART_NAMES[index], (Integer) midiPrograms[index].getValue());
         }
-        return new RenderSettings(assignments, programs, fluidSynth.getText().trim(),
-                sfizz.getText().trim());
+        Sf2Engine engine = sf2Engine.getSelectedIndex() == 1
+                ? Sf2Engine.FLUIDSYNTH : Sf2Engine.GERVILL;
+        return new RenderSettings(assignments, programs, engine,
+                fluidSynth.getText().trim(), sfizz.getText().trim());
     }
 
     private Path renderArrangement(Path source, Path destination, RenderSettings settings,
                                    GemmaMusicComposer.Progress progress) throws Exception {
         return new StudioMusicRenderer(registry).render(source, destination, settings.assignments,
-                settings.programs, settings.fluidSynthExecutable, settings.sfizzExecutable, progress);
+                settings.programs, settings.sf2Engine,
+                settings.fluidSynthExecutable, settings.sfizzExecutable, progress);
     }
 
     private void createNewComposition() {
@@ -644,6 +655,8 @@ public final class AudioStudioFrame extends JFrame {
             }
             append("Proxy: " + new AudioProxyRoutes(networkSettings()).describe());
             directory.setText(saved.getProperty("outputDirectory", directory.getText()));
+            sf2Engine.setSelectedIndex("FLUIDSYNTH".equals(saved.getProperty("sf2Engine"))
+                    ? 1 : 0);
             fluidSynth.setText(saved.getProperty("fluidSynth", fluidSynth.getText()));
             sfizz.setText(saved.getProperty("sfizz", sfizz.getText()));
             description.setText(saved.getProperty("description", description.getText()));
@@ -695,6 +708,8 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("proxyAuthMode", proxyBasic.isSelected() ? "BASIC" : "");
             saved.setProperty("proxyCredentialRef", proxyCredentialRef.getText().trim());
             saved.setProperty("outputDirectory", directory.getText().trim());
+            saved.setProperty("sf2Engine", sf2Engine.getSelectedIndex() == 1
+                    ? "FLUIDSYNTH" : "GERVILL");
             saved.setProperty("fluidSynth", fluidSynth.getText().trim());
             saved.setProperty("sfizz", sfizz.getText().trim());
             saved.setProperty("description", description.getText());
@@ -918,14 +933,16 @@ public final class AudioStudioFrame extends JFrame {
     private static final class RenderSettings {
         private final Map<String, InstrumentLibrary> assignments;
         private final Map<String, Integer> programs;
+        private final Sf2Engine sf2Engine;
         private final String fluidSynthExecutable;
         private final String sfizzExecutable;
 
         private RenderSettings(Map<String, InstrumentLibrary> assignments,
-                               Map<String, Integer> programs, String fluidSynthExecutable,
-                               String sfizzExecutable) {
+                               Map<String, Integer> programs, Sf2Engine sf2Engine,
+                               String fluidSynthExecutable, String sfizzExecutable) {
             this.assignments = assignments;
             this.programs = programs;
+            this.sf2Engine = sf2Engine;
             this.fluidSynthExecutable = fluidSynthExecutable;
             this.sfizzExecutable = sfizzExecutable;
         }

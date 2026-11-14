@@ -40,6 +40,8 @@ public final class StudioMusicRendererTest {
         final List<String> messages = new ArrayList<String>();
         Path audio = new StudioMusicRenderer(registry).render(
                 arrangement, home.resolve("render"), assignments,
+                java.util.Collections.<String, Integer>emptyMap(),
+                com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine.FLUIDSYNTH,
                 "intentionally-missing-fluidsynth-audio-studio-test-executable",
                 "intentionally-missing-sfizz-test-executable",
                 new GemmaMusicComposer.Progress() {
