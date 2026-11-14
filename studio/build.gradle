@@ -1,0 +1,29 @@
+plugins {
+    id 'application'
+}
+
+dependencies {
+    implementation project(':music')
+    implementation project(':instruments')
+    implementation 'com.google.code.gson:gson:2.10.1'
+}
+
+application {
+    mainClass = 'com.aresstack.audio.studio.ui.AudioStudioMain'
+}
+
+tasks.named('jar') {
+    archiveFileName = 'audio-studio.jar'
+    manifest {
+        attributes 'Main-Class': application.mainClass.get()
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+}
+
+tasks.named('run') {
+    workingDir rootProject.projectDir
+}
