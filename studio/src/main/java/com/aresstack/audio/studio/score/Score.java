@@ -1,0 +1,254 @@
+package com.aresstack.audio.studio.score;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+
+/**
+ * A written arrangement as a conductor reads it: for every track a staff with a
+ * clef, and in every bar the notes and rests with their written lengths. The
+ * arrangement gives each note a start and a length in ticks; here that becomes
+ * sixteenths, chords, rests for the gaps, and ties where a note is longer than a
+ * bar or than one written value can say. One voice is written per staff: notes
+ * that begin together are a chord, and a chord ends when the next one begins.
+ * The score knows nothing of how it is drawn.
+ */
+public final class Score {
+    /** Sixteenths in a bar of four quarters. */
+    public static final int BAR = 16;
+    private static final int TICKS_PER_SIXTEENTH = 120;
+    /** The lengths a single note can have, in sixteenths: whole, dotted half, half, dotted quarter, and so on. */
+    private static final int[] NOTE_VALUES = {16, 12, 8, 6, 4, 3, 2, 1};
+    private static final int[] REST_VALUES = {16, 8, 4, 2, 1};
+
+    public enum Clef { TREBLE, BASS, PERCUSSION }
+
+    /** A chord (one note or several) or, without pitches, a rest. */
+    public static final class Event {
+        private final int start;
+        private final int length;
+        private final int[] pitches;
+        private final boolean tied;
+
+        Event(int start, int length, int[] pitches, boolean tied) {
+            this.start = start;
+            this.length = length;
+            this.pitches = pitches;
+            this.tied = tied;
+        }
+
+        /** Where in its bar the event begins, in sixteenths from 0. */
+        public int start() { return start; }
+        /** Its written length in sixteenths: 16, 12, 8, 6, 4, 3, 2 or 1. */
+        public int length() { return length; }
+        /** The MIDI pitches from low to high; none for a rest. */
+        public int[] pitches() { return pitches.clone(); }
+        public boolean rest() { return pitches.length == 0; }
+        /** Whether the event is tied to the one that follows it. */
+        public boolean tied() { return tied; }
+        public boolean dotted() { return length == 12 || length == 6 || length == 3; }
+    }
+
+    /** The staff of one track: its clef and its bars. */
+    public static final class Staff {
+        private final String trackId;
+        private final Clef clef;
+        private final List<List<Event>> bars;
+
+        Staff(String trackId, Clef clef, List<List<Event>> bars) {
+            this.trackId = trackId;
+            this.clef = clef;
+            this.bars = bars;
+        }
+
+        public String trackId() { return trackId; }
+        public Clef clef() { return clef; }
+        /** The events of a bar, in the order they sound; a bar without notes holds one whole rest. */
+        public List<Event> bar(int index) { return Collections.unmodifiableList(bars.get(index)); }
+    }
+
+    private final int tempo;
+    private final int bars;
+    private final List<Staff> staves;
+
+    private Score(int tempo, int bars, List<Staff> staves) {
+        this.tempo = tempo;
+        this.bars = bars;
+        this.staves = Collections.unmodifiableList(staves);
+    }
+
+    public int tempo() { return tempo; }
+    public int bars() { return bars; }
+    public List<Staff> staves() { return staves; }
+    public double secondsPerBar() { return 4 * 60.0 / tempo; }
+
+    /** Where a pitch sits on a staff: 0 is the lowest line, 2 the next line, 8 the top line; odd numbers are spaces. */
+    public static int position(int pitch, Clef clef) {
+        if (clef == Clef.PERCUSSION) {
+            switch (pitch) {
+                case 35: case 36: return 1;                      // bass drum
+                case 41: case 43: return 2;                      // low toms
+                case 45: case 47: return 4;
+                case 48: case 50: return 6;                      // high toms
+                case 42: case 44: case 46: return 9;             // hi-hat
+                case 49: case 51: case 52: case 53: case 55: case 57: case 59: return 10; // cymbals
+                default: return 5;                               // snare and everything else
+            }
+        }
+        int[] steps = {0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6};
+        int diatonic = (pitch / 12 - 1) * 7 + steps[pitch % 12];
+        return diatonic - (clef == Clef.BASS ? 18 : 30); // lowest line: G2 in the bass clef, E4 in the treble clef
+    }
+
+    /** Whether a pitch is written with a sharp (the piece is in C major, so every black key is). */
+    public static boolean sharp(int pitch) {
+        int tone = pitch % 12;
+        return tone == 1 || tone == 3 || tone == 6 || tone == 8 || tone == 10;
+    }
+
+    /** Whether a drum sound is written with a cross as its head: hi-hats and cymbals. */
+    public static boolean cross(int pitch) {
+        return position(pitch, Clef.PERCUSSION) >= 9;
+    }
+
+    /** Reads an arrangement file; {@code null} if there is none or it cannot be read. */
+    public static Score read(Path arrangement) {
+        if (arrangement == null || !Files.isRegularFile(arrangement)) {
+            return null;
+        }
+        try {
+            return of(Files.readAllLines(arrangement, StandardCharsets.UTF_8));
+        } catch (IOException | RuntimeException unreadable) {
+            return null;
+        }
+    }
+
+    /** The score of the lines of an arrangement: tempo, tracks and notes. */
+    public static Score of(List<String> lines) {
+        int tempo = 108;
+        Map<String, Boolean> drums = new LinkedHashMap<String, Boolean>();
+        Map<String, TreeMap<Integer, List<int[]>>> sounding = new LinkedHashMap<String, TreeMap<Integer, List<int[]>>>();
+        int end = 0;
+        for (String line : lines) {
+            String[] fields = line.split("\\t");
+            if (fields.length == 2 && "tempo".equals(fields[0])) {
+                tempo = Math.max(20, Math.min(400, Integer.parseInt(fields[1].trim())));
+            } else if (fields.length >= 4 && "track".equals(fields[0])) {
+                drums.put(fields[1], "9".equals(fields[3].trim())
+                        || (fields.length >= 5 && "drums".equals(fields[4].trim())));
+                sounding.put(fields[1], new TreeMap<Integer, List<int[]>>());
+            } else if (fields.length >= 6 && "note".equals(fields[0]) && sounding.containsKey(fields[1])) {
+                long startTicks = Long.parseLong(fields[2].trim());
+                long lengthTicks = Long.parseLong(fields[3].trim());
+                int start = (int) Math.round(startTicks / (double) TICKS_PER_SIXTEENTH);
+                int stop = Math.max(start + 1, (int) Math.round((startTicks + lengthTicks) / (double) TICKS_PER_SIXTEENTH));
+                TreeMap<Integer, List<int[]>> track = sounding.get(fields[1]);
+                List<int[]> together = track.get(start);
+                if (together == null) {
+                    together = new ArrayList<int[]>();
+                    track.put(start, together);
+                }
+                together.add(new int[]{Integer.parseInt(fields[4].trim()), stop});
+                end = Math.max(end, stop);
+            }
+        }
+        int bars = Math.max(1, (end + BAR - 1) / BAR);
+        List<Staff> staves = new ArrayList<Staff>();
+        for (Map.Entry<String, TreeMap<Integer, List<int[]>>> track : sounding.entrySet()) {
+            boolean kit = drums.get(track.getKey());
+            staves.add(new Staff(track.getKey(), kit ? Clef.PERCUSSION : clef(track.getValue()),
+                    write(track.getValue(), bars)));
+        }
+        return new Score(tempo, bars, staves);
+    }
+
+    /** The clef in which most of a track lies: below the A under middle C it is the bass clef. */
+    private static Clef clef(TreeMap<Integer, List<int[]>> track) {
+        long sum = 0;
+        int count = 0;
+        for (List<int[]> together : track.values()) {
+            for (int[] note : together) {
+                sum += note[0];
+                count++;
+            }
+        }
+        return count > 0 && sum / (double) count < 57 ? Clef.BASS : Clef.TREBLE;
+    }
+
+    private static List<List<Event>> write(TreeMap<Integer, List<int[]>> track, int bars) {
+        List<List<Event>> written = new ArrayList<List<Event>>();
+        for (int bar = 0; bar < bars; bar++) {
+            written.add(new ArrayList<Event>());
+        }
+        int at = 0;
+        List<Integer> onsets = new ArrayList<Integer>(track.keySet());
+        for (int index = 0; index < onsets.size(); index++) {
+            int onset = onsets.get(index);
+            List<int[]> together = track.get(onset);
+            int stop = 0;
+            TreeMap<Integer, Boolean> pitches = new TreeMap<Integer, Boolean>();
+            for (int[] note : together) {
+                stop = Math.max(stop, note[1]);
+                pitches.put(note[0], Boolean.TRUE);
+            }
+            if (index + 1 < onsets.size()) {
+                stop = Math.min(stop, onsets.get(index + 1)); // one voice: the next chord ends this one
+            }
+            stop = Math.min(stop, bars * BAR);
+            if (onset >= stop) {
+                continue;
+            }
+            fill(written, at, onset, new int[0]);
+            int[] chord = new int[pitches.size()];
+            int place = 0;
+            for (Integer pitch : pitches.keySet()) {
+                chord[place++] = pitch;
+            }
+            fill(written, onset, stop, chord);
+            at = stop;
+        }
+        fill(written, at, bars * BAR, new int[0]);
+        return written;
+    }
+
+    /** Writes one sound (or silence, for no pitches) from a sixteenth to another as notes of written lengths. */
+    private static void fill(List<List<Event>> written, int from, int to, int[] pitches) {
+        boolean rest = pitches.length == 0;
+        int at = from;
+        while (at < to) {
+            int bar = at / BAR;
+            int inBar = at % BAR;
+            int left = Math.min(to, (bar + 1) * BAR) - at;
+            int value = 1;
+            for (int candidate : rest ? REST_VALUES : NOTE_VALUES) {
+                if (candidate <= left && fits(candidate, inBar, rest)) {
+                    value = candidate;
+                    break;
+                }
+            }
+            written.get(bar).add(new Event(inBar, value, pitches, !rest && at + value < to));
+            at += value;
+        }
+    }
+
+    /** Whether a written length may begin at this place of the bar, so that the beats stay readable. */
+    private static boolean fits(int value, int inBar, boolean rest) {
+        switch (value) {
+            case 16: return inBar == 0;
+            case 12: return inBar == 0;
+            case 8: return rest ? inBar % 8 == 0 : inBar % 4 == 0;
+            case 6: return inBar % 4 == 0;
+            case 4: return rest ? inBar % 4 == 0 : inBar % 2 == 0;
+            case 3: return inBar % 4 == 0;
+            case 2: return inBar % 2 == 0;
+            default: return true;
+        }
+    }
+}

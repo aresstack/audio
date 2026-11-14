@@ -84,6 +84,26 @@ public final class StageMixServiceTest {
         Assert.assertEquals(MusicTrack.TEXTURE, tracks.get(2).role());
     }
 
+    @Test
+    public void aRenamedTrackKeepsItsNotesAndItsSound() throws Exception {
+        Path song = piece("tempo\t108", "track\tmelody\t73\t0\tmelody", "note\tmelody\t0\t480\t72\t90",
+                "track\tbass\t32\t1\tbass", "note\tbass\t0\t480\t40\t90");
+        StageMixService.keepStems(song, Arrays.asList("melody", "bass"),
+                new Path[]{song.resolve("melody.wav"), song.resolve("bass.wav")});
+
+        StageMixService.rename(song, "melody", "flute");
+
+        java.util.List<String> lines = Files.readAllLines(song.resolve("arrangement.tsv"), StandardCharsets.UTF_8);
+        Assert.assertEquals("track\tflute\t73\t0\tmelody", lines.get(1));
+        Assert.assertEquals("note\tflute\t0\t480\t72\t90", lines.get(2));
+        Assert.assertEquals("the other track is untouched", "note\tbass\t0\t480\t40\t90", lines.get(4));
+        Assert.assertTrue(Files.isRegularFile(song.resolve("flute.wav")));
+        Assert.assertFalse(Files.exists(song.resolve("melody.wav")));
+        Assert.assertEquals("flute.wav", StageMixService.stem(song, "flute").getFileName().toString());
+        Assert.assertTrue(Files.size(new StageMixService().mix(song.resolve("arrangement.tsv"), song,
+                message -> { })) > 1000);
+    }
+
     /** A piece of one second: its arrangement and a tone as the sound of the melody and of the bass. */
     private Path piece(String... lines) throws Exception {
         Path song = folder.newFolder().toPath();

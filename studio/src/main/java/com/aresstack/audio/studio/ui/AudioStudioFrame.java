@@ -139,6 +139,8 @@ public final class AudioStudioFrame extends JFrame {
         }
 
     });
+    /** The piece written out as a conductor's score, on the page of the composition. */
+    private final ScoreView scoreView = new ScoreView();
     private final com.aresstack.audio.studio.application.SongLibrary songs =
             com.aresstack.audio.studio.application.SongLibrary.standard();
     private final JComboBox<com.aresstack.audio.studio.application.SongLibrary.Song> songChoice =
@@ -414,6 +416,16 @@ public final class AudioStudioFrame extends JFrame {
                 if (placement != null) {
                     scene = scene.with(placement.named(to));
                 }
+                // The notes and the sound of the track keep belonging to it under its new name.
+                try {
+                    com.aresstack.audio.studio.application.StageMixService.rename(
+                            Paths.get(directory.getText().trim()), from, to);
+                } catch (IOException failed) {
+                    append("WARN: Die Dateien der Spur ließen sich nicht umbenennen: " + failed.getMessage());
+                }
+                if (from.equals(playbackSelection.getSelectedItem())) {
+                    playbackSelection.setSelectedItem("Mixed sampled arrangement");
+                }
             }
         }, arrangementView);
         DeckWidgets.Module output = new DeckWidgets.Module("Arrangement", trackTable);
@@ -505,6 +517,21 @@ public final class AudioStudioFrame extends JFrame {
         wish.setOpaque(false);
         wish.add(DeckWidgets.lettering("Was für Musik soll es sein? Das bekommt die KI gesagt."), BorderLayout.NORTH);
         wish.add(prompt, BorderLayout.CENTER);
+        prompt.setPreferredSize(new Dimension(300, 92));
+
+        // Under the words for the AI: what came of them, as the score a conductor reads.
+        JScrollPane sheet = new JScrollPane(scoreView, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        sheet.setBorder(BorderFactory.createLineBorder(AudioStudioTheme.STROKE, 1, true));
+        sheet.getVerticalScrollBar().setUnitIncrement(40);
+        JPanel notes = new JPanel(new BorderLayout(0, 6));
+        notes.setOpaque(false);
+        notes.add(DeckWidgets.lettering("Partitur · was die Instrumente spielen"), BorderLayout.NORTH);
+        notes.add(sheet, BorderLayout.CENTER);
+        JPanel written = new JPanel(new BorderLayout(0, 14));
+        written.setOpaque(false);
+        written.add(wish, BorderLayout.NORTH);
+        written.add(notes, BorderLayout.CENTER);
 
         JPanel whoRow = new JPanel(new java.awt.GridLayout(1, 2, 8, 0));
         whoRow.setOpaque(false);
@@ -520,7 +547,7 @@ public final class AudioStudioFrame extends JFrame {
 
         JPanel session = new JPanel(new BorderLayout(0, 16));
         session.setOpaque(false);
-        session.add(wish, BorderLayout.CENTER);
+        session.add(written, BorderLayout.CENTER);
         session.add(bottom, BorderLayout.SOUTH);
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
@@ -1824,6 +1851,8 @@ public final class AudioStudioFrame extends JFrame {
                 there ? "" : "Noch nichts gerendert · Komponieren oder Demo laden");
         arrangementView.setMix(player.envelope(), soloTrack() == null ? "Mix" : "Solo", soloTrack(), player.length());
         trackTable.setAlone(soloTrack());
+        scoreView.setScore(com.aresstack.audio.studio.score.Score.read(folder.resolve("arrangement.tsv")), ids,
+                "Noch keine Noten: erst komponieren, dann steht hier die Partitur");
         lcd.setSource(selected == null ? "—" : playbackName(selected), there);
         lcd.setTime(0, player.length());
     }
@@ -1996,6 +2025,7 @@ public final class AudioStudioFrame extends JFrame {
         lcd.setTime(second, length);
         lcd.tick();
         arrangementView.setSecond(second);
+        scoreView.setSecond(playing || second > 0 ? second : -1);
         DeckPlayer.Envelope envelope = player.envelope();
         masterLeft.setLevel(playing && envelope != null ? envelope.at(second, false) : 0f);
         masterRight.setLevel(playing && envelope != null ? envelope.at(second, true) : 0f);

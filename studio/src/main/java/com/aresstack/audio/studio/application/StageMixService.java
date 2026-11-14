@@ -112,6 +112,48 @@ public final class StageMixService {
         return stems;
     }
 
+    /**
+     * A track got another name: what is written and rendered of it goes with it, so that its
+     * notes and its sound stay. The written arrangement, the note of which file holds its sound,
+     * and its sound files are renamed; the kept answers of the AI stay as they are.
+     */
+    public static void rename(Path directory, String from, String to) throws IOException {
+        Path arrangement = directory.resolve("arrangement.tsv");
+        if (Files.isRegularFile(arrangement)) {
+            List<String> lines = new ArrayList<String>();
+            for (String line : Files.readAllLines(arrangement, StandardCharsets.UTF_8)) {
+                String[] fields = line.split("\\t", -1);
+                if (fields.length >= 2 && ("track".equals(fields[0]) || "note".equals(fields[0]))
+                        && fields[1].equals(from)) {
+                    fields[1] = to;
+                    line = String.join("\t", fields);
+                }
+                lines.add(line);
+            }
+            Files.write(arrangement, lines, StandardCharsets.UTF_8);
+        }
+        for (String ending : new String[]{".wav", "-sampled.wav", "-isolated.mid"}) {
+            Path old = directory.resolve(from + ending);
+            if (Files.isRegularFile(old)) {
+                Files.move(old, directory.resolve(to + ending), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+        Path stems = directory.resolve(STEMS_FILE);
+        if (Files.isRegularFile(stems)) {
+            List<String> lines = new ArrayList<String>();
+            for (String line : Files.readAllLines(stems, StandardCharsets.UTF_8)) {
+                String[] fields = line.split("\\t");
+                if (fields.length == 2 && fields[0].equals(from)) {
+                    String file = fields[1].equals(from + ".wav") ? to + ".wav"
+                            : fields[1].equals(from + "-sampled.wav") ? to + "-sampled.wav" : fields[1];
+                    line = to + "\t" + file;
+                }
+                lines.add(line);
+            }
+            Files.write(stems, lines, StandardCharsets.UTF_8);
+        }
+    }
+
     /** The tracks of a written arrangement with their roles; an arrangement without roles gets them from its names. */
     public static List<MusicTrack> tracks(Path arrangement) throws IOException {
         List<MusicTrack> tracks = new ArrayList<MusicTrack>();

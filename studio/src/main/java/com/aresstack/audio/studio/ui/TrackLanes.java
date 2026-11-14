@@ -354,6 +354,8 @@ final class TrackLanes extends JPanel {
         private final JToggleButton mute = new JToggleButton("M");
         private final JButton menu = new JButton("⋯");
         private boolean filling;
+        private final JPanel words = new JPanel();
+        private javax.swing.JTextField renaming;
         private Work work;
         private String workLabel = "";
 
@@ -382,7 +384,6 @@ final class TrackLanes extends JPanel {
             menu.setMargin(new Insets(2, 6, 2, 6));
             menu.setFocusable(false);
 
-            JPanel words = new JPanel();
             words.setOpaque(false);
             words.setLayout(new BoxLayout(words, BoxLayout.Y_AXIS));
             words.add(name);
@@ -515,13 +516,57 @@ final class TrackLanes extends JPanel {
             }
         }
 
+        /** The name becomes a field where it stands: Enter or leaving it takes the new name, Escape keeps the old. */
         private void rename() {
-            Object typed = JOptionPane.showInputDialog(TrackLanes.this,
-                    "Name der Spur (Kleinbuchstaben, Ziffern, - und _):", "Spur umbenennen",
-                    JOptionPane.PLAIN_MESSAGE, null, null, track.id());
-            if (typed != null) {
-                change(String.valueOf(typed), track.role(), track.instrument(), track.program(), track.libraryId());
+            if (renaming != null) {
+                return;
             }
+            final javax.swing.JTextField field = new javax.swing.JTextField(track.id());
+            renaming = field;
+            field.setFont(name.getFont());
+            field.setMargin(new Insets(0, 2, 0, 2));
+            field.setToolTipText("Kleinbuchstaben, Ziffern, - und _ · Enter übernimmt, Esc verwirft");
+            field.setAlignmentX(0f);
+            field.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+            final boolean[] done = {false};
+            final Runnable finish = () -> {
+                if (done[0]) {
+                    return;
+                }
+                done[0] = true;
+                renaming = null;
+                String typed = field.getText().trim();
+                words.remove(field);
+                words.add(name, 0);
+                words.revalidate();
+                words.repaint();
+                if (!typed.isEmpty() && !typed.equals(track.id())) {
+                    change(typed, track.role(), track.instrument(), track.program(), track.libraryId());
+                }
+            };
+            field.addActionListener(event -> finish.run());
+            field.addFocusListener(new java.awt.event.FocusAdapter() {
+                @Override
+                public void focusLost(java.awt.event.FocusEvent event) {
+                    if (!event.isTemporary()) {
+                        finish.run();
+                    }
+                }
+            });
+            field.getInputMap().put(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0), "keep");
+            field.getActionMap().put("keep", new javax.swing.AbstractAction() {
+                @Override
+                public void actionPerformed(java.awt.event.ActionEvent event) {
+                    field.setText(track.id());
+                    finish.run();
+                }
+            });
+            words.remove(name);
+            words.add(field, 0);
+            words.revalidate();
+            words.repaint();
+            field.requestFocusInWindow();
+            field.selectAll();
         }
 
         private void describe() {
@@ -549,7 +594,7 @@ final class TrackLanes extends JPanel {
             popup.add(again);
             popup.addSeparator();
 
-            JMenuItem rename = new JMenuItem("Umbenennen …");
+            JMenuItem rename = new JMenuItem("Umbenennen");
             rename.setEnabled(editable);
             rename.addActionListener(event -> rename());
             popup.add(rename);
