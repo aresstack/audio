@@ -26,3 +26,18 @@ tasks.register('renderDemo', JavaExec) {
 tasks.named('check') {
     dependsOn tasks.named('renderDemo')
 }
+
+tasks.register('soundFontJar', Jar) {
+    group = 'build'
+    description = 'Build the standalone FluidSynth-backed SoundFont CLI.'
+    archiveFileName = 'music-soundfont-renderer.jar'
+    from sourceSets.main.output
+    dependsOn tasks.named('classes')
+    manifest {
+        attributes 'Main-Class': 'com.aresstack.audio.music.soundfont.SoundFontMidiRenderer'
+    }
+}
+
+tasks.named('assemble') {
+    dependsOn tasks.named('soundFontJar')
+}

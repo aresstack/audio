@@ -15,8 +15,14 @@ Every successful build on `main` updates the existing [latest release](https://g
 
 - [music-renderer.jar](https://github.com/aresstack/audio/releases/download/latest/music-renderer.jar)
 - [sounds-renderer.jar](https://github.com/aresstack/audio/releases/download/latest/sounds-renderer.jar)
+- [music-soundfont-renderer.jar](https://github.com/aresstack/audio/releases/download/latest/music-soundfont-renderer.jar) — renders an existing MIDI file through an installed FluidSynth and a user-supplied SoundFont
 
-Both are runnable with `java -jar` and a JDK/JRE 8 or newer. The `sounds` JAR includes Gson; neither program needs KIPITZ to render an existing plan. Generated music and effects are not published as binaries.
+**Same Gemma composition, different instrument sounds:**
+- [District Dawn – GeneralUser GS (MP3)](https://github.com/aresstack/audio/releases/download/latest/district-dawn-generaluser.mp3)
+- [District Dawn – original Java synthesis (MP3)](https://github.com/aresstack/audio/releases/download/latest/district-dawn-synth.mp3)
+- [GeneralUser WAV (44.1 kHz)](https://github.com/aresstack/audio/releases/download/latest/district-dawn-generaluser.wav) · [Original WAV](https://github.com/aresstack/audio/releases/download/latest/district-dawn-synth.wav) · [MIDI](https://github.com/aresstack/audio/releases/download/latest/district-dawn.mid)
+
+Both are runnable with `java -jar` and a JDK/JRE 8 or newer. The `sounds` JAR includes Gson; neither program needs KIPITZ to render an existing plan. Only the original generated *District Dawn* comparison music is published as audio files; these are not binary dependencies. The 32 MB SoundFont is not redistributed.
 
 ## Build
 

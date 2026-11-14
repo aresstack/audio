@@ -65,19 +65,47 @@ jobs:
           test -s build/smoke-sounds/new-sea-creature.wav
           test -s build/smoke-sounds/new-district.wav
 
-      - name: Stage tested JAR files
+      - name: Render the original Gemma MIDI with GeneralUser GS
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fluidsynth
+          mkdir -p build/soundfont-compare build/soundfonts
+
+          # Pin soundbank bytes to prevent changes in the upstream branch from changing the output.
+          curl --fail --location --silent --show-error --retry 3             https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/GeneralUser-GS.sf2             --output build/soundfonts/GeneralUser-GS.sf2
+          echo "9575028c7a1f589f5770fccc8cff2734566af40cd26ed836944e9a5152688cfe  build/soundfonts/GeneralUser-GS.sf2" | sha256sum --check
+
+          java -jar music/build/libs/music-renderer.jar             music/examples/gemma-district-dawn.tsv build/soundfont-compare/original
+          java -jar music/build/libs/music-soundfont-renderer.jar             build/soundfont-compare/original/arrangement.mid             build/soundfonts/GeneralUser-GS.sf2             build/soundfont-compare/district-dawn-generaluser.wav
+
+          test -s build/soundfont-compare/district-dawn-generaluser.wav
+          test -s build/soundfont-compare/original/arrangement.wav
+          ffmpeg -hide_banner -loglevel error -y             -i build/soundfont-compare/district-dawn-generaluser.wav             -codec:a libmp3lame -qscale:a 3 build/soundfont-compare/district-dawn-generaluser.mp3
+          ffmpeg -hide_banner -loglevel error -y             -i build/soundfont-compare/original/arrangement.wav             -codec:a libmp3lame -qscale:a 3 build/soundfont-compare/district-dawn-synth.mp3
+          test -s build/soundfont-compare/district-dawn-generaluser.mp3
+          test -s build/soundfont-compare/district-dawn-synth.mp3
+
+      - name: Stage verified JARs and the MIDI/SoundFont A/B comparison
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build/release
           cp music/build/libs/music-renderer.jar build/release/music-renderer.jar
+          cp music/build/libs/music-soundfont-renderer.jar build/release/music-soundfont-renderer.jar
           cp sounds/build/libs/sounds-renderer.jar build/release/sounds-renderer.jar
+          cp build/soundfont-compare/original/arrangement.mid build/release/district-dawn.mid
+          cp build/soundfont-compare/original/arrangement.wav build/release/district-dawn-synth.wav
+          cp build/soundfont-compare/district-dawn-generaluser.wav build/release/district-dawn-generaluser.wav
+          cp build/soundfont-compare/district-dawn-synth.mp3 build/release/district-dawn-synth.mp3
+          cp build/soundfont-compare/district-dawn-generaluser.mp3 build/release/district-dawn-generaluser.mp3
 
       - name: Upload verified build
         uses: actions/upload-artifact@v4
         with:
           name: audio-jars
-          path: build/release/*.jar
+          path: build/release/*
           if-no-files-found: error
           retention-days: 30
 
@@ -125,7 +153,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="latest"
-          notes="Rolling build from main, commit $GITHUB_SHA. Both JARs were built and smoke-tested on GitHub Actions. Java 8 bytecode; Java 8 or newer can execute the resulting programs."
+          notes="Rolling build from main commit $GITHUB_SHA. Contains Java 8-compatible music, sound effect, and FluidSynth SoundFont renderer JARs. District Dawn is the exact Gemma composition in two timbres: simple Java synthesis vs. GeneralUser GS 2.0.3/FluidSynth at 44.1 kHz. SoundFont: S. Christian Collins, GeneralUser GS License v2.0; only rendered original music is published."
 
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" --target "$GITHUB_SHA" --title "Audio – current build" --notes "$notes"
@@ -135,4 +163,6 @@ jobs:
             gh release edit "$tag" --title "Audio – current build" --notes "$notes"
           fi
 
-          gh release upload "$tag" release/music-renderer.jar release/sounds-renderer.jar --clobber
+          gh release upload "$tag" release/music-renderer.jar release/music-soundfont-renderer.jar release/sounds-renderer.jar \
+            release/district-dawn.mid release/district-dawn-synth.wav release/district-dawn-generaluser.wav \
+            release/district-dawn-synth.mp3 release/district-dawn-generaluser.mp3 --clobber

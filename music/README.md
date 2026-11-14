@@ -25,3 +25,30 @@ The music script is **self-contained**: it does not dot-source another file. You
 ## Windows PowerShell ConstrainedLanguage
 
 The Gemma PowerShell experiment runs in Windows PowerShell's restricted `ConstrainedLanguage` mode without invoking prohibited .NET helper methods. Its bar-index calculation uses an explicit bounded loop (rather than `[Math]::Floor`, which is blocked in this mode). GitHub Actions exercises the cached end-to-end music generation with Windows PowerShell 5.1 under `ConstrainedLanguage`, including the MIDI and WAV export. This smoke test does not call KIPITZ.
+
+## SoundFont experiment: same composition, real sampled instruments
+
+The original Gemma 4 31B composition *District Dawn* is kept as
+[`examples/gemma-district-dawn.tsv`](examples/gemma-district-dawn.tsv).
+GitHub Actions reconstructs its MIDI from the TSV, then renders two versions:
+the original built-in synthesis and [GeneralUser GS 2.0.3](https://github.com/mrbumpy409/GeneralUser-GS) using [FluidSynth](https://www.fluidsynth.org/).
+Only instrument synthesis changes; there are no new model requests or note edits.
+
+The rolling release contains `district-dawn-generaluser.mp3`, `district-dawn-synth.mp3`,
+their WAV counterparts, the matching MIDI, and `music-soundfont-renderer.jar`.
+The two MP3s make the same underlying notes directly comparable.
+
+On your machine, install FluidSynth and provide a SoundFont file, then run:
+
+```powershell
+java -jar music-soundfont-renderer.jar arrangement.mid "C:\\Sounds\\GeneralUser-GS.sf2" soundfont.wav
+```
+
+The `music-soundfont-renderer.jar` is a Java 8-compatible **process adapter**, not a copy of
+FluidSynth or the sample bank. It calls the FluidSynth executable with `ProcessBuilder`;
+paths with spaces are supported. FluidSynth and the bank are installed/downloaded only in CI
+for the release demonstration, while your local machine stays in control of its own soundbanks.
+
+SoundFont credit: **S. Christian Collins, GeneralUser GS 2.0.3**, GeneralUser GS License v2.0.
+The upstream GitHub SoundFont file is verified by its pinned SHA-256 checksum in CI.
+Do not commit third-party SoundFonts to this repository.
