@@ -9,9 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 
 /** Generate one shared arrangement plan and four compatible instrument parts. */
 public final class GemmaMusicComposer {
@@ -42,6 +40,7 @@ public final class GemmaMusicComposer {
 
         List<String> arrangement = new ArrayList<String>();
         arrangement.add("tempo\t108");
+        CompositionNoteNormalizer normalizer = new CompositionNoteNormalizer(progress);
         for (int index = 0; index < PARTS.length; index++) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new IOException("Composition cancelled.");
@@ -70,25 +69,35 @@ public final class GemmaMusicComposer {
                 throw new IOException("Unsupported note count for " + partName + ": " + notes.size());
             }
             arrangement.add("track\t" + partName + "\t" + PROGRAMS[index] + "\t" + CHANNELS[index]);
-            for (JsonElement element : notes) {
-                JsonObject note = element.getAsJsonObject();
-                double beat = note.get("beat").getAsDouble();
-                double duration = note.get("duration").getAsDouble();
-                int pitch = note.get("pitch").getAsInt();
-                int velocity = note.get("velocity").getAsInt();
-                validateNote(partName, beat, duration, pitch, velocity);
-                int corrected = normalizePitch(partName, beat, pitch);
-                if (corrected != pitch) {
-                    progress.update(partName + " beat " + beat + ": pitch " + pitch
-                            + " corrected to " + corrected);
+            int accepted = 0;
+            for (int noteIndex = 0; noteIndex < notes.size(); noteIndex++) {
+                JsonElement element = notes.get(noteIndex);
+                if (!element.isJsonObject()) {
+                    progress.update("WARN: Skipped " + partName + " note " + (noteIndex + 1)
+                            + ": not a JSON object");
+                    continue;
                 }
-                arrangement.add("note\t" + partName + "\t" + Math.round(beat * 480) + "\t"
-                        + Math.round(duration * 480) + "\t" + corrected + "\t" + velocity);
+                CompositionNoteNormalizer.NormalizedNote note = normalizer.normalize(
+                        element.getAsJsonObject(), partName, noteIndex + 1);
+                if (note == null) {
+                    continue;
+                }
+                arrangement.add("note\t" + partName + "\t" + note.startTick() + "\t"
+                        + note.durationTicks() + "\t" + note.pitch() + "\t" + note.velocity());
+                accepted++;
             }
-            progress.update(partName + ": " + notes.size() + " notes");
+            if (accepted == 0) {
+                throw new IOException("No playable notes remain for " + partName
+                        + ". Original model response is saved in " + partName + ".json.");
+            }
+            progress.update(partName + ": " + accepted + " playable of " + notes.size() + " notes");
         }
         Path output = directory.resolve("arrangement.tsv");
         Files.write(output, arrangement, StandardCharsets.UTF_8);
+        Files.write(directory.resolve("note-corrections.tsv"),
+                normalizer.corrections(), StandardCharsets.UTF_8);
+        progress.update("Note corrections: " + normalizer.correctionCount()
+                + " (see note-corrections.tsv). Original JSON cache preserved.");
         return output;
     }
 
@@ -125,44 +134,4 @@ public final class GemmaMusicComposer {
         }
     }
 
-    private static void validateNote(String part, double beat, double duration,
-                                     int pitch, int velocity) throws IOException {
-        if (!Double.isFinite(beat) || !Double.isFinite(duration)
-                || beat < 0 || beat >= 32 || duration < 0.25 || duration > 4
-                || beat + duration > 32 || beat * 4 != Math.rint(beat * 4)
-                || duration * 4 != Math.rint(duration * 4)
-                || pitch < 0 || pitch > 127 || velocity < 35 || velocity > 105) {
-            throw new IOException("Invalid " + part + " note at beat " + beat + ", pitch " + pitch);
-        }
-    }
-
-    private static int normalizePitch(String part, double beat, int pitch) {
-        if ("drums".equals(part)) {
-            return nearest(pitch, new int[]{36, 38, 42, 46}, 36, 46, false);
-        }
-        if ("melody".equals(part)) {
-            return nearest(pitch, new int[]{0, 2, 4, 5, 7, 9, 11}, 60, 88, true);
-        }
-        String chord = CHORDS[(int) Math.floor(beat / 4)];
-        int[] classes = "C".equals(chord) ? new int[]{0, 4, 7}
-                : "G".equals(chord) ? new int[]{7, 11, 2}
-                : "Am".equals(chord) ? new int[]{9, 0, 4} : new int[]{5, 9, 0};
-        return nearest(pitch, classes, "bass".equals(part) ? 36 : 48,
-                "bass".equals(part) ? 60 : 76, true);
-    }
-
-    private static int nearest(int pitch, int[] allowed, int minimum, int maximum, boolean pitchClasses) {
-        int closest = minimum;
-        int difference = Integer.MAX_VALUE;
-        for (int candidate = minimum; candidate <= maximum; candidate++) {
-            int key = pitchClasses ? candidate % 12 : candidate;
-            for (int value : allowed) {
-                if (value == key && Math.abs(candidate - pitch) < difference) {
-                    closest = candidate;
-                    difference = Math.abs(candidate - pitch);
-                }
-            }
-        }
-        return closest;
-    }
 }
