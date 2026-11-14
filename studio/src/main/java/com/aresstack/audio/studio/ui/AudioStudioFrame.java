@@ -148,8 +148,8 @@ public final class AudioStudioFrame extends JFrame {
         for (int index = 0; index < PART_NAMES.length; index++) {
             JComboBox<InstrumentLibrary> choice = new JComboBox<InstrumentLibrary>();
             choice.addItem(builtin);
-            for (InstrumentLibrary library : libraries) {
-                choice.addItem(library);
+            for (InstrumentLibrary installed : registry.installedInstruments()) {
+                choice.addItem(installed);
             }
             selections[index] = choice;
             addRow(fields, row++, PART_NAMES[index] + ":", choice);
@@ -179,7 +179,7 @@ public final class AudioStudioFrame extends JFrame {
         libraryTable.setAutoCreateRowSorter(true);
         panel.add(new JScrollPane(libraryTable), BorderLayout.CENTER);
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        JButton register = new JButton("Lokale SF2/SF3/SFZ-Datei zuweisen …");
+        JButton register = new JButton("Soundbank oder ganzen Ordner importieren …");
         register.addActionListener(event -> registerSelectedLibrary());
         actions.add(register);
         JButton source = new JButton("Quellseite öffnen");
@@ -357,19 +357,33 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         JFileChooser chooser = new JFileChooser();
-        Path registered = registry.find(library.id());
-        if (registered != null) {
-            chooser.setSelectedFile(registered.toFile());
-        }
+        chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
         if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
             return;
         }
         try {
-            registry.register(library, chooser.getSelectedFile().toPath());
+            int count = registry.importLocation(library, chooser.getSelectedFile().toPath());
             tableModel.fireTableDataChanged();
-            append("Registered " + library.name() + ": " + registry.find(library.id()));
+            refreshInstrumentChoices();
+            append("Imported " + count + " instrument preset(s) from " + library.name());
         } catch (Exception error) {
             message(error.getMessage());
+        }
+    }
+
+    private void refreshInstrumentChoices() {
+        java.util.List<InstrumentLibrary> installed = registry.installedInstruments();
+        for (JComboBox<InstrumentLibrary> choice : selections) {
+            InstrumentLibrary previous = (InstrumentLibrary) choice.getSelectedItem();
+            String previousId = previous == null ? "" : previous.id();
+            choice.removeAllItems();
+            choice.addItem(builtin);
+            for (InstrumentLibrary library : installed) {
+                choice.addItem(library);
+                if (library.id().equals(previousId)) {
+                    choice.setSelectedItem(library);
+                }
+            }
         }
     }
 
