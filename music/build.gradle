@@ -1,0 +1,28 @@
+plugins {
+    id 'application'
+}
+
+application {
+    mainClass = 'MultiTrackMusicRenderer'
+}
+
+tasks.named('jar') {
+    archiveFileName = 'music-renderer.jar'
+    manifest {
+        attributes 'Main-Class': application.mainClass.get()
+    }
+}
+
+tasks.register('renderDemo', JavaExec) {
+    group = 'verification'
+    description = 'Render the checked-in original demonstration arrangement.'
+    dependsOn tasks.named('classes')
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = application.mainClass
+    args file('examples/demo-arrangement.tsv').absolutePath,
+            layout.buildDirectory.dir('demo-output').get().asFile.absolutePath
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('renderDemo')
+}

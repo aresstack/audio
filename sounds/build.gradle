@@ -1,0 +1,36 @@
+plugins {
+    id 'application'
+}
+
+dependencies {
+    implementation 'com.google.code.gson:gson:2.10.1'
+}
+
+application {
+    mainClass = 'com.aresstack.audio.sounds.SoundEffectRenderer'
+}
+
+tasks.named('jar') {
+    archiveFileName = 'sounds-renderer.jar'
+    manifest {
+        attributes 'Main-Class': application.mainClass.get()
+    }
+}
+
+tasks.named('run') {
+    workingDir rootProject.projectDir
+}
+
+tasks.register('renderDemo', JavaExec) {
+    group = 'verification'
+    description = 'Render checked-in Gemma sound-plan sample as WAV effects.'
+    dependsOn tasks.named('classes')
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = application.mainClass
+    args file('examples/sound-plan.json').absolutePath,
+            layout.buildDirectory.dir('demo-effects').get().asFile.absolutePath
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('renderDemo')
+}
