@@ -65,6 +65,14 @@ jobs:
           test -s build/smoke-sounds/new-sea-creature.wav
           test -s build/smoke-sounds/new-district.wav
 
+      - name: Verify runnable Swing Studio JAR headlessly
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -jar studio/build/libs/audio-studio.jar --smoke-test
+          javap -verbose -cp studio/build/libs/audio-studio.jar com.aresstack.audio.studio.ui.AudioStudioMain | grep -q 'major version: 52'
+          unzip -p studio/build/libs/audio-studio.jar META-INF/MANIFEST.MF | grep -q 'Main-Class: com.aresstack.audio.studio.ui.AudioStudioMain'
+
       - name: Render the original Gemma MIDI with GeneralUser GS
         shell: bash
         run: |
@@ -93,6 +101,7 @@ jobs:
           set -euo pipefail
           mkdir -p build/release
           cp music/build/libs/music-renderer.jar build/release/music-renderer.jar
+          cp studio/build/libs/audio-studio.jar build/release/audio-studio.jar
           cp music/build/libs/music-soundfont-renderer.jar build/release/music-soundfont-renderer.jar
           cp sounds/build/libs/sounds-renderer.jar build/release/sounds-renderer.jar
           cp build/soundfont-compare/original/arrangement.mid build/release/district-dawn.mid
@@ -153,7 +162,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="latest"
-          notes="Rolling build from main commit $GITHUB_SHA. Contains Java 8-compatible music, sound effect, and FluidSynth SoundFont renderer JARs. District Dawn is the exact Gemma composition in two timbres: simple Java synthesis vs. GeneralUser GS 2.0.3/FluidSynth at 44.1 kHz. SoundFont: S. Christian Collins, GeneralUser GS License v2.0; only rendered original music is published."
+          notes="Rolling build from main commit $GITHUB_SHA. Contains Java 8-compatible Swing Audio Studio, music, sound effect, and FluidSynth SoundFont renderer JARs. District Dawn is the exact Gemma composition in two timbres: simple Java synthesis vs. GeneralUser GS 2.0.3/FluidSynth at 44.1 kHz. SoundFont: S. Christian Collins, GeneralUser GS License v2.0; only rendered original music is published."
 
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" --target "$GITHUB_SHA" --title "Audio – current build" --notes "$notes"
@@ -163,6 +172,6 @@ jobs:
             gh release edit "$tag" --title "Audio – current build" --notes "$notes"
           fi
 
-          gh release upload "$tag" release/music-renderer.jar release/music-soundfont-renderer.jar release/sounds-renderer.jar \
+          gh release upload "$tag" release/audio-studio.jar release/music-renderer.jar release/music-soundfont-renderer.jar release/sounds-renderer.jar \
             release/district-dawn.mid release/district-dawn-synth.wav release/district-dawn-generaluser.wav \
             release/district-dawn-synth.mp3 release/district-dawn-generaluser.mp3 --clobber
