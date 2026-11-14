@@ -176,6 +176,9 @@ public final class AudioStudioFrame extends JFrame {
         resetButton.addActionListener(event -> clearCompositionCache());
         actions.add(resetButton);
         actions.add(cancelButton);
+        JButton inspectButton = new JButton("Plan / Spuren ansehen");
+        inspectButton.addActionListener(event -> inspectComposition());
+        actions.add(inspectButton);
         actions.add(playbackSelection);
         JButton playButton = new JButton("Abspielen");
         playButton.addActionListener(event -> play());
@@ -473,6 +476,42 @@ public final class AudioStudioFrame extends JFrame {
                     + library.license() + "\nSource: " + library.sourceUrl(),
                     library.name(), JOptionPane.INFORMATION_MESSAGE);
         }
+    }
+
+    private void inspectComposition() {
+        StringBuilder document = new StringBuilder();
+        Path folder = Paths.get(directory.getText().trim());
+        for (String file : new String[]{"composition-plan.json", "melody.json", "harmony.json",
+                "bass.json", "drums.json"}) {
+            Path current = folder.resolve(file);
+            if (!Files.isRegularFile(current)) {
+                continue;
+            }
+            try {
+                byte[] bytes = Files.readAllBytes(current);
+                if (bytes.length > 250000) {
+                    throw new IOException("JSON response too large to display: " + file);
+                }
+                document.append("=== ").append(file).append(" ===\n");
+                document.append(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+                document.append("\n\n");
+            } catch (IOException error) {
+                message(error.getMessage());
+                return;
+            }
+        }
+        if (document.length() == 0) {
+            message("No saved Gemma JSON exists in this output directory.");
+            return;
+        }
+        JTextArea preview = new JTextArea(document.toString());
+        preview.setEditable(false);
+        preview.setLineWrap(true);
+        preview.setWrapStyleWord(true);
+        JScrollPane scroll = new JScrollPane(preview);
+        scroll.setPreferredSize(new Dimension(760, 480));
+        JOptionPane.showMessageDialog(this, scroll,
+                "Gemma composition plan and tracks", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void play() {
