@@ -83,7 +83,17 @@ public final class TrackTablePanel extends JPanel {
         if (table.isEditing() && !table.getCellEditor().stopCellEditing()) {
             throw new IllegalArgumentException("Finish editing the current table cell.");
         }
+        return currentArrangement();
+    }
+
+    /** Inspect committed edits without recursively ending the active JTable editor. */
+    public TrackArrangement currentArrangement() {
         return new TrackArrangement(new ArrayList<MusicTrack>(model.tracks));
+    }
+
+    public void setEditingEnabled(boolean enabled) {
+        table.setEnabled(enabled);
+        addButton.setEnabled(enabled && model.tracks.size() < TrackArrangement.MAX_TRACKS);
     }
 
     public void setArrangement(TrackArrangement arrangement) {

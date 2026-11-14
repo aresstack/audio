@@ -720,7 +720,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("description", description.getText());
             saved.setProperty("parallel", parallelRequests.getValue().toString());
             if (trackTable != null && !loadingTracks && trackTable.arrangement() != null) {
-                trackStore.save(Paths.get(directory.getText().trim()), trackTable.arrangement());
+                trackStore.save(Paths.get(directory.getText().trim()), trackTable.currentArrangement());
             }
             settingsStore.save(saved);
             if (notifyUser) {
@@ -989,7 +989,7 @@ public final class AudioStudioFrame extends JFrame {
         playbackSelection.addItem("Java reference mix");
         if (trackTable != null) {
             try {
-                for (MusicTrack track : trackTable.arrangement().tracks()) {
+                for (MusicTrack track : trackTable.currentArrangement().tracks()) {
                     playbackSelection.addItem(track.id());
                 }
             } catch (IllegalArgumentException ignored) {

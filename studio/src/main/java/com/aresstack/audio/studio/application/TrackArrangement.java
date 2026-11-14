@@ -30,6 +30,9 @@ public final class TrackArrangement {
         if (drumCount > 1) {
             throw new IllegalArgumentException("Only one shared GM percussion channel is supported.");
         }
+        if (checked.size() - drumCount > 15) {
+            throw new IllegalArgumentException("General MIDI provides only 15 melodic channels.");
+        }
         this.tracks = Collections.unmodifiableList(checked);
     }
 
