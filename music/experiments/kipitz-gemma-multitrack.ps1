@@ -63,6 +63,16 @@ function Resolve-HarmonicPitch {
     return $Nearest
 }
 
+# Locate the bar by truncating toward negative infinity, not by PowerShell's rounding int cast.
+function Get-BarIndex {
+    param([double]$Beat)
+
+    if ([double]::IsNaN($Beat) -or [double]::IsInfinity($Beat) -or $Beat -lt 0 -or $Beat -ge 32) {
+        throw "Beat $Beat is outside the eight-bar arrangement."
+    }
+    return [int][Math]::Floor($Beat / 4.0)
+}
+
 function Test-HarmonicPitch {
     $Cases = @(
         @{ pitch = 48; chord = "G"; part = "bass"; expected = 47 },
@@ -80,6 +90,39 @@ function Test-HarmonicPitch {
         }
     }
     Write-Host "Harmonic pitch tests passed: $($Cases.Count) cases."
+
+    # Cover all previously wrong rounded bar indices, including the final sixteenth note.
+    $BarCases = @(
+        @{ beat = 0; expected = 0 },
+        @{ beat = 3.75; expected = 0 },
+        @{ beat = 4; expected = 1 },
+        @{ beat = 19; expected = 4 },
+        @{ beat = 22; expected = 5 },
+        @{ beat = 23; expected = 5 },
+        @{ beat = 27; expected = 6 },
+        @{ beat = 28; expected = 7 },
+        @{ beat = 30; expected = 7 },
+        @{ beat = 31; expected = 7 },
+        @{ beat = 31.75; expected = 7 }
+    )
+    foreach ($Case in $BarCases) {
+        $Actual = Get-BarIndex -Beat $Case.beat
+        if ($Actual -ne $Case.expected) {
+            throw "Bar-index test failed for beat $($Case.beat): expected $($Case.expected), got $Actual."
+        }
+    }
+    foreach ($InvalidBeat in @(-0.25, 32, 33)) {
+        $Rejected = $false
+        try {
+            Get-BarIndex -Beat $InvalidBeat | Out-Null
+        } catch {
+            $Rejected = $true
+        }
+        if (-not $Rejected) {
+            throw "Invalid beat $InvalidBeat was accepted."
+        }
+    }
+    Write-Host "Bar-index tests passed: $($BarCases.Count) valid and 3 invalid cases."
 }
 
 if ($SelfTest) {
@@ -263,7 +306,9 @@ Return ONLY one JSON object with EXACTLY these fields:
         $Duration = [double]$Note.duration
         $Pitch = [int]$Note.pitch
         $Velocity = [int]$Note.velocity
-        if ($Beat -lt 0 -or $Duration -lt 0.25 -or $Duration -gt 4 -or ($Beat + $Duration) -gt 32) {
+        if ([double]::IsNaN($Beat) -or [double]::IsInfinity($Beat) -or
+            [double]::IsNaN($Duration) -or [double]::IsInfinity($Duration) -or
+            $Beat -lt 0 -or $Duration -lt 0.25 -or $Duration -gt 4 -or ($Beat + $Duration) -gt 32) {
             throw "Invalid note timing in ${PartId}: beat=$Beat duration=$Duration"
         }
         if (($Beat * 4) % 1 -ne 0 -or ($Duration * 4) % 1 -ne 0) {
@@ -279,8 +324,7 @@ Return ONLY one JSON object with EXACTLY these fields:
                 throw "Melody pitch outside C major: $Pitch"
             }
         } else {
-            $BarIndex = [int]($Beat / 4)
-            if ($BarIndex -ge 8) { throw "Note starts after the last bar." }
+            $BarIndex = Get-BarIndex -Beat $Beat
             $Chord = $ExpectedChords[$BarIndex]
             $CorrectedPitch = Resolve-HarmonicPitch -Pitch $Pitch -Chord $Chord -PartId $PartId
             if ($CorrectedPitch -ne $Pitch) {

@@ -52,6 +52,7 @@ jobs:
             }
           }
           & ./music/experiments/test-harmonic-pitch.ps1
+          & ./music/experiments/test-cached-render.ps1
 
       - name: Smoke-test the standalone renderer JARs
         shell: bash
