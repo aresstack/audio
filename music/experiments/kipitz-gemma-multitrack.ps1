@@ -402,8 +402,32 @@ Write-Host "Rendering MIDI and WAV using Java..."
 if ($LASTEXITCODE -ne 0) { throw "The Java renderer failed (exit code $LASTEXITCODE)." }
 
 $ZipFile = Join-Path $env:TEMP "kipitz-gemma-multitrack.zip"
-Compress-Archive -Path "$OutputDirectory\*" -DestinationPath $ZipFile -Force
+$ArchiveCreated = $false
+if (Test-Path $ZipFile) {
+    Remove-Item -Path $ZipFile -Force
+}
+
+# Prefer the native Windows tar executable: it works when ConstrainedLanguage blocks
+# Microsoft.PowerShell.Archive from autoloading.
+if (Get-Command tar.exe -ErrorAction SilentlyContinue) {
+    & tar.exe -a -c -f $ZipFile -C $OutputDirectory .
+    $ArchiveCreated = ($LASTEXITCODE -eq 0 -and (Test-Path $ZipFile))
+}
+if (-not $ArchiveCreated) {
+    try {
+        Compress-Archive -Path "$OutputDirectory\*" -DestinationPath $ZipFile -Force -ErrorAction Stop
+        $ArchiveCreated = Test-Path $ZipFile
+    } catch {
+        # Preserve all generated audio files even if ZIP creation is restricted by policy.
+        Write-Warning "ZIP creation is unavailable in this PowerShell session: $($_.Exception.Message)"
+    }
+}
+
 Write-Host ""
 Write-Host "Music ready: " (Join-Path $OutputDirectory "arrangement.wav")
 Write-Host "MIDI:        " (Join-Path $OutputDirectory "arrangement.mid")
-Write-Host "Upload ZIP:  $ZipFile"
+if ($ArchiveCreated) {
+    Write-Host "Upload ZIP:  $ZipFile"
+} else {
+    Write-Host "Generated files: $OutputDirectory (ZIP unavailable)"
+}
