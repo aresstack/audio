@@ -3,6 +3,9 @@ package com.aresstack.audio.studio.ui;
 import com.aresstack.audio.instruments.InstrumentCatalog;
 import com.aresstack.audio.instruments.InstrumentLibrary;
 import com.aresstack.audio.instruments.InstrumentRegistry;
+import com.aresstack.audio.instruments.network.AudioProxyRoutes;
+import com.aresstack.audio.studio.keepass.AudioKeePassService;
+import com.aresstack.audio.studio.keepass.KeePassEntry;
 import com.aresstack.audio.studio.ai.KipitzChatClient;
 import com.aresstack.audio.studio.application.GemmaMusicComposer;
 import com.aresstack.audio.studio.application.StudioMusicRenderer;
@@ -19,6 +22,9 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.io.IOException;
 import java.net.URI;
+import java.net.PasswordAuthentication;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -31,6 +37,7 @@ import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.Clip;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
@@ -61,7 +68,17 @@ public final class AudioStudioFrame extends JFrame {
     private final JPasswordField apiKey = new JPasswordField(38);
     private final JTextField model = new JTextField("google/gemma-4-31B-it", 23);
     private final JTextField proxyHost = new JTextField(16);
-    private final JTextField proxyPort = new JTextField("8080", 5);
+    private final JTextField proxyPort = new JTextField("", 5);
+    private final JComboBox<String> proxyMode = new JComboBox<String>(new String[]{
+            "Aus 3d4j / Windows übernehmen", "PAC_URL_POWERSHELL",
+            "PAC_URL_WINDOWS_SETTINGS", "PAC_URL_WSCRIPT", "PAC_URL_MANUAL",
+            "WINDOWS_STATIC_PROXY", "MANUAL_PROXY", "DISABLED"
+    });
+    private final JTextField proxyPacUrl = new JTextField(34);
+    private final JTextField proxyNonProxyHosts = new JTextField(24);
+    private final JCheckBox proxyBasic = new JCheckBox("Proxy-BASIC via KeePass");
+    private final JTextField proxyCredentialRef = new JTextField(22);
+    private final JComboBox<KeePassEntry> keePassEntries = new JComboBox<KeePassEntry>();
     private final JTextField directory = new JTextField(Paths.get(System.getProperty("user.home"),
             ".aresstack", "audio", "compositions", "district-dawn").toString(), 38);
     private final JTextField arrangementFile = new JTextField(38);
@@ -113,9 +130,7 @@ public final class AudioStudioFrame extends JFrame {
     private void initializeContents() {
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("1 · Bibliotheken installieren",
-                new InstrumentLibraryPanel(registry,
-                        () -> proxyHost.getText().trim(),
-                        () -> Integer.parseInt(proxyPort.getText().trim()),
+                new InstrumentLibraryPanel(registry, this::configureNetworkRoutes,
                         this::refreshInstrumentChoices, this::append));
         tabs.addTab("2 · Komponieren und abspielen", compositionPanel());
         add(tabs, BorderLayout.CENTER);
@@ -130,14 +145,41 @@ public final class AudioStudioFrame extends JFrame {
         fields.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
         int row = 0;
         addRow(fields, row++, "KIPITZ Completions URL:", endpoint);
-        addRow(fields, row++, "API-Key (im Benutzerprofil gespeichert):", apiKey);
-        addRow(fields, row++, "Modell:", model);
-        JPanel proxy = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        proxy.add(new JLabel("HTTP-Proxy-Host (optional):"));
-        proxy.add(proxyHost);
-        proxy.add(new JLabel("Port:"));
-        proxy.add(proxyPort);
-        addRow(fields, row++, "Proxy:", proxy);
+        JPanel credential = new JPanel(new BorderLayout(6, 0));
+        credential.add(apiKey, BorderLayout.CENTER);
+        JPanel credentialButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
+        JButton keepassList = new JButton("KeePass verbinden / Einträge laden");
+        keepassList.addActionListener(event -> loadKeePassEntries());
+        credentialButtons.add(keepassList);
+        JButton keepassUse = new JButton("Eintrag übernehmen");
+        keepassUse.addActionListener(event -> useKeePassEntry());
+        credentialButtons.add(keePassEntries);
+        credentialButtons.add(keepassUse);
+        credential.add(credentialButtons, BorderLayout.EAST);
+        addRow(fields, row++, "API-Key (lokal gespeichert):", credential);
+        JPanel modelControls = new JPanel(new BorderLayout(6, 0));
+        modelControls.add(model, BorderLayout.CENTER);
+        JButton listModels = new JButton("Modelle laden");
+        listModels.addActionListener(event -> loadModelNames());
+        modelControls.add(listModels, BorderLayout.EAST);
+        addRow(fields, row++, "Modell:", modelControls);
+        addRow(fields, row++, "Proxy-Modus:", proxyMode);
+        JPanel proxyHostAndPort = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        proxyHostAndPort.add(new JLabel("Host:"));
+        proxyHostAndPort.add(proxyHost);
+        proxyHostAndPort.add(new JLabel("Port:"));
+        proxyHostAndPort.add(proxyPort);
+        JButton testProxy = new JButton("Proxyweg prüfen");
+        testProxy.addActionListener(event -> testProxyRoute());
+        proxyHostAndPort.add(testProxy);
+        addRow(fields, row++, "Manueller Proxy:", proxyHostAndPort);
+        addRow(fields, row++, "PAC-Adresse (optional):", proxyPacUrl);
+        addRow(fields, row++, "Ohne Proxy für:", proxyNonProxyHosts);
+        JPanel proxyAuthentication = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        proxyAuthentication.add(proxyBasic);
+        proxyAuthentication.add(new JLabel("KeePass-Eintrag:"));
+        proxyAuthentication.add(proxyCredentialRef);
+        addRow(fields, row++, "Proxy-Anmeldung:", proxyAuthentication);
         addRow(fields, row++, "Musikalische Beschreibung:", new JScrollPane(description));
         JPanel output = new JPanel(new BorderLayout(4, 0));
         output.add(directory, BorderLayout.CENTER);
@@ -257,12 +299,11 @@ public final class AudioStudioFrame extends JFrame {
         Arrays.fill(password, '\0');
         final String selectedUrl = url;
         final String selectedModel = model.getText().trim();
-        final String host = proxyHost.getText().trim();
-        final int port;
+        final AudioProxyRoutes routes;
         try {
-            port = Integer.parseInt(proxyPort.getText().trim());
-        } catch (NumberFormatException invalidPort) {
-            message("Proxy port must be a number.");
+            routes = configureNetworkRoutes();
+        } catch (RuntimeException invalidProxy) {
+            message("Ungültige Proxy-Einstellung: " + invalidProxy.getMessage());
             return;
         }
         final String prompt = description.getText().trim();
@@ -274,7 +315,7 @@ public final class AudioStudioFrame extends JFrame {
         start(new Operation() {
             @Override
             public Path execute(GemmaMusicComposer.Progress progress) throws Exception {
-                KipitzChatClient client = new KipitzChatClient(selectedUrl, key, selectedModel, host, port);
+                KipitzChatClient client = new KipitzChatClient(selectedUrl, key, selectedModel, routes);
                 activeClient = client;
                 try {
                     Path tsv = new GemmaMusicComposer(client).compose(prompt, output, progress);
@@ -304,6 +345,209 @@ public final class AudioStudioFrame extends JFrame {
                 return renderArrangement(arrangement, output, settings, progress);
             }
         });
+    }
+
+    /** Combine user overrides with the proxy settings already used by 3d4j. */
+    private Properties networkSettings() {
+        Properties settings = new Properties();
+        int modeIndex = proxyMode.getSelectedIndex();
+        if (modeIndex > 0) {
+            settings.setProperty("proxyMode", proxyMode.getItemAt(modeIndex));
+        }
+        String host = proxyHost.getText().trim();
+        if (!host.isEmpty()) {
+            settings.setProperty("proxyHost", host);
+        }
+        String port = proxyPort.getText().trim();
+        if (!port.isEmpty()) {
+            settings.setProperty("proxyPort", port);
+        }
+        String pac = proxyPacUrl.getText().trim();
+        if (!pac.isEmpty()) {
+            settings.setProperty("proxyPacUrl", pac);
+        }
+        String exclusions = proxyNonProxyHosts.getText().trim();
+        if (!exclusions.isEmpty()) {
+            settings.setProperty("proxyNonProxyHosts", exclusions);
+        }
+        if (proxyBasic.isSelected()) {
+            settings.setProperty("proxyAuthMode", "BASIC");
+            settings.setProperty("proxyCredentialRef", proxyCredentialRef.getText().trim());
+        }
+        return settings;
+    }
+
+    private AudioProxyRoutes configureNetworkRoutes() {
+        Properties settings = networkSettings();
+        AudioProxyRoutes routes = new AudioProxyRoutes(settings);
+        String credentialRef = AudioProxyRoutes.basicCredentialReference(settings);
+        if (credentialRef != null && !credentialRef.trim().isEmpty()) {
+            String title = credentialRef.startsWith("keepass:")
+                    ? credentialRef.substring("keepass:".length()) : credentialRef;
+            routes.enableBasicAuthentication(settings, () -> {
+                try {
+                    String[] credentials = AudioKeePassService.credentials(
+                            AudioKeePassService.standardHome(), title, () -> null);
+                    return credentials == null ? null
+                            : new PasswordAuthentication(credentials[0], credentials[1].toCharArray());
+                } catch (Exception unavailable) {
+                    return null;
+                }
+            });
+        }
+        return routes;
+    }
+
+    private void testProxyRoute() {
+        final String address = endpoint.getText().trim().isEmpty()
+                ? "https://github.com/" : endpoint.getText().trim();
+        final AudioProxyRoutes routes;
+        try {
+            routes = configureNetworkRoutes();
+        } catch (RuntimeException error) {
+            message(error.getMessage());
+            return;
+        }
+        append("Prüfe Proxyweg (" + routes.describe() + ") für " + address);
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                java.net.Proxy route = routes.proxyFor(URI.create(address));
+                return route == java.net.Proxy.NO_PROXY ? "DIRECT" : route.toString();
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    append("Proxyweg: " + get());
+                } catch (Exception failure) {
+                    Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+                    append("Proxyprüfung fehlgeschlagen: " + cause.getMessage());
+                }
+            }
+        }.execute();
+    }
+
+    private String pairingCode() {
+        final AtomicReference<String> answer = new AtomicReference<String>();
+        Runnable dialog = () -> answer.set(JOptionPane.showInputDialog(this,
+                "KeePassRPC zeigt jetzt einen einmaligen Kopplungscode. Bitte hier eingeben:",
+                "KeePass koppeln", JOptionPane.QUESTION_MESSAGE));
+        if (SwingUtilities.isEventDispatchThread()) {
+            dialog.run();
+        } else {
+            try {
+                SwingUtilities.invokeAndWait(dialog);
+            } catch (Exception failed) {
+                return null;
+            }
+        }
+        return answer.get();
+    }
+
+    private void loadKeePassEntries() {
+        append("KeePassRPC: Suche nach Einträgen ...");
+        new SwingWorker<List<KeePassEntry>, Void>() {
+            @Override
+            protected List<KeePassEntry> doInBackground() throws Exception {
+                return AudioKeePassService.entries(() -> pairingCode());
+            }
+            @Override
+            protected void done() {
+                try {
+                    List<KeePassEntry> found = get();
+                    keePassEntries.removeAllItems();
+                    for (KeePassEntry entry : found) {
+                        keePassEntries.addItem(entry);
+                    }
+                    append("KeePassRPC: " + found.size() + " Einträge gefunden.");
+                } catch (Exception failed) {
+                    Throwable cause = failed.getCause() == null ? failed : failed.getCause();
+                    message("KeePass konnte nicht verbunden werden: " + cause.getMessage());
+                }
+            }
+        }.execute();
+    }
+
+    private void useKeePassEntry() {
+        final KeePassEntry selection = (KeePassEntry) keePassEntries.getSelectedItem();
+        if (selection == null) {
+            message("Bitte zuerst KeePass verbinden und einen Eintrag wählen.");
+            return;
+        }
+        new SwingWorker<KeePassEntry, Void>() {
+            @Override
+            protected KeePassEntry doInBackground() throws Exception {
+                return AudioKeePassService.entry(selection.title(), () -> pairingCode());
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    KeePassEntry selected = get();
+                    if (selected == null) {
+                        throw new IOException("Der Eintrag wurde nicht gefunden.");
+                    }
+                    apiKey.setText(selected.password());
+                    if (selected.hasUrl()) {
+                        endpoint.setText(normalizeKeePassUrl(selected.url()));
+                    }
+                    append("KeePass-Eintrag übernommen: " + selected.title());
+                    saveSettings(false);
+                } catch (Exception failed) {
+                    Throwable cause = failed.getCause() == null ? failed : failed.getCause();
+                    message("KeePass-Eintrag konnte nicht gelesen werden: " + cause.getMessage());
+                }
+            }
+        }.execute();
+    }
+
+    private static String normalizeKeePassUrl(String original) {
+        String value = original.trim().replaceAll("/+$", "");
+        if (value.endsWith("/chat/completions")) {
+            return value;
+        }
+        return value + "/chat/completions";
+    }
+
+    private void loadModelNames() {
+        if (endpoint.getText().trim().isEmpty()) {
+            message("Bitte zuerst den KIPITZ-Endpunkt oder einen KeePass-Eintrag wählen.");
+            return;
+        }
+        final String endpointUrl = endpoint.getText().trim();
+        final String chosenModel = model.getText().trim();
+        final String secret = new String(apiKey.getPassword());
+        final AudioProxyRoutes routes = configureNetworkRoutes();
+        new SwingWorker<List<String>, Void>() {
+            @Override
+            protected List<String> doInBackground() throws Exception {
+                return new KipitzChatClient(endpointUrl, secret, chosenModel, routes).listModels();
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    List<String> models = get();
+                    if (models.isEmpty()) {
+                        message("Der Server hat keine Modelle zurückgegeben.");
+                        return;
+                    }
+                    Object choice = JOptionPane.showInputDialog(AudioStudioFrame.this,
+                            "Modell für Komposition wählen:", "KIPITZ-Modelle",
+                            JOptionPane.QUESTION_MESSAGE, null,
+                            models.toArray(), models.contains(chosenModel)
+                                    ? chosenModel : models.get(0));
+                    if (choice != null) {
+                        model.setText(choice.toString());
+                        saveSettings(false);
+                    }
+                } catch (Exception error) {
+                    Throwable cause = error.getCause() == null ? error : error.getCause();
+                    message("Modelle konnten nicht geladen werden: " + cause.getMessage());
+                }
+            }
+        }.execute();
     }
 
     private RenderSettings captureRenderSettings() {
@@ -343,7 +587,16 @@ public final class AudioStudioFrame extends JFrame {
             apiKey.setText(saved.getProperty("apiKey", ""));
             model.setText(saved.getProperty("model", model.getText()));
             proxyHost.setText(saved.getProperty("proxyHost", ""));
-            proxyPort.setText(saved.getProperty("proxyPort", proxyPort.getText()));
+            proxyPort.setText(saved.getProperty("proxyPort", ""));
+            proxyPacUrl.setText(saved.getProperty("proxyPacUrl", ""));
+            proxyNonProxyHosts.setText(saved.getProperty("proxyNonProxyHosts", ""));
+            proxyBasic.setSelected("BASIC".equalsIgnoreCase(saved.getProperty("proxyAuthMode", "")));
+            proxyCredentialRef.setText(saved.getProperty("proxyCredentialRef", ""));
+            String savedMode = saved.getProperty("proxyMode", "");
+            if (!savedMode.isEmpty()) {
+                proxyMode.setSelectedItem(savedMode);
+            }
+            append("Proxy: " + new AudioProxyRoutes(networkSettings()).describe());
             directory.setText(saved.getProperty("outputDirectory", directory.getText()));
             fluidSynth.setText(saved.getProperty("fluidSynth", fluidSynth.getText()));
             sfizz.setText(saved.getProperty("sfizz", sfizz.getText()));
@@ -386,6 +639,13 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("model", model.getText().trim());
             saved.setProperty("proxyHost", proxyHost.getText().trim());
             saved.setProperty("proxyPort", proxyPort.getText().trim());
+            String selectedProxyMode = proxyMode.getSelectedIndex() == 0 ? ""
+                    : String.valueOf(proxyMode.getSelectedItem());
+            saved.setProperty("proxyMode", selectedProxyMode);
+            saved.setProperty("proxyPacUrl", proxyPacUrl.getText().trim());
+            saved.setProperty("proxyNonProxyHosts", proxyNonProxyHosts.getText().trim());
+            saved.setProperty("proxyAuthMode", proxyBasic.isSelected() ? "BASIC" : "");
+            saved.setProperty("proxyCredentialRef", proxyCredentialRef.getText().trim());
             saved.setProperty("outputDirectory", directory.getText().trim());
             saved.setProperty("fluidSynth", fluidSynth.getText().trim());
             saved.setProperty("sfizz", sfizz.getText().trim());
