@@ -72,7 +72,7 @@ public final class AudioStudioFrame extends JFrame {
     private final JTextField proxyHost = new JTextField(16);
     private final JTextField proxyPort = new JTextField("", 5);
     private final JComboBox<String> proxyMode = new JComboBox<String>(new String[]{
-            "Aus 3d4j / Windows übernehmen", "PAC_URL_POWERSHELL",
+            "Standard (Windows: PAC per PowerShell, sonst kein Proxy)", "PAC_URL_POWERSHELL",
             "PAC_URL_WINDOWS_SETTINGS", "PAC_URL_WSCRIPT", "PAC_URL_MANUAL",
             "WINDOWS_STATIC_PROXY", "MANUAL_PROXY", "DISABLED"
     });
@@ -767,7 +767,7 @@ public final class AudioStudioFrame extends JFrame {
         });
     }
 
-    /** Combine user overrides with the proxy settings already used by 3d4j. */
+    /** The proxy settings as chosen here; nothing chosen means the defaults. */
     private Properties networkSettings() {
         Properties settings = new Properties();
         int modeIndex = proxyMode.getSelectedIndex();

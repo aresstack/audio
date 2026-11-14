@@ -7,7 +7,7 @@ import java.util.Properties;
 import org.junit.Assert;
 import org.junit.Test;
 
-/** Mirror the proxy routing guarantees used by 3d4j without contacting the network. */
+/** The proxy routing guarantees, checked without contacting the network. */
 public final class AudioProxyRoutesTest {
     @Test
     public void respectsManualProxyForExternalHttpsTargets() throws Exception {
@@ -66,5 +66,25 @@ public final class AudioProxyRoutesTest {
         Properties settings = new Properties();
         settings.setProperty("proxyMode", "INVALID_MODE");
         new AudioProxyRoutes(settings).proxyFor(URI.create("https://example.com/"));
+    }
+
+    @Test
+    public void readsNoProxySettingsOfOtherPrograms() throws Exception {
+        java.nio.file.Path home = java.nio.file.Files.createTempDirectory("audio-proxy-home-");
+        java.nio.file.Path game = java.nio.file.Files.createDirectories(home.resolve(".3d4j"));
+        java.nio.file.Files.write(game.resolve("generator.properties"),
+                ("network.proxy.mode=MANUAL_PROXY\nnetwork.proxy.host=proxy.of.the.game.invalid\n"
+                        + "network.proxy.port=3128\nnetwork.proxy.nonProxyHosts=*.game.invalid\n").getBytes("UTF-8"));
+        String before = System.getProperty("user.home");
+        System.setProperty("user.home", home.toString());
+        try {
+            boolean windows = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).startsWith("windows");
+            // Nothing chosen: the studio's own default, whatever 3d4j has set for itself.
+            Assert.assertEquals(windows ? "PAC_URL_POWERSHELL" : "DISABLED",
+                    new AudioProxyRoutes(new Properties()).describe());
+            Assert.assertNull(AudioProxyRoutes.basicCredentialReference(new Properties()));
+        } finally {
+            System.setProperty("user.home", before);
+        }
     }
 }

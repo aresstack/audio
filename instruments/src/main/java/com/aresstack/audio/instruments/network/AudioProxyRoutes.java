@@ -33,9 +33,12 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
 /**
- * Reuse the corporate proxy strategy of 3d4j: PAC/WPAD via win-proxy-java,
- * Windows trust and KeePass-configured BASIC proxy credentials when configured.
- * Never silently switch to DIRECT when PAC resolution fails.
+ * The way through a corporate proxy: PAC/WPAD via win-proxy-java, Windows trust
+ * and KeePass-configured BASIC proxy credentials when configured. The strategy
+ * and its defaults are those of 3d4j (on Windows the PAC script found by
+ * PowerShell, elsewhere no proxy), but the settings are the studio's own: no
+ * file of another program is read. Never silently switch to DIRECT when PAC
+ * resolution fails.
  */
 public final class AudioProxyRoutes {
     private final String modeName;
@@ -53,15 +56,9 @@ public final class AudioProxyRoutes {
 
     public AudioProxyRoutes(Properties audioSettings) {
         Properties own = normalize(audioSettings);
-        Properties game = read(Paths.get(System.getProperty("user.home"), ".3d4j", "generator.properties"));
-        String appData = System.getenv("APPDATA");
-        Properties enterprise = read(Paths.get(
-                appData == null || appData.trim().isEmpty() ? System.getProperty("user.home") : appData,
-                ".enterprise-ai-client", "enterprise-ai-client.properties"));
-
-        String raw = first("network.proxy.mode", own, game, enterprise);
+        String raw = first("network.proxy.mode", own);
         boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows");
-        String pacUrl = first("network.proxy.pacUrl", own, game, enterprise);
+        String pacUrl = first("network.proxy.pacUrl", own);
         String selected = raw == null ? (windows ? "PAC_URL_POWERSHELL" : "DISABLED")
                 : raw.toUpperCase(Locale.ROOT).replace('-', '_');
 
@@ -85,7 +82,7 @@ public final class AudioProxyRoutes {
         }
         mode = chosen;
         long configuredTimeout = 20000;
-        String setting = first("network.proxy.resolveTimeoutMillis", own, game, enterprise);
+        String setting = first("network.proxy.resolveTimeoutMillis", own);
         if (setting != null) {
             try {
                 configuredTimeout = Math.max(1000, Long.parseLong(setting));
@@ -95,7 +92,7 @@ public final class AudioProxyRoutes {
         }
         timeoutMillis = configuredTimeout;
 
-        String exclusions = first("network.proxy.nonProxyHosts", own, game, enterprise);
+        String exclusions = first("network.proxy.nonProxyHosts", own);
         if (exclusions != null) {
             for (String host : exclusions.split("[,;|\\s]+")) {
                 if (!host.trim().isEmpty()) {
@@ -112,15 +109,15 @@ public final class AudioProxyRoutes {
                 if (pacUrl != null) {
                     builder.pacUrl(pacUrl);
                 }
-                String host = first("network.proxy.host", own, game, enterprise);
+                String host = first("network.proxy.host", own);
                 if (host != null) {
                     builder.manualProxyHost(host);
                 }
-                String port = first("network.proxy.port", own, game, enterprise);
+                String port = first("network.proxy.port", own);
                 if (port != null) {
                     builder.manualProxyPort(Integer.parseInt(port));
                 }
-                String discovery = first("network.proxy.pacDiscoveryScript", own, game, enterprise);
+                String discovery = first("network.proxy.pacDiscoveryScript", own);
                 if (discovery != null) {
                     builder.pacUrlDiscoveryScript(discovery);
                 }
@@ -198,9 +195,7 @@ public final class AudioProxyRoutes {
     public void enableBasicAuthentication(Properties userSettings,
                                           final Supplier<PasswordAuthentication> supplier) {
         Properties own = normalize(userSettings);
-        String method = first("network.proxy.auth.mode", own,
-                read(Paths.get(System.getProperty("user.home"), ".3d4j", "generator.properties")),
-                enterpriseSettings());
+        String method = first("network.proxy.auth.mode", own);
         if (!"BASIC".equalsIgnoreCase(method)) {
             return;
         }
@@ -220,9 +215,7 @@ public final class AudioProxyRoutes {
 
     public static String basicCredentialReference(Properties settings) {
         Properties own = normalize(settings);
-        return first("network.proxy.auth.credentialRef", own,
-                read(Paths.get(System.getProperty("user.home"), ".3d4j", "generator.properties")),
-                enterpriseSettings());
+        return first("network.proxy.auth.credentialRef", own);
     }
 
     public static String effectiveMode(Properties settings) {
@@ -295,25 +288,6 @@ public final class AudioProxyRoutes {
             }
         }
         return null;
-    }
-
-    private static Properties enterpriseSettings() {
-        String appData = System.getenv("APPDATA");
-        return read(Paths.get(
-                appData == null || appData.trim().isEmpty() ? System.getProperty("user.home") : appData,
-                ".enterprise-ai-client", "enterprise-ai-client.properties"));
-    }
-
-    private static Properties read(Path file) {
-        Properties result = new Properties();
-        if (Files.isRegularFile(file)) {
-            try (Reader source = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-                result.load(source);
-            } catch (IOException invalid) {
-                // Treat unreadable foreign settings as absent.
-            }
-        }
-        return result;
     }
 
     private static String join(List<String> items) {

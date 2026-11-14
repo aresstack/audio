@@ -74,42 +74,48 @@ public final class KipitzChatClient {
         request.addProperty("top_p", 0.9);
         request.addProperty("top_k", 40);
         request.addProperty("max_tokens", maxTokens);
-        request.addProperty("stream", false);
         request.addProperty("user", "audio-swing-studio");
         JsonArray messages = new JsonArray();
         messages.add(message("system", instruction));
         messages.add(message("user", prompt));
         request.add("messages", messages);
 
-        HttpURLConnection connection = openConnection();
-        activeConnections.add(connection);
+        Answer answer = null;
+        for (int attempt = 1; answer == null; attempt++) {
+            // Streamed: the answer arrives piece by piece while the model writes. A proxy or gateway
+            // on the way gives up on a connection that stays silent (HTTP 504), and a long answer
+            // keeps a connection silent for minutes when it only comes at the end.
+            request.addProperty("stream", streaming);
+            try {
+                answer = exchange(gson.toJson(request).getBytes(StandardCharsets.UTF_8));
+            } catch (Refused refused) {
+                if (streaming && (refused.status == 400 || refused.status == 404 || refused.status == 415
+                        || refused.status == 422 || refused.status == 501)) {
+                    streaming = false; // a service that does not stream: asked the old way from now on
+                    continue;
+                }
+                throw new IOException("KIPITZ returned HTTP " + refused.status
+                        + ". Check endpoint, proxy, credentials and model.");
+            } catch (Unusable unusable) {
+                throw unusable;
+            } catch (IOException broken) {
+                // The connection failed or broke off on the way: that says nothing about the request.
+                if (cancelled || Thread.currentThread().isInterrupted() || attempt >= TRANSPORT_ATTEMPTS) {
+                    throw broken;
+                }
+                try {
+                    Thread.sleep(2000L * attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw broken;
+                }
+            }
+        }
         try {
-            byte[] body = gson.toJson(request).getBytes(StandardCharsets.UTF_8);
-            connection.setRequestMethod("POST");
-            connection.setConnectTimeout(30000);
-            connection.setReadTimeout(300000);
-            connection.setDoOutput(true);
-            connection.setRequestProperty("Authorization", "Bearer " + apiKey);
-            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            connection.setRequestProperty("Accept", "application/json");
-            try (OutputStream output = connection.getOutputStream()) {
-                output.write(body);
+            if (!"stop".equals(answer.finishReason)) {
+                throw new IOException("The model output was not complete (finish_reason=" + answer.finishReason + ").");
             }
-            int status = connection.getResponseCode();
-            if (status != 200) {
-                throw new IOException("KIPITZ returned HTTP " + status + ". Check endpoint, proxy, credentials and model.");
-            }
-            String response;
-            try (InputStream input = connection.getInputStream()) {
-                response = readText(input, 2_000_000);
-            }
-            JsonObject root = new JsonParser().parse(response).getAsJsonObject();
-            JsonObject choice = root.getAsJsonArray("choices").get(0).getAsJsonObject();
-            String finishReason = choice.get("finish_reason").getAsString();
-            if (!"stop".equals(finishReason)) {
-                throw new IOException("The model output was not complete (finish_reason=" + finishReason + ").");
-            }
-            String content = choice.getAsJsonObject("message").get("content").getAsString().trim();
+            String content = answer.text.trim();
             int start = content.indexOf('{');
             int end = content.lastIndexOf('}');
             if (start < 0 || end <= start) {
@@ -121,20 +127,164 @@ public final class KipitzChatClient {
             return parsed;
         } catch (RuntimeException malformed) {
             throw new IOException("Could not parse the KIPITZ model response.", malformed);
+        }
+    }
+
+    /** How often a request is sent again when the connection fails or breaks off, before the failure counts. */
+    private static final int TRANSPORT_ATTEMPTS = 3;
+    private static final int RESPONSE_LIMIT = 2_000_000;
+
+    /** Whether answers are asked for as a stream; switched off for a service that refuses to stream. */
+    private volatile boolean streaming = true;
+    private volatile boolean cancelled;
+
+    /** The text of an answer and why the model ended it. */
+    static final class Answer {
+        final String text;
+        final String finishReason;
+
+        Answer(String text, String finishReason) {
+            this.text = text;
+            this.finishReason = finishReason;
+        }
+    }
+
+    /** The service answered with an error status: sending the same request again would not help. */
+    private static final class Refused extends IOException {
+        private final int status;
+
+        Refused(int status) {
+            super("HTTP " + status);
+            this.status = status;
+        }
+    }
+
+    /** The service answered, but not with what can be read as an answer: asking again would not help either. */
+    private static final class Unusable extends IOException {
+        Unusable(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /** Sends one request and reads its answer, streamed or whole, whichever the service sends. */
+    private Answer exchange(byte[] body) throws IOException {
+        HttpURLConnection connection = openConnection();
+        activeConnections.add(connection);
+        try {
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(30000);
+            connection.setReadTimeout(300000);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Authorization", "Bearer " + apiKey);
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            connection.setRequestProperty("Accept", "application/json, text/event-stream");
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(body);
+            }
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                throw new Refused(status);
+            }
+            String type = String.valueOf(connection.getContentType());
+            try (InputStream input = connection.getInputStream()) {
+                if (type.contains("event-stream")) {
+                    return readStream(input);
+                }
+                String response = readText(input, RESPONSE_LIMIT);
+                try {
+                    JsonObject choice = new JsonParser().parse(response).getAsJsonObject()
+                            .getAsJsonArray("choices").get(0).getAsJsonObject();
+                    return new Answer(choice.getAsJsonObject("message").get("content").getAsString(),
+                            choice.get("finish_reason").getAsString());
+                } catch (RuntimeException malformed) {
+                    throw new Unusable("Could not parse the KIPITZ model response.", malformed);
+                }
+            }
         } finally {
             activeConnections.remove(connection);
             connection.disconnect();
         }
     }
 
+    /**
+     * Reads a streamed answer: lines {@code data: {...}} with a piece of text each in
+     * {@code choices[0].delta.content}, ended by {@code data: [DONE]}. Reading stops at that end
+     * mark instead of waiting for the connection to close, because a proxy may cut the connection
+     * without ending it properly ("Premature EOF"). If the connection breaks after the model has
+     * said why it ended, the answer is whole and is taken; if it breaks earlier, that is an error
+     * and the request is sent again. Thinking arrives in other fields and is left out.
+     */
+    static Answer readStream(InputStream input) throws IOException {
+        StringBuilder text = new StringBuilder();
+        String finishReason = null;
+        String broken = null;
+        boolean done = false;
+        java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(input, StandardCharsets.UTF_8));
+        try {
+            for (String line = reader.readLine(); line != null && !done; line = reader.readLine()) {
+                if (!line.startsWith("data:")) {
+                    continue; // empty lines between events, comments that keep the connection alive
+                }
+                String data = line.substring(5).trim();
+                if (data.equals("[DONE]")) {
+                    done = true;
+                    break;
+                }
+                if (data.isEmpty()) {
+                    continue;
+                }
+                JsonObject event;
+                try {
+                    event = new JsonParser().parse(data).getAsJsonObject();
+                } catch (RuntimeException malformed) {
+                    throw new Unusable("The stream carried something that is no JSON.", malformed);
+                }
+                if (event.has("error")) {
+                    throw new Unusable("KIPITZ reported: " + event.get("error"), null);
+                }
+                if (!event.has("choices") || !event.get("choices").isJsonArray()
+                        || event.getAsJsonArray("choices").size() == 0) {
+                    continue; // e.g. the usage at the end
+                }
+                JsonObject choice = event.getAsJsonArray("choices").get(0).getAsJsonObject();
+                if (choice.has("delta") && choice.get("delta").isJsonObject()) {
+                    com.google.gson.JsonElement content = choice.getAsJsonObject("delta").get("content");
+                    if (content != null && content.isJsonPrimitive()) {
+                        text.append(content.getAsString());
+                        if (text.length() > RESPONSE_LIMIT) {
+                            throw new Unusable("KIPITZ response exceeds the configured size limit.", null);
+                        }
+                    }
+                }
+                com.google.gson.JsonElement finish = choice.get("finish_reason");
+                if (finish != null && finish.isJsonPrimitive()) {
+                    finishReason = finish.getAsString();
+                }
+            }
+            if (!done) {
+                broken = "the connection was closed"; // quietly, without the end mark
+            }
+        } catch (Unusable unusable) {
+            throw unusable;
+        } catch (IOException cut) {
+            broken = String.valueOf(cut.getMessage()); // "Premature EOF", a reset, a silence too long
+        }
+        if (finishReason == null) {
+            throw new IOException("The stream broke off after " + text.length() + " characters: " + broken);
+        }
+        return new Answer(text.toString(), finishReason);
+    }
+
     /** Disconnect a pending request when the user cancels the composition. */
     public void cancel() {
+        cancelled = true;
         for (HttpURLConnection connection : activeConnections) {
             connection.disconnect();
         }
     }
 
-    /** Open through the same PAC-aware proxy route and Windows trust store used by 3d4j. */
+    /** Open through the PAC-aware proxy route and the Windows trust store. */
     private HttpURLConnection openConnection() throws IOException {
         return openConnection(URI.create(endpoint));
     }
