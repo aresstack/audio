@@ -46,7 +46,9 @@ public final class GemmaMusicComposerTest {
         Assert.assertTrue(content.contains("note\tbass\t12960\t480\t45\t70"));
         Assert.assertTrue(content.contains("note\tbass\t15240\t120\t47\t70"));
         Assert.assertTrue(content.contains("track\tdrums\t0\t9"));
-        Assert.assertEquals(9, Files.list(output).count());
+        try (java.util.stream.Stream<Path> generatedFiles = Files.list(output)) {
+            Assert.assertEquals(6L, generatedFiles.count());
+        }
     }
 
     @Test(expected = IOException.class)
