@@ -5,3 +5,7 @@ dependencies {
     implementation 'org.tukaani:xz:1.10'
     testImplementation 'junit:junit:4.13.2'
 }
+
+tasks.named('test') {
+    systemProperty 'soundfont.live', System.getProperty('soundfont.live', 'false')
+}
