@@ -16,6 +16,8 @@ application {
     mainClass = 'com.aresstack.audio.studio.ui.AudioStudioMain'
 }
 
+def mergedServicesDirectory = layout.buildDirectory.dir('merged-service-providers')
+
 tasks.named('jar') {
     dependsOn ':music:jar', ':instruments:jar', tasks.named('mergeServiceProviders')
     archiveFileName = 'audio-studio.jar'
@@ -37,7 +39,6 @@ tasks.named('run') {
     workingDir rootProject.projectDir
 }
 
-def mergedServicesDirectory = layout.buildDirectory.dir('merged-service-providers')
 tasks.register('mergeServiceProviders') {
     dependsOn ':music:jar', ':instruments:jar'
     inputs.files(configurations.runtimeClasspath)
