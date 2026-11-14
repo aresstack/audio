@@ -73,6 +73,21 @@ jobs:
           javap -verbose -cp studio/build/libs/audio-studio.jar com.aresstack.audio.studio.ui.AudioStudioMain | grep -q 'major version: 52'
           unzip -p studio/build/libs/audio-studio.jar META-INF/MANIFEST.MF | grep -q 'Main-Class: com.aresstack.audio.studio.ui.AudioStudioMain'
 
+      - name: Verify real Java 8 runtime compatibility
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: Run Java 8 studio and SoundFont CLI smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          java -jar studio/build/libs/audio-studio.jar --smoke-test
+          java -jar music/build/libs/music-renderer.jar music/examples/demo-arrangement.tsv build/java8-test-music
+          test -s build/java8-test-music/arrangement.wav
+
       - name: Render the original Gemma MIDI with GeneralUser GS
         shell: bash
         run: |
