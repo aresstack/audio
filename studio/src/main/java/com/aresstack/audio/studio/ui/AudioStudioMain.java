@@ -3,6 +3,8 @@ package com.aresstack.audio.studio.ui;
 import com.aresstack.audio.instruments.InstrumentCatalog;
 import com.aresstack.audio.instruments.InstrumentLibrary;
 import com.aresstack.audio.instruments.InstrumentRegistry;
+import com.aresstack.audio.instruments.network.AudioProxyRoutes;
+import com.aresstack.audio.studio.keepass.AudioKeePassService;
 import com.aresstack.audio.studio.application.GemmaMusicComposer;
 import com.aresstack.audio.studio.application.StudioMusicRenderer;
 import java.awt.EventQueue;
@@ -42,11 +44,23 @@ public final class AudioStudioMain {
     }
 
     private static void verifyHeadlessStartup(Path optionalSoundFont) throws Exception {
+        // Verify the desktop theme and all runtime dependencies on Java 8, without opening a window.
+        AudioStudioTheme.install();
+        Class.forName("com.aresstack.enterpriseai.proasteion.platform.security.keepassrpc.KeePassRpcLink");
+        java.util.Properties proxySettings = new java.util.Properties();
+        proxySettings.setProperty("proxyMode", "DISABLED");
+        AudioProxyRoutes proxy = new AudioProxyRoutes(proxySettings);
+        if (proxy.proxyFor(java.net.URI.create("https://example.org")) != java.net.Proxy.NO_PROXY) {
+            throw new IllegalStateException("The proxy-disabled smoke test attempted networking.");
+        }
         if (InstrumentCatalog.standard().size() < 9) {
             throw new IllegalStateException("Instrument catalog is incomplete.");
         }
         Path sandbox = Files.createTempDirectory("audio-studio-smoke-");
         try {
+            if (AudioKeePassService.isPaired(sandbox)) {
+                throw new IllegalStateException("A fresh temporary profile cannot be KeePass-paired.");
+            }
             InstrumentRegistry registry = new InstrumentRegistry(sandbox.resolve("libraries.properties"));
             verifyDirectoryImport(registry, sandbox);
             Path tsv = copyBundledComposition(sandbox);
