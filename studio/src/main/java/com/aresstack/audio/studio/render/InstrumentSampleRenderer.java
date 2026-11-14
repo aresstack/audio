@@ -1,0 +1,42 @@
+package com.aresstack.audio.studio.render;
+
+import com.aresstack.audio.instruments.InstrumentLibrary;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+
+/** Select the native rendering engine by instrument format, not by the user interface. */
+public final class InstrumentSampleRenderer {
+    private final ExternalProcessRunner processRunner = new ExternalProcessRunner();
+
+    public void render(InstrumentLibrary library, Path soundbank, Path midi, Path output,
+                       String fluidSynthCommand, String sfizzCommand) throws Exception {
+        List<String> command = new ArrayList<String>();
+        if (library.format() == InstrumentLibrary.Format.SFZ) {
+            command.add(sfizzCommand.trim());
+            command.add("--sfz");
+            command.add(soundbank.toAbsolutePath().toString());
+            command.add("--midi");
+            command.add(midi.toAbsolutePath().toString());
+            command.add("--wav");
+            command.add(output.toAbsolutePath().toString());
+            command.add("--samplerate");
+            command.add("44100");
+        } else {
+            command.add(fluidSynthCommand.trim());
+            command.add("-n");
+            command.add("-i");
+            command.add("-g");
+            command.add("0.35");
+            command.add("-r");
+            command.add("44100");
+            command.add("-T");
+            command.add("wav");
+            command.add("-F");
+            command.add(output.toAbsolutePath().toString());
+            command.add(soundbank.toAbsolutePath().toString());
+            command.add(midi.toAbsolutePath().toString());
+        }
+        processRunner.execute(command, output);
+    }
+}
