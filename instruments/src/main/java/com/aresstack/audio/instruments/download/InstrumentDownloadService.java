@@ -2,6 +2,8 @@ package com.aresstack.audio.instruments.download;
 
 import com.aresstack.audio.instruments.InstrumentLibrary;
 import com.aresstack.audio.instruments.InstrumentRegistry;
+import com.aresstack.audio.instruments.network.AudioProxyRoutes;
+import com.aresstack.audio.instruments.network.AudioWindowsTrust;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -9,6 +11,7 @@ import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.URL;
+import javax.net.ssl.HttpsURLConnection;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -30,17 +33,30 @@ public final class InstrumentDownloadService {
     private final Path libraryRoot;
     private final InstrumentRegistry registry;
     private final Proxy proxy;
+    private final AudioProxyRoutes routes;
     private final SoundFontArchiveExtractor extractor = new SoundFontArchiveExtractor();
 
     public InstrumentDownloadService(Path libraryRoot, InstrumentRegistry registry,
                                      String proxyHost, int proxyPort) {
         this.libraryRoot = libraryRoot;
         this.registry = registry;
+        this.routes = null;
         if (proxyHost != null && !proxyHost.trim().isEmpty()) {
             this.proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort));
         } else {
             this.proxy = null;
         }
+    }
+
+    public InstrumentDownloadService(Path libraryRoot, InstrumentRegistry registry,
+                                     AudioProxyRoutes routes) {
+        if (routes == null) {
+            throw new IllegalArgumentException("Audio proxy routes must be provided.");
+        }
+        this.libraryRoot = libraryRoot;
+        this.registry = registry;
+        this.routes = routes;
+        this.proxy = null;
     }
 
     public static Path standardLibraryRoot() {
@@ -94,8 +110,12 @@ public final class InstrumentDownloadService {
     private void download(InstrumentDownload source, Path target, Progress progress)
             throws Exception {
         URL url = source.uri().toURL();
-        HttpURLConnection connection = (HttpURLConnection) (proxy == null
-                ? url.openConnection() : url.openConnection(proxy));
+        Proxy resolved = routes != null ? routes.proxyFor(source.uri()) : proxy;
+        HttpURLConnection connection = (HttpURLConnection) (resolved == null
+                ? url.openConnection() : url.openConnection(resolved));
+        if (connection instanceof HttpsURLConnection) {
+            AudioWindowsTrust.configure((HttpsURLConnection) connection);
+        }
         connection.setConnectTimeout(30000);
         connection.setReadTimeout(60000);
         connection.setRequestProperty("User-Agent", "AresStack-Audio-Studio/0.1");

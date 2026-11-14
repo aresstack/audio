@@ -3,6 +3,7 @@ package com.aresstack.audio.studio.ui;
 import com.aresstack.audio.instruments.InstrumentCatalog;
 import com.aresstack.audio.instruments.InstrumentLibrary;
 import com.aresstack.audio.instruments.InstrumentRegistry;
+import com.aresstack.audio.instruments.network.AudioProxyRoutes;
 import com.aresstack.audio.instruments.download.InstrumentDownload;
 import com.aresstack.audio.instruments.download.InstrumentDownloadCatalog;
 import com.aresstack.audio.instruments.download.InstrumentDownloadService;
@@ -36,8 +37,7 @@ import javax.swing.table.AbstractTableModel;
 public final class InstrumentLibraryPanel extends JPanel {
     private final InstrumentRegistry registry;
     private final List<InstrumentLibrary> libraries = InstrumentCatalog.standard();
-    private final Supplier<String> proxyHost;
-    private final Supplier<Integer> proxyPort;
+    private final Supplier<AudioProxyRoutes> proxyRoutes;
     private final Runnable onRegistryChanged;
     private final Consumer<String> log;
     private final JTable table = new JTable(new LibraryTableModel());
@@ -48,12 +48,11 @@ public final class InstrumentLibraryPanel extends JPanel {
     private SwingWorker<Integer, String> downloadWorker;
 
     public InstrumentLibraryPanel(InstrumentRegistry registry,
-                                  Supplier<String> proxyHost, Supplier<Integer> proxyPort,
+                                  Supplier<AudioProxyRoutes> proxyRoutes,
                                   Runnable onRegistryChanged, Consumer<String> log) {
         super(new BorderLayout(8, 8));
         this.registry = registry;
-        this.proxyHost = proxyHost;
-        this.proxyPort = proxyPort;
+        this.proxyRoutes = proxyRoutes;
         this.onRegistryChanged = onRegistryChanged;
         this.log = log;
         setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
@@ -168,14 +167,14 @@ public final class InstrumentLibraryPanel extends JPanel {
         if (downloadWorker != null && !downloadWorker.isDone()) {
             return;
         }
-        final String host = proxyHost.get().trim();
-        final int port;
+        final AudioProxyRoutes routes;
         try {
-            port = proxyPort.get();
+            routes = proxyRoutes.get();
         } catch (RuntimeException invalid) {
-            showError("Ungültiger Proxy-Port: " + invalid.getMessage());
+            showError("Ungültige Proxykonfiguration: " + invalid.getMessage());
             return;
         }
+        log.accept("Downloads verwenden Proxy-Modus: " + routes.describe());
         downloadButton.setEnabled(false);
         downloadAllButton.setEnabled(false);
         cancelButton.setEnabled(true);
@@ -186,7 +185,7 @@ public final class InstrumentLibraryPanel extends JPanel {
             @Override
             protected Integer doInBackground() throws Exception {
                 InstrumentDownloadService service = new InstrumentDownloadService(
-                        InstrumentDownloadService.standardLibraryRoot(), registry, host, port);
+                        InstrumentDownloadService.standardLibraryRoot(), registry, routes);
                 int success = 0;
                 for (InstrumentDownload item : downloads) {
                     if (isCancelled()) {
