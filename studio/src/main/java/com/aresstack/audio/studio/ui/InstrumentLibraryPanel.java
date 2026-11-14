@@ -330,7 +330,10 @@ public final class InstrumentLibraryPanel extends JPanel {
             switch (column) {
                 case 0: return item.name();
                 case 1: return item.family();
-                case 2: return download == null ? item.format().name() : download.packaging().name();
+                case 2: return download == null ? item.format().name()
+                        : download.packaging() == InstrumentDownload.Packaging.SEVEN_Z_SF2
+                        ? "SF2 (7z)" : download.packaging() == InstrumentDownload.Packaging.RAW_SF3
+                        ? "SF3" : "SF2";
                 case 3: return download == null ? "Projektseite" :
                         (download.estimatedBytes() / (1024 * 1024)) + " MiB";
                 case 4: return registry.isInstalled(item.id()) ? "Installiert" :
