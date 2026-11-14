@@ -81,8 +81,30 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  rolling-release:
+  windows-constrained-smoke:
     needs: build
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Download tested Java renderer for Windows PowerShell smoke test
+        uses: actions/download-artifact@v4
+        with:
+          name: audio-jars
+          path: music/build/libs
+
+      - name: Test the entire cached generation under Windows PowerShell 5.1 ConstrainedLanguage
+        shell: powershell
+        run: |
+          & .\music\experiments\test-cached-render.ps1
+
+  rolling-release:
+    needs: [build, windows-constrained-smoke]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10

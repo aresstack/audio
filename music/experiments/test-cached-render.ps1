@@ -99,6 +99,30 @@ try {
         }
     }
 
+    # Exercise the actual Windows PowerShell 5.1 restricted execution path when available.
+    $WindowsPowerShell = Get-Command powershell.exe -ErrorAction SilentlyContinue
+    if ($null -ne $WindowsPowerShell) {
+        $ConstrainedRunner = Join-Path $Sandbox "run-constrained.ps1"
+        $EscapedMusicScript = $MusicScript.Replace("'", "''")
+        $RunnerText = @'
+$ErrorActionPreference = "Stop"
+$ExecutionContext.SessionState.LanguageMode = "ConstrainedLanguage"
+& '__SCRIPT__'
+'@.Replace("__SCRIPT__", $EscapedMusicScript)
+        Set-Content -Path $ConstrainedRunner -Value $RunnerText -Encoding UTF8
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $ConstrainedRunner
+        if ($LASTEXITCODE -ne 0) {
+            throw "Windows PowerShell 5.1 ConstrainedLanguage execution failed."
+        }
+        foreach ($FileName in $OutputFiles) {
+            $Output = Join-Path $Cache $FileName
+            if (-not (Test-Path $Output) -or (Get-Item $Output).Length -eq 0) {
+                throw "ConstrainedLanguage execution failed to produce $FileName"
+            }
+        }
+        Write-Host "Windows PowerShell ConstrainedLanguage end-to-end render passed."
+    }
+
     Write-Host "Offline cached generation passed for saved script and pasted execution."
 } finally {
     $env:TEMP = $SavedTemp

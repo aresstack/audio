@@ -67,10 +67,17 @@ function Resolve-HarmonicPitch {
 function Get-BarIndex {
     param([double]$Beat)
 
-    if ([double]::IsNaN($Beat) -or [double]::IsInfinity($Beat) -or $Beat -lt 0 -or $Beat -ge 32) {
+    if (-not ($Beat -ge 0 -and $Beat -lt 32)) {
         throw "Beat $Beat is outside the eight-bar arrangement."
     }
-    return [int][Math]::Floor($Beat / 4.0)
+
+    # Avoid .NET method calls: Windows PowerShell ConstrainedLanguage rejects Math.Floor().
+    for ($Index = 0; $Index -lt 8; $Index++) {
+        if ($Beat -lt (4 * ($Index + 1))) {
+            return $Index
+        }
+    }
+    throw "Beat $Beat is outside the eight-bar arrangement."
 }
 
 function Test-HarmonicPitch {
@@ -306,9 +313,8 @@ Return ONLY one JSON object with EXACTLY these fields:
         $Duration = [double]$Note.duration
         $Pitch = [int]$Note.pitch
         $Velocity = [int]$Note.velocity
-        if ([double]::IsNaN($Beat) -or [double]::IsInfinity($Beat) -or
-            [double]::IsNaN($Duration) -or [double]::IsInfinity($Duration) -or
-            $Beat -lt 0 -or $Duration -lt 0.25 -or $Duration -gt 4 -or ($Beat + $Duration) -gt 32) {
+        if (-not ($Beat -ge 0 -and $Beat -lt 32 -and $Duration -ge 0.25 -and
+            $Duration -le 4 -and ($Beat + $Duration) -le 32)) {
             throw "Invalid note timing in ${PartId}: beat=$Beat duration=$Duration"
         }
         if (($Beat * 4) % 1 -ne 0 -or ($Duration * 4) % 1 -ne 0) {
@@ -362,7 +368,7 @@ Set-Content -Path (Join-Path $OutputDirectory "full-composition.json") -Value ($
 # Prefer the local Gradle-built JAR when running from a saved script.
 # When pasted interactively, PSScriptRoot is empty, so use the public rolling release instead.
 $RendererJar = $null
-if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+if ($PSScriptRoot) {
     $LocalRenderer = Join-Path $PSScriptRoot "..\build\libs\music-renderer.jar"
     if (Test-Path $LocalRenderer -PathType Leaf) {
         $RendererJar = (Resolve-Path $LocalRenderer).Path

@@ -21,3 +21,7 @@ The model sometimes produces a non-chord pitch (e.g. MIDI 48/C over G in the bas
 The offline regression tests are in `experiments/test-harmonic-pitch.ps1`; they test both saved-file execution and the same code evaluated as an interactive PowerShell script block.
 
 The music script is **self-contained**: it does not dot-source another file. You can execute the saved `.ps1` file or paste its complete contents into a PowerShell session. For the pasted case, the script uses the fixed [latest release](https://github.com/aresstack/audio/releases/tag/latest) to download `music-renderer.jar` to `%TEMP%\\aresstack-audio-renderers` once; running as a saved repo script prefers `music/build/libs/music-renderer.jar`. Successful Gemma JSON outputs are reused from `%TEMP%\\kipitz-gemma-multitrack` on restart, even if no API key is available. To test only the pitch logic, run the saved script with `-SelfTest`.
+
+## Windows PowerShell ConstrainedLanguage
+
+The Gemma PowerShell experiment runs in Windows PowerShell's restricted `ConstrainedLanguage` mode without invoking prohibited .NET helper methods. Its bar-index calculation uses an explicit bounded loop (rather than `[Math]::Floor`, which is blocked in this mode). GitHub Actions exercises the cached end-to-end music generation with Windows PowerShell 5.1 under `ConstrainedLanguage`, including the MIDI and WAV export. This smoke test does not call KIPITZ.
