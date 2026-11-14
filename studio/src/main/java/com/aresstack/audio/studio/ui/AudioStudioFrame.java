@@ -15,7 +15,7 @@ import com.aresstack.audio.studio.application.TrackArrangementStore;
 import com.aresstack.audio.studio.application.InstrumentProposalService;
 import com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine;
 import com.aresstack.audio.studio.settings.StudioSettingsStore;
-import com.aresstack.audio.studio.settings.ExistingAiSettings;
+import com.aresstack.audio.studio.settings.AiDefaults;
 
 import java.awt.BorderLayout;
 import java.awt.event.WindowAdapter;
@@ -1029,12 +1029,12 @@ public final class AudioStudioFrame extends JFrame {
 
     private void loadSettings() {
         try {
-            Properties saved = ExistingAiSettings.withDefaults(settingsStore.load());
+            Properties saved = AiDefaults.withDefaults(settingsStore.load());
             preferredKeePassEntry = saved.getProperty("keepassEntry", "");
             endpoint.setText(saved.getProperty("endpoint", ""));
             apiKey.setText(saved.getProperty("apiKey", ""));
             model.setText(saved.getProperty("model", model.getText()));
-            tokenLimit.setValue(ExistingAiSettings.maxTokens(saved));
+            tokenLimit.setValue(AiDefaults.maxTokens(saved));
             proxyHost.setText(saved.getProperty("proxyHost", ""));
             proxyPort.setText(saved.getProperty("proxyPort", ""));
             proxyPacUrl.setText(saved.getProperty("proxyPacUrl", ""));
@@ -1125,13 +1125,21 @@ public final class AudioStudioFrame extends JFrame {
         cancelKey.setEnabled(true);
         renderKey.setEnabled(false);
         lcd.setBusy(true);
+        trackStates.clear();
+        trackTable.clearWork();
         worker = new SwingWorker<Path, String>() {
             @Override
             protected Path doInBackground() throws Exception {
-                return action.execute(new GemmaMusicComposer.Progress() {
+                return action.execute(new GemmaMusicComposer.TrackProgress() {
                     @Override
                     public void update(String update) {
                         publish(update);
+                    }
+
+                    @Override
+                    public void track(final String trackId, final GemmaMusicComposer.Stage stage,
+                                      final GemmaMusicComposer.State state, final String detail) {
+                        SwingUtilities.invokeLater(() -> trackWork(trackId, stage, state, detail));
                     }
                 });
             }
@@ -1154,6 +1162,8 @@ public final class AudioStudioFrame extends JFrame {
                 cancelKey.setEnabled(false);
                 renderKey.setEnabled(true);
                 lcd.setBusy(false);
+                trackStates.clear();
+                trackTable.clearWork();
                 try {
                     Path result = get();
                     if (result != null) {
@@ -1377,6 +1387,65 @@ public final class AudioStudioFrame extends JFrame {
         }.execute();
     }
 
+    /** How each track is getting on in the stage that is running, by track id. */
+    private final Map<String, GemmaMusicComposer.State> trackStates =
+            new java.util.LinkedHashMap<String, GemmaMusicComposer.State>();
+    private GemmaMusicComposer.Stage trackStage;
+    private long trackStageBegan;
+
+    /** A track reports from the workers: its strip shows it, and the display counts all of them. */
+    private void trackWork(String trackId, GemmaMusicComposer.Stage stage, GemmaMusicComposer.State state,
+                           String detail) {
+        if (worker == null || worker.isDone()) {
+            return; // a late word after the work was cancelled
+        }
+        if (stage != trackStage) {
+            trackStage = stage;
+            trackStates.clear();
+            trackTable.clearWork();
+            trackStageBegan = System.currentTimeMillis();
+        }
+        trackStates.put(trackId, state);
+        MixerPanel.Work work = state == GemmaMusicComposer.State.WAITING ? MixerPanel.Work.WAITING
+                : state == GemmaMusicComposer.State.WORKING ? MixerPanel.Work.WORKING
+                : state == GemmaMusicComposer.State.DONE ? MixerPanel.Work.DONE : MixerPanel.Work.FAILED;
+        trackTable.setWork(trackId, work, stage == GemmaMusicComposer.Stage.COMPOSE ? "KI" : "RENDERN", detail);
+        showTrackWork();
+    }
+
+    private boolean tracksAtWork() {
+        for (GemmaMusicComposer.State state : trackStates.values()) {
+            if (state == GemmaMusicComposer.State.WAITING || state == GemmaMusicComposer.State.WORKING) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** One line for many tracks: how many are being worked on at the same time, and how many are done. */
+    private void showTrackWork() {
+        int working = 0;
+        int waiting = 0;
+        int done = 0;
+        int failed = 0;
+        for (GemmaMusicComposer.State state : trackStates.values()) {
+            switch (state) {
+                case WORKING: working++; break;
+                case WAITING: waiting++; break;
+                case DONE: done++; break;
+                default: failed++; break;
+            }
+        }
+        if (working + waiting == 0) {
+            return; // the next line of the log takes the display again
+        }
+        long seconds = (System.currentTimeMillis() - trackStageBegan) / 1000;
+        lcd.setStatus((trackStage == GemmaMusicComposer.Stage.COMPOSE ? "KI komponiert" : "Rendern") + ": "
+                + working + " gleichzeitig · " + done + " von " + trackStates.size() + " fertig"
+                + (waiting > 0 ? " · " + waiting + " warten" : "") + (failed > 0 ? " · " + failed + " Fehler" : "")
+                + " · " + seconds + " s");
+    }
+
     private void listenAlone(String trackId) {
         playbackSelection.setSelectedItem(trackId);
         play();
@@ -1457,13 +1526,22 @@ public final class AudioStudioFrame extends JFrame {
         masterRight.setLevel(playing && envelope != null ? envelope.at(second, true) : 0f);
         if (trackTable != null) {
             trackTable.follow(playing ? second : -1, soloTrack());
+            trackTable.pulse();
+        }
+        if (tracksAtWork() && System.currentTimeMillis() / 1000 != shownSecond) {
+            shownSecond = System.currentTimeMillis() / 1000;
+            showTrackWork(); // the seconds on the display run on
         }
     }
+
+    private long shownSecond;
 
     private void append(String text) {
         log.append(text + "\n");
         log.setCaretPosition(log.getDocument().getLength());
-        lcd.setStatus(text);
+        if (!tracksAtWork()) {
+            lcd.setStatus(text); // while several tracks are worked on, the display counts them instead
+        }
     }
 
     private void message(String text) {

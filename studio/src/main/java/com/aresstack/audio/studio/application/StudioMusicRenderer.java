@@ -58,23 +58,75 @@ public final class StudioMusicRenderer {
                 arrangement.toAbsolutePath().toString(), directory.toAbsolutePath().toString());
         runner.execute(command, directory.resolve("arrangement.wav"));
 
-        List<Path> stems = new ArrayList<Path>();
-        for (String track : readTrackIds(arrangement)) {
-            InstrumentLibrary library = assignments.get(track);
+        // The tracks with a sound bank are rendered side by side: each one is a process of its own
+        // that loads its bank, and none depends on another. The mix keeps the order of the tracks.
+        final List<String> trackIds = readTrackIds(arrangement);
+        final Path[] stems = new Path[trackIds.size()];
+        List<java.util.concurrent.Callable<Void>> jobs = new ArrayList<java.util.concurrent.Callable<Void>>();
+        for (int index = 0; index < trackIds.size(); index++) {
+            final int place = index;
+            final String track = trackIds.get(index);
+            final InstrumentLibrary library = assignments.get(track);
             if (library == null) {
-                stems.add(directory.resolve(track + ".wav"));
+                stems[place] = directory.resolve(track + ".wav");
                 continue;
             }
-            Path bank = registry.find(library.id());
+            final Path bank = registry.find(library.id());
             if (bank == null || !Files.isRegularFile(bank)) {
                 throw new IllegalArgumentException("Register an installed " + library.format()
                         + " file for " + library.name() + " before rendering " + track + ".");
             }
-            String engineName = library.format() == InstrumentLibrary.Format.SF2
-                    && sf2Engine == Sf2Engine.GERVILL ? "Java/Gervill"
-                    : library.format() == InstrumentLibrary.Format.SFZ ? "sfizz" : "FluidSynth";
-            progress.update("Rendering " + track + " with " + library.name()
-                    + " using " + engineName + " ...");
+            GemmaMusicComposer.tell(progress, track, GemmaMusicComposer.Stage.RENDER,
+                    GemmaMusicComposer.State.WAITING, "");
+            jobs.add(new java.util.concurrent.Callable<Void>() {
+                @Override
+                public Void call() throws Exception {
+                    stems[place] = renderStem(track, library, bank, directory, programOverrides, sf2Engine,
+                            fluidSynthExecutable, sfizzExecutable, progress);
+                    return null;
+                }
+            });
+        }
+        if (!jobs.isEmpty()) {
+            int threads = Math.max(1, Math.min(jobs.size(), Runtime.getRuntime().availableProcessors()));
+            progress.update("Rendering " + jobs.size() + " tracks with their sound banks, " + threads
+                    + " at the same time ...");
+            java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threads);
+            try {
+                for (java.util.concurrent.Future<Void> job : executor.invokeAll(jobs)) {
+                    try {
+                        job.get();
+                    } catch (java.util.concurrent.ExecutionException failed) {
+                        Throwable cause = failed.getCause();
+                        if (cause instanceof Exception) {
+                            throw (Exception) cause;
+                        }
+                        throw new IllegalStateException(String.valueOf(cause), cause);
+                    }
+                }
+            } finally {
+                executor.shutdownNow();
+            }
+        }
+        Path mix = directory.resolve("arrangement-instruments.wav");
+        progress.update("Mixing the instrument tracks ...");
+        mixer.mix(Arrays.asList(stems), mix);
+        return mix;
+    }
+
+    /** Renders one track with its sound bank; if the sampler is missing, the Java sound of the track is kept. */
+    private Path renderStem(String track, InstrumentLibrary library, Path bank, Path directory,
+                            Map<String, Integer> programOverrides, Sf2Engine sf2Engine,
+                            String fluidSynthExecutable, String sfizzExecutable,
+                            GemmaMusicComposer.Progress progress) throws Exception {
+        String engineName = library.format() == InstrumentLibrary.Format.SF2
+                && sf2Engine == Sf2Engine.GERVILL ? "Java/Gervill"
+                : library.format() == InstrumentLibrary.Format.SFZ ? "sfizz" : "FluidSynth";
+        progress.update("Rendering " + track + " with " + library.name()
+                + " using " + engineName + " ...");
+        GemmaMusicComposer.tell(progress, track, GemmaMusicComposer.Stage.RENDER,
+                GemmaMusicComposer.State.WORKING, engineName);
+        try {
             boolean generalMidi = library.id().equals("generaluser")
                     || library.id().startsWith("generaluser::")
                     || library.id().equals("musescore-general")
@@ -89,7 +141,9 @@ public final class StudioMusicRenderer {
             try {
                 sampler.render(library, bank, trackMidi, stem, sf2Engine,
                         fluidSynthExecutable, sfizzExecutable);
-                stems.add(stem);
+                GemmaMusicComposer.tell(progress, track, GemmaMusicComposer.Stage.RENDER,
+                        GemmaMusicComposer.State.DONE, library.name());
+                return stem;
             } catch (SamplerUnavailableException unavailable) {
                 String engine = library.format() == InstrumentLibrary.Format.SFZ
                         ? "sfizz_render" : library.format() == InstrumentLibrary.Format.SF2
@@ -97,14 +151,16 @@ public final class StudioMusicRenderer {
                 progress.update("WARN: " + engine + " is not installed or cannot be launched ('"
                         + unavailable.executable() + "'). Using the built-in Java sound for "
                         + track + " instead. Install the sampler and configure its path under "
-                        + "3 · Einstellungen to hear " + library.name() + ".");
-                stems.add(directory.resolve(track + ".wav"));
+                        + "Einstellungen to hear " + library.name() + ".");
+                GemmaMusicComposer.tell(progress, track, GemmaMusicComposer.Stage.RENDER,
+                        GemmaMusicComposer.State.DONE, "Java sound");
+                return directory.resolve(track + ".wav");
             }
+        } catch (Exception failed) {
+            GemmaMusicComposer.tell(progress, track, GemmaMusicComposer.Stage.RENDER,
+                    GemmaMusicComposer.State.FAILED, String.valueOf(failed.getMessage()));
+            throw failed;
         }
-        Path mix = directory.resolve("arrangement-instruments.wav");
-        progress.update("Mixing the instrument tracks ...");
-        mixer.mix(stems, mix);
-        return mix;
     }
 
     /** Trust the written TSV arrangement as the source of truth for output track order. */

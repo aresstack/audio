@@ -158,6 +158,46 @@ public final class MixerPanel extends JPanel {
         }
     }
 
+    /** How a track is getting on while the studio composes or renders: what its strip shows in its cap. */
+    enum Work { WAITING, WORKING, DONE, FAILED }
+
+    /**
+     * Shows on a track's strip how the track is getting on.
+     *
+     * @param label a short word for the cap, e.g. "KI" or "RENDERN"
+     */
+    void setWork(String trackId, Work work, String label, String detail) {
+        for (Strip strip : strips) {
+            if (strip.track.id().equals(trackId)) {
+                strip.work = work;
+                strip.workLabel = label;
+                strip.setToolTipText(detail == null || detail.isEmpty() ? null : detail);
+                strip.repaint();
+            }
+        }
+    }
+
+    /** The work is over: the strips show their roles again. */
+    void clearWork() {
+        for (Strip strip : strips) {
+            strip.work = null;
+            strip.setToolTipText(null);
+            strip.repaint();
+        }
+    }
+
+    /** Lets the strips that are being worked on blink; called by the desk's clock. */
+    void pulse() {
+        phase = (phase + 0.045f) % 1f;
+        for (Strip strip : strips) {
+            if (strip.work == Work.WORKING) {
+                strip.repaint();
+            }
+        }
+    }
+
+    private float phase;
+
     private void fill(List<MusicTrack> tracks) {
         strips.clear();
         row.removeAll();
@@ -246,6 +286,8 @@ public final class MixerPanel extends JPanel {
         private boolean overRemove;
         private boolean filling;
         private boolean playsAlone;
+        private Work work;
+        private String workLabel = "";
 
         Strip(MusicTrack shown, int index) {
             super(new GridBagLayout());
@@ -500,17 +542,31 @@ public final class MixerPanel extends JPanel {
                     AudioStudioTheme.withAlpha(color, 170)));
             cap.fillRect(0, 0, getWidth(), 32);
             cap.dispose();
-            g.setColor(playsAlone ? Color.WHITE : AudioStudioTheme.withAlpha(color, 120));
-            g.setStroke(new BasicStroke(playsAlone ? 2f : 1f));
+            float glow = (float) Math.abs(Math.sin(phase * Math.PI * 2));
+            if (work == Work.WORKING) {
+                g.setColor(AudioStudioTheme.withAlpha(Color.WHITE, 90 + Math.round(150 * glow)));
+                g.setStroke(new BasicStroke(2f));
+            } else if (work == Work.FAILED) {
+                g.setColor(AudioStudioTheme.RED);
+                g.setStroke(new BasicStroke(2f));
+            } else {
+                g.setColor(playsAlone ? Color.WHITE : AudioStudioTheme.withAlpha(color, 120));
+                g.setStroke(new BasicStroke(playsAlone ? 2f : 1f));
+            }
             g.draw(shape);
             g.setFont(AudioStudioTheme.lettering(11f));
             g.setColor(new Color(0x15161B));
             FontMetrics metrics = g.getFontMetrics();
-            // A lamp: lit when the track has been rendered and can be heard alone.
-            DeckWidgets.paintLamp(g, 16f, 16f, 4f, Color.WHITE, envelopes.get(track.id()) != null);
+            // A lamp: lit when the track has been rendered and can be heard alone. While the studio
+            // works on the track it blinks, and the cap says what is being done instead of the role.
+            boolean lit = work == null ? envelopes.get(track.id()) != null
+                    : work == Work.WORKING ? glow > 0.45f : work != Work.WAITING;
+            DeckWidgets.paintLamp(g, 16f, 16f, 4f, work == Work.FAILED ? new Color(0x7A1020) : Color.WHITE, lit);
             String number = String.format(java.util.Locale.ROOT, "CH %02d", index + 1);
             g.drawString(number, 28, 21);
-            String kind = track.role().toUpperCase(java.util.Locale.ROOT);
+            String kind = work == null ? track.role().toUpperCase(java.util.Locale.ROOT)
+                    : work == Work.WAITING ? "WARTET" : work == Work.WORKING ? workLabel + " …"
+                    : work == Work.DONE ? workLabel + " ✓" : "FEHLER";
             g.drawString(kind, getWidth() - 36 - metrics.stringWidth(kind), 21);
             if (removable) {
                 float x = getWidth() - 18f;

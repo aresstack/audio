@@ -29,6 +29,28 @@ public final class GemmaMusicComposer {
         void update(String message);
     }
 
+    /** What is being done to a track. */
+    public enum Stage { COMPOSE, RENDER }
+
+    /** How far that is. */
+    public enum State { WAITING, WORKING, DONE, FAILED }
+
+    /**
+     * A listener that also wants to know how each single track is getting on, e.g. to show it on
+     * the track's channel strip while several tracks are worked on at the same time. Called from
+     * the worker threads.
+     */
+    public interface TrackProgress extends Progress {
+        void track(String trackId, Stage stage, State state, String detail);
+    }
+
+    /** Tells a listener about a track, if it wants to know. */
+    public static void tell(Progress progress, String trackId, Stage stage, State state, String detail) {
+        if (progress instanceof TrackProgress) {
+            ((TrackProgress) progress).track(trackId, stage, state, detail);
+        }
+    }
+
     private static final String[] CHORDS = {"C", "G", "Am", "F", "C", "G", "F", "G"};
     private final KipitzChatClient client;
     private final int maxTokens;
@@ -91,7 +113,11 @@ public final class GemmaMusicComposer {
         CompletionService<TrackResponse> completion =
                 new ExecutorCompletionService<TrackResponse>(executor);
         List<Future<TrackResponse>> pending = new ArrayList<Future<TrackResponse>>();
+        progress.update("Composing " + tracks.tracks().size() + " tracks, " + threads + " at the same time ...");
         try {
+            for (MusicTrack track : tracks.tracks()) {
+                tell(progress, track.id(), Stage.COMPOSE, State.WAITING, "");
+            }
             for (MusicTrack track : tracks.tracks()) {
                 final MusicTrack target = track;
                 pending.add(completion.submit(new Callable<TrackResponse>() {
@@ -102,13 +128,25 @@ public final class GemmaMusicComposer {
                         }
                         progress.update("Composing " + target.id() + " ("
                                 + target.instrument() + ") ...");
-                        String prompt = promptFor(target, plan);
-                        Path cached = cachedResponse(directory, target, prompt);
-                        JsonObject answer = client.generate(
-                                "Compose original instrumental music. Return valid JSON only.",
-                                prompt, maxTokens, cached);
-                        validateResponse(target, answer);
-                        return new TrackResponse(target.id(), answer);
+                        tell(progress, target.id(), Stage.COMPOSE, State.WORKING, "");
+                        try {
+                            String prompt = promptFor(target, plan);
+                            Path cached = cachedResponse(directory, target, prompt);
+                            boolean known = Files.isRegularFile(cached);
+                            JsonObject answer = client.generate(
+                                    "Compose original instrumental music. Return valid JSON only.",
+                                    prompt, maxTokens, cached);
+                            validateResponse(target, answer);
+                            tell(progress, target.id(), Stage.COMPOSE, State.DONE,
+                                    answer.getAsJsonArray("notes").size() + (known ? " notes, cached" : " notes"));
+                            return new TrackResponse(target.id(), answer);
+                        } catch (IOException failed) {
+                            tell(progress, target.id(), Stage.COMPOSE, State.FAILED, String.valueOf(failed.getMessage()));
+                            throw failed;
+                        } catch (RuntimeException failed) {
+                            tell(progress, target.id(), Stage.COMPOSE, State.FAILED, String.valueOf(failed));
+                            throw failed;
+                        }
                     }
                 }));
             }
