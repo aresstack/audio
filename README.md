@@ -53,7 +53,7 @@ Both renderer JARs are self-contained for their CLI use cases; the sound rendere
 
 ## KIPITZ / Gemma experiments
 
-PowerShell scripts reside in `music/experiments/` and `sounds/experiments/`. Both assume **`$ApiKey` and `$CompletionsUrl` are already defined in the current PowerShell session**. Never commit credentials or API responses containing secrets.
+Legacy PowerShell scripts reside in `music/experiments/` and `sounds/experiments/`. Both assume **`$ApiKey` and `$CompletionsUrl` are already defined in the current PowerShell session**. Never commit credentials or API responses containing secrets.
 
 - `music/experiments/kipitz-gemma-multitrack.ps1`: sends one composition-plan request and four instrument-part requests to `google/gemma-4-31B-it`; saves JSON and TSV; uses the compiled `music/build/libs/music-renderer.jar` to generate MIDI and WAV files. Build `:music:jar` first using the wrapper (or download the rolling-release JAR into `music/build/libs`). Previously saved model answers are reused on restart; pass `-Regenerate` to request every step again. The PowerShell script is self-contained and also works when pasted into an interactive session (it downloads the release renderer JAR to a temporary cache if no locally built JAR can be found). Off-chord bass/harmony notes are corrected deterministically for the rendered TSV while the original JSON remains unchanged; corrections appear in `harmonic-corrections.txt`. Output: `%TEMP%\kipitz-gemma-multitrack\` and `%TEMP%\kipitz-gemma-multitrack.zip`.
 - `sounds/experiments/kipitz-gemma-sounds.ps1`: requests four sound designs; synthesizes WAV files directly with constrained-language-compatible PowerShell. Output: `%TEMP%\kipitz-gemma-sounds\` and `%TEMP%\kipitz-gemma-sounds.zip`.
@@ -81,18 +81,27 @@ Keep descriptive models and input validation separate from synthesizers, encoder
 
 ## Swing Audio Studio
 
-Run: `java -jar audio-studio.jar` (Java 8 or newer).
+Start the current [audio-studio.jar](https://github.com/aresstack/audio/releases/download/latest/audio-studio.jar) with `java -jar audio-studio.jar` (Java 8 or newer). The Swing application is a **replacement for the PowerShell music experiment**.
 
-1. Open **Instrumentenbibliotheken**, select a library, open its upstream page, download it locally and register its `.sf2`, `.sf3` or specific `.sfz` file. Keep SFZ sample files at their original relative paths.
-2. Open **Komposition und Wiedergabe**, enter your KIPITZ chat completions URL and API key (masked, never persisted), model `google/gemma-4-31B-it`, and optional HTTP proxy hostname/port.
-3. Enter a music description and click **Mit Gemma komponieren**. The app generates the plan and four tracks through five model requests; completed valid JSON is cached in the output directory for resumable runs.
-4. Select a locally installed bank for each track, or leave **Java synthesis (built in)**. Render the mix using FluidSynth (SF2/SF3) and/or sfizz_render (SFZ).
-5. Use **Demo laden** to play the bundled original Gemma song without any API calls. Click **Abspielen** to hear mixed, reference or separate tracks.
+### First-time use
 
-The native FluidSynth and sfizz_render programs must be installed separately and available on PATH or entered as full executable paths. Full sample libraries (often gigabytes) are not bundled. Neither sources nor audio data are downloaded without user action. Java's default proxy configuration is used when no explicit HTTP proxy is entered.
+1. Open **1 · Bibliotheken installieren**. The table distinguishes **Installiert**, **Download verfügbar** and **Manuell**. Select a library and click **Herunterladen**. At the right, **Alle verfügbaren herunterladen** installs the four verified direct-download libraries in one action, after a size confirmation. These are GeneralUser GS (SF2, checksum verified), MuseScore General (SF3), Spanish Classical Guitar (compact SF2, unpacked from 7z), and FSBS Clean Electric Guitar (compact SF2, unpacked from 7z). Downloaded banks are stored and registered automatically in `~/.aresstack/audio/libraries/`.
+2. For the large and multi-package libraries **VSCO 2 CE, Virtual Playing Orchestra, Salamander Grand Piano**, and the **FreePats/SFZ Instruments collections**, use **Download-Seite öffnen** and then **Vorhandene Datei / Ordner importieren**. Importing a directory discovers up to 2,000 SF2/SF3/SFZ instrument definitions without copying the sample data. VPO needs both its WAV archive and its SFZ script archive extracted to the same folder. The app does not silently download gigabytes.
+3. Switch to **2 · Komponieren und abspielen**. Start with **Demo laden (ohne KI)** and **3 · Rendern** to hear the supplied original Gemma composition without a new API call. The built-in Java synthesizer works without any downloaded bank.
+4. For a new song, click **1 · Neues Stück**, enter your music description and choose **2 · Mit Gemma komponieren**. That creates a **new composition folder**, preserving older cache and WAV files. Completed model responses are cached within the chosen output folder and reused after restart.
+5. Choose a downloaded instrument independently for each track. General-MIDI banks allow program numbers 0–127. Install FluidSynth (SF2/SF3) or sfizz_render (SFZ) separately and set their executable paths. Click **3 · Rendern**, then **4 · Anhören** or select a single track.
+6. Set your KIPITZ chat completions URL, masked API key, model (`google/gemma-4-31B-it`) and, if needed, explicit HTTP proxy host/port. Use **Einstellungen speichern** or generate/render to save them. The program reloads them on restart.
 
-Settings save only local soundbank paths under `~/.aresstack/audio/instruments.properties`; no API key is stored. Sample-library license terms vary; VPO is from mixed origins and Salamander requires attribution. Some SFZ libraries use ARIA-specific extensions that may not work identically with sfizz. Polyphone can convert some SFZ to SF2 but can lose modulation or articulation features.
+### Local settings and security
 
-Build the Swing app with `bash ./gradlew :studio:jar`, or `gradlew.bat :studio:jar` on Windows. CI runs `java -jar studio/build/libs/audio-studio.jar --smoke-test` without opening a desktop.
+The application deliberately stores both settings **and the API key in clear text**, as requested, in `~/.aresstack/audio/studio.properties` (on Windows: `%USERPROFILE%\\.aresstack\\audio\\studio.properties`). The app attempts owner-only POSIX permissions on Unix; on Windows the user's profile ACL applies. Do not copy this file into a repository or share it. The instrument registry is separate: `~/.aresstack/audio/instruments.properties`. No credentials or actual sample banks are committed to GitHub.
 
-The instrument library can import **entire folders**, discovering up to 2,000 SF2/SF3/SFZ presets recursively. Each file becomes its own selectable track instrument; sample data stays wherever it was extracted. This supports large orchestral SFZ collections without repackaging or converting them to SF2. The CI additionally renders an actual GeneralUser GS stem inside the studio and verifies the combined MIDI/WAV output.
+The downloader uses a bounded HTTP(S) transfer, verifies the known GeneralUser SHA-256, checks SoundFont RIFF signatures, extracts 7z instrument archives in Java with path traversal protection, and registers successfully installed banks. It uses Java's default proxy configuration or the explicit HTTP proxy setting. **CI runs a separate integration workflow that downloads and installs all four direct sources**; see [Verify soundbank downloads](https://github.com/aresstack/audio/actions/workflows/soundbank-downloads.yml).
+
+### Scope and limitations
+
+The UI is a lightweight test application, not yet a complete DAW. The original Gemma pipeline still composes eight bars with four tracks. Real SF2/SF3/SFZ playback requires the appropriate external renderer (FluidSynth or sfizz_render), not merely the instrument samples. The offline demo with Java synthesis does not.
+
+Sample-library licenses differ. Virtual Playing Orchestra draws on multiple origins; Salamander Grand Piano is CC BY 3.0. Not every ARIA-specific SFZ opcode can be used by sfizz. **Polyphone** may convert SFZ into SF2, but articulation and modulation information can be lost.
+
+Build with `bash ./gradlew :studio:jar` or `gradlew.bat :studio:jar` on Windows. CI runs a headless launch test, a real GeneralUser stem/mix, cached Gemma composition tests, 7z extraction tests, and the existing Windows PowerShell compatibility tests.
