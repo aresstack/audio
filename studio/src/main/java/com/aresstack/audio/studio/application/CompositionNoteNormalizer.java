@@ -23,6 +23,10 @@ public final class CompositionNoteNormalizer {
     }
 
     public NormalizedNote normalize(JsonObject source, String part, int noteIndex) {
+        return normalize(source, part, part, noteIndex);
+    }
+
+    public NormalizedNote normalize(JsonObject source, String part, String role, int noteIndex) {
         final double beat;
         final double duration;
         final int pitch;
@@ -54,7 +58,7 @@ public final class CompositionNoteNormalizer {
         alignedDuration = Math.min(alignedDuration, SONG_BEATS - alignedBeat);
 
         int midiPitch = Math.max(0, Math.min(127, pitch));
-        int correctedPitch = normalizePitch(part, alignedBeat, midiPitch);
+        int correctedPitch = normalizePitch(role, alignedBeat, midiPitch);
         int correctedVelocity = Math.max(35, Math.min(105, velocity));
 
         report(part, noteIndex, "beat", beat, alignedBeat, "Align to 16th-note grid");
@@ -91,19 +95,22 @@ public final class CompositionNoteNormalizer {
                 + " " + original + " -> " + corrected);
     }
 
-    private int normalizePitch(String part, double beat, int pitch) {
-        if ("drums".equals(part)) {
+    private int normalizePitch(String role, double beat, int pitch) {
+        if ("drums".equals(role)) {
             return nearest(pitch, new int[]{36, 38, 42, 46}, 36, 46, false);
         }
-        if ("melody".equals(part)) {
+        if ("melody".equals(role)) {
             return nearest(pitch, new int[]{0, 2, 4, 5, 7, 9, 11}, 60, 88, true);
         }
         String chord = CHORDS[(int) Math.floor(beat / 4)];
         int[] chordTones = "C".equals(chord) ? new int[]{0, 4, 7}
                 : "G".equals(chord) ? new int[]{7, 11, 2}
                 : "Am".equals(chord) ? new int[]{9, 0, 4} : new int[]{5, 9, 0};
-        return nearest(pitch, chordTones, "bass".equals(part) ? 36 : 48,
-                "bass".equals(part) ? 60 : 76, true);
+        if ("texture".equals(role)) {
+            return nearest(pitch, new int[]{0, 2, 4, 5, 7, 9, 11}, 48, 88, true);
+        }
+        return nearest(pitch, chordTones, "bass".equals(role) ? 36 : 48,
+                "bass".equals(role) ? 60 : 76, true);
     }
 
     private static int nearest(int pitch, int[] allowed, int minimum, int maximum,
