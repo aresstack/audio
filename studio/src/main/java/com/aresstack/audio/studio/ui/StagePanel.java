@@ -114,6 +114,8 @@ final class StagePanel extends JPanel {
     private final JToggleButton mute = new JToggleButton("Stumm");
     private final JToggleButton lock = new JToggleButton("Vor KI schützen");
     private final JLabel course = new JLabel(" ");
+    private final LevelCourse curve = new LevelCourse();
+    private Row master;
     private final JButton flat = new JButton("Verlauf löschen");
     private final JButton director = new JButton("KI mischt ab");
     private final JButton usual = new JButton("Standardaufstellung");
@@ -298,7 +300,7 @@ final class StagePanel extends JPanel {
         courseRow.add(course, BorderLayout.CENTER);
         courseRow.add(flat, BorderLayout.EAST);
         JPanel sourceBox = column(chosen, where, Box.createVerticalStrut(6), source, Box.createVerticalStrut(6),
-                flags, Box.createVerticalStrut(8), courseRow);
+                flags, Box.createVerticalStrut(8), courseRow, Box.createVerticalStrut(4), curve);
 
         // Mixing.
         director.setFont(director.getFont().deriveFont(java.awt.Font.BOLD, 14f));
@@ -330,8 +332,22 @@ final class StagePanel extends JPanel {
         verdict.setVisible(false);
         status.setForeground(AudioStudioTheme.TEXT_DIM);
         status.setFont(status.getFont().deriveFont(12f));
-        JPanel mixing = column(director, Box.createVerticalStrut(8), verdict, Box.createVerticalStrut(8), usual,
-                Box.createVerticalStrut(10), status);
+        JPanel masterForm = new JPanel(new GridBagLayout());
+        masterForm.setOpaque(false);
+        master = new Row(masterForm, 0, "Master", (int) SpatialScene.MIN_MASTER, 0,
+                "Die Lautstärke der fertigen Mischung; 0 dB ist voll ausgesteuert") {
+            @Override
+            String words(int shown) {
+                return StageView.decibels(shown);
+            }
+
+            @Override
+            void moved(int shown, boolean settled) {
+                change(scene.withMaster(shown), settled);
+            }
+        };
+        JPanel mixing = column(masterForm, Box.createVerticalStrut(8), director, Box.createVerticalStrut(8), verdict,
+                Box.createVerticalStrut(8), usual, Box.createVerticalStrut(10), status);
 
         JPanel modules = new JPanel();
         modules.setOpaque(false);
@@ -402,6 +418,172 @@ final class StagePanel extends JPanel {
             column.add(part);
         }
         return column;
+    }
+
+    /** How many bars the piece has: the course of the level is drawn over them. */
+    void setBars(int count) {
+        bars = Math.max(1, count);
+        curve.repaint();
+    }
+
+    private int bars = 8;
+
+    /**
+     * The course of a track's level over the bars, to be set by hand: a click in the field sets
+     * a point, a point is dragged to its place, and the right mouse button takes it away. Between
+     * the points the level moves in a straight line; before the first and after the last it stays.
+     */
+    private final class LevelCourse extends javax.swing.JComponent {
+        private static final double TOP = 6;
+        private static final double BOTTOM = -18;
+        private SoundSourcePlacement shown;
+        private int held = -1;
+
+        LevelCourse() {
+            setPreferredSize(new Dimension(100, 78));
+            setMinimumSize(new Dimension(100, 78));
+            setToolTipText("Verlauf der Lautstärke über die Takte: klicken setzt einen Punkt, ziehen verschiebt, "
+                    + "Rechtsklick entfernt");
+            java.awt.event.MouseAdapter mouse = new java.awt.event.MouseAdapter() {
+                @Override
+                public void mousePressed(java.awt.event.MouseEvent event) {
+                    if (shown == null) {
+                        return;
+                    }
+                    List<SoundSourcePlacement.LevelPoint> points = new ArrayList<SoundSourcePlacement.LevelPoint>(
+                            shown.dynamics());
+                    int near = near(event.getX(), event.getY());
+                    if (javax.swing.SwingUtilities.isRightMouseButton(event)) {
+                        if (near >= 0) {
+                            points.remove(near);
+                            put(shown.withDynamics(points), true);
+                        }
+                        return;
+                    }
+                    if (near < 0) {
+                        if (points.size() >= SoundSourcePlacement.MAX_POINTS) {
+                            return;
+                        }
+                        SoundSourcePlacement.LevelPoint added = point(event.getX(), event.getY());
+                        points.add(added);
+                        SoundSourcePlacement changed = shown.withDynamics(points);
+                        put(changed, false);
+                        near = changed.dynamics().indexOf(added);
+                    }
+                    held = near;
+                }
+
+                @Override
+                public void mouseDragged(java.awt.event.MouseEvent event) {
+                    move(event, false);
+                }
+
+                @Override
+                public void mouseReleased(java.awt.event.MouseEvent event) {
+                    if (held >= 0) {
+                        move(event, true);
+                        held = -1;
+                    }
+                }
+
+                private void move(java.awt.event.MouseEvent event, boolean settled) {
+                    if (shown == null || held < 0 || held >= shown.dynamics().size()) {
+                        return;
+                    }
+                    List<SoundSourcePlacement.LevelPoint> points = new ArrayList<SoundSourcePlacement.LevelPoint>(
+                            shown.dynamics());
+                    SoundSourcePlacement.LevelPoint moved = point(event.getX(), event.getY());
+                    points.set(held, moved);
+                    SoundSourcePlacement changed = shown.withDynamics(points);
+                    held = changed.dynamics().indexOf(moved); // it may have passed a neighbour
+                    put(changed, settled);
+                }
+            };
+            addMouseListener(mouse);
+            addMouseMotionListener(mouse);
+        }
+
+        void show(SoundSourcePlacement placement) {
+            shown = placement;
+            repaint();
+        }
+
+        private float x(double bar) {
+            return 6 + (float) ((getWidth() - 12) * Math.min(1, bar / bars));
+        }
+
+        private float y(double db) {
+            return 5 + (float) ((getHeight() - 10) * (TOP - Math.max(BOTTOM, Math.min(TOP, db))) / (TOP - BOTTOM));
+        }
+
+        private SoundSourcePlacement.LevelPoint point(int px, int py) {
+            double bar = Math.max(0, Math.min(bars, (px - 6) / (double) Math.max(1, getWidth() - 12) * bars));
+            double db = TOP - (py - 5) / (double) Math.max(1, getHeight() - 10) * (TOP - BOTTOM);
+            return new SoundSourcePlacement.LevelPoint(Math.round(bar * 4) / 4.0,
+                    Math.round(Math.max(BOTTOM, Math.min(TOP, db))));
+        }
+
+        private int near(int px, int py) {
+            List<SoundSourcePlacement.LevelPoint> points = shown.dynamics();
+            for (int i = 0; i < points.size(); i++) {
+                if (Math.hypot(x(points.get(i).bar()) - px, y(points.get(i).db()) - py) < 8) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        @Override
+        protected void paintComponent(java.awt.Graphics graphics) {
+            java.awt.Graphics2D g = DeckWidgets.smooth(graphics);
+            java.awt.geom.RoundRectangle2D well = new java.awt.geom.RoundRectangle2D.Float(0.5f, 0.5f,
+                    getWidth() - 1f, getHeight() - 1f, 10f, 10f);
+            g.setColor(AudioStudioTheme.WELL);
+            g.fill(well);
+            g.setColor(AudioStudioTheme.STROKE);
+            g.draw(well);
+            // The bars, and the line of the track's own level.
+            for (int bar = 0; bar <= bars; bar += bars > 32 ? 4 : bars > 16 ? 2 : 1) {
+                g.setColor(new java.awt.Color(255, 255, 255, bar % 4 == 0 ? 30 : 14));
+                g.draw(new java.awt.geom.Line2D.Float(x(bar), 4, x(bar), getHeight() - 4));
+            }
+            g.setColor(AudioStudioTheme.withAlpha(AudioStudioTheme.TEXT_FAINT, 170));
+            g.setStroke(new java.awt.BasicStroke(1f, java.awt.BasicStroke.CAP_BUTT, java.awt.BasicStroke.JOIN_MITER,
+                    1f, new float[]{3f, 4f}, 0f));
+            g.draw(new java.awt.geom.Line2D.Float(6, y(0), getWidth() - 6, y(0)));
+            g.setFont(AudioStudioTheme.lettering(8.5f));
+            g.drawString("±0", getWidth() - 22, y(0) - 3);
+            if (shown == null) {
+                g.dispose();
+                return;
+            }
+            java.awt.Color color = AudioStudioTheme.channel(Math.max(0, order.indexOf(shown.trackId())));
+            List<SoundSourcePlacement.LevelPoint> points = shown.dynamics();
+            java.awt.geom.Path2D line = new java.awt.geom.Path2D.Float();
+            if (points.isEmpty()) {
+                line.moveTo(6, y(0));
+                line.lineTo(getWidth() - 6, y(0));
+            } else {
+                line.moveTo(6, y(points.get(0).db()));
+                for (SoundSourcePlacement.LevelPoint point : points) {
+                    line.lineTo(x(point.bar()), y(point.db()));
+                }
+                line.lineTo(getWidth() - 6, y(points.get(points.size() - 1).db()));
+            }
+            g.setStroke(new java.awt.BasicStroke(2f, java.awt.BasicStroke.CAP_ROUND, java.awt.BasicStroke.JOIN_ROUND));
+            g.setColor(points.isEmpty() ? AudioStudioTheme.withAlpha(color, 110) : color);
+            g.draw(line);
+            for (SoundSourcePlacement.LevelPoint point : points) {
+                float px = x(point.bar());
+                float py = y(point.db());
+                g.setColor(AudioStudioTheme.WELL);
+                g.fill(new java.awt.geom.Ellipse2D.Float(px - 5, py - 5, 10, 10));
+                g.setColor(color);
+                g.setStroke(new java.awt.BasicStroke(2f));
+                g.draw(new java.awt.geom.Ellipse2D.Float(px - 4, py - 4, 8, 8));
+            }
+            g.dispose();
+        }
     }
 
     /** Shows the stage of the piece for its tracks, as the studio holds it. */
@@ -475,6 +657,9 @@ final class StagePanel extends JPanel {
         try {
             room.setSelectedItem(AcousticRoom.of(scene.room().kind()));
             ring.show((int) Math.round(scene.room().reverbSeconds() * 10));
+            if (master != null) {
+                master.show((int) Math.round(scene.masterDb()));
+            }
             amount.show((int) Math.round(scene.room().amount() * 100));
         } finally {
             filling = false;
@@ -496,6 +681,7 @@ final class StagePanel extends JPanel {
                 where.setText("Eine Scheibe auf der Bühne anklicken");
                 course.setText(" ");
                 flat.setVisible(false);
+                curve.show(null);
                 return;
             }
             int index = order.indexOf(placement.trackId());
@@ -521,7 +707,11 @@ final class StagePanel extends JPanel {
                 course.setText(text + (points.size() > 5 ? " …" : " dB"));
             }
             course.setToolTipText("Wie sich die Lautstärke der Spur über die Takte ändert; die KI schlägt das mit vor");
+            if (points.isEmpty()) {
+                course.setText("Verlauf: gleichbleibend · ins Feld klicken setzt Punkte");
+            }
             flat.setVisible(!points.isEmpty());
+            curve.show(placement);
         } finally {
             filling = false;
         }

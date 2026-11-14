@@ -457,6 +457,13 @@ public final class AudioStudioFrame extends JFrame {
         inspect.addActionListener(event -> inspectComposition());
         moreMenu.add(inspect);
         moreMenu.addSeparator();
+        javax.swing.JMenuItem saveMix = new javax.swing.JMenuItem("Mischung als WAV speichern (24 Bit) …");
+        saveMix.addActionListener(event -> exportMix());
+        moreMenu.add(saveMix);
+        javax.swing.JMenuItem saveScore = new javax.swing.JMenuItem("Partitur als Bild speichern (PNG) …");
+        saveScore.addActionListener(event -> exportScore());
+        moreMenu.add(saveScore);
+        moreMenu.addSeparator();
         javax.swing.JMenuItem demo = new javax.swing.JMenuItem("Demo laden");
         demo.setToolTipText("Das mitgelieferte Stück laden, ohne die KI zu fragen");
         demo.addActionListener(event -> loadDemo());
@@ -661,11 +668,12 @@ public final class AudioStudioFrame extends JFrame {
             stagePanel.setStatus(String.format(java.util.Locale.GERMANY,
                     "Neu gemischt in %.1f s · ohne KI, ohne Synthese", seconds));
         }
-        if (!"Mixed sampled arrangement".equals(playbackSelection.getSelectedItem())) {
+        String selected = (String) playbackSelection.getSelectedItem();
+        if (selected == null || "Java reference mix".equals(selected)) {
             return;
         }
-        // What plays goes on at the same place with the new mix.
-        Path file = playbackFile("Mixed sampled arrangement");
+        // What plays goes on at the same place with the new mix; a track that plays alone is mixed anew too.
+        Path file = playbackFile(selected);
         boolean playing = player.playing();
         double at = player.seconds();
         if (player.ready()) {
@@ -682,8 +690,59 @@ public final class AudioStudioFrame extends JFrame {
         } else {
             player.show(file);
         }
-        arrangementView.setMix(player.envelope(), "Mix", null, player.length());
-        lcd.setSource(playbackName("Mixed sampled arrangement"), true);
+        arrangementView.setMix(player.envelope(), soloTrack() == null ? "Mix" : "Solo", soloTrack(), player.length());
+        lcd.setSource(playbackName(selected), true);
+    }
+
+    /** Writes the mix on the stage to a WAV file of the user's choice, with 24 bits. */
+    private void exportMix() {
+        final Path arrangement = writtenArrangement();
+        if (arrangement == null) {
+            message("Erst komponieren und rendern: dann gibt es eine Mischung zu speichern.");
+            return;
+        }
+        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
+        chooser.setDialogTitle("Mischung als WAV speichern (24 Bit)");
+        chooser.setSelectedFile(new java.io.File(songs.name(Paths.get(directory.getText().trim()))
+                .replaceAll("[^\\p{L}\\p{N} _-]", "").trim() + ".wav"));
+        if (chooser.showSaveDialog(this) != javax.swing.JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        Path chosen = chooser.getSelectedFile().toPath();
+        final Path target = chosen.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".wav")
+                ? chosen : chosen.resolveSibling(chosen.getFileName() + ".wav");
+        try {
+            new com.aresstack.audio.studio.application.StageMixService().export(arrangement,
+                    Paths.get(directory.getText().trim()), scene, target, 24);
+            append("Mischung gespeichert (24 Bit, 44,1 kHz): " + target);
+        } catch (Exception failed) {
+            message("Die Mischung ließ sich nicht speichern: " + failed.getMessage());
+        }
+    }
+
+    /** Writes the score as a picture, dark on white as on paper, to a PNG file of the user's choice. */
+    private void exportScore() {
+        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
+        chooser.setDialogTitle("Partitur als Bild speichern (PNG)");
+        chooser.setSelectedFile(new java.io.File(songs.name(Paths.get(directory.getText().trim()))
+                .replaceAll("[^\\p{L}\\p{N} _-]", "").trim() + " - Partitur.png"));
+        if (chooser.showSaveDialog(this) != javax.swing.JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        Path chosen = chooser.getSelectedFile().toPath();
+        Path target = chosen.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".png")
+                ? chosen : chosen.resolveSibling(chosen.getFileName() + ".png");
+        try {
+            java.awt.image.BufferedImage sheet = scoreView.picture(1600);
+            if (sheet == null) {
+                message("Es gibt noch keine Noten: erst komponieren.");
+                return;
+            }
+            javax.imageio.ImageIO.write(sheet, "png", target.toFile());
+            append("Partitur gespeichert: " + target);
+        } catch (Exception failed) {
+            message("Die Partitur ließ sich nicht speichern: " + failed.getMessage());
+        }
     }
 
     /** The AI is told what each track plays and proposes levels, their course, places and the room. */
@@ -891,7 +950,7 @@ public final class AudioStudioFrame extends JFrame {
             if (startAfresh()) {
                 proposeInstruments(true);
             }
-        } else {
+        } else if (planStillFits()) {
             generate();
         }
     }
@@ -997,6 +1056,41 @@ public final class AudioStudioFrame extends JFrame {
         generate();
     }
 
+    /**
+     * Composing for the tracks as they are, but the words for the AI are no longer those the
+     * piece was planned from: the kept plan would still follow the old words. The studio asks.
+     *
+     * @return whether composing shall go on
+     */
+    private boolean planStillFits() {
+        Path folder = Paths.get(directory.getText().trim());
+        String now = description.getText().trim();
+        String planned = songs.plannedFrom(folder);
+        if (!Files.isRegularFile(folder.resolve("composition-plan.json")) || planned == null
+                || planned.trim().equals(now)) {
+            return true;
+        }
+        Object[] choices = {"Alles neu komponieren", "Nur Fehlendes ergänzen", "Abbrechen"};
+        int choice = JOptionPane.showOptionDialog(this,
+                "Die Beschreibung ist nicht mehr die, nach der dieses Stück geplant wurde.\n\n"
+                        + "Alles neu komponieren: Plan und Noten folgen der neuen Beschreibung; "
+                        + "die bisherige Fassung liegt danach im Ordner „earlier“.\n"
+                        + "Nur Fehlendes ergänzen: der bisherige Plan gilt weiter, vorhandene Spuren bleiben.",
+                "Komponieren", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, choices, choices[0]);
+        if (choice == 0) {
+            try {
+                int put = putAnswersAside(folder, null);
+                append("Nach der neuen Beschreibung wird neu komponiert; " + put
+                        + " bisherige Antworten liegen im Ordner „earlier“.");
+                return true;
+            } catch (IOException failed) {
+                message("Das ließ sich nicht vorbereiten: " + failed.getMessage());
+                return false;
+            }
+        }
+        return choice == 1;
+    }
+
     /** Compose exactly the rows currently selected by the user. */
     private void generate() {
         final TrackArrangement chosen;
@@ -1028,8 +1122,12 @@ public final class AudioStudioFrame extends JFrame {
             @Override
             public Path execute(GemmaMusicComposer.Progress progress) throws Exception {
                 try {
+                    boolean planned = Files.isRegularFile(output.resolve("composition-plan.json"));
                     Path arrangement = new GemmaMusicComposer(client, tokens, parallel)
                             .compose(prompt, output, chosen, progress);
+                    if (!planned) {
+                        songs.planned(output, prompt); // the words this plan follows
+                    }
                     return renderArrangement(arrangement, output, settings, progress);
                 } finally {
                     activeClient = null;
@@ -1094,8 +1192,12 @@ public final class AudioStudioFrame extends JFrame {
                         return null;
                     }
                     new TrackArrangementStore().save(output, selected);
+                    boolean planned = Files.isRegularFile(output.resolve("composition-plan.json"));
                     Path arrangement = new GemmaMusicComposer(client, tokens, parallel)
                             .compose(prompt, output, selected, progress);
+                    if (!planned) {
+                        songs.planned(output, prompt); // the words this plan follows
+                    }
                     return renderArrangement(arrangement, output, rendering.get(), progress);
                 } finally {
                     activeClient = null;
@@ -1821,7 +1923,18 @@ public final class AudioStudioFrame extends JFrame {
         if ("Java reference mix".equals(selected)) {
             return folder.resolve("arrangement.wav");
         }
-        return com.aresstack.audio.studio.application.StageMixService.stem(folder, selected);
+        // One track alone is heard as it stands on the stage: with its level, its place and the room.
+        Path arrangement = writtenArrangement();
+        Path raw = com.aresstack.audio.studio.application.StageMixService.stem(folder, selected);
+        if (arrangement != null && Files.isRegularFile(raw)) {
+            try {
+                return new com.aresstack.audio.studio.application.StageMixService().solo(arrangement, folder, scene,
+                        selected);
+            } catch (Exception failed) {
+                return raw; // then the track as it was rendered
+            }
+        }
+        return raw;
     }
 
     /** The track that plays alone, or {@code null} when a mix is chosen. */
@@ -1851,6 +1964,11 @@ public final class AudioStudioFrame extends JFrame {
                 there ? "" : "Noch nichts gerendert · Komponieren oder Demo laden");
         arrangementView.setMix(player.envelope(), soloTrack() == null ? "Mix" : "Solo", soloTrack(), player.length());
         trackTable.setAlone(soloTrack());
+        com.aresstack.audio.studio.score.Score written =
+                com.aresstack.audio.studio.score.Score.read(folder.resolve("arrangement.tsv"));
+        if (stagePanel != null) {
+            stagePanel.setBars(written == null ? 8 : written.bars());
+        }
         scoreView.setScore(com.aresstack.audio.studio.score.Score.read(folder.resolve("arrangement.tsv")), ids,
                 "Noch keine Noten: erst komponieren, dann steht hier die Partitur");
         lcd.setSource(selected == null ? "—" : playbackName(selected), there);
@@ -1860,13 +1978,13 @@ public final class AudioStudioFrame extends JFrame {
     /** What a choice of the playback is called in the list. */
     private static String playbackLabel(String selected) {
         return "Mixed sampled arrangement".equals(selected) ? "Mix · Bühne"
-                : "Java reference mix".equals(selected) ? "Mix · Java-Synthese"
+                : "Java reference mix".equals(selected) ? "Referenz · Java-Synthese, ohne Bühne"
                 : "Solo · " + selected;
     }
 
     private static String playbackName(String selected) {
         return "Mixed sampled arrangement".equals(selected) ? "MIX · BÜHNE"
-                : "Java reference mix".equals(selected) ? "MIX · JAVA-SYNTHESE"
+                : "Java reference mix".equals(selected) ? "REFERENZ · OHNE BÜHNE"
                 : "SOLO · " + selected.toUpperCase(java.util.Locale.ROOT);
     }
 
@@ -1881,7 +1999,8 @@ public final class AudioStudioFrame extends JFrame {
         }
         final List<Path> files = new ArrayList<Path>();
         for (String id : ids) {
-            files.add(playbackFile(id));
+            files.add(com.aresstack.audio.studio.application.StageMixService.stem(
+                    Paths.get(directory.getText().trim()), id));
         }
         new SwingWorker<Map<String, DeckPlayer.Envelope>, Void>() {
             @Override

@@ -151,6 +151,29 @@ public final class SongLibrary {
         return kept == null || kept.trim().isEmpty() ? null : kept;
     }
 
+    /**
+     * The description the plan of a piece was made from, or {@code null} if that is not known.
+     * It is noted the first time the piece is seen with a plan, from the description kept then.
+     */
+    public String plannedFrom(Path folder) {
+        Properties properties = properties(folder);
+        String noted = properties.getProperty("plannedFrom");
+        if (noted != null) {
+            return noted;
+        }
+        return null;
+    }
+
+    /** Notes the description a plan was made from. */
+    public void planned(Path folder, String description) throws IOException {
+        Properties properties = properties(folder);
+        properties.setProperty("plannedFrom", description == null ? "" : description);
+        Files.createDirectories(folder);
+        try (Writer writer = Files.newBufferedWriter(folder.resolve(FILE_NAME), StandardCharsets.UTF_8)) {
+            properties.store(writer, "Audio Studio piece");
+        }
+    }
+
     /** Makes a new, empty piece with this name and returns its folder. */
     public Path create(String name) throws IOException {
         String clean = name == null ? "" : name.trim();

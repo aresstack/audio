@@ -20,6 +20,8 @@ import java.util.Map;
  */
 public final class StageMixService {
     public static final String MIX_FILE = "arrangement-instruments.wav";
+    /** The track that is listened to alone, as it stands on the stage. */
+    public static final String SOLO_FILE = "stage-solo.wav";
     /** Which file holds the sound of each track, as the last rendering left it. */
     public static final String STEMS_FILE = "stems.tsv";
 
@@ -40,6 +42,21 @@ public final class StageMixService {
 
     public Path mix(Path arrangement, Path directory, SpatialScene scene, GemmaMusicComposer.Progress progress)
             throws Exception {
+        return mix(arrangement, directory, scene, null, directory.resolve(MIX_FILE), 16, progress);
+    }
+
+    /** One track alone, but as it stands on the stage: with its level, its place and the room. */
+    public Path solo(Path arrangement, Path directory, SpatialScene scene, String trackId) throws Exception {
+        return mix(arrangement, directory, scene, trackId, directory.resolve(SOLO_FILE), 16, message -> { });
+    }
+
+    /** Writes the mix on the stage to a file of the user's choice, with 16 or 24 bits. */
+    public Path export(Path arrangement, Path directory, SpatialScene scene, Path target, int bits) throws Exception {
+        return mix(arrangement, directory, scene, null, target, bits, message -> { });
+    }
+
+    private Path mix(Path arrangement, Path directory, SpatialScene scene, String only, Path target, int bits,
+                     GemmaMusicComposer.Progress progress) throws Exception {
         List<MusicTrack> tracks = tracks(arrangement);
         SpatialScene fitting = scene.fitting(tracks);
         Map<String, String> stems = stems(directory);
@@ -49,6 +66,10 @@ public final class StageMixService {
         for (MusicTrack track : tracks) {
             Path file = stem(directory, track.id(), stems);
             SoundSourcePlacement placement = fitting.placement(track.id());
+            if (only != null) {
+                // Alone means: the others are silent, and the one is heard even if it is muted in the mix.
+                placement = placement.withMuted(!only.equals(track.id()));
+            }
             if (!placement.muted() && !Files.isRegularFile(file)) {
                 throw new IOException("Die Spur " + track.id() + " ist noch nicht gerendert: " + file.getFileName());
             }
@@ -58,15 +79,14 @@ public final class StageMixService {
         }
         progress.update("Mische " + tracks.size() + " Spuren auf der Bühne · " + fitting.room().name()
                 + (heard ? "" : " · alle Spuren sind stumm") + " ...");
-        Path mix = directory.resolve(MIX_FILE);
-        Path fresh = directory.resolve("mix-" + System.nanoTime() + ".part");
+        Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
-            mixer.mix(files, placements, fitting.room(), 4 * 60.0 / tempo(arrangement), fresh, 16);
-            Files.move(fresh, mix, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            mixer.mix(files, placements, fitting.room(), 4 * 60.0 / tempo(arrangement), fitting.masterDb(), fresh, bits);
+            Files.move(fresh, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(fresh);
         }
-        return mix;
+        return target;
     }
 
     /** Notes which file holds the sound of each track, for the mixes that follow without rendering. */

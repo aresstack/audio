@@ -13,10 +13,20 @@ import java.util.Map;
  * where everything is. It cannot be changed: every change gives a new scene.
  */
 public final class SpatialScene {
+    public static final double MIN_MASTER = -30;
     private final AcousticRoom room;
     private final Map<String, SoundSourcePlacement> placements;
+    private final double masterDb;
 
     public SpatialScene(AcousticRoom room, List<SoundSourcePlacement> placements) {
+        this(room, placements, 0);
+    }
+
+    /**
+     * @param masterDb how far below full level the finished mix is, 0 (full) down to -30 dB
+     */
+    public SpatialScene(AcousticRoom room, List<SoundSourcePlacement> placements, double masterDb) {
+        this.masterDb = SoundSourcePlacement.within(masterDb, MIN_MASTER, 0);
         this.room = room == null ? AcousticRoom.HALL : room;
         Map<String, SoundSourcePlacement> kept = new LinkedHashMap<String, SoundSourcePlacement>();
         if (placements != null) {
@@ -35,6 +45,13 @@ public final class SpatialScene {
     }
 
     public AcousticRoom room() { return room; }
+
+    /** The level of the finished mix: 0 dB is full level, less is quieter. */
+    public double masterDb() { return masterDb; }
+
+    public SpatialScene withMaster(double db) {
+        return new SpatialScene(room, placements(), db);
+    }
 
     public List<SoundSourcePlacement> placements() {
         return new ArrayList<SoundSourcePlacement>(placements.values());
@@ -59,11 +76,11 @@ public final class SpatialScene {
         if (!found) {
             changed.add(placement);
         }
-        return new SpatialScene(room, changed);
+        return new SpatialScene(room, changed, masterDb);
     }
 
     public SpatialScene inRoom(AcousticRoom other) {
-        return new SpatialScene(other, placements());
+        return new SpatialScene(other, placements(), masterDb);
     }
 
     /**
@@ -86,7 +103,7 @@ public final class SpatialScene {
             seen.put(track.role(), nth + 1);
             seats.add(seat(track, nth));
         }
-        return new SpatialScene(room, seats);
+        return new SpatialScene(room, seats, masterDb);
     }
 
     /** The scene with every placement that is not locked taken from a proposal; the room comes from the proposal. */
@@ -100,7 +117,7 @@ public final class SpatialScene {
                 merged.add(proposed.withMuted(existing.muted()));
             }
         }
-        return new SpatialScene(proposal.room, merged);
+        return new SpatialScene(proposal.room, merged, masterDb);
     }
 
     /** The usual seat of a role; several tracks of one role fan out to both sides in turn. */

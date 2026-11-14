@@ -31,9 +31,6 @@ public final class TrackArrangement {
             }
             checked.add(track);
         }
-        if (drumCount > 1) {
-            throw new IllegalArgumentException("Only one shared GM percussion channel is supported.");
-        }
         this.tracks = Collections.unmodifiableList(checked);
     }
 

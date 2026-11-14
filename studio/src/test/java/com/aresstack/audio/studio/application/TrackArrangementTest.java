@@ -40,11 +40,15 @@ public final class TrackArrangementTest {
         Assert.assertEquals(0, single.channelFor("piano"));
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void forbidsTwoDrumKitsSharingOneMidiChannel() {
-        new TrackArrangement(java.util.Arrays.asList(
+    @Test
+    public void severalDrumTracksShareThePercussionChannel() {
+        TrackArrangement two = new TrackArrangement(java.util.Arrays.asList(
                 new MusicTrack("drum1", MusicTrack.DRUMS, "Kit one", 0, "builtin"),
+                new MusicTrack("piano", MusicTrack.MELODY, "Piano", 0, "builtin"),
                 new MusicTrack("drum2", MusicTrack.DRUMS, "Kit two", 0, "builtin")));
+        Assert.assertEquals(9, two.channelFor("drum1"));
+        Assert.assertEquals(9, two.channelFor("drum2"));
+        Assert.assertEquals(0, two.channelFor("piano"));
     }
 
     @Test

@@ -61,7 +61,7 @@ public final class InstrumentProposalService {
                 + "role (one of melody, harmony, bass, drums, texture), "
                 + "instrument (short human-readable name), program (zero-based General MIDI 0..127). "
                 + "Create as many complementary tracks as this music needs, a small ensemble or a full "
-                + "orchestra, at least 2; at most one drums role. "
+                + "orchestra, at least 2. "
                 + "Choose actual instruments and GM programs suitable for the mood; "
                 + "do not repeat the same orchestral role unnecessarily. "
                 + "Use the GM drum kit on channel 10 for drums, with program=0. "

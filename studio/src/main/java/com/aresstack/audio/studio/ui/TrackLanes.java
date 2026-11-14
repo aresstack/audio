@@ -304,6 +304,19 @@ final class TrackLanes extends JPanel {
         });
     }
 
+    /** Moves a track one place up or down; the order is the order of the lanes, of the score and of the channels. */
+    private void moveTrack(Head head, int by) {
+        List<MusicTrack> tracks = new ArrayList<MusicTrack>(tracks());
+        int from = heads.indexOf(head);
+        int to = from + by;
+        if (from < 0 || to < 0 || to >= tracks.size()) {
+            return;
+        }
+        tracks.add(to, tracks.remove(from));
+        fill(tracks);
+        changed();
+    }
+
     private void removeTrack(Head head) {
         List<MusicTrack> tracks = new ArrayList<MusicTrack>();
         for (Head other : heads) {
@@ -660,6 +673,14 @@ final class TrackLanes extends JPanel {
             }
             popup.add(banks);
             popup.addSeparator();
+            JMenuItem higher = new JMenuItem("Nach oben");
+            higher.setEnabled(editable && index > 0);
+            higher.addActionListener(event -> moveTrack(Head.this, -1));
+            popup.add(higher);
+            JMenuItem lower = new JMenuItem("Nach unten");
+            lower.setEnabled(editable && index < heads.size() - 1);
+            lower.addActionListener(event -> moveTrack(Head.this, 1));
+            popup.add(lower);
             JMenuItem remove = new JMenuItem("Spur entfernen");
             remove.setEnabled(editable);
             remove.addActionListener(event -> removeTrack(Head.this));

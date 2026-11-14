@@ -60,4 +60,16 @@ public final class SongLibraryTest {
         Assert.assertEquals("Winter Bells", library.name(first));
         Assert.assertEquals("stueck", library.createUntitled("").getFileName().toString().replace("neues-", ""));
     }
+
+    @Test
+    public void remembersTheWordsAPieceWasPlannedFrom() throws Exception {
+        SongLibrary library = new SongLibrary(folder.newFolder("planned").toPath());
+        Path song = library.create("Winter");
+        Assert.assertNull("not known before a plan was made", library.plannedFrom(song));
+        library.planned(song, "A snowy sleigh ride");
+        library.save(song, null, "Something else now");
+        Assert.assertEquals("A snowy sleigh ride", library.plannedFrom(song));
+        Assert.assertEquals("Something else now", library.description(song));
+        Assert.assertEquals("Winter", library.name(song));
+    }
 }

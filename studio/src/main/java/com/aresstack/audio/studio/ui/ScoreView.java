@@ -33,12 +33,12 @@ import java.util.Map;
  * where it is and the sheet turns along.
  */
 final class ScoreView extends JComponent implements Scrollable {
-    // Dark as the rest of the desk: light notes on a dark sheet.
-    private static final Color PAPER = AudioStudioTheme.WELL;
-    private static final Color INK = new Color(0xF2F0F6);
-    private static final Color FAINT = AudioStudioTheme.TEXT_FAINT;
+    // Dark as the rest of the desk: light notes on a dark sheet. A picture for printing is the other way round.
+    private Color paper = AudioStudioTheme.WELL;
+    private Color ink = new Color(0xF2F0F6);
+    private Color faint = AudioStudioTheme.TEXT_FAINT;
     /** The five lines and the bar lines: lighter than the sheet, quieter than the notes. */
-    private static final Color LINES = new Color(0x8D8B9A);
+    private Color lines = new Color(0x8D8B9A);
     /** The distance between two lines of a staff, in pixels; everything is measured in it. */
     private static final float SPACE = 9f;
     private static final int NAMES = 132;
@@ -110,7 +110,7 @@ final class ScoreView extends JComponent implements Scrollable {
 
     ScoreView() {
         setOpaque(true);
-        setBackground(PAPER);
+        setBackground(paper);
     }
 
     /** Shows a score; the order of the tracks gives each staff the colour of its channel. */
@@ -120,6 +120,30 @@ final class ScoreView extends JComponent implements Scrollable {
         hint = emptyHint == null ? "" : emptyHint;
         revalidate();
         repaint();
+    }
+
+    /**
+     * The whole score as a picture of this width, dark on white as on paper; {@code null}
+     * when there are no notes yet.
+     */
+    java.awt.image.BufferedImage picture(int width) {
+        if (score == null || staves().isEmpty()) {
+            return null;
+        }
+        ScoreView sheet = new ScoreView();
+        sheet.paper = Color.WHITE;
+        sheet.ink = new Color(0x111111);
+        sheet.faint = new Color(0x666666);
+        sheet.lines = new Color(0x333333);
+        sheet.setSize(width, 100);
+        sheet.setScore(score, order, "");
+        sheet.setSize(width, sheet.getPreferredSize().height + 20);
+        java.awt.image.BufferedImage image = new java.awt.image.BufferedImage(sheet.getWidth(), sheet.getHeight(),
+                java.awt.image.BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        sheet.paint(g);
+        g.dispose();
+        return image;
     }
 
     /** Where the playback is, in seconds; negative when nothing plays. */
@@ -199,11 +223,11 @@ final class ScoreView extends JComponent implements Scrollable {
     @Override
     protected void paintComponent(Graphics graphics) {
         Graphics2D g = DeckWidgets.smooth(graphics);
-        g.setColor(PAPER);
+        g.setColor(paper);
         g.fillRect(0, 0, getWidth(), getHeight());
         List<Score.Staff> staves = staves();
         if (score == null || staves.isEmpty()) {
-            g.setColor(FAINT);
+            g.setColor(faint);
             g.setFont(getFont().deriveFont(java.awt.Font.ITALIC, 15f));
             String text = hint.isEmpty() ? "Noch keine Noten" : hint;
             g.drawString(text, (getWidth() - g.getFontMetrics().stringWidth(text)) / 2f, getHeight() / 2f);
@@ -217,7 +241,7 @@ final class ScoreView extends JComponent implements Scrollable {
         float barWidth = (right - left - LEAD) / perSystem;
         Rectangle visible = g.getClipBounds();
 
-        g.setColor(INK);
+        g.setColor(ink);
         g.setFont(new java.awt.Font(java.awt.Font.SERIF, java.awt.Font.ITALIC, 14));
         g.drawString("♩ = " + score.tempo(), left, 30);
 
@@ -233,12 +257,24 @@ final class ScoreView extends JComponent implements Scrollable {
             float lowest = systemTop + (staves.size() - 1) * STAFF_STEP + 4 * SPACE;
 
             // The line that joins the staves at the left, and the number of the first bar.
-            g.setColor(LINES);
+            g.setColor(lines);
             g.setStroke(new BasicStroke(1.6f));
             g.draw(new Line2D.Float(left, systemTop, left, lowest));
+            // Which bars this line of the sheet holds: the piece goes on in the next line, as in a book.
+            g.setFont(AudioStudioTheme.lettering(10.5f));
+            g.setColor(ink);
+            g.drawString(lastBar - firstBar == 1 ? "TAKT " + (firstBar + 1) : "TAKTE " + (firstBar + 1) + " – " + lastBar,
+                    14, systemTop - 16);
             g.setFont(new java.awt.Font(java.awt.Font.SERIF, java.awt.Font.ITALIC, 12));
-            g.setColor(FAINT);
-            g.drawString(Integer.toString(firstBar + 1), left + 2, systemTop - 12);
+            g.setColor(faint);
+            for (int bar = firstBar; bar < lastBar; bar++) {
+                g.drawString(Integer.toString(bar + 1), left + LEAD + (bar - firstBar) * barWidth + 4, systemTop - 8);
+            }
+            if (system > 0) {
+                g.setColor(AudioStudioTheme.withAlpha(lines, 70));
+                g.setStroke(new BasicStroke(1f));
+                g.draw(new Line2D.Float(14, systemTop - 34, getWidth() - 24, systemTop - 34));
+            }
 
             for (int row = 0; row < staves.size(); row++) {
                 Score.Staff staff = staves.get(row);
@@ -247,7 +283,7 @@ final class ScoreView extends JComponent implements Scrollable {
                 int channel = Math.max(0, order.indexOf(staff.trackId()));
                 g.setColor(AudioStudioTheme.channel(channel));
                 g.fill(new Ellipse2D.Float(14, top + 2 * SPACE - 4, 8, 8));
-                g.setColor(INK);
+                g.setColor(ink);
                 g.setFont(new java.awt.Font(java.awt.Font.SERIF, java.awt.Font.PLAIN, 14));
                 FontMetrics metrics = g.getFontMetrics();
                 String name = staff.trackId().replace('_', ' ');
@@ -257,12 +293,12 @@ final class ScoreView extends JComponent implements Scrollable {
                 g.drawString(name, 28, top + 2 * SPACE + 5);
 
                 // The five lines, the clef, the time on the first system, the bar lines.
-                g.setColor(LINES);
+                g.setColor(lines);
                 g.setStroke(new BasicStroke(1f));
                 for (int line = 0; line < 5; line++) {
                     g.draw(new Line2D.Float(left, top + line * SPACE, systemRight, top + line * SPACE));
                 }
-                g.setColor(INK);
+                g.setColor(ink);
                 if (staff.clef() == Score.Clef.TREBLE) {
                     glyph(g, "gClef", left + 8, top + 3 * SPACE);
                 } else if (staff.clef() == Score.Clef.BASS) {
@@ -277,7 +313,7 @@ final class ScoreView extends JComponent implements Scrollable {
                 for (int bar = firstBar; bar < lastBar; bar++) {
                     float barRight = left + LEAD + (bar - firstBar + 1) * barWidth;
                     boolean last = bar == score.bars() - 1;
-                    g.setColor(LINES);
+                    g.setColor(lines);
                     g.setStroke(new BasicStroke(1.2f));
                     g.draw(new Line2D.Float(barRight - (last ? 6 : 0), top, barRight - (last ? 6 : 0), top + 4 * SPACE));
                     if (last) {
@@ -365,7 +401,7 @@ final class ScoreView extends JComponent implements Scrollable {
     }
 
     /** Sharps before the notes that need one, and a natural where a sharp earlier in the bar no longer holds. */
-    private static void accidentals(Graphics2D g, Placed place, Score.Clef clef, Map<Integer, Boolean> sharpened) {
+    private void accidentals(Graphics2D g, Placed place, Score.Clef clef, Map<Integer, Boolean> sharpened) {
         if (clef == Score.Clef.PERCUSSION) {
             return;
         }
@@ -374,7 +410,7 @@ final class ScoreView extends JComponent implements Scrollable {
             boolean sharp = Score.sharp(pitch);
             boolean before = Boolean.TRUE.equals(sharpened.get(position));
             if (sharp != before) {
-                g.setColor(INK);
+                g.setColor(ink);
                 glyph(g, sharp ? "sharp" : "natural", place.x - (sharp ? 11.5f : 9f), y(place.staffTop, position));
                 sharpened.put(position, sharp);
             }
@@ -382,7 +418,7 @@ final class ScoreView extends JComponent implements Scrollable {
     }
 
     /** Joins eighths and sixteenths of one beat with a beam; the stems of a group all go the same way. */
-    private static void beam(Graphics2D g, List<Placed> bar, Score.Clef clef) {
+    private void beam(Graphics2D g, List<Placed> bar, Score.Clef clef) {
         int index = 0;
         while (index < bar.size()) {
             Placed first = bar.get(index);
@@ -411,30 +447,51 @@ final class ScoreView extends JComponent implements Scrollable {
             }
             boolean up = clef == Score.Clef.PERCUSSION || sum / group.size() < 4;
             float top = group.get(0).staffTop;
-            float beamY = up ? Math.min(y(top, highest) - 3.3f * SPACE, y(top, 4) - SPACE)
-                    : Math.max(y(top, lowest) + 3.3f * SPACE, y(top, 4) + SPACE);
-            g.setColor(INK);
+            // The beam leans the way the notes go, but only a little, and every stem keeps a fair length.
+            float[] reach = new float[group.size()];
+            float[] xs = new float[group.size()];
+            for (int i = 0; i < group.size(); i++) {
+                int[] pitches = group.get(i).event.pitches();
+                int outer = Score.position(up ? pitches[pitches.length - 1] : pitches[0], clef);
+                reach[i] = y(top, outer) + (up ? -3.2f : 3.2f) * SPACE;
+                xs[i] = stemX(group.get(i).x, up);
+            }
+            float firstX = xs[0];
+            float lastX = xs[xs.length - 1];
+            float lean = Math.max(-1.25f * SPACE, Math.min(1.25f * SPACE, reach[reach.length - 1] - reach[0]));
+            float slope = lean / Math.max(1f, lastX - firstX);
+            float start = reach[0];
+            for (int i = 0; i < xs.length; i++) {
+                float on = start + slope * (xs[i] - firstX);
+                if (up ? on > reach[i] : on < reach[i]) {
+                    start += reach[i] - on; // a stem would be too short: the whole beam moves away
+                }
+            }
+            float middle = y(top, 4);
+            float centre = start + slope * (lastX - firstX) / 2;
+            if (up ? centre > middle - SPACE : centre < middle + SPACE) {
+                start += (up ? middle - SPACE : middle + SPACE) - centre; // notes far outside: the beam reaches the staff
+            }
+            g.setColor(ink);
             float thick = SPACE * 0.5f;
-            float firstX = stemX(group.get(0).x, up);
-            float lastX = stemX(group.get(group.size() - 1).x, up);
-            g.fill(new Rectangle2D.Float(firstX, up ? beamY : beamY - thick, lastX - firstX, thick));
+            band(g, firstX, start, lastX, start + slope * (lastX - firstX), up ? thick : -thick);
             for (int i = 0; i < group.size(); i++) {
                 Placed place = group.get(i);
                 Placed stemmed = new Placed(place.event, place.x, place.staffTop, up);
                 stemmed.beamed = true;
-                stemmed.stemEnd = beamY;
+                stemmed.stemEnd = start + slope * (xs[i] - firstX);
                 bar.set(bar.indexOf(place), stemmed);
                 if (place.event.length() == 1) {
                     // The second beam of a sixteenth: to its neighbour if that is one too, else a stub.
-                    float second = up ? beamY + thick * 1.5f : beamY - thick * 2.5f;
-                    float from = stemX(place.x, up);
+                    float away = up ? thick * 1.5f : -thick * 1.5f;
                     boolean joinsNext = i + 1 < group.size() && group.get(i + 1).event.length() == 1;
                     boolean joinsBefore = i > 0 && group.get(i - 1).event.length() == 1;
-                    if (joinsNext) {
-                        g.fill(new Rectangle2D.Float(from, second, stemX(group.get(i + 1).x, up) - from, thick));
-                    } else if (!joinsBefore) {
-                        float stub = SPACE * 1.1f;
-                        g.fill(new Rectangle2D.Float(i == 0 ? from : from - stub, second, stub, thick));
+                    float from = xs[i];
+                    float to = joinsNext ? xs[i + 1] : i == 0 ? from + SPACE * 1.1f : from - SPACE * 1.1f;
+                    if (joinsNext || !joinsBefore) {
+                        band(g, Math.min(from, to), start + slope * (Math.min(from, to) - firstX) + away,
+                                Math.max(from, to), start + slope * (Math.max(from, to) - firstX) + away,
+                                up ? thick : -thick);
                     }
                 }
             }
@@ -442,26 +499,53 @@ final class ScoreView extends JComponent implements Scrollable {
         }
     }
 
+    /** A beam: a band from one point to another, as thick as said (downwards for a positive thickness). */
+    private static void band(Graphics2D g, float x1, float y1, float x2, float y2, float thickness) {
+        Path2D shape = new Path2D.Float();
+        shape.moveTo(x1, y1);
+        shape.lineTo(x2, y2);
+        shape.lineTo(x2, y2 + thickness);
+        shape.lineTo(x1, y1 + thickness);
+        shape.closePath();
+        g.fill(shape);
+    }
+
     private static float stemX(float x, boolean up) {
         return up ? x + 1.18f * SPACE - 0.6f : x + 0.6f;
     }
 
-    private static void note(Graphics2D g, Placed place, Score.Clef clef) {
+    private void note(Graphics2D g, Placed place, Score.Clef clef) {
         Score.Event event = place.event;
         int[] pitches = event.pitches();
         int length = event.length();
-        g.setColor(INK);
+        g.setColor(ink);
         int low = Integer.MAX_VALUE;
         int high = Integer.MIN_VALUE;
-        for (int pitch : pitches) {
+        // Two notes next to each other on the staff cannot stand above one another: counted from
+        // the end the stem starts at, every second one of such neighbours moves to the other side.
+        boolean[] aside = new boolean[pitches.length];
+        boolean any = false;
+        for (int step = 1; step < pitches.length; step++) {
+            int i = place.stemUp ? step : pitches.length - 1 - step;
+            int before = place.stemUp ? i - 1 : i + 1;
+            if (Math.abs(Score.position(pitches[i], clef) - Score.position(pitches[before], clef)) == 1
+                    && !aside[before]) {
+                aside[i] = true;
+                any = true;
+            }
+        }
+        float headWidth = (length == 16 ? 1.69f : 1.18f) * SPACE;
+        for (int i = 0; i < pitches.length; i++) {
+            int pitch = pitches[i];
             int position = Score.position(pitch, clef);
             low = Math.min(low, position);
             high = Math.max(high, position);
             float y = y(place.staffTop, position);
+            float x = aside[i] ? place.x + (place.stemUp ? headWidth - 1.2f : -headWidth + 1.2f) : place.x;
             boolean cross = clef == Score.Clef.PERCUSSION && Score.cross(pitch);
-            glyph(g, cross ? "noteX" : length == 16 ? "noteWhole" : length >= 8 ? "noteHalf" : "noteBlack", place.x, y);
+            glyph(g, cross ? "noteX" : length == 16 ? "noteWhole" : length >= 8 ? "noteHalf" : "noteBlack", x, y);
             if (event.dotted()) {
-                glyph(g, "dot", place.x + (length == 16 ? 1.9f : 1.45f) * SPACE,
+                glyph(g, "dot", place.x + (length == 16 ? 1.9f : 1.45f) * SPACE + (any && place.stemUp ? headWidth : 0),
                         position % 2 == 0 ? y - SPACE / 2 : y);
             }
         }
@@ -490,9 +574,9 @@ final class ScoreView extends JComponent implements Scrollable {
         }
     }
 
-    private static void rest(Graphics2D g, Placed place) {
+    private void rest(Graphics2D g, Placed place) {
         int length = place.event.length();
-        g.setColor(INK);
+        g.setColor(ink);
         float top = place.staffTop;
         if (length == 16) {
             glyph(g, "restWhole", place.x, y(top, 6));
@@ -508,8 +592,8 @@ final class ScoreView extends JComponent implements Scrollable {
     }
 
     /** The arc from a note to the one it is tied to, on the side away from the stem. */
-    private static void tie(Graphics2D g, Placed place, float to, Score.Clef clef) {
-        g.setColor(INK);
+    private void tie(Graphics2D g, Placed place, float to, Score.Clef clef) {
+        g.setColor(ink);
         g.setStroke(new BasicStroke(1.3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
         for (int pitch : place.event.pitches()) {
             float y = y(place.staffTop, Score.position(pitch, clef)) + (place.stemUp ? 0.75f : -0.75f) * SPACE;

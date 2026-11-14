@@ -104,6 +104,35 @@ public final class StageMixServiceTest {
                 message -> { })) > 1000);
     }
 
+    @Test
+    public void aTrackAloneIsHeardAsItStandsOnTheStageAndTheMasterTurnsTheMixDown() throws Exception {
+        Path song = piece("tempo\t120", "track\tmelody\t73\t0\tmelody", "track\tbass\t32\t1\tbass");
+        StageMixService service = new StageMixService();
+        Path arrangement = song.resolve("arrangement.tsv");
+        SpatialScene scene = service.scene(arrangement, song);
+        scene = scene.with(scene.placement("bass").at(1, 0).withMuted(true));
+
+        // Alone, the bass is heard although it is muted in the mix, and it is heard on the right.
+        SpatialStemMixer.Signal alone = SpatialStemMixer.read(service.solo(arrangement, song, scene, "bass"));
+        Assert.assertTrue(rms(alone.right) > 4 * rms(alone.left));
+        Assert.assertEquals(StageMixService.SOLO_FILE, service.solo(arrangement, song, scene, "bass")
+                .getFileName().toString());
+
+        SpatialStemMixer.Signal full = SpatialStemMixer.read(service.mix(arrangement, song, scene, message -> { }));
+        SpatialStemMixer.Signal quiet = SpatialStemMixer.read(service.mix(arrangement, song, scene.withMaster(-12),
+                message -> { }));
+        Assert.assertEquals(Math.pow(10, -12 / 20.0), rms(quiet.left) / rms(full.left), 0.01);
+
+        // The stage is kept with its master level, and the mix can be saved with 24 bits elsewhere.
+        new SpatialSceneStore().save(song, scene.withMaster(-12));
+        Assert.assertEquals(-12, new SpatialSceneStore().load(song).masterDb(), 1e-9);
+        Path saved = service.export(arrangement, song, scene, song.resolve("out.wav"), 24);
+        try (javax.sound.sampled.AudioInputStream audio = javax.sound.sampled.AudioSystem.getAudioInputStream(
+                saved.toFile())) {
+            Assert.assertEquals(24, audio.getFormat().getSampleSizeInBits());
+        }
+    }
+
     /** A piece of one second: its arrangement and a tone as the sound of the melody and of the bass. */
     private Path piece(String... lines) throws Exception {
         Path song = folder.newFolder().toPath();

@@ -80,6 +80,11 @@ public final class SpatialStemMixer {
     /** Mixes the files of the tracks and writes the mix as a WAV of 16 or 24 bits. */
     public void mix(List<Path> files, List<SoundSourcePlacement> placements, AcousticRoom room,
                     double secondsPerBar, Path output, int bits) throws Exception {
+        mix(files, placements, room, secondsPerBar, 0, output, bits);
+    }
+
+    public void mix(List<Path> files, List<SoundSourcePlacement> placements, AcousticRoom room,
+                    double secondsPerBar, double masterDb, Path output, int bits) throws Exception {
         if (files.isEmpty() || files.size() != placements.size()) {
             throw new IllegalArgumentException("Every audio stem needs its placement.");
         }
@@ -88,7 +93,7 @@ public final class SpatialStemMixer {
             // A muted track is not even read.
             signals.add(placements.get(i).muted() ? new Signal(new float[0], new float[0], RATE) : read(files.get(i)));
         }
-        write(master(render(signals, placements, room, secondsPerBar)), output, bits);
+        write(master(render(signals, placements, room, secondsPerBar), masterDb), output, bits);
     }
 
     /**
@@ -134,9 +139,16 @@ public final class SpatialStemMixer {
      * not come out thin. The balance between the tracks stays as it was set.
      */
     public static Mix master(Mix mix) {
+        return master(mix, 0);
+    }
+
+    /**
+     * @param masterDb how far below full level the mix shall be, 0 or less
+     */
+    public static Mix master(Mix mix, double masterDb) {
         float peak = mix.peak();
         if (peak > 1e-4f) {
-            float gain = (float) Math.min(4, CEILING / peak);
+            float gain = (float) (Math.min(4, CEILING / peak) * Math.pow(10, Math.min(0, masterDb) / 20));
             for (int i = 0; i < mix.left.length; i++) {
                 mix.left[i] *= gain;
                 mix.right[i] *= gain;

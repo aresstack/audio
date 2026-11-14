@@ -51,6 +51,7 @@ public final class SpatialSceneStore {
         room.addProperty("reverbSeconds", round(scene.room().reverbSeconds()));
         room.addProperty("amount", round(scene.room().amount()));
         root.add("room", room);
+        root.addProperty("master", round(scene.masterDb()));
         JsonArray sources = new JsonArray();
         for (SoundSourcePlacement placement : scene.placements()) {
             JsonObject source = new JsonObject();
@@ -120,7 +121,7 @@ public final class SpatialSceneStore {
                         flag(source, "muted"), flag(source, "locked"), points));
             }
         }
-        return new SpatialScene(room, placements);
+        return new SpatialScene(room, placements, number(root, "master", 0));
     }
 
     private static double round(double value) {
