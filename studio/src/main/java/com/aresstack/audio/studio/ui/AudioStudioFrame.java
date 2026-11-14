@@ -10,6 +10,7 @@ import com.aresstack.audio.studio.ai.KipitzChatClient;
 import com.aresstack.audio.studio.application.GemmaMusicComposer;
 import com.aresstack.audio.studio.application.StudioMusicRenderer;
 import com.aresstack.audio.studio.settings.StudioSettingsStore;
+import com.aresstack.audio.studio.settings.ExistingAiSettings;
 
 import java.awt.BorderLayout;
 import java.awt.event.WindowAdapter;
@@ -97,6 +98,7 @@ public final class AudioStudioFrame extends JFrame {
     private final JButton cancelButton = new JButton("Abbrechen");
     private SwingWorker<Path, String> worker;
     private volatile KipitzChatClient activeClient;
+    private String preferredKeePassEntry = "";
     private Clip currentPlayback;
 
     @SuppressWarnings("unchecked")
@@ -367,17 +369,19 @@ public final class AudioStudioFrame extends JFrame {
         if (modeIndex > 0) {
             settings.setProperty("proxyMode", proxyMode.getItemAt(modeIndex));
         }
-        String host = proxyHost.getText().trim();
-        if (!host.isEmpty()) {
-            settings.setProperty("proxyHost", host);
-        }
-        String port = proxyPort.getText().trim();
-        if (!port.isEmpty()) {
-            settings.setProperty("proxyPort", port);
-        }
-        String pac = proxyPacUrl.getText().trim();
-        if (!pac.isEmpty()) {
-            settings.setProperty("proxyPacUrl", pac);
+        if (modeIndex > 0) {
+            String host = proxyHost.getText().trim();
+            if (!host.isEmpty()) {
+                settings.setProperty("proxyHost", host);
+            }
+            String port = proxyPort.getText().trim();
+            if (!port.isEmpty()) {
+                settings.setProperty("proxyPort", port);
+            }
+            String pac = proxyPacUrl.getText().trim();
+            if (!pac.isEmpty()) {
+                settings.setProperty("proxyPacUrl", pac);
+            }
         }
         String exclusions = proxyNonProxyHosts.getText().trim();
         if (!exclusions.isEmpty()) {
@@ -472,6 +476,9 @@ public final class AudioStudioFrame extends JFrame {
                     keePassEntries.removeAllItems();
                     for (KeePassEntry entry : found) {
                         keePassEntries.addItem(entry);
+                        if (entry.title().equalsIgnoreCase(preferredKeePassEntry)) {
+                            keePassEntries.setSelectedItem(entry);
+                        }
                     }
                     append("KeePassRPC: " + found.size() + " Einträge gefunden.");
                 } catch (Exception failed) {
@@ -502,6 +509,7 @@ public final class AudioStudioFrame extends JFrame {
                         throw new IOException("Der Eintrag wurde nicht gefunden.");
                     }
                     apiKey.setText(selected.password());
+                    preferredKeePassEntry = selected.title();
                     if (selected.hasUrl()) {
                         endpoint.setText(normalizeKeePassUrl(selected.url()));
                     }
@@ -595,7 +603,8 @@ public final class AudioStudioFrame extends JFrame {
 
     private void loadSettings() {
         try {
-            Properties saved = settingsStore.load();
+            Properties saved = ExistingAiSettings.withDefaults(settingsStore.load());
+            preferredKeePassEntry = saved.getProperty("keepassEntry", "");
             endpoint.setText(saved.getProperty("endpoint", ""));
             apiKey.setText(saved.getProperty("apiKey", ""));
             model.setText(saved.getProperty("model", model.getText()));
@@ -643,6 +652,7 @@ public final class AudioStudioFrame extends JFrame {
         try {
             Properties saved = new Properties();
             saved.setProperty("endpoint", endpoint.getText().trim());
+            saved.setProperty("keepassEntry", preferredKeePassEntry);
             char[] password = apiKey.getPassword();
             try {
                 saved.setProperty("apiKey", new String(password));
