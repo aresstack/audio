@@ -159,7 +159,15 @@ public final class AudioStudioFrame extends JFrame {
         engines.add(fluidSynth);
         engines.add(new JLabel("sfizz:"));
         engines.add(sfizz);
+        JButton fluidHelp = new JButton("FluidSynth installieren …");
+        fluidHelp.addActionListener(event -> openEngineWebsite("https://www.fluidsynth.org/download/"));
+        engines.add(fluidHelp);
+        JButton sfizzHelp = new JButton("sfizz installieren …");
+        sfizzHelp.addActionListener(event -> openEngineWebsite("https://github.com/sfztools/sfizz/releases"));
+        engines.add(sfizzHelp);
         addRow(fields, row++, "Sampler:", engines);
+        addRow(fields, row++, "Hinweis:",
+                new JLabel("SF2/SF3 benötigen FluidSynth, SFZ benötigt sfizz; ohne Engine funktioniert die Java-Synthese."));
 
         for (int index = 0; index < PART_NAMES.length; index++) {
             JComboBox<InstrumentLibrary> choice = new JComboBox<InstrumentLibrary>();
@@ -472,6 +480,14 @@ public final class AudioStudioFrame extends JFrame {
         JFileChooser chooser = new JFileChooser();
         if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             arrangementFile.setText(chooser.getSelectedFile().toString());
+        }
+    }
+
+    private void openEngineWebsite(String url) {
+        try {
+            Desktop.getDesktop().browse(URI.create(url));
+        } catch (Exception error) {
+            message("Die Downloadseite konnte nicht geöffnet werden: " + url);
         }
     }
 
