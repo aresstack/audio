@@ -9,6 +9,10 @@ import com.aresstack.audio.studio.keepass.KeePassEntry;
 import com.aresstack.audio.studio.ai.KipitzChatClient;
 import com.aresstack.audio.studio.application.GemmaMusicComposer;
 import com.aresstack.audio.studio.application.StudioMusicRenderer;
+import com.aresstack.audio.studio.application.MusicTrack;
+import com.aresstack.audio.studio.application.TrackArrangement;
+import com.aresstack.audio.studio.application.TrackArrangementStore;
+import com.aresstack.audio.studio.application.InstrumentProposalService;
 import com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine;
 import com.aresstack.audio.studio.settings.StudioSettingsStore;
 import com.aresstack.audio.studio.settings.ExistingAiSettings;
@@ -26,6 +30,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.PasswordAuthentication;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReference;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -60,12 +66,11 @@ import javax.swing.table.AbstractTableModel;
 
 /** Keep UI state and interactions here; delegate model calls, rendering and persistence to services. */
 public final class AudioStudioFrame extends JFrame {
-    private static final String[] PART_NAMES = {"melody", "harmony", "bass", "drums"};
-    private static final int[] DEFAULT_PROGRAMS = {10, 48, 32, 0};
     private final InstrumentRegistry registry;
+    private final TrackArrangementStore trackStore = new TrackArrangementStore();
+    private TrackTablePanel trackTable;
+    private boolean loadingTracks;
     private final StudioSettingsStore settingsStore = StudioSettingsStore.standard();
-    private final InstrumentLibrary builtin = new InstrumentLibrary("builtin", "Java synthesis (built in)",
-            "Fallback", InstrumentLibrary.Format.SF2, "Built into audio", "", "No sample bank required.");
     private final JTextField endpoint = new JTextField(38);
     private final JPasswordField apiKey = new JPasswordField(38);
     private final JTextField model = new JTextField("google/gemma-4-31B-it", 23);
@@ -95,11 +100,13 @@ public final class AudioStudioFrame extends JFrame {
     private final JTextArea description = new JTextArea(
             "A charming pastel city slowly grows; compose a playful, cozy, uplifting orchestral theme.", 3, 54);
     private final JTextArea log = new JTextArea(10, 70);
-    private final JComboBox<InstrumentLibrary>[] selections;
-    private final JSpinner[] midiPrograms = new JSpinner[PART_NAMES.length];
     private final JComboBox<String> playbackSelection = new JComboBox<String>(new String[]{
-            "Mixed sampled arrangement", "Java reference mix", "melody", "harmony", "bass", "drums"
+            "Mixed sampled arrangement", "Java reference mix"
     });
+    private final JSpinner parallelRequests = new JSpinner(
+            new SpinnerNumberModel(32, 1, 1024, 1));
+    private final JButton proposalButton = new JButton("KI-Instrumentvorschlag");
+    private final JButton autopilotButton = new JButton("Vollautomatisch");
     private final JButton generateButton = new JButton("Mit Gemma komponieren");
     private final JButton renderButton = new JButton("Rendern");
     private final JButton cancelButton = new JButton("Abbrechen");
@@ -108,11 +115,9 @@ public final class AudioStudioFrame extends JFrame {
     private String preferredKeePassEntry = "";
     private Clip currentPlayback;
 
-    @SuppressWarnings("unchecked")
     public AudioStudioFrame(InstrumentRegistry registry) {
         super("AresStack Audio Studio – Gemma, MIDI, SoundFonts und SFZ");
         this.registry = registry;
-        this.selections = (JComboBox<InstrumentLibrary>[]) new JComboBox<?>[PART_NAMES.length];
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setMinimumSize(new Dimension(880, 660));
         setSize(1100, 790);
@@ -183,25 +188,10 @@ public final class AudioStudioFrame extends JFrame {
         tsv.add(chooseButtons, BorderLayout.EAST);
         addRow(fields, row++, "Arrangement:", tsv);
 
-        for (int index = 0; index < PART_NAMES.length; index++) {
-            JComboBox<InstrumentLibrary> choice = new JComboBox<InstrumentLibrary>();
-            choice.addItem(builtin);
-            for (InstrumentLibrary installed : registry.installedInstruments()) {
-                choice.addItem(installed);
-            }
-            selections[index] = choice;
-            JSpinner program = new JSpinner(new SpinnerNumberModel(DEFAULT_PROGRAMS[index], 0, 127, 1));
-            program.setToolTipText("Zero-based General MIDI program (0–127); ignored for SFZ presets.");
-            program.setEnabled(index != 3);
-            midiPrograms[index] = program;
-            JPanel trackControls = new JPanel(new BorderLayout(8, 0));
-            trackControls.add(choice, BorderLayout.CENTER);
-            JPanel programControls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
-            programControls.add(new JLabel("GM patch (0–127):"));
-            programControls.add(program);
-            trackControls.add(programControls, BorderLayout.EAST);
-            addRow(fields, row++, PART_NAMES[index] + ":", trackControls);
-        }
+        trackTable = new TrackTablePanel(registry, this::tracksChanged);
+        trackTable.setPreferredSize(new Dimension(800, 270));
+        addRow(fields, row++, "Spuren:", trackTable);
+
         JPanel steps = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
         JButton newSong = new JButton("1 · Neues Stück");
         newSong.addActionListener(event -> createNewComposition());
@@ -209,8 +199,14 @@ public final class AudioStudioFrame extends JFrame {
         JButton demo = new JButton("Demo laden (ohne KI)");
         demo.addActionListener(event -> loadDemo());
         steps.add(demo);
-        generateButton.setText("2 · Mit Gemma komponieren");
+        steps.add(proposalButton);
+        proposalButton.setToolTipText("KI macht nur einen editierbaren Vorschlag; es werden noch keine Noten erzeugt.");
+        proposalButton.addActionListener(event -> proposeInstruments(false));
+        generateButton.setText("2 · Aus Tabelle komponieren");
         steps.add(generateButton);
+        autopilotButton.setToolTipText("KI schlägt Instrumente vor, komponiert alle Spuren und rendert sie.");
+        autopilotButton.addActionListener(event -> proposeInstruments(true));
+        steps.add(autopilotButton);
         renderButton.setText("3 · Rendern");
         steps.add(renderButton);
         JButton listen = new JButton("4 · Anhören");
@@ -282,6 +278,9 @@ public final class AudioStudioFrame extends JFrame {
         proxyAuthentication.add(proxyCredentialRef);
         addRow(fields, row++, "Proxy-Anmeldung:", proxyAuthentication);
         addRow(fields, row++, "Token-Limit pro Antwort:", tokenLimit);
+        addRow(fields, row++, "Parallele KI-Anfragen:", parallelRequests);
+        addRow(fields, row++, "Parallelität:",
+                new JLabel("Standard 32; tatsächlich höchstens so viele Anfragen wie gewählte Spuren."));
         addRow(fields, row++, "Token-Hinweis:",
                 new JLabel("Maximale Antwortlänge; der kurze Kompositionsplan nutzt höchstens 2.048 Tokens."));
         addRow(fields, row++, "Audio-Renderer:", new JLabel("SF2 standardmäßig direkt in Java rendern"));
@@ -603,19 +602,36 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     private RenderSettings captureRenderSettings() {
+        return captureRenderSettings(trackTable.arrangement());
+    }
+
+    private RenderSettings captureRenderSettings(TrackArrangement arrangement) {
         Map<String, InstrumentLibrary> assignments = new HashMap<String, InstrumentLibrary>();
         Map<String, Integer> programs = new HashMap<String, Integer>();
-        for (int index = 0; index < PART_NAMES.length; index++) {
-            InstrumentLibrary library = (InstrumentLibrary) selections[index].getSelectedItem();
-            if (library != null && !"builtin".equals(library.id())) {
-                assignments.put(PART_NAMES[index], library);
+        for (MusicTrack track : arrangement.tracks()) {
+            programs.put(track.id(), track.program());
+            if (!"builtin".equals(track.libraryId())) {
+                InstrumentLibrary installed = findInstalledBank(track.libraryId());
+                if (installed == null) {
+                    throw new IllegalArgumentException("Soundbank nicht installiert: "
+                            + track.libraryId() + " (Spur " + track.id() + ")");
+                }
+                assignments.put(track.id(), installed);
             }
-            programs.put(PART_NAMES[index], (Integer) midiPrograms[index].getValue());
         }
         Sf2Engine engine = sf2Engine.getSelectedIndex() == 1
                 ? Sf2Engine.FLUIDSYNTH : Sf2Engine.GERVILL;
         return new RenderSettings(assignments, programs, engine,
                 fluidSynth.getText().trim(), sfizz.getText().trim());
+    }
+
+    private InstrumentLibrary findInstalledBank(String libraryId) {
+        for (InstrumentLibrary library : registry.installedInstruments()) {
+            if (library.id().equals(libraryId)) {
+                return library;
+            }
+        }
+        return null;
     }
 
     private Path renderArrangement(Path source, Path destination, RenderSettings settings,
@@ -630,6 +646,7 @@ public final class AudioStudioFrame extends JFrame {
                 "audio", "compositions", "song-" + System.currentTimeMillis());
         directory.setText(newDirectory.toString());
         arrangementFile.setText("");
+        tracksChanged();
         saveSettings(false);
         append("Neues, unabhängiges Stück angelegt: " + newDirectory);
         append("Klicke 'Mit Gemma komponieren' oder 'Demo laden'.");
@@ -665,25 +682,8 @@ public final class AudioStudioFrame extends JFrame {
             fluidSynth.setText(saved.getProperty("fluidSynth", fluidSynth.getText()));
             sfizz.setText(saved.getProperty("sfizz", sfizz.getText()));
             description.setText(saved.getProperty("description", description.getText()));
-            for (int index = 0; index < PART_NAMES.length; index++) {
-                String part = PART_NAMES[index];
-                String program = saved.getProperty("program." + part);
-                if (program != null) {
-                    try {
-                        midiPrograms[index].setValue(Integer.valueOf(program));
-                    } catch (IllegalArgumentException invalidSetting) {
-                        append("Ungültige MIDI-Programmnummer für " + part + " ignoriert.");
-                    }
-                }
-                String selectionId = saved.getProperty("instrument." + part, "builtin");
-                for (int item = 0; item < selections[index].getItemCount(); item++) {
-                    InstrumentLibrary library = selections[index].getItemAt(item);
-                    if (library.id().equals(selectionId)) {
-                        selections[index].setSelectedIndex(item);
-                        break;
-                    }
-                }
-            }
+            parallelRequests.setValue(parseParallel(saved.getProperty("parallel", "32")));
+            loadArrangementForCurrentDirectory(saved);
             append("Einstellungen geladen: " + settingsStore.location());
         } catch (IOException error) {
             append("Einstellungen konnten nicht geladen werden: " + error.getMessage());
@@ -718,12 +718,9 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("fluidSynth", fluidSynth.getText().trim());
             saved.setProperty("sfizz", sfizz.getText().trim());
             saved.setProperty("description", description.getText());
-            for (int index = 0; index < PART_NAMES.length; index++) {
-                String part = PART_NAMES[index];
-                InstrumentLibrary selection = (InstrumentLibrary) selections[index].getSelectedItem();
-                saved.setProperty("instrument." + part,
-                        selection == null ? "builtin" : selection.id());
-                saved.setProperty("program." + part, midiPrograms[index].getValue().toString());
+            saved.setProperty("parallel", parallelRequests.getValue().toString());
+            if (trackTable != null && !loadingTracks && trackTable.arrangement() != null) {
+                trackStore.save(Paths.get(directory.getText().trim()), trackTable.arrangement());
             }
             settingsStore.save(saved);
             if (notifyUser) {
@@ -807,6 +804,9 @@ public final class AudioStudioFrame extends JFrame {
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
         if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             directory.setText(chooser.getSelectedFile().toString());
+            loadArrangementForCurrentDirectory(new Properties());
+            Path song = chooser.getSelectedFile().toPath().resolve("arrangement.tsv");
+            arrangementFile.setText(Files.isRegularFile(song) ? song.toString() : "");
         }
     }
 
@@ -814,6 +814,9 @@ public final class AudioStudioFrame extends JFrame {
         JFileChooser chooser = new JFileChooser();
         if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             arrangementFile.setText(chooser.getSelectedFile().toString());
+            Path parent = chooser.getSelectedFile().toPath().toAbsolutePath().getParent();
+            directory.setText(parent.toString());
+            loadArrangementForCurrentDirectory(new Properties());
         }
     }
 
@@ -834,6 +837,7 @@ public final class AudioStudioFrame extends JFrame {
             Files.createDirectories(destination.getParent());
             Files.copy(input, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             arrangementFile.setText(destination.toString());
+            trackTable.setArrangement(TrackArrangement.defaults());
             append("Loaded original Gemma composition (no API call): " + destination);
         } catch (IOException error) {
             message(error.getMessage());
@@ -841,27 +845,22 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     private void refreshInstrumentChoices() {
-        java.util.List<InstrumentLibrary> installed = registry.installedInstruments();
-        for (JComboBox<InstrumentLibrary> choice : selections) {
-            InstrumentLibrary previous = (InstrumentLibrary) choice.getSelectedItem();
-            String previousId = previous == null ? "" : previous.id();
-            choice.removeAllItems();
-            choice.addItem(builtin);
-            for (InstrumentLibrary library : installed) {
-                choice.addItem(library);
-                if (library.id().equals(previousId)) {
-                    choice.setSelectedItem(library);
-                }
-            }
-        }
+        trackTable.refreshLibraries();
     }
 
     private void inspectComposition() {
         StringBuilder document = new StringBuilder();
         Path folder = Paths.get(directory.getText().trim());
-        for (String file : new String[]{"composition-plan.json", "melody.json", "harmony.json",
-                "bass.json", "drums.json"}) {
-            Path current = folder.resolve(file);
+        List<Path> previewFiles = new ArrayList<Path>();
+        try (java.util.stream.Stream<Path> existing = Files.list(folder)) {
+            existing.filter(file -> file.getFileName().toString().endsWith(".json"))
+                    .sorted().forEach(previewFiles::add);
+        } catch (IOException ignored) {
+            message("Kein Kompositionsverzeichnis vorhanden: " + folder);
+            return;
+        }
+        for (Path current : previewFiles) {
+            String file = current.getFileName().toString();
             if (!Files.isRegularFile(current)) {
                 continue;
             }
@@ -929,6 +928,77 @@ public final class AudioStudioFrame extends JFrame {
 
     private void message(String text) {
         JOptionPane.showMessageDialog(this, text, "Audio Studio", JOptionPane.WARNING_MESSAGE);
+    }
+
+    private int parseParallel(String configured) {
+        try {
+            return Math.max(1, Math.min(1024, Integer.parseInt(configured)));
+        } catch (NumberFormatException invalid) {
+            return 32;
+        }
+    }
+
+    private void loadArrangementForCurrentDirectory(Properties saved) {
+        loadingTracks = true;
+        try {
+            Path folder = Paths.get(directory.getText().trim());
+            TrackArrangement arrangement = trackStore.load(folder);
+            if (!Files.isRegularFile(folder.resolve(TrackArrangementStore.FILE_NAME))) {
+                List<MusicTrack> restored = new ArrayList<MusicTrack>();
+                for (MusicTrack track : arrangement.tracks()) {
+                    String bank = saved.getProperty("instrument." + track.id(), track.libraryId());
+                    int program = track.program();
+                    try {
+                        program = Integer.parseInt(saved.getProperty("program." + track.id(),
+                                Integer.toString(program)));
+                    } catch (NumberFormatException ignored) {
+                        // Preserve the default General MIDI program when legacy settings are malformed.
+                    }
+                    restored.add(new MusicTrack(track.id(), track.role(),
+                            track.instrument(), program, bank));
+                }
+                arrangement = new TrackArrangement(restored);
+            }
+            trackTable.setArrangement(arrangement);
+            refreshPlaybackChoices();
+        } catch (Exception invalid) {
+            append("WARN: Gespeicherte Spuren konnten nicht geladen werden: "
+                    + invalid.getMessage());
+            trackTable.setArrangement(TrackArrangement.defaults());
+        } finally {
+            loadingTracks = false;
+        }
+    }
+
+    private void tracksChanged() {
+        refreshPlaybackChoices();
+        if (loadingTracks) {
+            return;
+        }
+        try {
+            trackStore.save(Paths.get(directory.getText().trim()), trackTable.arrangement());
+        } catch (Exception error) {
+            append("WARN: Spurauswahl nicht gespeichert: " + error.getMessage());
+        }
+    }
+
+    private void refreshPlaybackChoices() {
+        String previous = (String) playbackSelection.getSelectedItem();
+        playbackSelection.removeAllItems();
+        playbackSelection.addItem("Mixed sampled arrangement");
+        playbackSelection.addItem("Java reference mix");
+        if (trackTable != null) {
+            try {
+                for (MusicTrack track : trackTable.arrangement().tracks()) {
+                    playbackSelection.addItem(track.id());
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Permit an empty table while the user edits it.
+            }
+        }
+        if (previous != null) {
+            playbackSelection.setSelectedItem(previous);
+        }
     }
 
     private interface Operation {
