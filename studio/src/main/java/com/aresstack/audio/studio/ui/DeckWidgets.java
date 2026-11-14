@@ -202,6 +202,44 @@ final class DeckWidgets {
         }
     }
 
+    /** A key that chooses a page of the desk: a pill with a lamp, lit while its page is shown, as on a player. */
+    static final class PageKey extends JToggleButton {
+        PageKey(String text) {
+            super(text);
+            setFont(AudioStudioTheme.lettering(10.5f));
+            setContentAreaFilled(false);
+            setBorderPainted(false);
+            setFocusPainted(false);
+            setOpaque(false);
+            setFocusable(false);
+            int width = getFontMetrics(getFont()).stringWidth(text.toUpperCase(java.util.Locale.ROOT)) + 42;
+            setPreferredSize(new Dimension(width, 28));
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            setRolloverEnabled(true);
+        }
+
+        @Override
+        protected void paintComponent(Graphics graphics) {
+            Graphics2D g = smooth(graphics);
+            boolean chosen = isSelected();
+            float height = getHeight() - 2f;
+            RoundRectangle2D shape = new RoundRectangle2D.Float(1f, 1f, getWidth() - 2f, height, height, height);
+            g.setPaint(chosen ? new GradientPaint(0, 0, new Color(0x4A2A3D), 0, getHeight(), new Color(0x33212C))
+                    : new GradientPaint(0, 0, new Color(getModel().isRollover() ? 0x343743 : 0x2A2D37), 0, getHeight(),
+                    new Color(0x20222A)));
+            g.fill(shape);
+            g.setColor(chosen ? AudioStudioTheme.withAlpha(AudioStudioTheme.ACCENT, 200) : AudioStudioTheme.STROKE);
+            g.draw(shape);
+            paintLamp(g, 15f, getHeight() / 2f, 3.4f, AudioStudioTheme.ACCENT, chosen);
+            g.setFont(getFont());
+            g.setColor(chosen ? AudioStudioTheme.TEXT : AudioStudioTheme.TEXT_DIM);
+            FontMetrics metrics = g.getFontMetrics();
+            g.drawString(getText().toUpperCase(java.util.Locale.ROOT), 27,
+                    (getHeight() + metrics.getAscent() - metrics.getDescent()) / 2f);
+            g.dispose();
+        }
+    }
+
     /** Gives a key the look of a step of the work: a number in a circle before its name. */
     static void asStep(AbstractButton button, int number) {
         button.putClientProperty("deck.step", Integer.valueOf(number));

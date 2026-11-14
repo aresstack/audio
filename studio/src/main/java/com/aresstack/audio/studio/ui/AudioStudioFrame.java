@@ -122,12 +122,15 @@ public final class AudioStudioFrame extends JFrame {
     private SwingWorker<Path, String> worker;
     private volatile KipitzChatClient activeClient;
     private String preferredKeePassEntry = "";
-    // The desk: display, transport, waveform, master meters, and the pages behind the drop-down under the name.
+    // The desk: display, transport, waveform, master meters, and the pages behind the keys under the display.
     private final DeckPlayer player = new DeckPlayer();
     private final DeckDisplays.Lcd lcd = new DeckDisplays.Lcd();
     /** The line at the lower edge of the window: what the studio is doing or did last. */
     private final JLabel statusLine = new JLabel("Bereit");
-    private final JComboBox<String> pageChoice = new JComboBox<String>();
+    /** The keys under the display that choose the page, by the name of the page. */
+    private final Map<String, DeckWidgets.PageKey> pageKeys = new java.util.LinkedHashMap<String, DeckWidgets.PageKey>();
+    /** The name of the piece in use, small under the name of the studio. */
+    private final JLabel pieceName = new JLabel(" ");
     private final ArrangementView arrangementView = new ArrangementView(new ArrangementView.Listener() {
         @Override
         public void seek(double second) {
@@ -208,7 +211,9 @@ public final class AudioStudioFrame extends JFrame {
         desk.setBorder(BorderFactory.createEmptyBorder(14, 14, 8, 14));
         desk.add(transportBar(), BorderLayout.NORTH);
         pageHolder.setOpaque(false);
-        pageHolder.add(deckPage(), "deck");
+        JPanel lanesPage = deckPage(); // also builds what the page of the piece shows
+        pageHolder.add(songPage(), "song");
+        pageHolder.add(lanesPage, "deck");
         pageHolder.add(stagePage(), "stage");
         pageHolder.add(libraryPage(), "library");
         pageHolder.add(settingsPanel(), "settings");
@@ -222,7 +227,7 @@ public final class AudioStudioFrame extends JFrame {
         statusLine.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mousePressed(java.awt.event.MouseEvent event) {
-                pageChoice.setSelectedIndex(4);
+                showPage("console");
             }
         });
         desk.add(statusLine, BorderLayout.SOUTH);
@@ -252,19 +257,19 @@ public final class AudioStudioFrame extends JFrame {
         JLabel title = new JLabel("Audio Studio");
         title.setFont(new java.awt.Font(java.awt.Font.SERIF, java.awt.Font.BOLD | java.awt.Font.ITALIC, 27));
         title.setForeground(AudioStudioTheme.TEXT);
-        // Under the name: the choice of the page of the desk. It takes the place of a rail of keys.
-        final String[][] entries = {{"deck", "Arrangement"}, {"stage", "Bühne"}, {"library", "Soundbänke"},
-                {"settings", "Einstellungen"}, {"console", "Protokoll"}};
-        final JComboBox<String> line = pageChoice;
-        for (String[] entry : entries) {
-            line.addItem(entry[1]);
-        }
-        line.setToolTipText("Bereich wählen: Arrangement, Bühne, Soundbänke, Einstellungen, Protokoll");
-        line.setMaximumRowCount(entries.length);
+        // Under the name: the piece in use. A click leads to its page.
+        final JLabel line = pieceName;
+        line.setForeground(AudioStudioTheme.TEXT_DIM);
+        line.setFont(line.getFont().deriveFont(12.5f));
         line.setAlignmentX(0f);
-        line.setMaximumSize(new Dimension(190, 28));
-        line.setPreferredSize(new Dimension(190, 28));
-        line.addActionListener(event -> pages.show(pageHolder, entries[Math.max(0, line.getSelectedIndex())][0]));
+        line.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        line.setToolTipText("Das Stück, an dem gearbeitet wird · Klick: zur Seite Stück");
+        line.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mousePressed(java.awt.event.MouseEvent event) {
+                showPage("song");
+            }
+        });
         brand.setAlignmentX(0f);
         title.setAlignmentX(0f);
         name.add(javax.swing.Box.createVerticalGlue());
@@ -273,7 +278,7 @@ public final class AudioStudioFrame extends JFrame {
         name.add(javax.swing.Box.createVerticalStrut(4));
         name.add(line);
         name.add(javax.swing.Box.createVerticalGlue());
-        name.setPreferredSize(new Dimension(236, 84));
+        name.setPreferredSize(new Dimension(236, 88));
 
         playKey.addActionListener(event -> togglePlayback());
         stopKey.addActionListener(event -> stopPlayback());
@@ -336,9 +341,36 @@ public final class AudioStudioFrame extends JFrame {
         GridBagConstraints middle = new GridBagConstraints();
         middle.anchor = GridBagConstraints.WEST;
         middle.weightx = 1;
+        middle.gridy = 0;
         display.add(lcd, middle);
-        inner.add(display, BorderLayout.CENTER);
-        inner.add(right, BorderLayout.EAST);
+        // Under the display, as on a player: one key per page of the desk.
+        JPanel keysOfPages = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        keysOfPages.setOpaque(false);
+        javax.swing.ButtonGroup onePage = new javax.swing.ButtonGroup();
+        String[][] entries = {{"song", "Stück"}, {"deck", "Arrangement"}, {"stage", "Bühne"},
+                {"library", "Soundbänke"}, {"settings", "Einstellungen"}, {"console", "Protokoll"}};
+        for (final String[] entry : entries) {
+            DeckWidgets.PageKey key = new DeckWidgets.PageKey(entry[1]);
+            key.addActionListener(event -> pages.show(pageHolder, entry[0]));
+            onePage.add(key);
+            pageKeys.put(entry[0], key);
+            keysOfPages.add(key);
+        }
+        pageKeys.get("song").setSelected(true);
+
+        JPanel upper = new JPanel(new BorderLayout(18, 0));
+        upper.setOpaque(false);
+        upper.add(display, BorderLayout.CENTER);
+        upper.add(right, BorderLayout.EAST);
+        JPanel pagesRow = new JPanel(new BorderLayout());
+        pagesRow.setOpaque(false);
+        pagesRow.setBorder(BorderFactory.createEmptyBorder(0, -6, 0, 0));
+        pagesRow.add(keysOfPages, BorderLayout.WEST);
+        JPanel both = new JPanel(new BorderLayout(0, 6));
+        both.setOpaque(false);
+        both.add(upper, BorderLayout.CENTER);
+        both.add(pagesRow, BorderLayout.SOUTH);
+        inner.add(both, BorderLayout.CENTER);
         DeckWidgets.Module bar = new DeckWidgets.Module("Transport", inner);
         return bar;
     }
@@ -351,8 +383,8 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     /**
-     * The arrangement page: on top the piece and the key that composes it, below it the tracks
-     * one under the other, each with its head in front of its lane of notes, filling the page.
+     * The arrangement page: the tracks one under the other, each with its head in front of its
+     * lane of notes, filling the page.
      */
     private JPanel deckPage() {
         JPanel sourceChoice = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
@@ -454,19 +486,10 @@ public final class AudioStudioFrame extends JFrame {
             }
         });
         songChoice.setToolTipText("Das Stück wählen, an dem gearbeitet wird");
-        JPanel songKeys = new JPanel(new java.awt.GridLayout(1, 2, 8, 0));
+        songKeys = new JPanel(new java.awt.GridLayout(1, 2, 8, 0));
         songKeys.setOpaque(false);
         songKeys.add(newSong);
         songKeys.add(more);
-        JPanel song = new JPanel(new java.awt.GridLayout(2, 1, 0, 8));
-        song.setOpaque(false);
-        song.add(songChoice);
-        song.add(songKeys);
-        song.setPreferredSize(new Dimension(290, 72));
-
-        JScrollPane prompt = new JScrollPane(description);
-        prompt.setBorder(BorderFactory.createLineBorder(AudioStudioTheme.STROKE, 1, true));
-        description.setToolTipText("Was für Musik soll es sein? Die KI komponiert danach.");
 
         // Composing: one key, and the choice of who decides on the instruments.
         javax.swing.ButtonGroup who = new javax.swing.ButtonGroup();
@@ -474,35 +497,67 @@ public final class AudioStudioFrame extends JFrame {
         who.add(ownTracks);
         aiChooses.setSelected(true);
         aiChooses.setToolTipText("Die KI schlägt zur Beschreibung passende Instrumente vor und komponiert dann für sie");
-        ownTracks.setToolTipText("Für genau die Spuren darunter komponieren; was schon komponiert ist, bleibt");
+        ownTracks.setToolTipText("Für genau die Spuren im Arrangement komponieren; was schon komponiert ist, bleibt");
+        composeButton.setToolTipText("Komponieren und gleich rendern");
+        composeButton.setFont(composeButton.getFont().deriveFont(java.awt.Font.BOLD, 15f));
+        composeButton.addActionListener(event -> compose());
+        getRootPane().setDefaultButton(composeButton);
+
+        JPanel page = new JPanel(new BorderLayout());
+        page.setOpaque(false);
+        page.add(output, BorderLayout.CENTER);
+        return page;
+    }
+
+    private JPanel songKeys;
+
+    /**
+     * The page of the piece: which piece, and what the AI is told. This is where a piece
+     * begins; the arrangement page is where what was composed is adjusted.
+     */
+    private JPanel songPage() {
+        songChoice.setPreferredSize(new Dimension(360, 30));
+        songKeys.setPreferredSize(new Dimension(230, 30));
+        JPanel choice = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        choice.setOpaque(false);
+        choice.add(songChoice);
+        choice.add(javax.swing.Box.createHorizontalStrut(10));
+        choice.add(songKeys);
+        songFacts.setForeground(AudioStudioTheme.TEXT_DIM);
+        songFacts.setFont(songFacts.getFont().deriveFont(12f));
+        JPanel top = new JPanel(new BorderLayout(14, 0));
+        top.setOpaque(false);
+        top.add(choice, BorderLayout.WEST);
+        top.add(songFacts, BorderLayout.EAST);
+
+        JScrollPane prompt = new JScrollPane(description);
+        prompt.setBorder(BorderFactory.createLineBorder(AudioStudioTheme.STROKE, 1, true));
+        description.setFont(description.getFont().deriveFont(15f));
+        JPanel wish = new JPanel(new BorderLayout(0, 6));
+        wish.setOpaque(false);
+        wish.add(DeckWidgets.lettering("Was für Musik soll es sein? Das bekommt die KI gesagt."), BorderLayout.NORTH);
+        wish.add(prompt, BorderLayout.CENTER);
+
         JPanel whoRow = new JPanel(new java.awt.GridLayout(1, 2, 8, 0));
         whoRow.setOpaque(false);
         whoRow.add(aiChooses);
         whoRow.add(ownTracks);
-        composeButton.setToolTipText("Komponieren und gleich rendern");
-        composeButton.setFont(composeButton.getFont().deriveFont(java.awt.Font.BOLD, 14f));
-        composeButton.addActionListener(event -> compose());
-        getRootPane().setDefaultButton(composeButton);
-        JPanel composing = new JPanel(new java.awt.GridLayout(2, 1, 0, 8));
-        composing.setOpaque(false);
-        composing.add(whoRow);
-        composing.add(composeButton);
-        composing.setPreferredSize(new Dimension(330, 72));
+        whoRow.setPreferredSize(new Dimension(380, 40));
+        composeButton.setPreferredSize(new Dimension(260, 44));
+        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        bottom.setOpaque(false);
+        bottom.add(whoRow);
+        bottom.add(javax.swing.Box.createHorizontalStrut(14));
+        bottom.add(composeButton);
 
-        JPanel session = new JPanel(new BorderLayout(14, 0));
+        JPanel session = new JPanel(new BorderLayout(0, 16));
         session.setOpaque(false);
-        session.add(song, BorderLayout.WEST);
-        session.add(prompt, BorderLayout.CENTER);
-        session.add(composing, BorderLayout.EAST);
-        DeckWidgets.Module sessionModule = new DeckWidgets.Module("Stück · Was für Musik soll es sein?", session);
-        songFacts.setForeground(AudioStudioTheme.TEXT_DIM);
-        songFacts.setFont(songFacts.getFont().deriveFont(12f));
-        sessionModule.setHeadEnd(songFacts);
-
-        JPanel page = new JPanel(new BorderLayout(0, 14));
+        session.add(top, BorderLayout.NORTH);
+        session.add(wish, BorderLayout.CENTER);
+        session.add(bottom, BorderLayout.SOUTH);
+        JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
-        page.add(sessionModule, BorderLayout.NORTH);
-        page.add(output, BorderLayout.CENTER);
+        page.add(new DeckWidgets.Module("Stück", session), BorderLayout.CENTER);
         return page;
     }
 
@@ -1425,6 +1480,7 @@ public final class AudioStudioFrame extends JFrame {
             }
             songChoice.setSelectedItem(shown);
             setTitle("AresStack Audio Studio — " + shown.name());
+            pieceName.setText(shown.name());
             songFacts.setText(songFacts(current));
         } finally {
             fillingSongs = false;
@@ -1562,6 +1618,9 @@ public final class AudioStudioFrame extends JFrame {
     private void start(final Operation action) {
         if (worker != null && !worker.isDone()) {
             return;
+        }
+        if (pageKeys.get("song").isSelected()) {
+            showPage("deck"); // composing is watched where the tracks are
         }
         generateButton.setEnabled(false);
         composeButton.setEnabled(false);
@@ -1996,6 +2055,14 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     private long shownSecond;
+
+    private void showPage(String page) {
+        pages.show(pageHolder, page);
+        DeckWidgets.PageKey key = pageKeys.get(page);
+        if (key != null) {
+            key.setSelected(true);
+        }
+    }
 
     private void setStatus(String text) {
         String line = text == null ? "" : text.replace('\n', ' ').trim();
