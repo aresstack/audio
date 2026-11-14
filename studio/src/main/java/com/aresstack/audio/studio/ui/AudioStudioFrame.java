@@ -35,6 +35,8 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
+import javax.swing.JSpinner;
+import javax.swing.SpinnerNumberModel;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
@@ -46,6 +48,7 @@ import javax.swing.table.AbstractTableModel;
 /** Keep UI state and interactions here; delegate model calls, rendering and persistence to services. */
 public final class AudioStudioFrame extends JFrame {
     private static final String[] PART_NAMES = {"melody", "harmony", "bass", "drums"};
+    private static final int[] DEFAULT_PROGRAMS = {10, 48, 32, 0};
     private final InstrumentRegistry registry;
     private final java.util.List<InstrumentLibrary> libraries = InstrumentCatalog.standard();
     private final InstrumentLibrary builtin = new InstrumentLibrary("builtin", "Java synthesis (built in)",
@@ -64,6 +67,7 @@ public final class AudioStudioFrame extends JFrame {
             "A charming pastel city slowly grows; compose a playful, cozy, uplifting orchestral theme.", 3, 54);
     private final JTextArea log = new JTextArea(10, 70);
     private final JComboBox<InstrumentLibrary>[] selections;
+    private final JSpinner[] midiPrograms = new JSpinner[PART_NAMES.length];
     private final LibraryTableModel tableModel = new LibraryTableModel();
     private final JTable libraryTable = new JTable(tableModel);
     private final JComboBox<String> playbackSelection = new JComboBox<String>(new String[]{
@@ -152,11 +156,24 @@ public final class AudioStudioFrame extends JFrame {
                 choice.addItem(installed);
             }
             selections[index] = choice;
-            addRow(fields, row++, PART_NAMES[index] + ":", choice);
+            JSpinner program = new JSpinner(new SpinnerNumberModel(DEFAULT_PROGRAMS[index], 0, 127, 1));
+            program.setToolTipText("Zero-based General MIDI program (0–127); ignored for SFZ presets.");
+            program.setEnabled(index != 3);
+            midiPrograms[index] = program;
+            JPanel trackControls = new JPanel(new BorderLayout(8, 0));
+            trackControls.add(choice, BorderLayout.CENTER);
+            JPanel programControls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
+            programControls.add(new JLabel("GM patch (0–127):"));
+            programControls.add(program);
+            trackControls.add(programControls, BorderLayout.EAST);
+            addRow(fields, row++, PART_NAMES[index] + ":", trackControls);
         }
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT));
         actions.add(generateButton);
         actions.add(renderButton);
+        JButton resetButton = new JButton("Neues Stück / Cache löschen");
+        resetButton.addActionListener(event -> clearCompositionCache());
+        actions.add(resetButton);
         actions.add(cancelButton);
         actions.add(playbackSelection);
         JButton playButton = new JButton("Abspielen");
@@ -230,12 +247,13 @@ public final class AudioStudioFrame extends JFrame {
         }
         final String prompt = description.getText().trim();
         final Path output = Paths.get(directory.getText().trim());
+        final RenderSettings settings = captureRenderSettings();
         start(new Operation() {
             @Override
             public Path execute(GemmaMusicComposer.Progress progress) throws Exception {
                 KipitzChatClient client = new KipitzChatClient(selectedUrl, key, selectedModel, host, port);
                 Path tsv = new GemmaMusicComposer(client).compose(prompt, output, progress);
-                return renderArrangement(tsv, output, progress);
+                return renderArrangement(tsv, output, settings, progress);
             }
         });
     }
@@ -248,25 +266,55 @@ public final class AudioStudioFrame extends JFrame {
         }
         final Path arrangement = Paths.get(file);
         final Path output = Paths.get(directory.getText().trim());
+        final RenderSettings settings = captureRenderSettings();
         start(new Operation() {
             @Override
             public Path execute(GemmaMusicComposer.Progress progress) throws Exception {
-                return renderArrangement(arrangement, output, progress);
+                return renderArrangement(arrangement, output, settings, progress);
             }
         });
     }
 
-    private Path renderArrangement(Path source, Path destination, GemmaMusicComposer.Progress progress)
-            throws Exception {
+    private RenderSettings captureRenderSettings() {
         Map<String, InstrumentLibrary> assignments = new HashMap<String, InstrumentLibrary>();
+        Map<String, Integer> programs = new HashMap<String, Integer>();
         for (int index = 0; index < PART_NAMES.length; index++) {
             InstrumentLibrary library = (InstrumentLibrary) selections[index].getSelectedItem();
             if (library != null && !"builtin".equals(library.id())) {
                 assignments.put(PART_NAMES[index], library);
             }
+            programs.put(PART_NAMES[index], (Integer) midiPrograms[index].getValue());
         }
-        return new StudioMusicRenderer(registry).render(source, destination, assignments,
-                fluidSynth.getText().trim(), sfizz.getText().trim(), progress);
+        return new RenderSettings(assignments, programs, fluidSynth.getText().trim(),
+                sfizz.getText().trim());
+    }
+
+    private Path renderArrangement(Path source, Path destination, RenderSettings settings,
+                                   GemmaMusicComposer.Progress progress) throws Exception {
+        return new StudioMusicRenderer(registry).render(source, destination, settings.assignments,
+                settings.programs, settings.fluidSynthExecutable, settings.sfizzExecutable, progress);
+    }
+
+    private void clearCompositionCache() {
+        int answer = JOptionPane.showConfirmDialog(this,
+                "Delete the five cached Gemma JSON files for this output directory? "
+                        + "Previously rendered WAV files are kept.",
+                "Start a new composition", JOptionPane.YES_NO_OPTION);
+        if (answer != JOptionPane.YES_OPTION) {
+            return;
+        }
+        Path folder = Paths.get(directory.getText().trim());
+        for (String file : new String[]{"composition-plan.json", "melody.json", "harmony.json",
+                "bass.json", "drums.json", "arrangement.tsv"}) {
+            try {
+                Files.deleteIfExists(folder.resolve(file));
+            } catch (IOException failure) {
+                message("Cannot delete cached file " + file + ": " + failure.getMessage());
+                return;
+            }
+        }
+        arrangementFile.setText("");
+        append("Composition cache cleared. The next Generate action will request new parts.");
     }
 
     private void start(final Operation action) {
@@ -458,6 +506,22 @@ public final class AudioStudioFrame extends JFrame {
 
     private interface Operation {
         Path execute(GemmaMusicComposer.Progress progress) throws Exception;
+    }
+
+    private static final class RenderSettings {
+        private final Map<String, InstrumentLibrary> assignments;
+        private final Map<String, Integer> programs;
+        private final String fluidSynthExecutable;
+        private final String sfizzExecutable;
+
+        private RenderSettings(Map<String, InstrumentLibrary> assignments,
+                               Map<String, Integer> programs, String fluidSynthExecutable,
+                               String sfizzExecutable) {
+            this.assignments = assignments;
+            this.programs = programs;
+            this.fluidSynthExecutable = fluidSynthExecutable;
+            this.sfizzExecutable = sfizzExecutable;
+        }
     }
 
     private final class LibraryTableModel extends AbstractTableModel {
