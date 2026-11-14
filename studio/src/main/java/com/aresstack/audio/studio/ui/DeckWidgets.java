@@ -23,7 +23,7 @@ import java.awt.geom.Ellipse2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.RoundRectangle2D;
 
-/** The parts a mixing desk is built from: modules, lamps, round transport keys, the keys of the side rail. */
+/** The parts a mixing desk is built from: modules, lamps, round transport keys. */
 final class DeckWidgets {
     private DeckWidgets() {
     }
@@ -198,46 +198,6 @@ final class DeckWidgets {
                     g.draw(new java.awt.geom.Line2D.Float(cx + unit * 0.8f, cy - unit * 0.8f, cx - unit * 0.8f, cy + unit * 0.8f));
                     break;
             }
-            g.dispose();
-        }
-    }
-
-    /** A key of the side rail: a lamp, a name, lit while its page is shown. */
-    static final class RailKey extends JToggleButton {
-        RailKey(String text) {
-            super(text);
-            setFont(AudioStudioTheme.lettering(11f));
-            setHorizontalAlignment(SwingConstants.LEFT);
-            setContentAreaFilled(false);
-            setBorderPainted(false);
-            setFocusPainted(false);
-            setOpaque(false);
-            setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-            setPreferredSize(new Dimension(168, 46));
-            setMaximumSize(new Dimension(Integer.MAX_VALUE, 46));
-            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            setRolloverEnabled(true);
-        }
-
-        @Override
-        protected void paintComponent(Graphics graphics) {
-            Graphics2D g = smooth(graphics);
-            boolean chosen = isSelected();
-            RoundRectangle2D shape = new RoundRectangle2D.Float(1f, 2f, getWidth() - 2f, getHeight() - 4f, 14f, 14f);
-            if (chosen) {
-                g.setPaint(new GradientPaint(0, 0, new Color(0x4A2A3D), getWidth(), 0, new Color(0x2A2029)));
-                g.fill(shape);
-                g.setColor(AudioStudioTheme.withAlpha(AudioStudioTheme.ACCENT, 190));
-                g.draw(shape);
-            } else if (getModel().isRollover()) {
-                g.setColor(new Color(0x23252D));
-                g.fill(shape);
-            }
-            paintLamp(g, 20f, getHeight() / 2f, 4f, AudioStudioTheme.ACCENT, chosen);
-            g.setFont(getFont());
-            g.setColor(chosen ? AudioStudioTheme.TEXT : AudioStudioTheme.TEXT_DIM);
-            FontMetrics metrics = g.getFontMetrics();
-            g.drawString(getText().toUpperCase(java.util.Locale.ROOT), 36, (getHeight() + metrics.getAscent() - metrics.getDescent()) / 2f);
             g.dispose();
         }
     }

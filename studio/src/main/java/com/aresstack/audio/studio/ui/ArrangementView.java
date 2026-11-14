@@ -24,15 +24,17 @@ import java.util.Map;
 /**
  * The piece laid out in time, as in a program for cutting music or video: a ruler
  * with the bars, one lane per track with its notes, and below them the mix as a
- * waveform. A line marks where the playback is; a click in the lanes jumps there,
- * a click on the name of a lane chooses that track for listening alone.
+ * waveform. A line marks where the playback is; a click in the lanes jumps there.
+ * The names of the lanes and what can be set for a track stand in front of the
+ * lanes, in {@link TrackLanes}; both use the same heights.
  */
 final class ArrangementView extends JComponent {
     private static final int TICKS_PER_BEAT = 480;
-    private static final int GUTTER = 104;
-    private static final int RULER = 22;
-    private static final int LANE = 26;
-    private static final int MIX = 44;
+    private static final int GUTTER = 0;
+    static final int RULER = 24;
+    static final int MIX = 54;
+    /** How high a lane is; the heads of the lanes are given the same height. */
+    private int lane = 60;
 
     /** A note of a lane: where it starts, how long it is, how high it sounds. */
     private static final class Note {
@@ -110,9 +112,6 @@ final class ArrangementView extends JComponent {
     interface Listener {
         /** Jump to this second of the playback. */
         void seek(double second);
-
-        /** Choose this track for listening alone; {@code null} chooses the mix. */
-        void choose(String trackId);
     }
 
     private final Listener listener;
@@ -124,7 +123,6 @@ final class ArrangementView extends JComponent {
     private double second;
     private double audioSeconds;
     private String hint = "";
-    private final Map<String, String> states = new LinkedHashMap<String, String>();
 
     ArrangementView(Listener listener) {
         this.listener = listener;
@@ -132,16 +130,7 @@ final class ArrangementView extends JComponent {
         MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent event) {
-                if (event.getX() < GUTTER) {
-                    int lane = (event.getY() - RULER) / LANE;
-                    if (event.getY() >= RULER && lane >= 0 && lane < order.size()) {
-                        ArrangementView.this.listener.choose(order.get(lane));
-                    } else if (event.getY() >= RULER + order.size() * LANE) {
-                        ArrangementView.this.listener.choose(null);
-                    }
-                } else {
-                    jump(event);
-                }
+                jump(event);
             }
 
             @Override
@@ -161,7 +150,6 @@ final class ArrangementView extends JComponent {
         };
         addMouseListener(mouse);
         addMouseMotionListener(mouse);
-        setToolTipText("Klick in die Spuren: dorthin springen · Klick auf einen Namen: diese Spur allein wählen");
     }
 
     /** The lanes: the tracks of the mixer in their order, with the notes of the arrangement file if there is one. */
@@ -189,19 +177,12 @@ final class ArrangementView extends JComponent {
         }
     }
 
-    /** A short word beside a lane's name while the studio works on the track; {@code null} takes it away. */
-    void setState(String trackId, String word) {
-        if (word == null) {
-            states.remove(trackId);
-        } else {
-            states.put(trackId, word);
+    void setLaneHeight(int height) {
+        if (height != lane) {
+            lane = height;
+            revalidate();
+            repaint();
         }
-        repaint();
-    }
-
-    void clearStates() {
-        states.clear();
-        repaint();
     }
 
     private double totalSeconds() {
@@ -210,12 +191,12 @@ final class ArrangementView extends JComponent {
 
     @Override
     public Dimension getPreferredSize() {
-        return new Dimension(600, RULER + Math.max(1, order.size()) * LANE + MIX + 2);
+        return new Dimension(400, RULER + order.size() * lane + MIX);
     }
 
     @Override
     public Dimension getMinimumSize() {
-        return new Dimension(260, RULER + LANE + MIX);
+        return new Dimension(200, RULER + lane + MIX);
     }
 
     @Override
@@ -223,23 +204,16 @@ final class ArrangementView extends JComponent {
         Graphics2D g = DeckWidgets.smooth(graphics);
         int width = getWidth();
         int height = getHeight();
-        RoundRectangle2D well = new RoundRectangle2D.Float(0.5f, 0.5f, width - 1f, height - 1f, 14f, 14f);
         g.setColor(AudioStudioTheme.WELL);
-        g.fill(well);
-        g.setColor(AudioStudioTheme.STROKE);
-        g.draw(well);
-        g.clip(well); // within what the scroll pane shows of the view
+        g.fillRect(0, 0, width, height);
 
         int left = GUTTER;
         int span = Math.max(1, width - GUTTER - 10);
         double total = totalSeconds();
         double music = arrangement == null ? 0 : arrangement.seconds();
         float musicSpan = total <= 0 ? span : (float) (span * music / total);
+        final int LANE = lane;
         int lanesBottom = RULER + order.size() * LANE;
-
-        // The gutter with the names, a little lighter than the lanes.
-        g.setColor(new Color(0x1B1D24));
-        g.fillRect(0, 0, GUTTER, height);
 
         // Lanes: a band each, the notes as small bars placed by time and pitch.
         for (int index = 0; index < order.size(); index++) {
@@ -253,18 +227,8 @@ final class ArrangementView extends JComponent {
                 g.setColor(AudioStudioTheme.withAlpha(color, 34));
                 g.fillRect(0, top, width, LANE);
             }
-            g.setColor(color);
-            g.fillRect(0, top + 3, 4, LANE - 6);
-            g.setFont(AudioStudioTheme.lettering(10f));
-            g.setColor(chosen ? Color.WHITE : AudioStudioTheme.TEXT_DIM);
-            FontMetrics metrics = g.getFontMetrics();
-            String state = states.get(id);
-            String name = fit(metrics, id.toUpperCase(java.util.Locale.ROOT), GUTTER - 16 - (state == null ? 0 : metrics.stringWidth(state) + 8));
-            g.drawString(name, 12, top + LANE / 2f + 4);
-            if (state != null) {
-                g.setColor(AudioStudioTheme.ACCENT_SOFT);
-                g.drawString(state, GUTTER - 6 - metrics.stringWidth(state), top + LANE / 2f + 4);
-            }
+            g.setColor(new Color(255, 255, 255, 14));
+            g.fillRect(left, top + LANE - 1, width - left, 1);
             List<Note> notes = arrangement == null ? null : arrangement.lanes.get(id);
             if (notes == null || notes.isEmpty()) {
                 continue;
@@ -276,13 +240,14 @@ final class ArrangementView extends JComponent {
                 high = Math.max(high, note.pitch);
             }
             int range = Math.max(6, high - low);
-            float usable = LANE - 9f;
+            float usable = LANE - 14f;
+            float thick = Math.max(3.4f, Math.min(7f, usable / (range + 1f)));
             g.setColor(chosen ? color : AudioStudioTheme.withAlpha(color, 215));
             for (Note note : notes) {
                 float x = left + musicSpan * note.start / (float) arrangement.ticks;
                 float w = Math.max(2f, musicSpan * note.length / (float) arrangement.ticks - 1f);
-                float y = top + 3f + usable * (1f - (note.pitch - low) / (float) range);
-                g.fill(new RoundRectangle2D.Float(x, y, w, 3.4f, 2f, 2f));
+                float y = top + 5f + usable * (1f - (note.pitch - low) / (float) range);
+                g.fill(new RoundRectangle2D.Float(x, y, w, thick, 2.4f, 2.4f));
             }
         }
 
@@ -291,9 +256,7 @@ final class ArrangementView extends JComponent {
         g.setColor(new Color(0x101116));
         g.fillRect(left, mixTop, width - left, height - mixTop);
         g.setFont(AudioStudioTheme.lettering(10f));
-        g.setColor(alone == null ? Color.WHITE : AudioStudioTheme.TEXT_DIM);
         FontMetrics letters = g.getFontMetrics();
-        g.drawString(fit(letters, mixName.toUpperCase(java.util.Locale.ROOT), GUTTER - 16), 12, mixTop + (height - mixTop) / 2f + 4);
         if (mix != null && mix.left.length > 0 && total > 0) {
             float middle = mixTop + (height - mixTop) / 2f;
             float reach = (height - mixTop) / 2f - 5f;
@@ -330,7 +293,6 @@ final class ArrangementView extends JComponent {
         g.setColor(AudioStudioTheme.STROKE);
         g.draw(new Line2D.Float(0, RULER, width, RULER));
         g.draw(new Line2D.Float(0, lanesBottom, width, lanesBottom));
-        g.draw(new Line2D.Float(GUTTER, 0, GUTTER, height));
         g.setFont(AudioStudioTheme.display(10f));
         if (arrangement != null) {
             int bars = arrangement.bars();

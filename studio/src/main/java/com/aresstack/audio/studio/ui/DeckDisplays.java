@@ -30,15 +30,14 @@ final class DeckDisplays {
         private String time = "00:00.0";
         private String length = "00:00.0";
         private String source = "—";
-        private String status = "Bereit";
         private boolean busy;
         private boolean playing;
         private boolean loaded;
         private float pulse;
 
         Lcd() {
-            setPreferredSize(new Dimension(520, 78));
-            setMinimumSize(new Dimension(320, 78));
+            setPreferredSize(new Dimension(430, 54));
+            setMinimumSize(new Dimension(300, 54));
         }
 
         void setTime(double seconds, double total) {
@@ -54,11 +53,6 @@ final class DeckDisplays {
         void setSource(String name, boolean available) {
             source = name == null ? "—" : name;
             loaded = available;
-            repaint();
-        }
-
-        void setStatus(String text) {
-            status = text == null ? "" : text.replace('\n', ' ').trim();
             repaint();
         }
 
@@ -78,7 +72,7 @@ final class DeckDisplays {
         void tick() {
             if (busy) {
                 pulse = (pulse + 0.06f) % 1f;
-                repaint(getWidth() - 140, 0, 140, 34);
+                repaint(getWidth() - 140, 0, 140, 30);
             }
         }
 
@@ -95,9 +89,9 @@ final class DeckDisplays {
             g.setClip(glass);
 
             // The time, large; behind it the same figures dark, as unlit segments show through.
-            g.setFont(AudioStudioTheme.display(34f));
+            g.setFont(AudioStudioTheme.display(30f));
             FontMetrics big = g.getFontMetrics();
-            int baseline = 14 + big.getAscent() - 6;
+            int baseline = (height + big.getAscent()) / 2 - 4;
             g.setColor(AudioStudioTheme.LCD_DIM);
             g.drawString("88:88.8", 16, baseline);
             g.setColor(AudioStudioTheme.LCD_TEXT);
@@ -116,19 +110,16 @@ final class DeckDisplays {
             if (roomForFlags) {
                 int flagX = width - 16;
                 flagX = flag(g, "AI", busy, busy ? 0.55f + 0.45f * (float) Math.abs(Math.sin(pulse * Math.PI * 2)) : 1f,
-                        flagX, 22);
-                flagX = flag(g, "PLAY", playing, 1f, flagX, 22);
-                flag(g, "FILE", loaded, 1f, flagX, 22);
+                        flagX, 21);
+                flagX = flag(g, "PLAY", playing, 1f, flagX, 21);
+                flag(g, "FILE", loaded, 1f, flagX, 21);
             }
             g.setFont(AudioStudioTheme.display(12f));
             FontMetrics small = g.getFontMetrics();
-            int textX = afterLength + 22;
-            if (width - textX - 150 > 90) {
-                g.setColor(AudioStudioTheme.LCD_TEXT);
-                g.drawString(fit(small, source, width - textX - 150), textX, 24);
-            }
-            g.setColor(AudioStudioTheme.withAlpha(AudioStudioTheme.LCD_TEXT, 170));
-            g.drawString(fit(small, "> " + status, width - 32), 16, height - 12);
+            // What is loaded stands under the flags, at the right.
+            g.setColor(AudioStudioTheme.withAlpha(AudioStudioTheme.LCD_TEXT, 200));
+            String shown = fit(small, source, width - afterLength - 40);
+            g.drawString(shown, width - 16 - small.stringWidth(shown), height - 11);
             g.dispose();
         }
 
