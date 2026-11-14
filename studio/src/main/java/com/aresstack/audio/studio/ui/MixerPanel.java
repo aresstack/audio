@@ -14,10 +14,8 @@ import javax.swing.JComponent;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JSpinner;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
-import javax.swing.SpinnerNumberModel;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -51,9 +49,15 @@ public final class MixerPanel extends JPanel {
         void listen(String trackId);
     }
 
+    /** Asked to have the AI compose one track anew, leaving the others as they are. */
+    public interface Recompose {
+        void again(String trackId);
+    }
+
     private final InstrumentRegistry registry;
     private final Runnable onChanged;
     private final Solo solo;
+    private final Recompose recompose;
     private final List<Strip> strips = new ArrayList<Strip>();
     private final JPanel row = new JPanel();
     private final AddStrip addStrip = new AddStrip();
@@ -61,11 +65,12 @@ public final class MixerPanel extends JPanel {
     private boolean changing;
     private boolean editable = true;
 
-    public MixerPanel(InstrumentRegistry registry, Runnable onChanged, Solo solo) {
+    public MixerPanel(InstrumentRegistry registry, Runnable onChanged, Solo solo, Recompose recompose) {
         super(new BorderLayout());
         this.registry = registry;
         this.onChanged = onChanged;
         this.solo = solo;
+        this.recompose = recompose;
         setOpaque(false);
         row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
         row.setBackground(AudioStudioTheme.MODULE);
@@ -227,7 +232,7 @@ public final class MixerPanel extends JPanel {
             sequence++;
         }
         List<MusicTrack> tracks = new ArrayList<MusicTrack>(currentArrangement().tracks());
-        tracks.add(new MusicTrack("voice_" + sequence, MusicTrack.TEXTURE, "Flute", 73, "builtin"));
+        tracks.add(new MusicTrack("voice_" + sequence, MusicTrack.TEXTURE, GeneralMidi.name(73), 73, "builtin"));
         fill(tracks);
         Strip added = strips.get(strips.size() - 1);
         added.instrument.requestFocusInWindow();
@@ -277,7 +282,8 @@ public final class MixerPanel extends JPanel {
         private final JTextField id = new JTextField();
         private final JComboBox<String> role = new JComboBox<String>(MusicTrack.ROLES.toArray(new String[0]));
         private final JTextField instrument = new JTextField();
-        private final JSpinner program = new JSpinner(new SpinnerNumberModel(0, 0, 127, 1));
+        private final JComboBox<String> program = new JComboBox<String>(GeneralMidi.entries());
+        private final JButton again = new JButton("Neu");
         private final JComboBox<String> bank = new JComboBox<String>();
         private final DeckDisplays.Meter left = new DeckDisplays.Meter(true);
         private final DeckDisplays.Meter right = new DeckDisplays.Meter(true);
@@ -294,17 +300,20 @@ public final class MixerPanel extends JPanel {
             this.track = shown;
             this.index = index;
             setOpaque(false);
-            Dimension size = new Dimension(184, 284);
+            Dimension size = new Dimension(190, 326);
             setPreferredSize(size);
             setMinimumSize(size);
-            setMaximumSize(new Dimension(184, Integer.MAX_VALUE));
+            setMaximumSize(new Dimension(190, Integer.MAX_VALUE));
             setBorder(BorderFactory.createEmptyBorder(42, 12, 12, 12));
 
             id.setHorizontalAlignment(JTextField.CENTER);
             id.setFont(id.getFont().deriveFont(java.awt.Font.BOLD, 13.5f));
             id.setToolTipText("Name der Spur: Kleinbuchstaben, Ziffern, - und _");
             instrument.setToolTipText("Instrument oder Klangfarbe, wie die KI sie verstehen soll");
-            program.setToolTipText("General-MIDI-Programm 0–127");
+            program.setToolTipText("Das Instrument nach General MIDI, mit dem die Spur klingt");
+            program.setMaximumRowCount(16);
+            again.setToolTipText("Nur diese Spur von der KI neu komponieren lassen; die anderen bleiben");
+            again.setMargin(new Insets(4, 6, 4, 6));
             listen.setToolTipText("Diese Spur allein anhören");
             listen.setMargin(new Insets(4, 6, 4, 6));
             // The cross in the cap takes the track out of the arrangement.
@@ -347,17 +356,13 @@ public final class MixerPanel extends JPanel {
             c.insets = new Insets(0, 0, 8, 0);
             c.gridy = 0;
             add(id, c);
-            // Role and General MIDI program share a row: a strip is narrow, but need not be tall.
-            JPanel roleAndProgram = new JPanel(new BorderLayout(6, 0));
-            roleAndProgram.setOpaque(false);
-            roleAndProgram.add(labelled("Rolle", role), BorderLayout.CENTER);
-            JComponent gm = labelled("GM", program);
-            gm.setPreferredSize(new Dimension(58, 10));
-            roleAndProgram.add(gm, BorderLayout.EAST);
+            c.insets = new Insets(0, 0, 6, 0);
             c.gridy = 1;
-            add(roleAndProgram, c);
+            add(labelled("Rolle", role), c);
             c.gridy = 2;
-            add(labelled("Klang", instrument), c);
+            add(labelled("Instrument", program), c);
+            c.gridy = 3;
+            add(labelled("Beschreibung für die KI", instrument), c);
             c.gridy = 4;
             add(labelled("Soundbank", bank), c);
 
@@ -367,9 +372,13 @@ public final class MixerPanel extends JPanel {
             meters.add(right);
             meters.setPreferredSize(new Dimension(30, 44));
             meters.setMinimumSize(new Dimension(30, 44));
+            JPanel pair = new JPanel(new java.awt.GridLayout(1, 2, 6, 0));
+            pair.setOpaque(false);
+            pair.add(listen);
+            pair.add(again);
             JPanel keys = new JPanel(new BorderLayout());
             keys.setOpaque(false);
-            keys.add(listen, BorderLayout.SOUTH);
+            keys.add(pair, BorderLayout.SOUTH);
             c.gridy = 5;
             c.gridwidth = 1;
             c.weightx = 0;
@@ -403,7 +412,21 @@ public final class MixerPanel extends JPanel {
             instrument.addActionListener(event -> commit(true));
             role.addActionListener(event -> commit(true));
             bank.addActionListener(event -> commit(true));
-            program.addChangeListener(event -> commit(true));
+            program.addActionListener(event -> {
+                if (!filling) {
+                    // A description that only named the old instrument follows the new one.
+                    String old = GeneralMidi.name(track.program());
+                    if (instrument.getText().trim().equalsIgnoreCase(old)) {
+                        instrument.setText(GeneralMidi.name(program.getSelectedIndex()));
+                    }
+                    commit(true);
+                }
+            });
+            again.addActionListener(event -> {
+                if (commit(true)) {
+                    recompose.again(track.id());
+                }
+            });
             listen.addActionListener(event -> {
                 if (commit(true)) {
                     solo.listen(track.id());
@@ -421,6 +444,7 @@ public final class MixerPanel extends JPanel {
             instrument.setEnabled(enabled);
             program.setEnabled(enabled);
             bank.setEnabled(enabled);
+            again.setEnabled(enabled);
             removable = enabled;
             repaint();
         }
@@ -459,7 +483,7 @@ public final class MixerPanel extends JPanel {
                 role.setSelectedItem(shown.role());
                 instrument.setText(shown.instrument());
                 instrument.setCaretPosition(0);
-                program.setValue(Integer.valueOf(shown.program()));
+                program.setSelectedIndex(shown.program());
                 bank.setSelectedItem(bankName(shown.libraryId()));
             } finally {
                 filling = false;
@@ -502,7 +526,7 @@ public final class MixerPanel extends JPanel {
             }
             try {
                 MusicTrack typed = new MusicTrack(id.getText(), String.valueOf(role.getSelectedItem()),
-                        instrument.getText(), ((Number) program.getValue()).intValue(),
+                        instrument.getText(), Math.max(0, program.getSelectedIndex()),
                         bankId((String) bank.getSelectedItem()));
                 if (containsId(typed.id(), this)) {
                     throw new IllegalArgumentException("Den Spurnamen gibt es schon: " + typed.id());
@@ -587,7 +611,7 @@ public final class MixerPanel extends JPanel {
     private final class AddStrip extends JButton {
         AddStrip() {
             super("+ Spur");
-            Dimension size = new Dimension(112, 284);
+            Dimension size = new Dimension(112, 326);
             setPreferredSize(size);
             setMinimumSize(size);
             setMaximumSize(new Dimension(112, Integer.MAX_VALUE));

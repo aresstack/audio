@@ -132,6 +132,14 @@ public final class AudioStudioTheme {
         UIManager.put("Spinner.buttonBackground", WELL);
         UIManager.put("Spinner.buttonArrowColor", TEXT_DIM);
 
+        UIManager.put("ToggleButton.background", RAISED);
+        UIManager.put("ToggleButton.foreground", TEXT_DIM);
+        UIManager.put("ToggleButton.hoverBackground", new Color(0x353945));
+        UIManager.put("ToggleButton.selectedBackground", new Color(0x5A2C46));
+        UIManager.put("ToggleButton.selectedForeground", Color.WHITE);
+        UIManager.put("ToggleButton.pressedBackground", new Color(0x40303C));
+        UIManager.put("ToggleButton.arc", 14);
+        UIManager.put("ToggleButton.margin", new Insets(6, 10, 6, 10));
         UIManager.put("CheckBox.foreground", TEXT);
         UIManager.put("CheckBox.icon.background", WELL);
         UIManager.put("CheckBox.icon.borderColor", STROKE);
