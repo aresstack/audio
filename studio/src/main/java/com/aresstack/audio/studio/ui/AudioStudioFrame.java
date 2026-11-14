@@ -32,7 +32,6 @@ import java.net.PasswordAuthentication;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.atomic.AtomicReference;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -447,7 +446,7 @@ public final class AudioStudioFrame extends JFrame {
             return new KipitzChatClient(url, new String(secret), model.getText().trim(),
                     configureNetworkRoutes());
         } finally {
-            Arrays.fill(secret, '\\0');
+            Arrays.fill(secret, (char) 0);
         }
     }
 
