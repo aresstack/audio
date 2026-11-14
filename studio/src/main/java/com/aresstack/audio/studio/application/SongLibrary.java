@@ -157,7 +157,28 @@ public final class SongLibrary {
         if (clean.isEmpty()) {
             clean = "Neues Stück";
         }
-        String slug = clean.toLowerCase(Locale.ROOT).replace("ä", "ae").replace("ö", "oe").replace("ü", "ue")
+        Path folder = folder(clean);
+        save(folder, clean, null);
+        return folder;
+    }
+
+    /**
+     * Makes a new, empty piece that has no name of its own yet: it is called after the title the
+     * AI gives its plan. Until then its folder, made from the first words of the hint, names it.
+     */
+    public Path createUntitled(String hint) throws IOException {
+        StringBuilder words = new StringBuilder();
+        int count = 0;
+        for (String word : (hint == null ? "" : hint.trim()).split("\\s+")) {
+            if (!word.isEmpty() && count++ < 4) {
+                words.append(words.length() == 0 ? "" : " ").append(word);
+            }
+        }
+        return folder(words.length() == 0 ? "Neues Stück" : words.toString());
+    }
+
+    private Path folder(String name) throws IOException {
+        String slug = name.toLowerCase(Locale.ROOT).replace("ä", "ae").replace("ö", "oe").replace("ü", "ue")
                 .replace("ß", "ss").replaceAll("[^a-z0-9]+", "-").replaceAll("^-+|-+$", "");
         if (slug.isEmpty()) {
             slug = "stueck";
@@ -170,7 +191,6 @@ public final class SongLibrary {
             folder = root.resolve(slug + "-" + number);
         }
         Files.createDirectories(folder);
-        save(folder, clean, null);
         return folder;
     }
 

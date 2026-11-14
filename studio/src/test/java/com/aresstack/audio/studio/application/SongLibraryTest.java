@@ -43,4 +43,21 @@ public final class SongLibraryTest {
     public void aLibraryThatDoesNotExistYetIsEmpty() {
         Assert.assertTrue(new SongLibrary(folder.getRoot().toPath().resolve("nothing")).songs().isEmpty());
     }
+
+    @Test
+    public void aPieceWithoutANameIsCalledAfterThePlanOfTheAi() throws Exception {
+        SongLibrary library = new SongLibrary(folder.newFolder("untitled").toPath());
+        Path first = library.createUntitled("  A snowy sleigh ride through the quiet forest at night ");
+        Path second = library.createUntitled("A snowy sleigh ride, but faster");
+
+        Assert.assertEquals("a-snowy-sleigh-ride", first.getFileName().toString());
+        Assert.assertEquals("a second piece from the same words gets a folder of its own",
+                "a-snowy-sleigh-ride-2", second.getFileName().toString());
+        Assert.assertEquals("until the plan is there, the folder names the piece",
+                "a-snowy-sleigh-ride", library.name(first));
+        Files.write(first.resolve("composition-plan.json"),
+                "{\"title\":\"Winter Bells\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Assert.assertEquals("Winter Bells", library.name(first));
+        Assert.assertEquals("stueck", library.createUntitled("").getFileName().toString().replace("neues-", ""));
+    }
 }

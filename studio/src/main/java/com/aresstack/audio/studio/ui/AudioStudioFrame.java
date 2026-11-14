@@ -915,10 +915,87 @@ public final class AudioStudioFrame extends JFrame {
     /** The one key: the AI chooses the instruments first, or the tracks of the mixer are composed as they are. */
     private void compose() {
         if (aiChooses.isSelected()) {
-            proposeInstruments(true);
+            if (startAfresh()) {
+                proposeInstruments(true);
+            }
         } else {
             generate();
         }
+    }
+
+    /**
+     * The AI shall choose the instruments, but the piece in use is composed already. Its kept
+     * answers would simply be used again and nothing would change, so the studio asks: a new
+     * piece beside this one, or this one anew.
+     *
+     * @return whether composing shall go on
+     */
+    private boolean startAfresh() {
+        Path folder = Paths.get(directory.getText().trim());
+        if (!Files.isRegularFile(folder.resolve("composition-plan.json"))
+                && !Files.isRegularFile(folder.resolve("instrument-proposal.json"))
+                && !Files.isRegularFile(folder.resolve("arrangement.tsv"))) {
+            return true;
+        }
+        Object[] choices = {"Neues Stück", "Dieses ersetzen", "Abbrechen"};
+        int choice = JOptionPane.showOptionDialog(this,
+                "„" + songs.name(folder) + "“ ist schon komponiert.\n\n"
+                        + "Neues Stück: es kommt als eigenes Stück in die Liste, dieses bleibt, wie es ist.\n"
+                        + "Dieses ersetzen: Instrumente und Noten werden neu erfunden; "
+                        + "die bisherige Fassung liegt danach im Ordner „earlier“.",
+                "Komponieren", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, choices, choices[0]);
+        try {
+            if (choice == 0) {
+                keepSong();
+                stopPlayback();
+                Path fresh = songs.createUntitled(description.getText());
+                directory.setText(fresh.toString());
+                arrangementFile.setText("");
+                loadArrangementForCurrentDirectory(new Properties());
+                saveSettings(false);
+                refreshSongs();
+                append("Neues Stück angelegt; seinen Namen bekommt es vom Plan der KI: " + fresh.getFileName());
+                return true;
+            }
+            if (choice == 1) {
+                int put = putAnswersAside(folder, null);
+                append("Das Stück wird neu komponiert; " + put + " bisherige Antworten liegen im Ordner „earlier“.");
+                return true;
+            }
+        } catch (IOException failed) {
+            message("Das ließ sich nicht vorbereiten: " + failed.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * Moves the kept answers of the AI into the folder "earlier", so that it is asked anew.
+     *
+     * @param only the one file to move, or {@code null} for the plan, the proposal and all tracks
+     */
+    private int putAnswersAside(Path folder, String only) throws IOException {
+        int put = 0;
+        if (!Files.isDirectory(folder)) {
+            return 0;
+        }
+        List<Path> kept = new ArrayList<Path>();
+        try (java.util.stream.Stream<Path> files = Files.list(folder)) {
+            for (Path file : (Iterable<Path>) files::iterator) {
+                String name = file.getFileName().toString();
+                boolean answer = name.endsWith(".json") && !name.equals(TrackArrangementStore.FILE_NAME)
+                        && !name.equals(com.aresstack.audio.studio.stage.SpatialSceneStore.FILE_NAME);
+                if (Files.isRegularFile(file) && (only == null ? answer : name.equals(only))) {
+                    kept.add(file);
+                }
+            }
+        }
+        for (Path file : kept) {
+            Path aside = Files.createDirectories(folder.resolve("earlier"));
+            Files.move(file, aside.resolve(System.currentTimeMillis() + "-" + file.getFileName()),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            put++;
+        }
+        return put;
     }
 
     /** Has the AI compose one track anew: its kept answer is put aside, the other tracks stay as they are. */
@@ -1003,6 +1080,15 @@ public final class AudioStudioFrame extends JFrame {
         final int parallel = (Integer) parallelRequests.getValue();
         if (!saveSettings(false)) {
             return;
+        }
+        if (!autopilot) {
+            // A proposal is asked for anew each time; the one kept from before would only come again.
+            try {
+                putAnswersAside(output, "instrument-proposal.json");
+            } catch (IOException failed) {
+                message("Der bisherige Vorschlag ließ sich nicht beiseitelegen: " + failed.getMessage());
+                return;
+            }
         }
         activeClient = client;
         start(new Operation() {
