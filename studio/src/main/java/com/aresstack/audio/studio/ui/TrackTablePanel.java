@@ -55,7 +55,7 @@ public final class TrackTablePanel extends JPanel {
                 int column = table.columnAtPoint(event.getPoint());
                 int row = table.rowAtPoint(event.getPoint());
                 if (column == 5 && row >= 0) {
-                    remove(row);
+                    removeTrack(row);
                 }
             }
         });
@@ -132,7 +132,7 @@ public final class TrackTablePanel extends JPanel {
         changed();
     }
 
-    private void remove(int row) {
+    private void removeTrack(int row) {
         if (row >= model.tracks.size()) {
             return;
         }
