@@ -180,34 +180,40 @@ public final class AudioStudioFrame extends JFrame {
             trackControls.add(programControls, BorderLayout.EAST);
             addRow(fields, row++, PART_NAMES[index] + ":", trackControls);
         }
-        JPanel workflow = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 4));
+        JPanel steps = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
         JButton newSong = new JButton("1 · Neues Stück");
         newSong.addActionListener(event -> createNewComposition());
-        workflow.add(newSong);
-        JButton demo = new JButton("Demo laden");
+        steps.add(newSong);
+        JButton demo = new JButton("Demo laden (ohne KI)");
         demo.addActionListener(event -> loadDemo());
-        workflow.add(demo);
+        steps.add(demo);
         generateButton.setText("2 · Mit Gemma komponieren");
-        workflow.add(generateButton);
+        steps.add(generateButton);
         renderButton.setText("3 · Rendern");
-        workflow.add(renderButton);
+        steps.add(renderButton);
         JButton listen = new JButton("4 · Anhören");
         listen.addActionListener(event -> play());
-        workflow.add(listen);
-        workflow.add(playbackSelection);
+        steps.add(listen);
+
+        JPanel secondary = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
+        secondary.add(new JLabel("Wiedergabe:"));
+        secondary.add(playbackSelection);
         JButton stop = new JButton("Stopp");
         stop.addActionListener(event -> stopPlayback());
-        workflow.add(stop);
-        workflow.add(cancelButton);
+        secondary.add(stop);
+        secondary.add(cancelButton);
         JButton inspect = new JButton("Plan / Spuren");
         inspect.addActionListener(event -> inspectComposition());
-        workflow.add(inspect);
+        secondary.add(inspect);
         JButton save = new JButton("Einstellungen speichern");
         save.addActionListener(event -> saveSettings(true));
 
-        JPanel toolbar = new JPanel(new BorderLayout(5, 0));
-        toolbar.add(workflow, BorderLayout.CENTER);
-        toolbar.add(save, BorderLayout.EAST);
+        JPanel lower = new JPanel(new BorderLayout());
+        lower.add(secondary, BorderLayout.WEST);
+        lower.add(save, BorderLayout.EAST);
+        JPanel toolbar = new JPanel(new BorderLayout(5, 2));
+        toolbar.add(steps, BorderLayout.NORTH);
+        toolbar.add(lower, BorderLayout.SOUTH);
 
         JPanel panel = new JPanel(new BorderLayout(4, 8));
         panel.add(toolbar, BorderLayout.NORTH);
