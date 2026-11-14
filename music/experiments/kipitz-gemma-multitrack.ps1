@@ -2,14 +2,90 @@
 # Let Gemma compose an original eight-bar song in separate instrument parts.
 # Render an editable multitrack MIDI and preview WAVs using the Java 8 renderer compiled by Gradle.
 
-param([switch]$Regenerate)
+param(
+    [switch]$Regenerate,
+    [switch]$SelfTest
+)
 
 $ErrorActionPreference = "Stop"
 
-. (Join-Path $PSScriptRoot "harmonic-pitch.ps1")
+# Keep the original Gemma JSON intact. Correct only notes used for the rendered arrangement.
+# Choose the nearest allowed chord tone within the instrument range; on a tie prefer the lower note.
+function Resolve-HarmonicPitch {
+    param(
+        [int]$Pitch,
+        [string]$Chord,
+        [string]$PartId
+    )
 
-if (-not $ApiKey) { throw "ApiKey is not set in this PowerShell session." }
-if (-not $CompletionsUrl) { throw "CompletionsUrl is not set in this PowerShell session." }
+    $AllowedClasses = switch ($Chord) {
+        "C" { @(0, 4, 7) }
+        "G" { @(7, 11, 2) }
+        "Am" { @(9, 0, 4) }
+        "F" { @(5, 9, 0) }
+        default { throw "Unsupported chord: $Chord" }
+    }
+
+    if ($PartId -eq "bass") {
+        $Minimum = 36
+        $Maximum = 60
+    } elseif ($PartId -eq "harmony") {
+        $Minimum = 48
+        $Maximum = 76
+    } else {
+        throw "Unsupported harmonic part: $PartId"
+    }
+
+    if ($Pitch -ge $Minimum -and $Pitch -le $Maximum -and $AllowedClasses -contains ($Pitch % 12)) {
+        return $Pitch
+    }
+
+    $Nearest = -1
+    $SmallestDistance = 999
+    for ($Candidate = $Minimum; $Candidate -le $Maximum; $Candidate++) {
+        if ($AllowedClasses -notcontains ($Candidate % 12)) {
+            continue
+        }
+        if ($Candidate -gt $Pitch) {
+            $Distance = $Candidate - $Pitch
+        } else {
+            $Distance = $Pitch - $Candidate
+        }
+        if ($Distance -lt $SmallestDistance) {
+            $Nearest = $Candidate
+            $SmallestDistance = $Distance
+        }
+    }
+
+    if ($Nearest -lt 0) {
+        throw "No suitable chord tone for $PartId and chord $Chord."
+    }
+    return $Nearest
+}
+
+function Test-HarmonicPitch {
+    $Cases = @(
+        @{ pitch = 48; chord = "G"; part = "bass"; expected = 47 },
+        @{ pitch = 43; chord = "G"; part = "bass"; expected = 43 },
+        @{ pitch = 52; chord = "C"; part = "harmony"; expected = 52 },
+        @{ pitch = 50; chord = "Am"; part = "harmony"; expected = 48 },
+        @{ pitch = 55; chord = "F"; part = "bass"; expected = 53 },
+        @{ pitch = 60; chord = "C"; part = "bass"; expected = 60 },
+        @{ pitch = 120; chord = "G"; part = "bass"; expected = 59 }
+    )
+    foreach ($Case in $Cases) {
+        $Actual = Resolve-HarmonicPitch -Pitch $Case.pitch -Chord $Case.chord -PartId $Case.part
+        if ($Actual -ne $Case.expected) {
+            throw "Pitch test failed for $($Case.part) $($Case.chord): expected $($Case.expected), got $Actual."
+        }
+    }
+    Write-Host "Harmonic pitch tests passed: $($Cases.Count) cases."
+}
+
+if ($SelfTest) {
+    Test-HarmonicPitch
+    return
+}
 
 $Model = "google/gemma-4-31B-it"
 $OutputDirectory = Join-Path $env:TEMP "kipitz-gemma-multitrack"
@@ -29,6 +105,13 @@ function Invoke-KipitzCompletion {
         } catch {
             Write-Warning "Could not reuse $StepName. Requesting it again: $($_.Exception.Message)"
         }
+    }
+
+    if (-not $ApiKey) {
+        throw "ApiKey is not set in this PowerShell session, and no cached result is available for $StepName."
+    }
+    if (-not $CompletionsUrl) {
+        throw "CompletionsUrl is not set in this PowerShell session, and no cached result is available for $StepName."
     }
 
     $Body = @{
@@ -232,9 +315,33 @@ Set-Content -Path $ArrangementFile -Value $Lines -Encoding UTF8
 $FullPlan = @{ composition = $Plan; tracks = $Parts }
 Set-Content -Path (Join-Path $OutputDirectory "full-composition.json") -Value ($FullPlan | ConvertTo-Json -Depth 20) -Encoding UTF8
 
-$RendererJar = Join-Path $PSScriptRoot "..\build\libs\music-renderer.jar"
-if (-not (Test-Path $RendererJar)) {
-    throw "Missing music-renderer.jar. First build it with gradle :music:jar. Expected: $RendererJar"
+# Prefer the local Gradle-built JAR when running from a saved script.
+# When pasted interactively, PSScriptRoot is empty, so use the public rolling release instead.
+$RendererJar = $null
+if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    $LocalRenderer = Join-Path $PSScriptRoot "..\build\libs\music-renderer.jar"
+    if (Test-Path $LocalRenderer -PathType Leaf) {
+        $RendererJar = (Resolve-Path $LocalRenderer).Path
+    }
+}
+if (-not $RendererJar) {
+    $RendererDirectory = Join-Path $env:TEMP "aresstack-audio-renderers"
+    New-Item -ItemType Directory -Path $RendererDirectory -Force | Out-Null
+    $RendererJar = Join-Path $RendererDirectory "music-renderer.jar"
+    if (-not (Test-Path $RendererJar -PathType Leaf) -or (Get-Item $RendererJar).Length -lt 1000) {
+        $RendererUrl = "https://github.com/aresstack/audio/releases/download/latest/music-renderer.jar"
+        Write-Host "Downloading the music renderer from $RendererUrl"
+        try {
+            Invoke-WebRequest -Uri $RendererUrl -OutFile $RendererJar -UseBasicParsing -ErrorAction Stop
+        } catch {
+            if (Test-Path $RendererJar) { Remove-Item $RendererJar -Force }
+            throw "Could not download music-renderer.jar from the rolling release: $($_.Exception.Message)"
+        }
+        if ((Get-Item $RendererJar).Length -lt 1000) {
+            Remove-Item $RendererJar -Force
+            throw "Downloaded music-renderer.jar is unexpectedly small."
+        }
+    }
 }
 if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
     throw "Java is not on PATH. Add a Java 8+ runtime to PATH and rerun rendering."
