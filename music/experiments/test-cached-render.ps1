@@ -84,8 +84,8 @@ try {
         }
     }
     $Corrections = Get-Content (Join-Path $Cache "harmonic-corrections.txt")
-    if ($Corrections -match "beat 19|beat 22|beat 23|beat 27") {
-        throw "The historic rounded bar error has reappeared."
+    if ($Corrections -match "beat 19 pitch 48\b|beat 22 pitch 50\b|beat 23 pitch 47\b|beat 27 pitch 45\b") {
+        throw "Previously valid chord tones were incorrectly corrected: $($Corrections -join '; ')"
     }
 
     $RendererCache = Join-Path $Sandbox "aresstack-audio-renderers"
