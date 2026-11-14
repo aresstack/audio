@@ -2108,7 +2108,10 @@ public final class AudioStudioFrame extends JFrame {
         if (trackTable != null) {
             try {
                 int count = trackTable.tracks().size();
-                trackCount.setText(count == 0 ? "KEINE SPUR" : count + (count == 1 ? " SPUR" : " SPUREN") + " VON 16");
+                // Only what there is: "6 of 16" read as if ten more tracks were hidden somewhere.
+                trackCount.setText(count == 0 ? "KEINE SPUR" : count + (count == 1 ? " SPUR" : " SPUREN"));
+                trackCount.setToolTipText("Dieses Stück hat " + count + (count == 1 ? " Spur" : " Spuren")
+                        + "; möglich sind höchstens 16.");
             } catch (IllegalArgumentException empty) {
                 trackCount.setText("KEINE SPUR");
             }

@@ -730,6 +730,12 @@ public final class MixerPanel extends JPanel {
             FontMetrics metrics = g.getFontMetrics();
             String text = getText().toUpperCase(java.util.Locale.ROOT);
             g.drawString(text, (getWidth() - metrics.stringWidth(text)) / 2f, getHeight() / 2f + 4);
+            // Says how many more tracks fit, so that the end of the row reads as the end.
+            int free = TrackArrangement.MAX_TRACKS - strips.size();
+            String room = free <= 0 ? "ALLE 16 BELEGT" : "NOCH " + free + " MÖGLICH";
+            g.setFont(AudioStudioTheme.lettering(9f));
+            g.setColor(AudioStudioTheme.TEXT_FAINT);
+            g.drawString(room, (getWidth() - g.getFontMetrics().stringWidth(room)) / 2f, getHeight() / 2f + 24);
             g.dispose();
         }
     }
