@@ -15,6 +15,13 @@ tasks.named('jar') {
     manifest {
         attributes 'Main-Class': application.mainClass.get()
     }
+
+    // Bundle runtime dependencies so the rolling release works with plain java -jar.
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
 }
 
 tasks.named('run') {

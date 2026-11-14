@@ -11,3 +11,11 @@ gradle :music:renderDemo
 ```
 
 Listen to `music/build/demo-output/arrangement.wav`; open `arrangement.mid` in a MIDI editor. Per-track WAV files (`melody`, `harmony`, `bass`, `drums`) are also exported.
+
+## Gemma retry and harmonic normalization
+
+The PowerShell experiment stores every successful model response in `%TEMP%\\kipitz-gemma-multitrack`. On a later run it **reuses** those files instead of requesting expensive already-finished parts again. Add `-Regenerate` to regenerate all steps deliberately.
+
+The model sometimes produces a non-chord pitch (e.g. MIDI 48/C over G in the bass). The `harmonic-pitch.ps1` helper picks the nearest legal triad note in the requested instrument range, logging each correction to `harmonic-corrections.txt`. Original responses (`bass.json`, etc.) are never overwritten by normalization. Other invalid timing or malformed model output is still rejected.
+
+The offline regression tests are in `experiments/test-harmonic-pitch.ps1`; the GitHub workflow checks their results as well as the PowerShell parser.
