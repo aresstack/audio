@@ -301,7 +301,7 @@ public final class AudioStudioFrame extends JFrame {
         engines.add(sfizzHelp);
         addRow(fields, row++, "Sampler:", engines);
         addRow(fields, row++, "Hinweis:",
-                new JLabel("SF2/SF3 benötigen FluidSynth, SFZ benötigt sfizz; ohne Engine funktioniert die Java-Synthese."));
+                new JLabel("SF2: Java/Gervill ohne Installation · SF3: FluidSynth · SFZ: sfizz."));
 
 
         JPanel actionBar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 6));
@@ -655,6 +655,11 @@ public final class AudioStudioFrame extends JFrame {
             }
             append("Proxy: " + new AudioProxyRoutes(networkSettings()).describe());
             directory.setText(saved.getProperty("outputDirectory", directory.getText()));
+            Path previousArrangement = Paths.get(directory.getText().trim(), "arrangement.tsv");
+            if (Files.isRegularFile(previousArrangement)) {
+                arrangementFile.setText(previousArrangement.toString());
+                append("Vorhandene Komposition wiedergefunden: " + previousArrangement);
+            }
             sf2Engine.setSelectedIndex("FLUIDSYNTH".equals(saved.getProperty("sf2Engine"))
                     ? 1 : 0);
             fluidSynth.setText(saved.getProperty("fluidSynth", fluidSynth.getText()));

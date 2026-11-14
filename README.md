@@ -116,3 +116,14 @@ An optional proxy-authentication entry can be named in **Proxy-Anmeldung**, or i
 UI layout: FlatLaf with the rounded, card-based 3d4j design translated to Swing, using navy/teal rather than the game's pink theme. The Java 8 runtime smoke test installs the theme, resolves a disabled proxy route, loads KeePassRPC and renders the supplied demo headlessly.
 
 **Scope:** CI validates Java 8, simulated KIPITZ calls through a local HTTP proxy, proxy routing modes, and KeePassRPC class loading. Actual company PAC/KeePass pairing and a GUI review must be tested on the target Windows environment; no corporate network or secret is available to CI.
+
+
+### Built-in Java Gervill for SF2 (the new default)
+
+**FluidSynth is no longer required for SF2 sample playback or WAV export.** Audio Studio now renders SF2 instruments (including GeneralUser GS, Spanish Classical Guitar and FSBS Clean Electric Guitar) with the **Gervill software synthesizer built into Java 8 and newer**. It produces 44.1-kHz stereo WAVs offline without a sound card or any native `fluidsynth.exe`.
+
+Under **3 · Einstellungen → SF2-Synthesizer**, the default is **Java / Gervill (integriert)**. Optionally switch to FluidSynth if you have it installed. **SF3** (e.g. MuseScore General) still requires FluidSynth, and **SFZ** requires sfizz. If an external executable is missing, the original Java audio track is preserved and used as a fallback instead of losing the composition.
+
+The JDK does not expose Gervill's offline PCM stream through its standard public Java Sound API. Audio Studio isolates this internal API access in a second Java process using the same installed Java runtime. For Java 9+ the program automatically supplies the necessary `--add-exports` flag; Java 8 requires no flag. Users do not have to configure these parameters manually. CI renders the actual GeneralUser SF2 on both Java 8 and Java 21, verifies non-silent WAV output and runs the studio's GeneralUser end-to-end smoke test.
+
+To continue an interrupted song, reopen Audio Studio. It automatically recognizes an existing `arrangement.tsv` in the saved output directory. Click **3 · Rendern**, then **4 · Anhören**. No additional AI requests are made.
