@@ -25,6 +25,20 @@ public final class GemmaMusicComposerTest {
         writePlan(output);
         writePart(output, "melody", 10, new double[]{0, 4, 8, 12, 16, 20, 24, 28},
                 new int[]{72, 72, 72, 72, 72, 72, 72, 72});
+        // Keep a cached C-major note ending beyond beat 32 to reproduce the user's crash.
+        Path originalMelody = output.resolve("melody.json");
+        JsonObject melody = new com.google.gson.JsonParser().parse(
+                new String(Files.readAllBytes(originalMelody), StandardCharsets.UTF_8))
+                .getAsJsonObject();
+        JsonObject overflowingNote = new JsonObject();
+        overflowingNote.addProperty("beat", 29.5);
+        overflowingNote.addProperty("duration", 4.0);
+        overflowingNote.addProperty("pitch", 84);
+        overflowingNote.addProperty("velocity", 70);
+        melody.getAsJsonArray("notes").add(overflowingNote);
+        save(originalMelody, melody);
+        String unchangedMelody = new String(Files.readAllBytes(originalMelody), StandardCharsets.UTF_8);
+
         writePart(output, "harmony", 48, new double[]{0, 4, 8, 12, 16, 20, 24, 28},
                 new int[]{52, 52, 52, 52, 52, 52, 52, 52});
         writePart(output, "bass", 32, new double[]{0, 4, 8, 12, 16, 20, 24, 27, 31.75},
@@ -46,9 +60,20 @@ public final class GemmaMusicComposerTest {
         Assert.assertTrue(content.contains("note\tbass\t12960\t480\t45\t70"));
         Assert.assertTrue(content.contains("note\tbass\t15240\t120\t47\t70"));
         Assert.assertTrue(content.contains("track\tdrums\t0\t9"));
+        Assert.assertTrue(content.contains("note\tmelody\t14160\t1200\t84\t70"));
+        String corrections = new String(Files.readAllBytes(
+                output.resolve("note-corrections.tsv")), StandardCharsets.UTF_8);
+        Assert.assertTrue(corrections.contains("melody\t9\tduration\t4.0\t2.5"));
+        Assert.assertEquals(unchangedMelody,
+                new String(Files.readAllBytes(originalMelody), StandardCharsets.UTF_8));
         try (java.util.stream.Stream<Path> generatedFiles = Files.list(output)) {
-            Assert.assertEquals(6L, generatedFiles.count());
+            Assert.assertEquals(7L, generatedFiles.count());
         }
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void rejectsTooSmallModelTokenLimit() {
+        new GemmaMusicComposer(null, 255);
     }
 
     @Test(expected = IOException.class)

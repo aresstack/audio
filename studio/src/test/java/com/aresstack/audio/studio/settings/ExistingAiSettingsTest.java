@@ -21,7 +21,8 @@ public final class ExistingAiSettingsTest {
         Files.write(directory.resolve("generator.properties"),
                 ("chat.baseUrl=https://kipitz.example/v1\n"
                 + "chat.model=google/gemma-4-31B-it\n"
-                + "chat.apiKeyRef=keepass:KIPITZ\n").getBytes("UTF-8"));
+                + "chat.apiKeyRef=keepass:KIPITZ\n"
+                + "chat.maxTokens=24576\n").getBytes("UTF-8"));
         try {
             System.setProperty("user.home", home.toString());
             Properties result = ExistingAiSettings.withDefaults(new Properties());
@@ -29,6 +30,7 @@ public final class ExistingAiSettingsTest {
                     result.getProperty("endpoint"));
             Assert.assertEquals("google/gemma-4-31B-it", result.getProperty("model"));
             Assert.assertEquals("KIPITZ", result.getProperty("keepassEntry"));
+            Assert.assertEquals(24576, ExistingAiSettings.maxTokens(result));
             Assert.assertNull(result.getProperty("apiKey"));
         } finally {
             if (original == null) {
@@ -48,6 +50,18 @@ public final class ExistingAiSettingsTest {
         Properties result = ExistingAiSettings.withDefaults(own);
         Assert.assertEquals("local-model", result.getProperty("model"));
         Assert.assertEquals("Audio entry", result.getProperty("keepassEntry"));
+    }
+
+    @Test
+    public void keepsOwnTokenLimitAndUses3d4jFallbackRules() {
+        Properties own = new Properties();
+        own.setProperty("maxTokens", "4096");
+        Assert.assertEquals(4096, ExistingAiSettings.maxTokens(
+                ExistingAiSettings.withDefaults(own)));
+        own.setProperty("maxTokens", "128");
+        Assert.assertEquals(256, ExistingAiSettings.maxTokens(own));
+        own.setProperty("maxTokens", "invalid");
+        Assert.assertEquals(16384, ExistingAiSettings.maxTokens(own));
     }
 
     @Test

@@ -22,9 +22,18 @@ public final class GemmaMusicComposer {
     private static final int[] PROGRAMS = {10, 48, 32, 0};
     private static final int[] CHANNELS = {0, 1, 2, 9};
     private final KipitzChatClient client;
+    private final int maxTokens;
 
     public GemmaMusicComposer(KipitzChatClient client) {
+        this(client, 16384);
+    }
+
+    public GemmaMusicComposer(KipitzChatClient client, int maxTokens) {
+        if (maxTokens < 256) {
+            throw new IllegalArgumentException("The model token limit must be at least 256.");
+        }
         this.client = client;
+        this.maxTokens = maxTokens;
     }
 
     public Path compose(String description, Path directory, Progress progress) throws IOException {
@@ -35,7 +44,7 @@ public final class GemmaMusicComposer {
                 + "bars=8, chords=[\"C\",\"G\",\"Am\",\"F\",\"C\",\"G\",\"F\",\"G\"], arrangementNotes."
                 + "\nKeep these exact musical constraints. No notes yet. Return only JSON.";
         JsonObject plan = client.generate("Return valid JSON only, with no Markdown.", planPrompt,
-                2048, directory.resolve("composition-plan.json"));
+                Math.min(2048, maxTokens), directory.resolve("composition-plan.json"));
         validatePlan(plan);
 
         List<String> arrangement = new ArrayList<String>();
@@ -59,7 +68,7 @@ public final class GemmaMusicComposer {
                     + "Align all beats to multiples of 0.25. All notes must use absolute song beats. "
                     + "Write every note explicitly; no Markdown.";
             JsonObject part = client.generate("Compose original instrumental music. Return valid JSON only.",
-                    prompt, 8192, directory.resolve(partName + ".json"));
+                    prompt, maxTokens, directory.resolve(partName + ".json"));
             if (!partName.equals(part.get("part").getAsString())
                     || part.get("program").getAsInt() != PROGRAMS[index]) {
                 throw new IOException("Unexpected part identity or program: " + partName);

@@ -37,6 +37,13 @@ public final class ExistingAiSettings {
                 merged.setProperty("model", value);
             }
         }
+        if (missing(merged, "maxTokens")) {
+            String configured = first(game.getProperty("chat.maxTokens"),
+                    enterprise.getProperty("chat.maxTokens"));
+            if (configured != null) {
+                merged.setProperty("maxTokens", configured);
+            }
+        }
         if (missing(merged, "keepassEntry")) {
             String reference = first(game.getProperty("chat.apiKeyRef"), enterprise.getProperty("chat.apiKeyRef"));
             if (reference != null) {
@@ -45,6 +52,15 @@ public final class ExistingAiSettings {
             }
         }
         return merged;
+    }
+
+    /** Match 3d4j: use at least 256 tokens or default to 16384 when malformed. */
+    public static int maxTokens(Properties settings) {
+        try {
+            return Math.max(256, Integer.parseInt(settings.getProperty("maxTokens", "16384")));
+        } catch (NumberFormatException invalid) {
+            return 16384;
+        }
     }
 
     public static String completionsEndpoint(String base) {
