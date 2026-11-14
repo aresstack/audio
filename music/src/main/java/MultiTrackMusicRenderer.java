@@ -52,12 +52,14 @@ public final class MultiTrackMusicRenderer {
             String[] fields = line.split("\\t");
             if (fields.length == 2 && "tempo".equals(fields[0])) {
                 arrangement.tempo = Integer.parseInt(fields[1]);
-            } else if (fields.length == 4 && "track".equals(fields[0])) {
-                if (arrangement.parts.containsKey(fields[1])) {
-                    throw new IllegalArgumentException("Duplicate part: " + fields[1]);
+            } else if ((fields.length == 4 || fields.length == 5) && "track".equals(fields[0])) {
+                if (!fields[1].matches("[a-z][a-z0-9_-]{0,28}")
+                        || arrangement.parts.containsKey(fields[1])) {
+                    throw new IllegalArgumentException("Invalid or duplicate track ID: " + fields[1]);
                 }
+                String role = fields.length == 5 ? fields[4] : fields[1];
                 arrangement.parts.put(fields[1], new Part(fields[1], Integer.parseInt(fields[2]),
-                        Integer.parseInt(fields[3])));
+                        Integer.parseInt(fields[3]), role));
             } else if (fields.length == 6 && "note".equals(fields[0])) {
                 Part part = arrangement.parts.get(fields[1]);
                 if (part == null) {
@@ -74,13 +76,18 @@ public final class MultiTrackMusicRenderer {
                 throw new IllegalArgumentException("Invalid input line: " + line);
             }
         }
-        if (arrangement.tempo < 60 || arrangement.tempo > 180 || arrangement.parts.size() != 4) {
-            throw new IllegalArgumentException("Require tempo 60..180 and exactly four tracks.");
+        if (arrangement.tempo < 60 || arrangement.tempo > 180
+                || arrangement.parts.isEmpty() || arrangement.parts.size() > 16) {
+            throw new IllegalArgumentException("Require tempo 60..180 and 1..16 MIDI tracks.");
         }
+        java.util.Set<Integer> channels = new java.util.HashSet<Integer>();
         for (Part part : arrangement.parts.values()) {
+            boolean isDrums = "drums".equals(part.role);
             if (part.notes.isEmpty() || part.program < 0 || part.program > 127 || part.channel < 0
-                    || part.channel > 15 || (part.channel == 9 && !"drums".equals(part.name))) {
-                throw new IllegalArgumentException("Invalid or empty track: " + part.name);
+                    || part.channel > 15 || (part.channel == 9) != isDrums
+                    || !channels.add(part.channel)) {
+                throw new IllegalArgumentException("Invalid, empty or channel-conflicting track: "
+                        + part.name);
             }
         }
         return arrangement;
@@ -133,7 +140,7 @@ public final class MultiTrackMusicRenderer {
             for (Note note : part.notes) {
                 synthesize(part, note, arrangement.tempo, samples);
             }
-            double gain = "harmony".equals(part.name) ? 0.55 : "drums".equals(part.name) ? 0.67 : 0.75;
+            double gain = "harmony".equals(part.role) ? 0.55 : "drums".equals(part.role) ? 0.67 : 0.75;
             for (int i = 0; i < frames; i++) {
                 samples[i] *= gain;
                 mixed[i] += samples[i];
@@ -154,16 +161,16 @@ public final class MultiTrackMusicRenderer {
         int first = (int) Math.round(startSeconds * SAMPLE_RATE);
         double frequency = 440.0 * Math.pow(2.0, (note.pitch - 69) / 12.0);
         double volume = (note.velocity / 127.0) * 0.22;
-        double tail = "harmony".equals(part.name) ? 0.30 : 0.14;
+        double tail = "harmony".equals(part.role) ? 0.30 : 0.14;
         int count = Math.min(samples.length - first, (int) ((noteSeconds + tail) * SAMPLE_RATE));
         Random noise = new Random(note.pitch * 97L + note.tick * 31L);
         double previousNoise = 0;
         double kickPhase = 0;
         for (int i = 0; i < count; i++) {
             double t = i / (double) SAMPLE_RATE;
-            double env = envelope(part.name, t, noteSeconds, tail);
+            double env = envelope(part.role, t, noteSeconds, tail);
             double value;
-            if ("drums".equals(part.name)) {
+            if ("drums".equals(part.role)) {
                 double white = noise.nextDouble() * 2.0 - 1.0;
                 double highPassed = white - previousNoise * 0.85;
                 previousNoise = white;
@@ -177,12 +184,12 @@ public final class MultiTrackMusicRenderer {
                     value = highPassed * Math.exp(-t * 45) * 0.43;
                 }
                 env = 1.0;
-            } else if ("melody".equals(part.name)) {
+            } else if ("melody".equals(part.role)) {
                 value = (Math.sin(TWO_PI * frequency * t) * 0.70
                         + Math.sin(TWO_PI * frequency * 2.01 * t) * 0.22
                         + Math.sin(TWO_PI * frequency * 3.98 * t) * 0.08);
                 env *= Math.exp(-t * 2.2);
-            } else if ("harmony".equals(part.name)) {
+            } else if ("harmony".equals(part.role)) {
                 value = Math.sin(TWO_PI * frequency * t) * 0.71
                         + Math.sin(TWO_PI * frequency * 2.003 * t) * 0.18
                         + Math.sin(TWO_PI * frequency * 0.999 * t + 0.4) * 0.11;
@@ -232,12 +239,14 @@ public final class MultiTrackMusicRenderer {
         private final String name;
         private final int program;
         private final int channel;
+        private final String role;
         private final List<Note> notes = new ArrayList<Note>();
 
-        private Part(String name, int program, int channel) {
+        private Part(String name, int program, int channel, String role) {
             this.name = name;
             this.program = program;
             this.channel = channel;
+            this.role = role;
         }
     }
 
