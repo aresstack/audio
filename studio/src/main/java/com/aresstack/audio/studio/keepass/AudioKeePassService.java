@@ -1,0 +1,206 @@
+package com.aresstack.audio.studio.keepass;
+
+import com.aresstack.enterpriseai.proasteion.platform.security.keepassrpc.KeePassRpcConfig;
+import com.aresstack.enterpriseai.proasteion.platform.security.keepassrpc.KeePassRpcLink;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Properties;
+import java.util.function.Supplier;
+
+/**
+ * Reads entries (API key and address of the AI service) from KeePass through the
+ * KeePassRPC plugin, with the KeePassRPC code of the Enterprise AI Client and Space
+ * Harvester (package {@code com.aresstack.enterpriseai...keepassrpc}).
+ *
+ * <p>The first call pairs this program with KeePass: KeePass shows a one-time
+ * password, the user types it into this program. The key is stored in
+ * {@code .Audio Studio/keepass.properties}; later calls connect without asking. If KeePass
+ * no longer accepts the stored key, the pairing is repeated once.</p>
+ */
+public final class AudioKeePassService {
+
+    private static final String CLIENT_ID = "AudioStudio";
+    private static final String ORIGIN = "chrome-extension://aresstack-audio";
+
+    private AudioKeePassService() {
+    }
+
+    public static Path standardHome() {
+        return java.nio.file.Paths.get(System.getProperty("user.home"), ".aresstack", "audio");
+    }
+
+    public static java.util.List<KeePassEntry> entries(java.util.function.Supplier<String> pairingCode)
+            throws java.io.IOException {
+        return entries(standardHome(), pairingCode);
+    }
+
+    public static KeePassEntry entry(String title, java.util.function.Supplier<String> pairingCode)
+            throws java.io.IOException {
+        return entry(standardHome(), title, pairingCode);
+    }
+
+    public static boolean isPaired() {
+        return isPaired(standardHome());
+    }
+
+    public static void unpair() throws java.io.IOException {
+        unpair(standardHome());
+    }
+
+    public static Path pairingFile(Path home) {
+        return home.resolve("keepass.properties");
+    }
+
+    /** {@code true} if an earlier pairing is stored. Whether KeePass still accepts it shows only when connecting. */
+    public static boolean isPaired(Path home) {
+        Path file = pairingFile(home);
+        if (!Files.isRegularFile(file)) {
+            return false;
+        }
+        Properties stored = new Properties();
+        try (Reader in = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            stored.load(in);
+        } catch (IOException | IllegalArgumentException e) {
+            return false;
+        }
+        return !stored.getProperty("srpKey", "").trim().isEmpty();
+    }
+
+    /** Forgets the stored pairing; the entry in KeePass stays. */
+    public static void unpair(Path home) throws IOException {
+        Files.deleteIfExists(pairingFile(home));
+    }
+
+    /** Reads the pairing code from the console. */
+    public static String codeFromConsole() {
+        System.out.print("KeePass is displaying the pairing code. Enter it: ");
+        System.out.flush();
+        try {
+            String line = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8)).readLine();
+            return line == null ? "" : line.trim();
+        } catch (IOException e) {
+            return "";
+        }
+    }
+
+    /**
+     * Lists the entries KeePass hands out (title and address, no passwords), sorted by
+     * title; pairs first if no pairing is stored.
+     *
+     * @param codeProvider called if pairing is needed, while KeePass shows its one-time
+     *                     password; returns what the user typed (may block until then)
+     * @throws IllegalStateException with a message for the user if KeePass cannot be used
+     */
+    public static List<KeePassEntry> entries(Path home, Supplier<String> codeProvider) throws IOException {
+        return connected(home, codeProvider, (config, key) -> {
+            List<KeePassEntry> entries = new ArrayList<>();
+            for (KeePassRpcLink.Entry entry : KeePassRpcLink.entries(config, key)) {
+                entries.add(new KeePassEntry(entry.title(), entry.url(), ""));
+            }
+            entries.sort(Comparator.comparing(KeePassEntry::title, String.CASE_INSENSITIVE_ORDER));
+            return entries;
+        });
+    }
+
+    /**
+     * Reads the entry with exactly this title, including its password.
+     *
+     * @return the entry, or {@code null} if KeePass has none with this title
+     */
+    public static KeePassEntry entry(Path home, String title, Supplier<String> codeProvider) throws IOException {
+        return connected(home, codeProvider, (config, key) -> {
+            KeePassRpcLink.Entry entry = KeePassRpcLink.entry(config, key, title);
+            return entry == null ? null : new KeePassEntry(entry.title(), entry.url(), entry.password());
+        });
+    }
+
+    /**
+     * User name and password of the entry with exactly this title (login at a proxy).
+     *
+     * @return both, or {@code null} if KeePass has no such entry
+     */
+    public static String[] credentials(Path home, String title, Supplier<String> codeProvider) throws IOException {
+        return connected(home, codeProvider, (config, key) -> {
+            KeePassRpcLink.Entry entry = KeePassRpcLink.entry(config, key, title);
+            return entry == null ? null : new String[] {entry.userName(), entry.password()};
+        });
+    }
+
+    private interface Call<T> {
+        T run(KeePassRpcConfig config, String key) throws KeePassRpcLink.Failure;
+    }
+
+    private static <T> T connected(Path home, Supplier<String> codeProvider, Call<T> call) throws IOException {
+        Path file = pairingFile(home);
+        Properties stored = new Properties();
+        if (Files.isRegularFile(file)) {
+            try (Reader in = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+                stored.load(in);
+            }
+        }
+        KeePassRpcConfig config = KeePassRpcConfig.builder()
+                .host(stored.getProperty("host", KeePassRpcConfig.DEFAULT_HOST))
+                .port(Integer.parseInt(stored.getProperty("port", String.valueOf(KeePassRpcConfig.DEFAULT_PORT))))
+                .origin(ORIGIN)
+                .clientId(CLIENT_ID)
+                .clientDisplayName("Audio Studio")
+                .build();
+        String key = stored.getProperty("srpKey");
+        boolean fresh = key == null || key.trim().isEmpty();
+        try {
+            if (fresh) {
+                key = pair(config, codeProvider, stored, home);
+            }
+            try {
+                return call.run(config, key);
+            } catch (KeePassRpcLink.Failure e) {
+                if (fresh || !e.rejected()) {
+                    throw e;
+                }
+                // The pairing was removed in KeePass: pair again, exactly once.
+                Files.deleteIfExists(file);
+                return call.run(config, pair(config, codeProvider, stored, home));
+            }
+        } catch (KeePassRpcLink.Failure e) {
+            throw new IllegalStateException("KeePass cannot be used (" + e.getMessage() + ").\n"
+                    + "Check that KeePass is running with the KeePassRPC plugin and the database is unlocked.", e);
+        }
+    }
+
+    private static String pair(KeePassRpcConfig config, Supplier<String> codeProvider, Properties stored, Path home)
+            throws KeePassRpcLink.Failure, IOException {
+        String key;
+        try {
+            key = KeePassRpcLink.pair(config, name -> {
+                String code = codeProvider.get();
+                return code == null || code.trim().isEmpty() ? null : code.trim().toCharArray();
+            });
+        } catch (KeePassRpcLink.Failure e) {
+            if (e.rejected()) {
+                throw new IllegalStateException("KeePass rejected the pairing code. Pair again.", e);
+            }
+            throw e;
+        }
+        if (key == null) {
+            throw new IllegalStateException("Pairing with KeePass was cancelled.");
+        }
+        stored.setProperty("host", config.host());
+        stored.setProperty("port", String.valueOf(config.port()));
+        stored.setProperty("srpKey", key);
+        Files.createDirectories(home);
+        try (Writer out = Files.newBufferedWriter(pairingFile(home), StandardCharsets.UTF_8)) {
+            stored.store(out, "Audio Studio pairing with KeePassRPC");
+        }
+        return key;
+    }
+}
