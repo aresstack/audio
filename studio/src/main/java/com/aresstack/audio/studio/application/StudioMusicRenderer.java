@@ -4,6 +4,7 @@ import com.aresstack.audio.instruments.InstrumentLibrary;
 import com.aresstack.audio.instruments.InstrumentRegistry;
 import com.aresstack.audio.studio.render.ExternalProcessRunner;
 import com.aresstack.audio.studio.render.InstrumentSampleRenderer;
+import com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine;
 import com.aresstack.audio.studio.render.MidiStemExporter;
 import com.aresstack.audio.studio.render.SamplerUnavailableException;
 import com.aresstack.audio.studio.render.WaveStemMixer;
@@ -31,11 +32,19 @@ public final class StudioMusicRenderer {
                        String fluidSynthExecutable, String sfizzExecutable,
                        GemmaMusicComposer.Progress progress) throws Exception {
         return render(arrangement, directory, assignments, java.util.Collections.<String, Integer>emptyMap(),
-                fluidSynthExecutable, sfizzExecutable, progress);
+                Sf2Engine.GERVILL, fluidSynthExecutable, sfizzExecutable, progress);
     }
 
     public Path render(Path arrangement, Path directory, Map<String, InstrumentLibrary> assignments,
                        Map<String, Integer> programOverrides,
+                       String fluidSynthExecutable, String sfizzExecutable,
+                       GemmaMusicComposer.Progress progress) throws Exception {
+        return render(arrangement, directory, assignments, programOverrides,
+                Sf2Engine.GERVILL, fluidSynthExecutable, sfizzExecutable, progress);
+    }
+
+    public Path render(Path arrangement, Path directory, Map<String, InstrumentLibrary> assignments,
+                       Map<String, Integer> programOverrides, Sf2Engine sf2Engine,
                        String fluidSynthExecutable, String sfizzExecutable,
                        GemmaMusicComposer.Progress progress) throws Exception {
         Files.createDirectories(directory);
@@ -58,7 +67,11 @@ public final class StudioMusicRenderer {
                 throw new IllegalArgumentException("Register an installed " + library.format()
                         + " file for " + library.name() + " before rendering " + track + ".");
             }
-            progress.update("Rendering " + track + " with " + library.name() + " ...");
+            String engineName = library.format() == InstrumentLibrary.Format.SF2
+                    && sf2Engine == Sf2Engine.GERVILL ? "Java/Gervill"
+                    : library.format() == InstrumentLibrary.Format.SFZ ? "sfizz" : "FluidSynth";
+            progress.update("Rendering " + track + " with " + library.name()
+                    + " using " + engineName + " ...");
             boolean generalMidi = library.id().equals("generaluser")
                     || library.id().startsWith("generaluser::")
                     || library.id().equals("musescore-general")
@@ -71,11 +84,13 @@ public final class StudioMusicRenderer {
                     selectedProgram, trackMidi);
             Path stem = directory.resolve(track + "-sampled.wav");
             try {
-                sampler.render(library, bank, trackMidi, stem, fluidSynthExecutable, sfizzExecutable);
+                sampler.render(library, bank, trackMidi, stem, sf2Engine,
+                        fluidSynthExecutable, sfizzExecutable);
                 stems.add(stem);
             } catch (SamplerUnavailableException unavailable) {
                 String engine = library.format() == InstrumentLibrary.Format.SFZ
-                        ? "sfizz_render" : "FluidSynth";
+                        ? "sfizz_render" : library.format() == InstrumentLibrary.Format.SF2
+                        && sf2Engine == Sf2Engine.GERVILL ? "Java/Gervill" : "FluidSynth";
                 progress.update("WARN: " + engine + " is not installed or cannot be launched ('"
                         + unavailable.executable() + "'). Using the built-in Java sound for "
                         + track + " instead. Install the sampler and configure its path under "
