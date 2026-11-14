@@ -7,7 +7,6 @@ import com.aresstack.audio.studio.render.InstrumentSampleRenderer;
 import com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine;
 import com.aresstack.audio.studio.render.MidiStemExporter;
 import com.aresstack.audio.studio.render.SamplerUnavailableException;
-import com.aresstack.audio.studio.render.WaveStemMixer;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
@@ -19,12 +18,15 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
-/** Produce the Java reference mix, then optionally replace stems with registered sample banks. */
+/**
+ * Produce the Java reference mix, then optionally replace stems with registered sample banks,
+ * and mix the tracks on the stage of the piece.
+ */
 public final class StudioMusicRenderer {
     private final InstrumentRegistry registry;
     private final InstrumentSampleRenderer sampler = new InstrumentSampleRenderer();
     private final MidiStemExporter midiExporter = new MidiStemExporter();
-    private final WaveStemMixer mixer = new WaveStemMixer();
+    private final StageMixService stage = new StageMixService();
     private final ExternalProcessRunner runner = new ExternalProcessRunner();
 
     public StudioMusicRenderer(InstrumentRegistry registry) {
@@ -108,10 +110,10 @@ public final class StudioMusicRenderer {
                 executor.shutdownNow();
             }
         }
-        Path mix = directory.resolve("arrangement-instruments.wav");
-        progress.update("Mixing the instrument tracks ...");
-        mixer.mix(Arrays.asList(stems), mix);
-        return mix;
+        // The mix is made on the stage of the piece; which file holds each track is noted, so that
+        // moving an instrument later only mixes again.
+        StageMixService.keepStems(directory, trackIds, stems);
+        return stage.mix(arrangement, directory, progress);
     }
 
     /** Renders one track with its sound bank; if the sampler is missing, the Java sound of the track is kept. */

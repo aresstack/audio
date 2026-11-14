@@ -62,6 +62,22 @@ public final class AudioStudioFrame extends JFrame {
     private final InstrumentRegistry registry;
     private final TrackArrangementStore trackStore = new TrackArrangementStore();
     private MixerPanel trackTable;
+    // The stage of the piece: where each track stands, how loud it is, and the room. It is kept in
+    // the folder of the piece; moving something only mixes the rendered tracks again.
+    private com.aresstack.audio.studio.stage.SpatialScene scene =
+            com.aresstack.audio.studio.stage.SpatialScene.standard(MusicTrack.defaults());
+    private final com.aresstack.audio.studio.stage.SpatialSceneStore sceneStore =
+            new com.aresstack.audio.studio.stage.SpatialSceneStore();
+    private StagePanel stagePanel;
+    private final javax.swing.Timer remixTimer = new javax.swing.Timer(350, event -> remix());
+    private final java.util.concurrent.ExecutorService mixQueue =
+            java.util.concurrent.Executors.newSingleThreadExecutor(task -> {
+                Thread thread = new Thread(task, "stage-mix");
+                thread.setDaemon(true);
+                return thread;
+            });
+    private volatile int mixWanted;
+    private Map<String, DeckPlayer.Envelope> stemEnvelopes = new HashMap<String, DeckPlayer.Envelope>();
     private boolean loadingTracks;
     private final StudioSettingsStore settingsStore = StudioSettingsStore.standard();
     private final JTextField endpoint = new JTextField(38);
@@ -197,6 +213,7 @@ public final class AudioStudioFrame extends JFrame {
         desk.add(sideRail(), BorderLayout.WEST);
         pageHolder.setOpaque(false);
         pageHolder.add(deckPage(), "deck");
+        pageHolder.add(stagePage(), "stage");
         pageHolder.add(libraryPage(), "library");
         pageHolder.add(settingsPanel(), "settings");
         pageHolder.add(consolePage(), "console");
@@ -312,7 +329,7 @@ public final class AudioStudioFrame extends JFrame {
         keys.setOpaque(false);
         keys.setLayout(new javax.swing.BoxLayout(keys, javax.swing.BoxLayout.Y_AXIS));
         javax.swing.ButtonGroup group = new javax.swing.ButtonGroup();
-        String[][] entries = {{"deck", "Mischpult"}, {"library", "Soundbänke"}, {"settings", "Einstellungen"},
+        String[][] entries = {{"deck", "Mischpult"}, {"stage", "Bühne"}, {"library", "Soundbänke"}, {"settings", "Einstellungen"},
                 {"console", "Protokoll"}};
         for (final String[] entry : entries) {
             DeckWidgets.RailKey key = new DeckWidgets.RailKey(entry[1]);
@@ -361,7 +378,27 @@ public final class AudioStudioFrame extends JFrame {
         DeckWidgets.Module output = new DeckWidgets.Module("Arrangement", lanes);
         output.setHeadEnd(sourceChoice);
 
-        trackTable = new MixerPanel(registry, this::tracksChanged, this::listenAlone, this::composeAgain);
+        trackTable = new MixerPanel(registry, this::tracksChanged, this::listenAlone, this::composeAgain,
+                new MixerPanel.Stage() {
+                    @Override
+                    public com.aresstack.audio.studio.stage.SoundSourcePlacement placement(String trackId) {
+                        return scene.placement(trackId);
+                    }
+
+                    @Override
+                    public void change(com.aresstack.audio.studio.stage.SoundSourcePlacement placement,
+                                       boolean settled) {
+                        sceneChanged(scene.with(placement), settled, true);
+                    }
+
+                    @Override
+                    public void renamed(String from, String to) {
+                        com.aresstack.audio.studio.stage.SoundSourcePlacement placement = scene.placement(from);
+                        if (placement != null) {
+                            scene = scene.with(placement.named(to));
+                        }
+                    }
+                });
         DeckWidgets.Module mixer = new DeckWidgets.Module("Mixer", trackTable);
         mixer.setHeadEnd(trackCount);
 
@@ -490,7 +527,7 @@ public final class AudioStudioFrame extends JFrame {
         work.add(mixer, BorderLayout.CENTER);
 
         // In a low window the page keeps its height and scrolls, so that a channel strip is never cut in half.
-        TallPage page = new TallPage(700);
+        TallPage page = new TallPage(724);
         page.add(work, BorderLayout.CENTER);
         page.add(side, BorderLayout.EAST);
         JScrollPane scroll = new JScrollPane(page, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
@@ -545,6 +582,176 @@ public final class AudioStudioFrame extends JFrame {
         public boolean getScrollableTracksViewportHeight() {
             return getParent() != null && getParent().getHeight() >= least;
         }
+    }
+
+    /** The stage: where the instruments stand, how loud they are, and the room around them. */
+    private JPanel stagePage() {
+        remixTimer.setRepeats(false);
+        stagePanel = new StagePanel(new StagePanel.Host() {
+            @Override
+            public void sceneChanged(com.aresstack.audio.studio.stage.SpatialScene changed, boolean settled) {
+                AudioStudioFrame.this.sceneChanged(changed, settled, false);
+            }
+
+            @Override
+            public void askDirector() {
+                AudioStudioFrame.this.askDirector();
+            }
+        });
+        JPanel page = new JPanel(new BorderLayout());
+        page.setOpaque(false);
+        page.add(stagePanel, BorderLayout.CENTER);
+        return page;
+    }
+
+    /**
+     * The stage was changed on the stage page or on a channel strip. The other view follows at
+     * once; when the change has settled, it is saved with the piece and the rendered tracks are
+     * mixed again. That needs neither the AI nor a synthesizer.
+     */
+    private void sceneChanged(com.aresstack.audio.studio.stage.SpatialScene changed, boolean settled,
+                              boolean fromMixer) {
+        scene = changed;
+        if (fromMixer) {
+            showStage();
+        } else {
+            trackTable.refreshStage();
+        }
+        if (settled) {
+            saveScene();
+            remixTimer.restart();
+        }
+    }
+
+    private void showStage() {
+        if (stagePanel != null && trackTable != null) {
+            stagePanel.setScene(scene, trackTable.tracks());
+        }
+    }
+
+    private void saveScene() {
+        try {
+            sceneStore.save(Paths.get(directory.getText().trim()), scene);
+        } catch (Exception error) {
+            append("WARN: Bühne nicht gespeichert: " + error.getMessage());
+        }
+    }
+
+    /** The written arrangement of the piece in use, or {@code null} when nothing is composed yet. */
+    private Path writtenArrangement() {
+        String named = arrangementFile.getText().trim();
+        Path file = named.isEmpty() ? Paths.get(directory.getText().trim(), "arrangement.tsv") : Paths.get(named);
+        return Files.isRegularFile(file) ? file : null;
+    }
+
+    /** Mixes the rendered tracks again on the stage as it stands, in the background. */
+    private void remix() {
+        if (stagePanel == null || (worker != null && !worker.isDone())) {
+            return; // what is running mixes on the saved stage when it gets there
+        }
+        final Path arrangement = writtenArrangement();
+        final Path folder = Paths.get(directory.getText().trim());
+        if (arrangement == null) {
+            stagePanel.setStatus("Noch nichts komponiert: die Bühne gilt, sobald gerendert wird.");
+            return;
+        }
+        final com.aresstack.audio.studio.stage.SpatialScene mixed = scene;
+        final int ticket = ++mixWanted;
+        stagePanel.setStatus("Mische neu …");
+        mixQueue.submit(() -> {
+            if (ticket != mixWanted) {
+                return; // moved on in the meantime: only the newest stage is mixed
+            }
+            final long began = System.nanoTime();
+            String problem = null;
+            try {
+                new com.aresstack.audio.studio.application.StageMixService().mix(arrangement, folder, mixed,
+                        message -> { });
+            } catch (Exception failed) {
+                problem = String.valueOf(failed.getMessage());
+            }
+            final String said = problem;
+            final double seconds = (System.nanoTime() - began) / 1e9;
+            SwingUtilities.invokeLater(() -> mixedAgain(folder, ticket, said, seconds));
+        });
+    }
+
+    private void mixedAgain(Path folder, int ticket, String problem, double seconds) {
+        if (!folder.equals(Paths.get(directory.getText().trim()))) {
+            return; // another piece is open by now
+        }
+        if (problem != null) {
+            stagePanel.setStatus(problem);
+            return;
+        }
+        if (ticket == mixWanted && stagePanel.proposal() == null) {
+            stagePanel.setStatus(String.format(java.util.Locale.GERMANY,
+                    "Neu gemischt in %.1f s · ohne KI, ohne Synthese", seconds));
+        }
+        if (!"Mixed sampled arrangement".equals(playbackSelection.getSelectedItem())) {
+            return;
+        }
+        // What plays goes on at the same place with the new mix.
+        Path file = playbackFile("Mixed sampled arrangement");
+        boolean playing = player.playing();
+        double at = player.seconds();
+        if (player.ready()) {
+            try {
+                player.open(file);
+                double length = player.length();
+                player.seek(length <= 0 ? 0 : Math.min(1, at / length));
+                if (playing) {
+                    player.play();
+                }
+            } catch (Exception noSound) {
+                player.show(file);
+            }
+        } else {
+            player.show(file);
+        }
+        arrangementView.setMix(player.envelope(), "Mix", null, player.length());
+        lcd.setSource(playbackName("Mixed sampled arrangement"), true);
+    }
+
+    /** The AI is told what each track plays and proposes levels, their course, places and the room. */
+    private void askDirector() {
+        final Path arrangement = writtenArrangement();
+        if (arrangement == null) {
+            message("Erst komponieren oder die Demo laden: die KI mischt ab, was geschrieben ist.");
+            return;
+        }
+        final KipitzChatClient client;
+        try {
+            client = createAiClient();
+        } catch (RuntimeException invalid) {
+            message(invalid.getMessage());
+            return;
+        }
+        final Path output = Paths.get(directory.getText().trim());
+        final String prompt = description.getText().trim();
+        final int tokens = (Integer) tokenLimit.getValue();
+        final com.aresstack.audio.studio.stage.SpatialScene current = scene;
+        if (!saveSettings(false)) {
+            return;
+        }
+        activeClient = client;
+        stagePanel.setProposal(null);
+        stagePanel.setStatus("Die KI schlägt eine Abmischung vor …");
+        start(new Operation() {
+            @Override
+            public Path execute(GemmaMusicComposer.Progress progress) throws Exception {
+                try {
+                    final com.aresstack.audio.studio.stage.SpatialScene proposed =
+                            new com.aresstack.audio.studio.application.MixDirector(client, tokens)
+                                    .direct(prompt, arrangement, current, output, progress);
+                    SwingUtilities.invokeLater(() -> stagePanel.setProposal(proposed));
+                    progress.update("Abmischung vorgeschlagen: auf der Bühne ansehen, dann übernehmen oder verwerfen.");
+                    return null;
+                } finally {
+                    activeClient = null;
+                }
+            }
+        });
     }
 
     private JPanel libraryPage() {
@@ -802,16 +1009,23 @@ public final class AudioStudioFrame extends JFrame {
             @Override
             public Path execute(GemmaMusicComposer.Progress progress) throws Exception {
                 try {
-                    TrackArrangement proposed = new InstrumentProposalService(client, tokens)
-                            .propose(prompt, output, progress);
-                    final TrackArrangement selected = withPreferredSoundbanks(proposed);
+                    final InstrumentProposalService.Staged staged = new InstrumentProposalService(client, tokens)
+                            .proposeStaged(prompt, output, progress);
+                    final TrackArrangement selected = withPreferredSoundbanks(staged.tracks());
                     final AtomicReference<RenderSettings> rendering = new AtomicReference<RenderSettings>();
                     SwingUtilities.invokeAndWait(new Runnable() {
                         @Override
                         public void run() {
                             trackTable.setArrangement(selected);
                             if (autopilot) {
+                                // The AI decides everything: its stage is taken too, but for what is protected.
+                                scene = scene.fitting(selected.tracks()).taking(staged.scene());
+                                saveScene();
+                                showStage();
+                                trackTable.refreshStage();
                                 rendering.set(captureRenderSettings(selected));
+                            } else {
+                                stagePanel.setProposal(staged.scene());
                             }
                         }
                     });
@@ -1348,6 +1562,8 @@ public final class AudioStudioFrame extends JFrame {
         autopilotButton.setEnabled(false);
         renderButton.setEnabled(false);
         trackTable.setEditingEnabled(false);
+        stagePanel.setBusy(true);
+        saveScene();
         cancelButton.setEnabled(true);
         cancelKey.setEnabled(true);
         renderKey.setEnabled(false);
@@ -1388,6 +1604,7 @@ public final class AudioStudioFrame extends JFrame {
                 autopilotButton.setEnabled(true);
                 renderButton.setEnabled(true);
                 trackTable.setEditingEnabled(true);
+                stagePanel.setBusy(false);
                 cancelButton.setEnabled(false);
                 cancelKey.setEnabled(false);
                 renderKey.setEnabled(true);
@@ -1400,8 +1617,6 @@ public final class AudioStudioFrame extends JFrame {
                     if (result != null) {
                         arrangementFile.setText(result.getParent().resolve("arrangement.tsv").toString());
                         append("Finished: " + result);
-                    } else {
-                        append("Instrumentenvorschlag bereit.");
                     }
                 } catch (java.util.concurrent.CancellationException cancelled) {
                     append("Operation cancelled.");
@@ -1546,8 +1761,7 @@ public final class AudioStudioFrame extends JFrame {
         if ("Java reference mix".equals(selected)) {
             return folder.resolve("arrangement.wav");
         }
-        Path sampled = folder.resolve(selected + "-sampled.wav");
-        return Files.isRegularFile(sampled) ? sampled : folder.resolve(selected + ".wav");
+        return com.aresstack.audio.studio.application.StageMixService.stem(folder, selected);
     }
 
     /** The track that plays alone, or {@code null} when a mix is chosen. */
@@ -1591,13 +1805,13 @@ public final class AudioStudioFrame extends JFrame {
 
     /** What a choice of the playback is called in the list. */
     private static String playbackLabel(String selected) {
-        return "Mixed sampled arrangement".equals(selected) ? "Mix · mit Soundbänken"
+        return "Mixed sampled arrangement".equals(selected) ? "Mix · Bühne"
                 : "Java reference mix".equals(selected) ? "Mix · Java-Synthese"
                 : "Solo · " + selected;
     }
 
     private static String playbackName(String selected) {
-        return "Mixed sampled arrangement".equals(selected) ? "MIX · INSTRUMENTE"
+        return "Mixed sampled arrangement".equals(selected) ? "MIX · BÜHNE"
                 : "Java reference mix".equals(selected) ? "MIX · JAVA-SYNTHESE"
                 : "SOLO · " + selected.toUpperCase(java.util.Locale.ROOT);
     }
@@ -1631,7 +1845,8 @@ public final class AudioStudioFrame extends JFrame {
             @Override
             protected void done() {
                 try {
-                    trackTable.setEnvelopes(get());
+                    stemEnvelopes = get();
+                    trackTable.setEnvelopes(stemEnvelopes);
                 } catch (Exception ignored) {
                     // The meters stay dark; playing is not affected.
                 }
@@ -1767,6 +1982,20 @@ public final class AudioStudioFrame extends JFrame {
             trackTable.follow(playing ? second : -1, soloTrack());
             trackTable.pulse();
         }
+        if (stagePanel != null && stagePanel.isShowing()) {
+            // On the stage every disc glows as loud as its track is right now.
+            Map<String, Float> sounding = new HashMap<String, Float>();
+            if (playing) {
+                String only = soloTrack();
+                for (Map.Entry<String, DeckPlayer.Envelope> entry : stemEnvelopes.entrySet()) {
+                    if (only == null || only.equals(entry.getKey())) {
+                        sounding.put(entry.getKey(), Math.max(entry.getValue().at(second, false),
+                                entry.getValue().at(second, true)));
+                    }
+                }
+            }
+            stagePanel.setLevels(sounding);
+        }
         if (tracksAtWork() && System.currentTimeMillis() / 1000 != shownSecond) {
             shownSecond = System.currentTimeMillis() / 1000;
             showTrackWork(); // the seconds on the display run on
@@ -1816,6 +2045,19 @@ public final class AudioStudioFrame extends JFrame {
                 }
                 arrangement = new TrackArrangement(restored);
             }
+            // The stage of the piece; a piece from before the stage gets the usual seating.
+            com.aresstack.audio.studio.stage.SpatialScene kept = null;
+            try {
+                kept = sceneStore.load(folder);
+            } catch (IOException unreadable) {
+                append("WARN: Gespeicherte Bühne nicht lesbar, es gilt die Standardaufstellung: "
+                        + unreadable.getMessage());
+            }
+            scene = kept == null ? com.aresstack.audio.studio.stage.SpatialScene.standard(arrangement.tracks())
+                    : kept.fitting(arrangement.tracks());
+            if (stagePanel != null) {
+                stagePanel.setProposal(null);
+            }
             trackTable.setArrangement(arrangement);
             refreshPlaybackChoices();
         } catch (Exception invalid) {
@@ -1828,10 +2070,15 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     private void tracksChanged() {
+        // Every track has its place on the stage: a new one gets the usual seat of its role.
+        scene = scene.fitting(trackTable.tracks());
+        trackTable.refreshStage();
+        showStage();
         refreshPlaybackChoices();
         if (loadingTracks) {
             return;
         }
+        saveScene();
         try {
             trackStore.save(Paths.get(directory.getText().trim()), trackTable.arrangement());
         } catch (Exception error) {

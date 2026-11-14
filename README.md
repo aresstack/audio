@@ -120,7 +120,7 @@ An optional proxy-authentication entry can be named under **Anmeldung** in the p
 UI layout: a dark mixing desk on FlatLaf, with the rounded modules of 3d4j's dialogs and its pink as the signal colour.
 
 - **Transport** (top): a display with the time, the loaded source, the last message and the flags FILE / PLAY / AI; round keys for play, stop, render and cancel; master level meters. The space bar plays and pauses.
-- **Side rail**: Mischpult, Soundbänke, Einstellungen, Protokoll.
+- **Side rail**: Mischpult, Bühne, Soundbänke, Einstellungen, Protokoll.
 - **Mischpult**, laid out like a simple program for cutting music: the **arrangement** on top, the **mixer** below it, and beside them the piece and the key that composes it.
 - **Arrangement**: a ruler with the bars, one lane per track with its notes (from `arrangement.tsv`), and below the lanes the loaded mix as a waveform. A line marks the playback; a click in the lanes jumps there, a click on a lane's name chooses that track for listening alone.
 - **Channel strip**: name, role, instrument (the 128 General MIDI instruments by name, not by number), the description the AI gets, sound bank, a lamp that is lit once the track is rendered, **Solo** to hear it alone, **Neu** to have the AI compose only this track again (the earlier answer is moved to the folder `earlier`, the other tracks stay), a cross in the coloured cap to remove it, and a stereo level meter that follows the playback from the track's own rendered file. `+ Spur` adds a track; composing afterwards asks the AI only for what is new, because finished answers are kept.
@@ -130,7 +130,7 @@ UI layout: a dark mixing desk on FlatLaf, with the rounded modules of 3d4j's dia
 
 - While the studio composes or renders, every channel strip shows in its cap how its own track is getting on (`WARTET`, `KI …`, `KI ✓`, `RENDERN …`, `FEHLER`) with a blinking lamp, and the display counts all of them in one line: how many are worked on at the same time, how many are done, and the seconds. The single voices are composed at the same time (as many as **Parallel** allows), and the tracks with a sound bank are rendered at the same time (as many as the computer has processors); only the plan before them is one request.
 
-The meters and the waveform are drawn from the rendered WAV files (loudness per hundredth of a second, `DeckPlayer.measure`); they show what was rendered, they do not change it. There are deliberately no faders: the mixer has no gain per track yet, and a control without function would lie. The Java 8 runtime smoke test installs the theme, resolves a disabled proxy route, loads KeePassRPC and renders the supplied demo headlessly.
+The meters and the waveform are drawn from the rendered WAV files (loudness per hundredth of a second, `DeckPlayer.measure`); they show what was rendered, they do not change it. Each strip has a fader (**Pegel**) and a **Stumm** key; both act on the mix and show the same as the stage. The Java 8 runtime smoke test installs the theme, resolves a disabled proxy route, loads KeePassRPC and renders the supplied demo headlessly.
 
 **Scope:** CI validates Java 8, simulated KIPITZ calls through a local HTTP proxy, proxy routing modes, and KeePassRPC class loading. Actual company PAC/KeePass pairing and a GUI review must be tested on the target Windows environment; no corporate network or secret is available to CI.
 
@@ -145,6 +145,25 @@ The JDK does not expose Gervill's offline PCM stream through its standard public
 
 To continue an interrupted song, reopen Audio Studio. It automatically recognizes an existing `arrangement.tsv` in the saved output directory. Press RENDER, then PLAY. No additional AI requests are made.
 
+
+## The stage: mixing in a room
+
+The **Bühne** page shows the stage from above: the back wall at the top, the listener in front at the bottom, each track a disc in the colour of its channel. A disc is dragged to its place; the mouse wheel over it changes its level. Beside the stage are the sliders of the chosen instrument (side, depth, level, width, share of the room, **Stumm**, **Vor KI schützen**) and the room (dry studio, chamber hall, concert hall, cathedral; reverberation time and amount).
+
+What the stage does to the sound (`studio/mix/SpatialStemMixer`, float throughout, 44.1 kHz, only the finished mix is written as 16-bit PCM; 24 bit is supported by the mixer):
+
+- level per track, optionally moving over the bars (**Verlauf**: points of bar and dB, interpolated without clicks);
+- width (mid/side) and equal-power panning from the angle at which the listener sees the track;
+- distance: the direct sound gets quieter and duller, the share of the room larger;
+- three early reflections (left wall, right wall, back wall) from mirrored sources;
+- one reverberation shared by all tracks, whose decay time follows the room; the tail is rendered to its end;
+- the finished mix is levelled as a whole (never clipped, never compressed).
+
+The stage is kept per piece in `spatial-scene.json` (versioned). A piece from before the stage gets the usual seating of the roles: melody in front, bass and drums in the middle, harmony to the sides, texture at the back. `stems.tsv` notes which WAV holds each track after rendering. Moving anything on the stage or a fader only runs `StageMixService` again: no AI request and no synthesis; what plays continues with the new mix.
+
+**KI mischt ab** is the last step before mixing: the AI is told what each track plays (notes per bar, range, velocities) and proposes levels, their course over the piece, places and the room. The proposal is drawn dashed over the stage and only applies after **Übernehmen**; protected instruments keep their place. With **KI wählt Instrumente**, the instrument proposal carries a stage in the same request and it is applied at once. Everything the AI says about the stage is clamped into range; unknown tracks are dropped, forgotten ones get their usual seat.
+
+No audio library was added for this. AskAI's `audio-dsp` module is a 16-bit speech pipeline; its filter formulas (Audio EQ Cookbook) were taken over, the float processing is new. The previous `WaveStemMixer` stays in the code as the plain reference. Not built yet: convolution reverb, HRTF/3D, moving sources, a real-time preview while dragging.
 
 ## Variable instrumentation: manual, AI suggestion or autopilot
 

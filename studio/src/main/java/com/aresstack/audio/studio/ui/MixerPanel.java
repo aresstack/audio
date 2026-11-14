@@ -4,6 +4,7 @@ import com.aresstack.audio.instruments.InstrumentLibrary;
 import com.aresstack.audio.instruments.InstrumentRegistry;
 import com.aresstack.audio.studio.application.MusicTrack;
 import com.aresstack.audio.studio.application.TrackArrangement;
+import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -39,7 +40,8 @@ import java.util.Map;
 /**
  * The mixer: one channel strip per track, side by side. A strip holds what a row
  * of the former table held (name, role, sound, General MIDI program, sound bank),
- * a key to listen to the track alone, and a level meter that follows the playback.
+ * a fader and a mute key that act on the mix, a key to listen to the track alone,
+ * and a level meter that follows the playback.
  */
 public final class MixerPanel extends JPanel {
     private static final String BUILT_IN = "Java-Synthese (integriert)";
@@ -54,6 +56,21 @@ public final class MixerPanel extends JPanel {
         void again(String trackId);
     }
 
+    /** The stage of the piece, as far as a strip deals with it: the level and the muting of its track. */
+    public interface Stage {
+        /** How the track stands on the stage, or {@code null} if it is not placed yet. */
+        SoundSourcePlacement placement(String trackId);
+
+        /**
+         * @param settled {@code false} while the fader is still being moved
+         */
+        void change(SoundSourcePlacement placement, boolean settled);
+
+        /** A track got another name; its place on the stage goes with it. */
+        void renamed(String from, String to);
+    }
+
+    private final Stage stage;
     private final InstrumentRegistry registry;
     private final Runnable onChanged;
     private final Solo solo;
@@ -65,8 +82,9 @@ public final class MixerPanel extends JPanel {
     private boolean changing;
     private boolean editable = true;
 
-    public MixerPanel(InstrumentRegistry registry, Runnable onChanged, Solo solo, Recompose recompose) {
+    public MixerPanel(InstrumentRegistry registry, Runnable onChanged, Solo solo, Recompose recompose, Stage stage) {
         super(new BorderLayout());
+        this.stage = stage;
         this.registry = registry;
         this.onChanged = onChanged;
         this.solo = solo;
@@ -137,6 +155,13 @@ public final class MixerPanel extends JPanel {
             changing = false;
         }
         changed();
+    }
+
+    /** The stage was changed elsewhere: the faders and mute keys show it. */
+    void refreshStage() {
+        for (Strip strip : strips) {
+            strip.showStage();
+        }
     }
 
     /** The loudness of each track's rendered file, by track id: what the strips' meters show while playing. */
@@ -288,6 +313,10 @@ public final class MixerPanel extends JPanel {
         private final DeckDisplays.Meter left = new DeckDisplays.Meter(true);
         private final DeckDisplays.Meter right = new DeckDisplays.Meter(true);
         private final JButton listen = new JButton("Solo");
+        private final javax.swing.JSlider fader = new javax.swing.JSlider(
+                (int) SoundSourcePlacement.MIN_LEVEL, (int) SoundSourcePlacement.MAX_LEVEL, 0);
+        private final javax.swing.JLabel loudness = new javax.swing.JLabel("±0 dB");
+        private final javax.swing.JToggleButton mute = new javax.swing.JToggleButton("Stumm");
         private boolean removable = true;
         private boolean overRemove;
         private boolean filling;
@@ -300,7 +329,7 @@ public final class MixerPanel extends JPanel {
             this.track = shown;
             this.index = index;
             setOpaque(false);
-            Dimension size = new Dimension(190, 326);
+            Dimension size = new Dimension(190, 384);
             setPreferredSize(size);
             setMinimumSize(size);
             setMaximumSize(new Dimension(190, Integer.MAX_VALUE));
@@ -370,15 +399,27 @@ public final class MixerPanel extends JPanel {
             meters.setOpaque(false);
             meters.add(left);
             meters.add(right);
-            meters.setPreferredSize(new Dimension(30, 44));
-            meters.setMinimumSize(new Dimension(30, 44));
-            JPanel pair = new JPanel(new java.awt.GridLayout(1, 2, 6, 0));
-            pair.setOpaque(false);
-            pair.add(listen);
-            pair.add(again);
-            JPanel keys = new JPanel(new BorderLayout());
+            meters.setPreferredSize(new Dimension(30, 70));
+            meters.setMinimumSize(new Dimension(30, 70));
+            fader.setOpaque(false);
+            fader.setToolTipText("Lautstärke der Spur in der Mischung; die Bühne zeigt dasselbe");
+            fader.setPreferredSize(new Dimension(60, 22));
+            loudness.setFont(AudioStudioTheme.display(11f));
+            loudness.setForeground(AudioStudioTheme.TEXT);
+            mute.setToolTipText("Die Spur aus der Mischung nehmen, ohne sie zu löschen");
+            mute.setMargin(new Insets(4, 6, 4, 6));
+            JPanel level = new JPanel(new BorderLayout(0, 0));
+            level.setOpaque(false);
+            JPanel levelHead = new JPanel(new BorderLayout());
+            levelHead.setOpaque(false);
+            levelHead.add(DeckWidgets.lettering("Pegel"), BorderLayout.WEST);
+            levelHead.add(loudness, BorderLayout.EAST);
+            level.add(levelHead, BorderLayout.NORTH);
+            level.add(fader, BorderLayout.CENTER);
+            JPanel keys = new JPanel(new BorderLayout(0, 6));
             keys.setOpaque(false);
-            keys.add(pair, BorderLayout.SOUTH);
+            keys.add(level, BorderLayout.NORTH);
+            keys.add(again, BorderLayout.SOUTH);
             c.gridy = 5;
             c.gridwidth = 1;
             c.weightx = 0;
@@ -395,9 +436,34 @@ public final class MixerPanel extends JPanel {
             c.anchor = GridBagConstraints.SOUTH;
             c.insets = new Insets(4, 0, 0, 0);
             add(keys, c);
+            JPanel pair = new JPanel(new java.awt.GridLayout(1, 2, 6, 0));
+            pair.setOpaque(false);
+            pair.add(listen);
+            pair.add(mute);
+            c.gridx = 0;
+            c.gridy = 6;
+            c.gridwidth = 2;
+            c.weighty = 0;
+            c.insets = new Insets(8, 0, 0, 0);
+            add(pair, c);
 
             offerBanks();
             show(shown);
+            showStage();
+            fader.addChangeListener(event -> {
+                loudness.setText(StageView.decibels(fader.getValue()));
+                SoundSourcePlacement placement = filling ? null : MixerPanel.this.stage.placement(track.id());
+                if (placement != null) {
+                    MixerPanel.this.stage.change(placement.withLevel(fader.getValue()), !fader.getValueIsAdjusting());
+                }
+            });
+            mute.addActionListener(event -> {
+                SoundSourcePlacement placement = MixerPanel.this.stage.placement(track.id());
+                if (placement != null) {
+                    MixerPanel.this.stage.change(placement.withMuted(mute.isSelected()), true);
+                }
+                repaint();
+            });
             FocusAdapter takeOver = new FocusAdapter() {
                 @Override
                 public void focusLost(FocusEvent event) {
@@ -446,6 +512,25 @@ public final class MixerPanel extends JPanel {
             bank.setEnabled(enabled);
             again.setEnabled(enabled);
             removable = enabled;
+            repaint();
+        }
+
+        /** Shows the level and the muting of the track as the stage has them. */
+        void showStage() {
+            SoundSourcePlacement placement = MixerPanel.this.stage.placement(track.id());
+            boolean before = filling;
+            filling = true;
+            try {
+                fader.setEnabled(placement != null);
+                mute.setEnabled(placement != null);
+                if (placement != null) {
+                    fader.setValue((int) Math.round(placement.levelDb()));
+                    mute.setSelected(placement.muted());
+                }
+                loudness.setText(StageView.decibels(fader.getValue()));
+            } finally {
+                filling = before;
+            }
             repaint();
         }
 
@@ -534,7 +619,11 @@ public final class MixerPanel extends JPanel {
                 boolean same = typed.id().equals(track.id()) && typed.role().equals(track.role())
                         && typed.instrument().equals(track.instrument()) && typed.program() == track.program()
                         && typed.libraryId().equals(track.libraryId());
+                String renamed = typed.id().equals(track.id()) ? null : track.id();
                 track = typed;
+                if (renamed != null) {
+                    MixerPanel.this.stage.renamed(renamed, typed.id());
+                }
                 bank.setToolTipText(String.valueOf(bank.getSelectedItem()));
                 if (!same) {
                     show(typed); // the name as it was cleaned up
@@ -555,7 +644,7 @@ public final class MixerPanel extends JPanel {
         @Override
         protected void paintComponent(Graphics graphics) {
             Graphics2D g = DeckWidgets.smooth(graphics);
-            Color color = AudioStudioTheme.channel(index);
+            Color color = mute.isSelected() ? new Color(0x6A6C78) : AudioStudioTheme.channel(index);
             RoundRectangle2D shape = new RoundRectangle2D.Float(0.5f, 0.5f, getWidth() - 1f, getHeight() - 1f, 16f, 16f);
             g.setColor(new Color(0x23252E));
             g.fill(shape);
@@ -611,7 +700,7 @@ public final class MixerPanel extends JPanel {
     private final class AddStrip extends JButton {
         AddStrip() {
             super("+ Spur");
-            Dimension size = new Dimension(112, 326);
+            Dimension size = new Dimension(112, 384);
             setPreferredSize(size);
             setMinimumSize(size);
             setMaximumSize(new Dimension(112, Integer.MAX_VALUE));
