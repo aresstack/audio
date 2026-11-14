@@ -6,6 +6,8 @@ dependencies {
     implementation project(':music')
     implementation project(':instruments')
     implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'org.java-websocket:Java-WebSocket:1.5.2'
+    runtimeOnly 'org.slf4j:slf4j-nop:1.7.36'
     testImplementation 'junit:junit:4.13.2'
 }
 
@@ -14,18 +16,60 @@ application {
 }
 
 tasks.named('jar') {
-    dependsOn ':music:jar', ':instruments:jar'
+    dependsOn ':music:jar', ':instruments:jar', tasks.named('mergeServiceProviders')
     archiveFileName = 'audio-studio.jar'
     manifest {
         attributes 'Main-Class': application.mainClass.get()
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from mergedServicesDirectory
     from {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }
-    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'META-INF/services/*',
+            'module-info.class', 'META-INF/versions/*/module-info.class'
+    from mergedServicesDirectory
 }
 
 tasks.named('run') {
     workingDir rootProject.projectDir
+}
+
+def mergedServicesDirectory = layout.buildDirectory.dir('merged-service-providers')
+tasks.register('mergeServiceProviders') {
+    dependsOn ':music:jar', ':instruments:jar'
+    inputs.files(configurations.runtimeClasspath)
+    outputs.dir(mergedServicesDirectory)
+    doLast {
+        String prefix = 'META-INF/services/'
+        Map<String, Set<String>> providers = new TreeMap<String, Set<String>>()
+        configurations.runtimeClasspath.files.findAll { it.name.endsWith('.jar') }.each { File jar ->
+            new java.util.zip.ZipFile(jar).withCloseable { zip ->
+                Collections.list(zip.entries()).each { entry ->
+                    String name = entry.name
+                    if (!entry.directory && name.startsWith(prefix) && name.indexOf('/', prefix.length()) < 0) {
+                        zip.getInputStream(entry).withCloseable { input ->
+                            String service = name.substring(prefix.length())
+                            if (!providers.containsKey(service)) {
+                                providers.put(service, new LinkedHashSet<String>())
+                            }
+                            input.getText('UTF-8').readLines().each { line ->
+                                String provider = line.replaceFirst('#.*$', '').trim()
+                                if (!provider.isEmpty()) {
+                                    providers.get(service).add(provider)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        File root = mergedServicesDirectory.get().asFile
+        root.deleteDir()
+        File folder = new File(root, prefix)
+        folder.mkdirs()
+        providers.each { String service, Set<String> names ->
+            new File(folder, service).setText(names.join('\n') + '\n', 'UTF-8')
+        }
+    }
 }
