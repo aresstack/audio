@@ -39,9 +39,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
-import javax.sound.sampled.AudioInputStream;
-import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.Clip;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -55,19 +52,16 @@ import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
 import javax.swing.SpinnerNumberModel;
-import javax.swing.JTabbedPane;
-import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
-import javax.swing.table.AbstractTableModel;
 
 /** Keep UI state and interactions here; delegate model calls, rendering and persistence to services. */
 public final class AudioStudioFrame extends JFrame {
     private final InstrumentRegistry registry;
     private final TrackArrangementStore trackStore = new TrackArrangementStore();
-    private TrackTablePanel trackTable;
+    private MixerPanel trackTable;
     private boolean loadingTracks;
     private final StudioSettingsStore settingsStore = StudioSettingsStore.standard();
     private final JTextField endpoint = new JTextField(38);
@@ -112,22 +106,47 @@ public final class AudioStudioFrame extends JFrame {
     private SwingWorker<Path, String> worker;
     private volatile KipitzChatClient activeClient;
     private String preferredKeePassEntry = "";
-    private Clip currentPlayback;
+    // The desk: display, transport, waveform, master meters, and the pages behind the side rail.
+    private final DeckPlayer player = new DeckPlayer();
+    private final DeckDisplays.Lcd lcd = new DeckDisplays.Lcd();
+    private final DeckDisplays.Waveform waveform = new DeckDisplays.Waveform(this::seek);
+    private final DeckDisplays.Meter masterLeft = new DeckDisplays.Meter(false);
+    private final DeckDisplays.Meter masterRight = new DeckDisplays.Meter(false);
+    private final DeckWidgets.TransportKey playKey = new DeckWidgets.TransportKey(
+            DeckWidgets.Symbol.PLAY, AudioStudioTheme.GREEN, "Abspielen, was unter Wiedergabe gewählt ist (Leertaste)");
+    private final DeckWidgets.TransportKey stopKey = new DeckWidgets.TransportKey(
+            DeckWidgets.Symbol.STOP, AudioStudioTheme.TEXT, "Wiedergabe anhalten und an den Anfang");
+    private final DeckWidgets.TransportKey renderKey = new DeckWidgets.TransportKey(
+            DeckWidgets.Symbol.RECORD, AudioStudioTheme.ACCENT, "Rendern: aus dem Arrangement WAV-Dateien erzeugen");
+    private final DeckWidgets.TransportKey cancelKey = new DeckWidgets.TransportKey(
+            DeckWidgets.Symbol.CANCEL, AudioStudioTheme.AMBER, "Laufenden Vorgang abbrechen");
+    private final java.awt.CardLayout pages = new java.awt.CardLayout();
+    private final JPanel pageHolder = new JPanel(pages);
+    private final JLabel trackCount = DeckWidgets.lettering("");
+    private final javax.swing.Timer clock = new javax.swing.Timer(33, event -> tick());
+    private boolean choosingPlayback;
 
     public AudioStudioFrame(InstrumentRegistry registry) {
-        super("AresStack Audio Studio – Gemma, MIDI, SoundFonts und SFZ");
+        super("AresStack Audio Studio");
         this.registry = registry;
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setMinimumSize(new Dimension(880, 660));
-        setSize(1100, 790);
+        setMinimumSize(new Dimension(1000, 700));
+        setSize(1360, 900);
         setLocationRelativeTo(null);
         log.setEditable(false);
         log.setLineWrap(true);
+        log.setWrapStyleWord(true);
+        log.setFont(AudioStudioTheme.display(12f));
+        log.setForeground(AudioStudioTheme.LCD_TEXT);
+        log.setBackground(AudioStudioTheme.LCD_GLASS);
+        log.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
         description.setLineWrap(true);
         description.setWrapStyleWord(true);
+        description.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
         initializeContents();
         loadSettings();
         cancelButton.setEnabled(false);
+        cancelKey.setEnabled(false);
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent event) {
@@ -138,195 +157,473 @@ public final class AudioStudioFrame extends JFrame {
         generateButton.addActionListener(event -> generate());
         renderButton.addActionListener(event -> render());
         cancelButton.addActionListener(event -> cancel());
+        playbackSelection.addActionListener(event -> {
+            if (!choosingPlayback) {
+                showPlaybackChoice();
+            }
+        });
+        showPlaybackChoice();
+        clock.start();
     }
 
     private void initializeContents() {
-        JTabbedPane tabs = new JTabbedPane();
-        tabs.addTab("1 · Bibliotheken installieren",
-                new InstrumentLibraryPanel(registry, this::configureNetworkRoutes,
-                        this::refreshInstrumentChoices, this::append));
-        tabs.addTab("2 · Komponieren und abspielen", compositionPanel());
-        tabs.addTab("3 · Einstellungen", settingsPanel());
-        add(tabs, BorderLayout.CENTER);
-        JPanel header = new JPanel(new BorderLayout());
-        header.setBorder(BorderFactory.createEmptyBorder(16, 20, 12, 20));
-        JLabel headline = new JLabel("AresStack  |  Audio Studio");
-        headline.setFont(headline.getFont().deriveFont(java.awt.Font.BOLD, 21f));
-        header.add(headline, BorderLayout.NORTH);
-        JLabel subtitle = new JLabel("Komponieren mit KI  ·  Instrumente verwalten  ·  WAV / MIDI rendern");
-        subtitle.setForeground(new java.awt.Color(0x526D7C));
-        header.add(subtitle, BorderLayout.SOUTH);
-        add(header, BorderLayout.NORTH);
+        JPanel desk = new JPanel(new BorderLayout(14, 14));
+        desk.setBackground(AudioStudioTheme.DESK);
+        desk.setBorder(BorderFactory.createEmptyBorder(14, 14, 14, 14));
+        desk.add(transportBar(), BorderLayout.NORTH);
+        desk.add(sideRail(), BorderLayout.WEST);
+        pageHolder.setOpaque(false);
+        pageHolder.add(deckPage(), "deck");
+        pageHolder.add(libraryPage(), "library");
+        pageHolder.add(settingsPanel(), "settings");
+        pageHolder.add(consolePage(), "console");
+        desk.add(pageHolder, BorderLayout.CENTER);
+        setContentPane(desk);
 
-        JPanel footer = new JPanel(new BorderLayout(8, 8));
-        footer.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
-        footer.add(new JScrollPane(log), BorderLayout.CENTER);
-        footer.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createTitledBorder("Arbeitsprotokoll"),
-                BorderFactory.createEmptyBorder(4, 6, 6, 6)));
-        add(footer, BorderLayout.SOUTH);
+        // The space bar starts and stops the playback, unless something is being typed.
+        java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(event -> {
+            if (event.getID() == java.awt.event.KeyEvent.KEY_PRESSED
+                    && event.getKeyCode() == java.awt.event.KeyEvent.VK_SPACE && isActive()
+                    && !(event.getComponent() instanceof javax.swing.text.JTextComponent)
+                    && !(event.getComponent() instanceof javax.swing.AbstractButton)
+                    && !(event.getComponent() instanceof JComboBox)) {
+                togglePlayback();
+                return true;
+            }
+            return false;
+        });
     }
 
-    private JPanel compositionPanel() {
-        JPanel fields = new JPanel(new GridBagLayout());
-        fields.setBorder(AudioStudioTheme.cardBorder());
-        int row = 0;
-        addRow(fields, row++, "Musikalische Beschreibung:", new JScrollPane(description));
-        JPanel output = new JPanel(new BorderLayout(4, 0));
-        output.add(directory, BorderLayout.CENTER);
+    /** The head of the desk: its name, the display, the transport keys and the master meters. */
+    private JPanel transportBar() {
+        JPanel name = new JPanel();
+        name.setOpaque(false);
+        name.setLayout(new javax.swing.BoxLayout(name, javax.swing.BoxLayout.Y_AXIS));
+        JLabel brand = DeckWidgets.lettering("AresStack");
+        brand.setForeground(AudioStudioTheme.ACCENT_SOFT);
+        JLabel title = new JLabel("Audio Studio");
+        title.setFont(new java.awt.Font(java.awt.Font.SERIF, java.awt.Font.BOLD | java.awt.Font.ITALIC, 27));
+        title.setForeground(AudioStudioTheme.TEXT);
+        JLabel line = new JLabel("Komponieren · Mischen · Rendern");
+        line.setForeground(AudioStudioTheme.TEXT_FAINT);
+        line.setFont(line.getFont().deriveFont(11.5f));
+        name.add(javax.swing.Box.createVerticalGlue());
+        name.add(brand);
+        name.add(title);
+        name.add(line);
+        name.add(javax.swing.Box.createVerticalGlue());
+        name.setPreferredSize(new Dimension(236, 78));
+
+        playKey.addActionListener(event -> togglePlayback());
+        stopKey.addActionListener(event -> stopPlayback());
+        renderKey.addActionListener(event -> render());
+        cancelKey.addActionListener(event -> cancel());
+        JPanel keys = new JPanel(new FlowLayout(FlowLayout.CENTER, 6, 0));
+        keys.setOpaque(false);
+        keys.add(playKey);
+        keys.add(stopKey);
+        keys.add(javax.swing.Box.createHorizontalStrut(10));
+        keys.add(renderKey);
+        keys.add(cancelKey);
+        JPanel keysWithNames = new JPanel(new BorderLayout(0, 2));
+        keysWithNames.setOpaque(false);
+        keysWithNames.add(keys, BorderLayout.CENTER);
+        JPanel names = new JPanel(new java.awt.GridLayout(1, 4, 6, 0));
+        names.setOpaque(false);
+        for (String text : new String[]{"Play", "Stop", "Render", "Abbruch"}) {
+            JLabel label = DeckWidgets.lettering(text);
+            label.setFont(AudioStudioTheme.lettering(9f));
+            label.setHorizontalAlignment(JLabel.CENTER);
+            names.add(label);
+        }
+        keysWithNames.add(names, BorderLayout.SOUTH);
+
+        JPanel master = new JPanel(new GridBagLayout());
+        master.setOpaque(false);
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.gridy = 0;
+        c.gridwidth = 2;
+        c.anchor = GridBagConstraints.WEST;
+        c.insets = new Insets(0, 0, 6, 0);
+        master.add(DeckWidgets.lettering("Master"), c);
+        c.gridwidth = 1;
+        c.gridy = 1;
+        c.insets = new Insets(0, 0, 5, 6);
+        master.add(side("L"), c);
+        c.gridx = 1;
+        c.insets = new Insets(0, 0, 5, 0);
+        master.add(masterLeft, c);
+        c.gridx = 0;
+        c.gridy = 2;
+        c.insets = new Insets(0, 0, 0, 6);
+        master.add(side("R"), c);
+        c.gridx = 1;
+        c.insets = new Insets(0, 0, 0, 0);
+        master.add(masterRight, c);
+
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 18, 0));
+        right.setOpaque(false);
+        right.add(keysWithNames);
+        right.add(master);
+
+        JPanel inner = new JPanel(new BorderLayout(18, 0));
+        inner.setOpaque(false);
+        inner.add(name, BorderLayout.WEST);
+        inner.add(lcd, BorderLayout.CENTER);
+        inner.add(right, BorderLayout.EAST);
+        DeckWidgets.Module bar = new DeckWidgets.Module("Transport", inner);
+        return bar;
+    }
+
+    private static JLabel side(String letter) {
+        JLabel label = new JLabel(letter);
+        label.setFont(AudioStudioTheme.display(11f));
+        label.setForeground(AudioStudioTheme.TEXT_DIM);
+        return label;
+    }
+
+    /** The rail on the left: one key per page of the desk. */
+    private JPanel sideRail() {
+        JPanel keys = new JPanel();
+        keys.setOpaque(false);
+        keys.setLayout(new javax.swing.BoxLayout(keys, javax.swing.BoxLayout.Y_AXIS));
+        javax.swing.ButtonGroup group = new javax.swing.ButtonGroup();
+        String[][] entries = {{"deck", "Mischpult"}, {"library", "Soundbänke"}, {"settings", "Einstellungen"},
+                {"console", "Protokoll"}};
+        for (final String[] entry : entries) {
+            DeckWidgets.RailKey key = new DeckWidgets.RailKey(entry[1]);
+            key.addActionListener(event -> pages.show(pageHolder, entry[0]));
+            key.setAlignmentX(0f);
+            group.add(key);
+            keys.add(key);
+            keys.add(javax.swing.Box.createVerticalStrut(4));
+            if ("deck".equals(entry[0])) {
+                key.setSelected(true);
+            }
+        }
+        keys.add(javax.swing.Box.createVerticalGlue());
+        JLabel hint = new JLabel("<html><div style='width:118px'>Leertaste: Play / Pause<br>Klick in die Welle: springen</div></html>");
+        hint.setForeground(AudioStudioTheme.TEXT_FAINT);
+        hint.setFont(hint.getFont().deriveFont(11f));
+        hint.setBorder(BorderFactory.createEmptyBorder(0, 8, 2, 0));
+        hint.setAlignmentX(0f);
+        keys.add(hint);
+        DeckWidgets.Module rail = new DeckWidgets.Module("Studio", keys);
+        rail.setPreferredSize(new Dimension(198, 100));
+        return rail;
+    }
+
+    /** The mixing desk proper: the output, the mixer, the session and the steps of the work. */
+    private JPanel deckPage() {
+        JPanel sourceChoice = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        sourceChoice.setOpaque(false);
+        sourceChoice.add(DeckWidgets.lettering("Wiedergabe"));
+        playbackSelection.setPreferredSize(new Dimension(230, 28));
+        sourceChoice.add(playbackSelection);
+        DeckWidgets.Module output = new DeckWidgets.Module("Ausgang", waveform);
+        output.setHeadEnd(sourceChoice);
+
+        trackTable = new MixerPanel(registry, this::tracksChanged, this::listenAlone);
+        DeckWidgets.Module mixer = new DeckWidgets.Module("Mixer", trackTable);
+        mixer.setHeadEnd(trackCount);
+
+        JPanel session = new JPanel(new GridBagLayout());
+        session.setOpaque(false);
+        JScrollPane prompt = new JScrollPane(description);
+        prompt.setBorder(BorderFactory.createLineBorder(AudioStudioTheme.STROKE, 1, true));
+        prompt.setPreferredSize(new Dimension(300, 64));
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.gridy = 0;
+        c.gridwidth = 3;
+        c.weightx = 1;
+        c.weighty = 1;
+        c.fill = GridBagConstraints.BOTH;
+        c.insets = new Insets(0, 0, 8, 0);
+        session.add(prompt, c);
         JButton chooseOutput = new JButton("Ordner …");
         chooseOutput.addActionListener(event -> selectDirectory());
-        output.add(chooseOutput, BorderLayout.EAST);
-        addRow(fields, row++, "Ausgabe / Cache:", output);
-        JPanel tsv = new JPanel(new BorderLayout(4, 0));
-        tsv.add(arrangementFile, BorderLayout.CENTER);
-        JButton selectTsv = new JButton("TSV …");
+        JButton selectTsv = new JButton("Datei …");
         selectTsv.addActionListener(event -> selectArrangement());
-        JPanel chooseButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
-        chooseButtons.add(selectTsv);
-        tsv.add(chooseButtons, BorderLayout.EAST);
-        addRow(fields, row++, "Arrangement:", tsv);
+        addFileRow(session, 1, "Ordner", directory, chooseOutput);
+        addFileRow(session, 2, "Arrangement", arrangementFile, selectTsv);
+        DeckWidgets.Module sessionModule = new DeckWidgets.Module("Session · Musikalische Beschreibung", session);
 
-        trackTable = new TrackTablePanel(registry, this::tracksChanged);
-        trackTable.setPreferredSize(new Dimension(800, 270));
-        addRow(fields, row++, "Spuren:", trackTable);
-
-        JPanel steps = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
-        JButton newSong = new JButton("1 · Neues Stück");
+        JButton newSong = new JButton("Neues Stück");
         newSong.addActionListener(event -> createNewComposition());
-        steps.add(newSong);
-        JButton demo = new JButton("Demo laden (ohne KI)");
+        JButton demo = new JButton("Demo laden");
+        demo.setToolTipText("Das mitgelieferte Stück laden, ohne die KI zu fragen");
         demo.addActionListener(event -> loadDemo());
+        proposalButton.setText("KI-Vorschlag");
+        proposalButton.setToolTipText("Die KI schlägt Instrumente vor; es werden noch keine Noten erzeugt.");
+        proposalButton.addActionListener(event -> proposeInstruments(false));
+        generateButton.setText("Komponieren");
+        generateButton.setToolTipText("Aus den Spuren des Mixers mit der KI komponieren");
+        autopilotButton.setText("Autopilot");
+        autopilotButton.setToolTipText("Die KI schlägt Instrumente vor, komponiert alle Spuren und rendert sie.");
+        autopilotButton.addActionListener(event -> proposeInstruments(true));
+        renderButton.setText("Rendern");
+        cancelButton.setText("Abbrechen");
+        JButton inspect = new JButton("Plan ansehen");
+        inspect.setToolTipText("Den Kompositionsplan und die Antworten der KI ansehen");
+        inspect.addActionListener(event -> inspectComposition());
+        DeckWidgets.asStep(newSong, 1);
+        DeckWidgets.asStep(proposalButton, 2);
+        DeckWidgets.asStep(generateButton, 3);
+        DeckWidgets.asStep(renderButton, 4);
+        getRootPane().setDefaultButton(generateButton);
+        JPanel steps = new JPanel(new java.awt.GridLayout(4, 2, 8, 8));
+        steps.setOpaque(false);
+        steps.add(newSong);
         steps.add(demo);
         steps.add(proposalButton);
-        proposalButton.setToolTipText("KI macht nur einen editierbaren Vorschlag; es werden noch keine Noten erzeugt.");
-        proposalButton.addActionListener(event -> proposeInstruments(false));
-        generateButton.setText("2 · Aus Tabelle komponieren");
-        steps.add(generateButton);
-        autopilotButton.setToolTipText("KI schlägt Instrumente vor, komponiert alle Spuren und rendert sie.");
-        autopilotButton.addActionListener(event -> proposeInstruments(true));
         steps.add(autopilotButton);
-        renderButton.setText("3 · Rendern");
+        steps.add(generateButton);
+        steps.add(inspect);
         steps.add(renderButton);
-        JButton listen = new JButton("4 · Anhören");
-        listen.addActionListener(event -> play());
-        steps.add(listen);
+        steps.add(cancelButton);
+        DeckWidgets.Module stepsModule = new DeckWidgets.Module("Ablauf", steps);
+        stepsModule.setPreferredSize(new Dimension(344, 100));
 
-        JPanel secondary = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
-        secondary.add(new JLabel("Wiedergabe:"));
-        secondary.add(playbackSelection);
-        JButton stop = new JButton("Stopp");
-        stop.addActionListener(event -> stopPlayback());
-        secondary.add(stop);
-        secondary.add(cancelButton);
-        JButton inspect = new JButton("Plan / Spuren");
-        inspect.addActionListener(event -> inspectComposition());
-        secondary.add(inspect);
-        JPanel lower = new JPanel(new BorderLayout());
-        lower.add(secondary, BorderLayout.WEST);
-        JPanel toolbar = new JPanel(new BorderLayout(5, 2));
-        toolbar.add(steps, BorderLayout.NORTH);
-        toolbar.add(lower, BorderLayout.SOUTH);
+        JPanel lower = new JPanel(new BorderLayout(14, 0));
+        lower.setOpaque(false);
+        lower.add(sessionModule, BorderLayout.CENTER);
+        lower.add(stepsModule, BorderLayout.EAST);
 
-        JPanel panel = new JPanel(new BorderLayout(4, 8));
-        panel.add(toolbar, BorderLayout.NORTH);
-        panel.add(new JScrollPane(fields), BorderLayout.CENTER);
-        return panel;
+        // In a low window the page keeps its height and scrolls, so that a channel strip is never cut in half.
+        TallPage page = new TallPage(730);
+        page.add(output, BorderLayout.NORTH);
+        page.add(mixer, BorderLayout.CENTER);
+        page.add(lower, BorderLayout.SOUTH);
+        JScrollPane scroll = new JScrollPane(page, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        scroll.getVerticalScrollBar().setUnitIncrement(28);
+        JPanel holder = new JPanel(new BorderLayout());
+        holder.setOpaque(false);
+        holder.add(scroll, BorderLayout.CENTER);
+        return holder;
     }
 
-    /** Group external AI, KeePass, network and sampler configuration in a dedicated tab. */
+    /** A page that fills the height it gets, but is never lower than it needs to be: then it scrolls. */
+    private static final class TallPage extends JPanel implements javax.swing.Scrollable {
+        private final int least;
+
+        TallPage(int least) {
+            super(new BorderLayout(0, 14));
+            this.least = least;
+            setOpaque(false);
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            Dimension size = super.getPreferredSize();
+            return new Dimension(size.width, Math.max(size.height, least));
+        }
+
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(java.awt.Rectangle visible, int orientation, int direction) {
+            return 28;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(java.awt.Rectangle visible, int orientation, int direction) {
+            return visible.height - 28;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return getParent() != null && getParent().getHeight() >= least;
+        }
+    }
+
+    private static void addFileRow(JPanel panel, int row, String name, JTextField field, JButton choose) {
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridy = row;
+        c.gridx = 0;
+        c.anchor = GridBagConstraints.WEST;
+        c.insets = new Insets(0, 0, row == 1 ? 6 : 0, 10);
+        panel.add(DeckWidgets.lettering(name), c);
+        c.gridx = 1;
+        c.weightx = 1;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.insets = new Insets(0, 0, row == 1 ? 6 : 0, 8);
+        panel.add(field, c);
+        c.gridx = 2;
+        c.weightx = 0;
+        c.fill = GridBagConstraints.NONE;
+        c.insets = new Insets(0, 0, row == 1 ? 6 : 0, 0);
+        panel.add(choose, c);
+    }
+
+    private JPanel libraryPage() {
+        InstrumentLibraryPanel libraries = new InstrumentLibraryPanel(registry, this::configureNetworkRoutes,
+                this::refreshInstrumentChoices, this::append);
+        JPanel page = new JPanel(new BorderLayout());
+        page.setOpaque(false);
+        page.add(new DeckWidgets.Module("Soundbänke · SF2, SF3 und SFZ", libraries), BorderLayout.CENTER);
+        return page;
+    }
+
+    private JPanel consolePage() {
+        JScrollPane scroll = new JScrollPane(log);
+        scroll.setBorder(BorderFactory.createLineBorder(new java.awt.Color(0x24352C), 1, true));
+        DeckWidgets.Module module = new DeckWidgets.Module("Protokoll", scroll);
+        JButton clear = new JButton("Leeren");
+        clear.addActionListener(event -> log.setText(""));
+        module.setHeadEnd(clear);
+        JPanel page = new JPanel(new BorderLayout());
+        page.setOpaque(false);
+        page.add(module, BorderLayout.CENTER);
+        return page;
+    }
+
+    /** External AI, KeePass, network and sampler configuration, each in a module of its own. */
     private JPanel settingsPanel() {
-        JPanel fields = new JPanel(new GridBagLayout());
-        fields.setBorder(AudioStudioTheme.cardBorder());
+        JPanel ai = form();
         int row = 0;
-        addRow(fields, row++, "KI-Anbieter:", new JLabel("OpenAI-kompatible KIPITZ-API"));
-        addRow(fields, row++, "KIPITZ Completions URL:", endpoint);
-        JPanel credential = new JPanel(new BorderLayout(6, 0));
-        credential.add(apiKey, BorderLayout.CENTER);
-        JPanel credentialButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
-        JButton keepassList = new JButton("KeePass verbinden / Einträge laden");
+        addRow(ai, row++, "Completions-URL", endpoint);
+        JButton keepassList = new JButton("KeePass verbinden");
+        keepassList.setToolTipText("Mit KeePassRPC verbinden und die Einträge laden");
         keepassList.addActionListener(event -> loadKeePassEntries());
-        credentialButtons.add(keepassList);
+        keePassEntries.setPreferredSize(new Dimension(260, 30));
         JButton keepassUse = new JButton("Eintrag übernehmen");
         keepassUse.addActionListener(event -> useKeePassEntry());
-        credentialButtons.add(keePassEntries);
-        credentialButtons.add(keepassUse);
-        credential.add(credentialButtons, BorderLayout.EAST);
-        addRow(fields, row++, "API-Key (lokal gespeichert):", credential);
-        JPanel modelControls = new JPanel(new BorderLayout(6, 0));
+        JPanel credentialButtons = line(keepassList, keePassEntries, keepassUse);
+        addRow(ai, row++, "API-Key", apiKey);
+        addRow(ai, row++, "KeePass", credentialButtons);
+        JPanel modelControls = new JPanel(new BorderLayout(8, 0));
+        modelControls.setOpaque(false);
         modelControls.add(model, BorderLayout.CENTER);
         JButton listModels = new JButton("Modelle laden");
         listModels.addActionListener(event -> loadModelNames());
         modelControls.add(listModels, BorderLayout.EAST);
-        addRow(fields, row++, "Modell:", modelControls);
-        addRow(fields, row++, "Proxy-Modus:", proxyMode);
-        JPanel proxyHostAndPort = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        proxyHostAndPort.add(new JLabel("Host:"));
-        proxyHostAndPort.add(proxyHost);
-        proxyHostAndPort.add(new JLabel("Port:"));
-        proxyHostAndPort.add(proxyPort);
+        addRow(ai, row++, "Modell", modelControls);
+        tokenLimit.setPreferredSize(new Dimension(110, 30));
+        parallelRequests.setPreferredSize(new Dimension(110, 30));
+        addRow(ai, row++, "Antwortlänge",
+                line(tokenLimit, note("Tokens je Antwort; der Kompositionsplan nutzt höchstens 2.048.")));
+        addRow(ai, row++, "Parallel",
+                line(parallelRequests, note("Anfragen gleichzeitig; höchstens so viele wie Spuren.")));
+        addRow(ai, row, "", note("Der API-Key wird lokal im Klartext gespeichert (studio.properties im Benutzerordner)."));
+
+        JPanel network = form();
+        row = 0;
+        addRow(network, row++, "Proxy-Modus", proxyMode);
         JButton testProxy = new JButton("Proxyweg prüfen");
         testProxy.addActionListener(event -> testProxyRoute());
-        proxyHostAndPort.add(testProxy);
-        addRow(fields, row++, "Manueller Proxy:", proxyHostAndPort);
-        addRow(fields, row++, "PAC-Adresse (optional):", proxyPacUrl);
-        addRow(fields, row++, "Ohne Proxy für:", proxyNonProxyHosts);
-        JPanel proxyAuthentication = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        proxyAuthentication.add(proxyBasic);
-        proxyAuthentication.add(new JLabel("KeePass-Eintrag:"));
-        proxyAuthentication.add(proxyCredentialRef);
-        addRow(fields, row++, "Proxy-Anmeldung:", proxyAuthentication);
-        addRow(fields, row++, "Token-Limit pro Antwort:", tokenLimit);
-        addRow(fields, row++, "Parallele KI-Anfragen:", parallelRequests);
-        addRow(fields, row++, "Parallelität:",
-                new JLabel("Standard 32; tatsächlich höchstens so viele Anfragen wie gewählte Spuren."));
-        addRow(fields, row++, "Token-Hinweis:",
-                new JLabel("Maximale Antwortlänge; der kurze Kompositionsplan nutzt höchstens 2.048 Tokens."));
-        addRow(fields, row++, "Audio-Renderer:", new JLabel("SF2 standardmäßig direkt in Java rendern"));
-        addRow(fields, row++, "SF2-Synthesizer:", sf2Engine);
-        addRow(fields, row++, "SF2-Hinweis:",
-                new JLabel("GeneralUser und andere SF2-Bänke funktionieren ohne FluidSynth-Installation."));
-        JPanel engines = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        engines.add(new JLabel("FluidSynth:"));
-        engines.add(fluidSynth);
-        engines.add(new JLabel("sfizz:"));
-        engines.add(sfizz);
-        JButton fluidHelp = new JButton("FluidSynth installieren …");
+        proxyHost.setPreferredSize(new Dimension(260, 30));
+        proxyPort.setPreferredSize(new Dimension(80, 30));
+        addRow(network, row++, "Manueller Proxy",
+                line(proxyHost, DeckWidgets.lettering("Port"), proxyPort, testProxy));
+        addRow(network, row++, "PAC-Adresse", proxyPacUrl);
+        addRow(network, row++, "Ohne Proxy für", proxyNonProxyHosts);
+        proxyBasic.setOpaque(false);
+        proxyCredentialRef.setPreferredSize(new Dimension(260, 30));
+        addRow(network, row, "Anmeldung",
+                line(proxyBasic, DeckWidgets.lettering("KeePass-Eintrag"), proxyCredentialRef));
+
+        JPanel sound = form();
+        row = 0;
+        addRow(sound, row++, "SF2-Synthesizer", sf2Engine);
+        JButton fluidHelp = new JButton("Installieren …");
         fluidHelp.addActionListener(event -> openEngineWebsite("https://www.fluidsynth.org/download/"));
-        engines.add(fluidHelp);
-        JButton sfizzHelp = new JButton("sfizz installieren …");
+        fluidSynth.setPreferredSize(new Dimension(260, 30));
+        addRow(sound, row++, "FluidSynth", line(fluidSynth, fluidHelp));
+        JButton sfizzHelp = new JButton("Installieren …");
         sfizzHelp.addActionListener(event -> openEngineWebsite("https://github.com/sfztools/sfizz/releases"));
-        engines.add(sfizzHelp);
-        addRow(fields, row++, "Sampler:", engines);
-        addRow(fields, row++, "Hinweis:",
-                new JLabel("SF2: Java/Gervill ohne Installation · SF3: FluidSynth · SFZ: sfizz."));
+        sfizz.setPreferredSize(new Dimension(260, 30));
+        addRow(sound, row++, "sfizz", line(sfizz, sfizzHelp));
+        addRow(sound, row, "", note("SF2: Java/Gervill ohne Installation · SF3: FluidSynth · SFZ: sfizz."));
 
-
-        JPanel actionBar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 6));
+        JPanel column = new JPanel();
+        column.setOpaque(false);
+        column.setLayout(new javax.swing.BoxLayout(column, javax.swing.BoxLayout.Y_AXIS));
+        DeckWidgets.Module aiModule = new DeckWidgets.Module("KI-Zugang · OpenAI-kompatible KIPITZ-API", ai);
         JButton save = new JButton("Einstellungen speichern");
         save.addActionListener(event -> saveSettings(true));
-        actionBar.add(save);
+        aiModule.setHeadEnd(save);
+        column.add(aiModule);
+        column.add(javax.swing.Box.createVerticalStrut(14));
+        column.add(new DeckWidgets.Module("Netzwerk · Proxy", network));
+        column.add(javax.swing.Box.createVerticalStrut(14));
+        column.add(new DeckWidgets.Module("Klangerzeugung", sound));
+        JPanel top = new JPanel(new BorderLayout());
+        top.setOpaque(false);
+        top.add(column, BorderLayout.NORTH);
+        JScrollPane scroll = new JScrollPane(top);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        scroll.getVerticalScrollBar().setUnitIncrement(24);
+        JPanel page = new JPanel(new BorderLayout());
+        page.setOpaque(false);
+        page.add(scroll, BorderLayout.CENTER);
+        return page;
+    }
 
-        JPanel panel = new JPanel(new BorderLayout(4, 8));
-        panel.add(new JScrollPane(fields), BorderLayout.CENTER);
-        panel.add(actionBar, BorderLayout.SOUTH);
-        return panel;
+    /** Components side by side with gaps between them, beginning flush left. */
+    private static JPanel line(java.awt.Component... parts) {
+        JPanel line = new JPanel();
+        line.setOpaque(false);
+        line.setLayout(new javax.swing.BoxLayout(line, javax.swing.BoxLayout.X_AXIS));
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                line.add(javax.swing.Box.createHorizontalStrut(8));
+            }
+            if (parts[i] instanceof javax.swing.JComponent) {
+                ((javax.swing.JComponent) parts[i]).setAlignmentY(0.5f);
+                java.awt.Dimension preferred = parts[i].getPreferredSize();
+                parts[i].setMaximumSize(new Dimension(preferred.width, Math.max(preferred.height, 30)));
+            }
+            line.add(parts[i]);
+        }
+        line.add(javax.swing.Box.createHorizontalGlue());
+        return line;
+    }
+
+    private static JPanel form() {
+        JPanel form = new JPanel(new GridBagLayout());
+        form.setOpaque(false);
+        return form;
+    }
+
+    private static JLabel note(String text) {
+        JLabel label = new JLabel(text);
+        label.setForeground(AudioStudioTheme.TEXT_FAINT);
+        label.setFont(label.getFont().deriveFont(12f));
+        return label;
     }
 
     private void addRow(JPanel panel, int row, String name, java.awt.Component component) {
         GridBagConstraints label = new GridBagConstraints();
         label.gridx = 0;
         label.gridy = row;
-        label.insets = new Insets(5, 5, 5, 10);
-        label.anchor = GridBagConstraints.NORTHWEST;
-        panel.add(new JLabel(name), label);
+        label.insets = new Insets(5, 0, 5, 14);
+        label.anchor = GridBagConstraints.WEST;
+        JLabel lettering = DeckWidgets.lettering(name);
+        lettering.setPreferredSize(new Dimension(132, 18));
+        panel.add(lettering, label);
         GridBagConstraints field = new GridBagConstraints();
         field.gridx = 1;
         field.gridy = row;
         field.weightx = 1;
         field.fill = GridBagConstraints.HORIZONTAL;
-        field.anchor = GridBagConstraints.NORTHWEST;
-        field.insets = new Insets(4, 4, 4, 4);
+        field.anchor = GridBagConstraints.WEST;
+        field.insets = new Insets(4, 0, 4, 0);
         panel.add(component, field);
     }
 
@@ -825,6 +1122,9 @@ public final class AudioStudioFrame extends JFrame {
         renderButton.setEnabled(false);
         trackTable.setEditingEnabled(false);
         cancelButton.setEnabled(true);
+        cancelKey.setEnabled(true);
+        renderKey.setEnabled(false);
+        lcd.setBusy(true);
         worker = new SwingWorker<Path, String>() {
             @Override
             protected Path doInBackground() throws Exception {
@@ -851,6 +1151,9 @@ public final class AudioStudioFrame extends JFrame {
                 renderButton.setEnabled(true);
                 trackTable.setEditingEnabled(true);
                 cancelButton.setEnabled(false);
+                cancelKey.setEnabled(false);
+                renderKey.setEnabled(true);
+                lcd.setBusy(false);
                 try {
                     Path result = get();
                     if (result != null) {
@@ -870,6 +1173,9 @@ public final class AudioStudioFrame extends JFrame {
                     if (Files.isRegularFile(savedArrangement)) {
                         arrangementFile.setText(savedArrangement.toString());
                     }
+                    // What was rendered is there to be seen and heard at once.
+                    showPlaybackChoice();
+                    refreshStems();
                 }
             }
         };
@@ -979,39 +1285,185 @@ public final class AudioStudioFrame extends JFrame {
                 "Gemma composition plan and tracks", JOptionPane.INFORMATION_MESSAGE);
     }
 
+    /** The WAV file behind a choice of the playback: the sampled mix, the Java mix, or one track. */
+    private Path playbackFile(String selected) {
+        if (selected == null) {
+            return null;
+        }
+        Path folder = Paths.get(directory.getText().trim());
+        if ("Mixed sampled arrangement".equals(selected)) {
+            return folder.resolve("arrangement-instruments.wav");
+        }
+        if ("Java reference mix".equals(selected)) {
+            return folder.resolve("arrangement.wav");
+        }
+        Path sampled = folder.resolve(selected + "-sampled.wav");
+        return Files.isRegularFile(sampled) ? sampled : folder.resolve(selected + ".wav");
+    }
+
+    /** The track that plays alone, or {@code null} when a mix is chosen. */
+    private String soloTrack() {
+        String selected = (String) playbackSelection.getSelectedItem();
+        return selected == null || "Mixed sampled arrangement".equals(selected)
+                || "Java reference mix".equals(selected) ? null : selected;
+    }
+
+    /** Shows what is chosen under playback on the display and as a waveform, without playing it. */
+    private void showPlaybackChoice() {
+        String selected = (String) playbackSelection.getSelectedItem();
+        Path file = playbackFile(selected);
+        boolean there = file != null && Files.isRegularFile(file);
+        player.close();
+        if (there) {
+            player.show(file);
+        }
+        String solo = soloTrack();
+        java.awt.Color tint = AudioStudioTheme.ACCENT;
+        if (solo != null && trackTable != null) {
+            int index = 0;
+            for (MusicTrack track : trackTable.tracks()) {
+                if (track.id().equals(solo)) {
+                    tint = AudioStudioTheme.channel(index);
+                }
+                index++;
+            }
+        }
+        waveform.setEnvelope(player.envelope(),
+                there ? "" : "Noch nichts gerendert · Demo laden oder komponieren, dann Rendern", tint);
+        lcd.setSource(selected == null ? "—" : playbackName(selected), there);
+        lcd.setTime(0, player.length());
+    }
+
+    private static String playbackName(String selected) {
+        return "Mixed sampled arrangement".equals(selected) ? "MIX · INSTRUMENTE"
+                : "Java reference mix".equals(selected) ? "MIX · JAVA-SYNTHESE"
+                : "SOLO · " + selected.toUpperCase(java.util.Locale.ROOT);
+    }
+
+    /** Measures the rendered file of every track, so that the mixer's meters can follow the playback. */
+    private void refreshStems() {
+        if (trackTable == null) {
+            return;
+        }
+        final List<String> ids = new ArrayList<String>();
+        for (MusicTrack track : trackTable.tracks()) {
+            ids.add(track.id());
+        }
+        final List<Path> files = new ArrayList<Path>();
+        for (String id : ids) {
+            files.add(playbackFile(id));
+        }
+        new SwingWorker<Map<String, DeckPlayer.Envelope>, Void>() {
+            @Override
+            protected Map<String, DeckPlayer.Envelope> doInBackground() {
+                Map<String, DeckPlayer.Envelope> measured = new HashMap<String, DeckPlayer.Envelope>();
+                for (int i = 0; i < ids.size(); i++) {
+                    DeckPlayer.Envelope envelope = DeckPlayer.measure(files.get(i));
+                    if (envelope != null) {
+                        measured.put(ids.get(i), envelope);
+                    }
+                }
+                return measured;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    trackTable.setEnvelopes(get());
+                } catch (Exception ignored) {
+                    // The meters stay dark; playing is not affected.
+                }
+            }
+        }.execute();
+    }
+
+    private void listenAlone(String trackId) {
+        playbackSelection.setSelectedItem(trackId);
+        play();
+    }
+
+    private void togglePlayback() {
+        if (player.playing()) {
+            player.pause();
+        } else if (player.ready()) {
+            player.play();
+        } else {
+            play();
+        }
+    }
+
     private void play() {
         String selected = (String) playbackSelection.getSelectedItem();
-        String file = "Mixed sampled arrangement".equals(selected) ? "arrangement-instruments.wav"
-                : "Java reference mix".equals(selected) ? "arrangement.wav"
-                : selected + "-sampled.wav";
-        Path output = Paths.get(directory.getText().trim(), file);
-        if (!Files.isRegularFile(output) && !selected.endsWith("mix")
-                && !"Mixed sampled arrangement".equals(selected)) {
-            output = Paths.get(directory.getText().trim(), selected + ".wav");
+        Path output = playbackFile(selected);
+        if (output == null || !Files.isRegularFile(output)) {
+            message("Dazu gibt es noch keine Aufnahme: " + (output == null ? "" : output.getFileName())
+                    + "\nErst „Demo laden“ oder komponieren, dann „Rendern“.");
+            return;
         }
         try {
-            stopPlayback();
-            try (AudioInputStream audio = AudioSystem.getAudioInputStream(output.toFile())) {
-                currentPlayback = AudioSystem.getClip();
-                currentPlayback.open(audio);
-                currentPlayback.start();
-            }
+            player.open(output);
+            waveform.setEnvelope(player.envelope(), "", AudioStudioTheme.ACCENT);
+            showTint();
+            lcd.setSource(playbackName(selected), true);
+            player.play();
         } catch (Exception error) {
             message("Cannot play " + output + ": " + error.getMessage());
         }
     }
 
+    /** Colours the waveform like the channel that plays alone. */
+    private void showTint() {
+        String solo = soloTrack();
+        if (solo == null) {
+            return;
+        }
+        int index = 0;
+        for (MusicTrack track : trackTable.tracks()) {
+            if (track.id().equals(solo)) {
+                waveform.setEnvelope(player.envelope(), "", AudioStudioTheme.channel(index));
+            }
+            index++;
+        }
+    }
+
     private void stopPlayback() {
-        if (currentPlayback != null) {
-            currentPlayback.stop();
-            currentPlayback.close();
-            currentPlayback = null;
+        player.pause();
+        player.seek(0);
+    }
+
+    private void seek(double share) {
+        if (!player.ready() && player.file() != null) {
+            try {
+                Path file = player.file();
+                player.open(file);
+            } catch (Exception ignored) {
+                return; // no sound card: the waveform stays a picture
+            }
+        }
+        player.seek(share);
+    }
+
+    /** Thirty times a second: the display, the place in the waveform and the meters follow the playback. */
+    private void tick() {
+        boolean playing = player.playing();
+        double second = player.seconds();
+        double length = player.length();
+        lcd.setPlaying(playing);
+        lcd.setTime(second, length);
+        lcd.tick();
+        waveform.setShare(length <= 0 ? 0 : second / length);
+        DeckPlayer.Envelope envelope = player.envelope();
+        masterLeft.setLevel(playing && envelope != null ? envelope.at(second, false) : 0f);
+        masterRight.setLevel(playing && envelope != null ? envelope.at(second, true) : 0f);
+        if (trackTable != null) {
+            trackTable.follow(playing ? second : -1, soloTrack());
         }
     }
 
     private void append(String text) {
         log.append(text + "\n");
         log.setCaretPosition(log.getDocument().getLength());
+        lcd.setStatus(text);
     }
 
     private void message(String text) {
@@ -1072,6 +1524,7 @@ public final class AudioStudioFrame extends JFrame {
 
     private void refreshPlaybackChoices() {
         String previous = (String) playbackSelection.getSelectedItem();
+        choosingPlayback = true;
         playbackSelection.removeAllItems();
         playbackSelection.addItem("Mixed sampled arrangement");
         playbackSelection.addItem("Java reference mix");
@@ -1087,6 +1540,17 @@ public final class AudioStudioFrame extends JFrame {
         if (previous != null) {
             playbackSelection.setSelectedItem(previous);
         }
+        choosingPlayback = false;
+        if (trackTable != null) {
+            try {
+                int count = trackTable.tracks().size();
+                trackCount.setText(count == 0 ? "KEINE SPUR" : count + (count == 1 ? " SPUR" : " SPUREN") + " VON 16");
+            } catch (IllegalArgumentException empty) {
+                trackCount.setText("KEINE SPUR");
+            }
+        }
+        showPlaybackChoice();
+        refreshStems();
     }
 
     private interface Operation {

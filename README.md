@@ -85,11 +85,11 @@ Start the current [audio-studio.jar](https://github.com/aresstack/audio/releases
 
 ### First-time use
 
-1. Open **1 · Bibliotheken installieren**. The table distinguishes **Installiert**, **Download verfügbar** and **Manuell**. Select a library and click **Herunterladen**. At the right, **Alle verfügbaren herunterladen** installs the four verified direct-download libraries in one action, after a size confirmation. These are GeneralUser GS (SF2, checksum verified), MuseScore General (SF3), Spanish Classical Guitar (compact SF2, unpacked from 7z), and FSBS Clean Electric Guitar (compact SF2, unpacked from 7z). Downloaded banks are stored and registered automatically in `~/.aresstack/audio/libraries/`.
-2. For the large and multi-package libraries **VSCO 2 CE, Virtual Playing Orchestra, Salamander Grand Piano**, and the **FreePats/SFZ Instruments collections**, use **Download-Seite öffnen** and then **Vorhandene Datei / Ordner importieren**. Importing a directory discovers up to 2,000 SF2/SF3/SFZ instrument definitions without copying the sample data. VPO needs both its WAV archive and its SFZ script archive extracted to the same folder. The app does not silently download gigabytes.
-3. Switch to **2 · Komponieren und abspielen**. Start with **Demo laden (ohne KI)** and **3 · Rendern** to hear the supplied original Gemma composition without a new API call. The built-in Java synthesizer works without any downloaded bank.
-4. For a new song, click **1 · Neues Stück**, enter your music description and choose **2 · Mit Gemma komponieren**. That creates a **new composition folder**, preserving older cache and WAV files. Completed model responses are cached within the chosen output folder and reused after restart.
-5. Choose a downloaded instrument independently for each track. General-MIDI banks allow program numbers 0–127. Install FluidSynth (SF2/SF3) or sfizz_render (SFZ) separately and set their executable paths. Click **3 · Rendern**, then **4 · Anhören** or select a single track.
+1. Open **Soundbänke** in the side rail. The table distinguishes **Installiert**, **Download verfügbar** and **Manuell**. Select a library and click **Herunterladen**. At the right, **Alle verfügbaren laden** installs the four verified direct-download libraries in one action, after a size confirmation. These are GeneralUser GS (SF2, checksum verified), MuseScore General (SF3), Spanish Classical Guitar (compact SF2, unpacked from 7z), and FSBS Clean Electric Guitar (compact SF2, unpacked from 7z). Downloaded banks are stored and registered automatically in `~/.aresstack/audio/libraries/`.
+2. For the large and multi-package libraries **VSCO 2 CE, Virtual Playing Orchestra, Salamander Grand Piano**, and the **FreePats/SFZ Instruments collections**, use **Download-Seite öffnen** and then **Datei / Ordner importieren …**. Importing a directory discovers up to 2,000 SF2/SF3/SFZ instrument definitions without copying the sample data. VPO needs both its WAV archive and its SFZ script archive extracted to the same folder. The app does not silently download gigabytes.
+3. Switch to **Mischpult**. Start with **Demo laden** and **Rendern** (the round RENDER key of the transport does the same) to hear the supplied original Gemma composition without a new API call. The built-in Java synthesizer works without any downloaded bank.
+4. For a new song, click **Neues Stück**, enter your music description under **Session** and choose **Komponieren**. That creates a **new composition folder**, preserving older cache and WAV files. Completed model responses are cached within the chosen output folder and reused after restart.
+5. Choose a downloaded instrument independently for each track. General-MIDI banks allow program numbers 0–127. Install FluidSynth (SF2/SF3) or sfizz_render (SFZ) separately and set their executable paths. Click **Rendern**, then the round PLAY key (or the space bar), or **Solo** on a channel strip to hear a single track.
 6. Set your KIPITZ chat completions URL, masked API key and model (`google/gemma-4-31B-it`), or click **KeePass verbinden / Einträge laden** to pair with KeePassRPC and take over a selected entry (API address and password). **Modelle laden** retrieves model IDs over the configured proxy. Audio Studio also suggests the base URL, model and KeePass entry from 3d4j or the Enterprise AI Client when there is no local setting. Save your choices with **Einstellungen speichern**; they reload on restart.
 7. **Proxy:** the default setting is **Aus 3d4j / Windows übernehmen**. The resolver uses the same `win-proxy-java:0.2.0` as 3d4j and gets its values in order from Audio Studio, `~/.3d4j/generator.properties`, and the Enterprise AI Client. Windows without explicit config uses `PAC_URL_POWERSHELL`; options include `PAC_URL_WINDOWS_SETTINGS`, `PAC_URL_WSCRIPT`, `PAC_URL_MANUAL`, `WINDOWS_STATIC_PROXY`, `MANUAL_PROXY` and `DISABLED`. **Proxyweg prüfen** displays the resolved route for the selected destination. Both KIPITZ traffic and sample downloads follow the same route. There is **no silent DIRECT fallback** when PAC fails.
 
@@ -113,7 +113,15 @@ The implementation uses the same **MIT-licensed KeePassRPC transport** as 3d4j /
 
 An optional proxy-authentication entry can be named in **Proxy-Anmeldung**, or inherited via `network.proxy.auth.mode=BASIC` and `network.proxy.auth.credentialRef=keepass:<title>` from 3d4j. Java performs HTTP proxy BASIC authentication using the selected KeePass credentials when the proxy requests them. On workstations whose proxy supports integrated Windows authentication, Java's usual authentication mechanism remains available. If a proxy route cannot be resolved, the request fails with diagnostics instead of bypassing the company network.
 
-UI layout: FlatLaf with the rounded, card-based 3d4j design translated to Swing, using navy/teal rather than the game's pink theme. The Java 8 runtime smoke test installs the theme, resolves a disabled proxy route, loads KeePassRPC and renders the supplied demo headlessly.
+UI layout: a dark mixing desk on FlatLaf, with the rounded modules of 3d4j's dialogs and its pink as the signal colour.
+
+- **Transport** (top): a display with the time, the loaded source, the last message and the flags FILE / PLAY / AI; round keys for play, stop, render and cancel; master level meters. The space bar plays and pauses.
+- **Side rail**: Mischpult, Soundbänke, Einstellungen, Protokoll.
+- **Mischpult**: the output as a waveform with the playback position (click or drag to jump), the **mixer** with one channel strip per track, the session (description, folder, arrangement) and the steps of the work.
+- **Channel strip**: name, role, General MIDI program, sound, sound bank, a lamp that is lit once the track is rendered, **Solo** to hear it alone, a cross in the coloured cap to remove it, and a stereo level meter that follows the playback from the track's own rendered file. The strips replace the former track table; `+ Spur` adds one.
+- In a low window the desk page scrolls instead of cutting the strips; in a narrow one the display drops its less important parts.
+
+The meters and the waveform are drawn from the rendered WAV files (loudness per hundredth of a second, `DeckPlayer.measure`); they show what was rendered, they do not change it. There are deliberately no faders: the mixer has no gain per track yet, and a control without function would lie. The Java 8 runtime smoke test installs the theme, resolves a disabled proxy route, loads KeePassRPC and renders the supplied demo headlessly.
 
 **Scope:** CI validates Java 8, simulated KIPITZ calls through a local HTTP proxy, proxy routing modes, and KeePassRPC class loading. Actual company PAC/KeePass pairing and a GUI review must be tested on the target Windows environment; no corporate network or secret is available to CI.
 
@@ -122,28 +130,28 @@ UI layout: FlatLaf with the rounded, card-based 3d4j design translated to Swing,
 
 **FluidSynth is no longer required for SF2 sample playback or WAV export.** Audio Studio now renders SF2 instruments (including GeneralUser GS, Spanish Classical Guitar and FSBS Clean Electric Guitar) with the **Gervill software synthesizer built into Java 8 and newer**. It produces 44.1-kHz stereo WAVs offline without a sound card or any native `fluidsynth.exe`.
 
-Under **3 · Einstellungen → SF2-Synthesizer**, the default is **Java / Gervill (integriert)**. Optionally switch to FluidSynth if you have it installed. **SF3** (e.g. MuseScore General) still requires FluidSynth, and **SFZ** requires sfizz. If an external executable is missing, the original Java audio track is preserved and used as a fallback instead of losing the composition.
+Under **Einstellungen → Klangerzeugung → SF2-Synthesizer**, the default is **Java / Gervill (integriert)**. Optionally switch to FluidSynth if you have it installed. **SF3** (e.g. MuseScore General) still requires FluidSynth, and **SFZ** requires sfizz. If an external executable is missing, the original Java audio track is preserved and used as a fallback instead of losing the composition.
 
 The JDK does not expose Gervill's offline PCM stream through its standard public Java Sound API. Audio Studio isolates this internal API access in a second Java process using the same installed Java runtime. For Java 9+ the program automatically supplies the necessary `--add-exports` flag; Java 8 requires no flag. Users do not have to configure these parameters manually. CI renders the actual GeneralUser SF2 on both Java 8 and Java 21, verifies non-silent WAV output and runs the studio's GeneralUser end-to-end smoke test.
 
-To continue an interrupted song, reopen Audio Studio. It automatically recognizes an existing `arrangement.tsv` in the saved output directory. Click **3 · Rendern**, then **4 · Anhören**. No additional AI requests are made.
+To continue an interrupted song, reopen Audio Studio. It automatically recognizes an existing `arrangement.tsv` in the saved output directory. Click **Rendern**, then PLAY. No additional AI requests are made.
 
 
 ## Variable instrumentation: manual, AI suggestion or autopilot
 
-The **2 · Komponieren und abspielen** tab contains an editable Instrumentierung / Arrangement table.
-The original Melody, Harmony, Bass and Drums entries are just the initial defaults. Any row can be edited or removed with its right-hand **✕**, and **+ Spur hinzufügen** adds a new instrument.
+The **Mischpult** page contains the editable mixer.
+The original Melody, Harmony, Bass and Drums entries are just the initial defaults. Any channel strip can be edited or removed with the **✕** in its cap, and **+ Spur** adds a new instrument.
 
-| Column | Meaning |
+| Field of a strip | Meaning |
 | --- | --- |
-| Spur-ID | Unique filename-safe ID, such as `melody`, `cello` or `flute` |
+| Name (top) | Unique filename-safe ID, such as `melody`, `cello` or `flute` |
 | Rolle | `melody`, `harmony`, `bass`, `drums` or `texture` |
-| Instrument / Klangfarbe | Musical description used in the model prompt |
-| GM-Programm | Zero-based General MIDI program 0–127 |
+| GM | Zero-based General MIDI program 0–127 |
+| Klang | Musical description used in the model prompt |
 | Soundbank | Locally installed library or built-in Java synth |
 | ✕ | Remove any track, including a default track |
 
-Three workflows are supported. **Manual**: edit the table and click **Aus Tabelle komponieren**. **KI-Instrumentvorschlag**: generate only an editable proposal of appropriate instruments, without notes. **Vollautomatisch**: generate a proposal, then the shared musical composition plan, then each selected track and the final WAV mix. Autopilot selects an installed GeneralUser SF2 bank automatically when it is available; otherwise it uses Java synthesis.
+Three workflows are supported. **Manual**: edit the strips and click **Komponieren**. **KI-Vorschlag**: generate only an editable proposal of appropriate instruments, without notes. **Autopilot**: generate a proposal, then the shared musical composition plan, then each selected track and the final WAV mix. Autopilot selects an installed GeneralUser SF2 bank automatically when it is available; otherwise it uses Java synthesis.
 
 Under **3 · Einstellungen**, **Parallele KI-Anfragen** defaults to **32**, independently of 3d4j's default of one. The real request count is limited to the number of configured tracks. The AI proposal and the shared eight-bar plan are each created sequentially, and then all part requests can run concurrently. Reducing parallelism can help with provider rate limits.
 

@@ -55,11 +55,26 @@ public final class InstrumentLibraryPanel extends JPanel {
         this.proxyRoutes = proxyRoutes;
         this.onRegistryChanged = onRegistryChanged;
         this.log = log;
-        setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
-        table.setRowHeight(26);
+        setOpaque(false);
+        table.setRowHeight(38);
         table.setAutoCreateRowSorter(true);
+        table.setShowVerticalLines(false);
+        table.setFillsViewportHeight(true);
+        table.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
+        table.getColumnModel().getColumn(0).setPreferredWidth(240);
+        table.getColumnModel().getColumn(1).setPreferredWidth(170);
+        table.getColumnModel().getColumn(2).setPreferredWidth(80);
+        table.getColumnModel().getColumn(3).setPreferredWidth(110);
+        table.getColumnModel().getColumn(4).setPreferredWidth(170);
+        table.getColumnModel().getColumn(5).setPreferredWidth(280);
+        table.getColumnModel().getColumn(4).setCellRenderer(new StatusRenderer());
+        table.getColumnModel().getColumn(0).setCellRenderer(new NameRenderer());
+        table.getTableHeader().setFont(AudioStudioTheme.lettering(10.5f));
+        table.getTableHeader().setReorderingAllowed(false);
         table.getSelectionModel().addListSelectionListener(event -> updateDownloadButton());
-        add(new JScrollPane(table), BorderLayout.CENTER);
+        JScrollPane scroll = new JScrollPane(table);
+        scroll.setBorder(BorderFactory.createLineBorder(AudioStudioTheme.STROKE, 1, true));
+        add(scroll, BorderLayout.CENTER);
         add(actions(), BorderLayout.SOUTH);
         if (!libraries.isEmpty()) {
             table.setRowSelectionInterval(0, 0);
@@ -68,14 +83,19 @@ public final class InstrumentLibraryPanel extends JPanel {
     }
 
     private JPanel actions() {
-        JPanel container = new JPanel(new BorderLayout(4, 6));
+        JPanel container = new JPanel(new BorderLayout(4, 10));
+        container.setOpaque(false);
+        progressBar.setPreferredSize(new java.awt.Dimension(100, 22));
         progressBar.setStringPainted(true);
         progressBar.setString("Bibliothek wählen und herunterladen – oder vorhandenen Ordner importieren");
         container.add(progressBar, BorderLayout.NORTH);
 
         JPanel actions = new JPanel(new BorderLayout(6, 0));
-        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        JButton importButton = new JButton("Vorhandene Datei / Ordner importieren");
+        actions.setOpaque(false);
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        left.setOpaque(false);
+        JButton importButton = new JButton("Datei / Ordner importieren …");
+        importButton.setToolTipText("Eine vorhandene SF2-, SF3- oder SFZ-Datei oder einen Ordner damit anmelden");
         importButton.addActionListener(event -> importSelected());
         left.add(importButton);
         JButton sourceButton = new JButton("Quellseite");
@@ -86,11 +106,17 @@ public final class InstrumentLibraryPanel extends JPanel {
         left.add(licenseButton);
         actions.add(left, BorderLayout.WEST);
 
-        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        right.setOpaque(false);
+        downloadButton.putClientProperty("JButton.buttonType", "default");
+        downloadButton.setBackground(AudioStudioTheme.ACCENT);
+        downloadButton.setForeground(java.awt.Color.WHITE);
         downloadButton.addActionListener(event -> downloadSelected());
         right.add(downloadButton);
         downloadAllButton.addActionListener(event -> downloadAll());
         right.add(downloadAllButton);
+        cancelButton.setText("Abbrechen");
+        downloadAllButton.setText("Alle verfügbaren laden");
         cancelButton.addActionListener(event -> cancelDownloads());
         cancelButton.setEnabled(false);
         right.add(cancelButton);
@@ -339,6 +365,45 @@ public final class InstrumentLibraryPanel extends JPanel {
                         download == null ? "Manuell" : "Download verfügbar";
                 default: return item.license();
             }
+        }
+    }
+
+    /** The state of a library as a lamp with its name: green installed, pink ready to download, dark by hand. */
+    private static final class StatusRenderer extends javax.swing.table.DefaultTableCellRenderer {
+        private java.awt.Color lamp = AudioStudioTheme.TEXT_FAINT;
+        private boolean lit;
+
+        @Override
+        public java.awt.Component getTableCellRendererComponent(JTable table, Object value, boolean selected,
+                                                                boolean focused, int row, int column) {
+            super.getTableCellRendererComponent(table, value, selected, false, row, column);
+            String state = String.valueOf(value);
+            lit = !"Manuell".equals(state);
+            lamp = "Installiert".equals(state) ? AudioStudioTheme.GREEN : AudioStudioTheme.ACCENT;
+            setForeground("Installiert".equals(state) ? AudioStudioTheme.GREEN
+                    : lit ? AudioStudioTheme.ACCENT_SOFT : AudioStudioTheme.TEXT_DIM);
+            setBorder(BorderFactory.createEmptyBorder(0, 30, 0, 6));
+            return this;
+        }
+
+        @Override
+        protected void paintComponent(java.awt.Graphics graphics) {
+            super.paintComponent(graphics);
+            java.awt.Graphics2D g = DeckWidgets.smooth(graphics);
+            DeckWidgets.paintLamp(g, 15f, getHeight() / 2f, 4.5f, lamp, lit);
+            g.dispose();
+        }
+    }
+
+    /** The name of a library, a little heavier than the rest of its row. */
+    private static final class NameRenderer extends javax.swing.table.DefaultTableCellRenderer {
+        @Override
+        public java.awt.Component getTableCellRendererComponent(JTable table, Object value, boolean selected,
+                                                                boolean focused, int row, int column) {
+            super.getTableCellRendererComponent(table, value, selected, false, row, column);
+            setFont(getFont().deriveFont(java.awt.Font.BOLD));
+            setBorder(BorderFactory.createEmptyBorder(0, 12, 0, 6));
+            return this;
         }
     }
 }
