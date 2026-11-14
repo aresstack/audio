@@ -94,3 +94,5 @@ The native FluidSynth and sfizz_render programs must be installed separately and
 Settings save only local soundbank paths under `~/.aresstack/audio/instruments.properties`; no API key is stored. Sample-library license terms vary; VPO is from mixed origins and Salamander requires attribution. Some SFZ libraries use ARIA-specific extensions that may not work identically with sfizz. Polyphone can convert some SFZ to SF2 but can lose modulation or articulation features.
 
 Build the Swing app with `bash ./gradlew :studio:jar`, or `gradlew.bat :studio:jar` on Windows. CI runs `java -jar studio/build/libs/audio-studio.jar --smoke-test` without opening a desktop.
+
+The instrument library can import **entire folders**, discovering up to 2,000 SF2/SF3/SFZ presets recursively. Each file becomes its own selectable track instrument; sample data stays wherever it was extracted. This supports large orchestral SFZ collections without repackaging or converting them to SF2. The CI additionally renders an actual GeneralUser GS stem inside the studio and verifies the combined MIDI/WAV output.

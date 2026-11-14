@@ -95,6 +95,12 @@ jobs:
           test -s build/soundfont-compare/district-dawn-generaluser.mp3
           test -s build/soundfont-compare/district-dawn-synth.mp3
 
+      - name: Smoke-test Swing Studio with actual GeneralUser soundbank
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -jar studio/build/libs/audio-studio.jar --smoke-test build/soundfonts/GeneralUser-GS.sf2
+
       - name: Stage verified JARs and the MIDI/SoundFont A/B comparison
         shell: bash
         run: |
