@@ -1,5 +1,7 @@
 package com.aresstack.audio.studio.ai;
 
+import com.aresstack.audio.instruments.network.AudioProxyRoutes;
+import com.aresstack.audio.instruments.network.AudioWindowsTrust;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -11,6 +13,8 @@ import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.URL;
+import java.net.URI;
+import javax.net.ssl.HttpsURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,6 +25,7 @@ public final class KipitzChatClient {
     private final String endpoint;
     private final String apiKey;
     private final String model;
+    private final AudioProxyRoutes routes;
     private final String proxyHost;
     private final int proxyPort;
     private volatile HttpURLConnection inFlight;
@@ -31,6 +36,19 @@ public final class KipitzChatClient {
         this.model = model;
         this.proxyHost = proxyHost == null ? "" : proxyHost.trim();
         this.proxyPort = proxyPort;
+        this.routes = null;
+    }
+
+    public KipitzChatClient(String endpoint, String apiKey, String model, AudioProxyRoutes routes) {
+        if (routes == null) {
+            throw new IllegalArgumentException("Proxy route resolver cannot be null.");
+        }
+        this.endpoint = endpoint;
+        this.apiKey = apiKey;
+        this.model = model;
+        this.proxyHost = "";
+        this.proxyPort = 0;
+        this.routes = routes;
     }
 
     public JsonObject generate(String instruction, String prompt, int maxTokens, Path cache) throws IOException {
@@ -112,19 +130,70 @@ public final class KipitzChatClient {
         }
     }
 
+    /** Open through the same PAC-aware proxy route and Windows trust store used by 3d4j. */
     private HttpURLConnection openConnection() throws IOException {
-        URL url = new URL(endpoint);
+        return openConnection(URI.create(endpoint));
+    }
+
+    private HttpURLConnection openConnection(URI destination) throws IOException {
+        URL url = destination.toURL();
         if (!"https".equalsIgnoreCase(url.getProtocol()) && !"http".equalsIgnoreCase(url.getProtocol())) {
             throw new IOException("Only HTTP(S) endpoints are supported.");
         }
-        if (proxyHost.isEmpty()) {
-            return (HttpURLConnection) url.openConnection();
+        HttpURLConnection connection;
+        if (routes != null) {
+            connection = (HttpURLConnection) url.openConnection(routes.proxyFor(destination));
+        } else if (proxyHost.isEmpty()) {
+            connection = (HttpURLConnection) url.openConnection();
+        } else {
+            if (proxyPort < 1 || proxyPort > 65535) {
+                throw new IOException("Invalid proxy port: " + proxyPort);
+            }
+            connection = (HttpURLConnection) url.openConnection(
+                    new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort)));
         }
-        if (proxyPort < 1 || proxyPort > 65535) {
-            throw new IOException("Invalid proxy port: " + proxyPort);
+        if (connection instanceof HttpsURLConnection) {
+            AudioWindowsTrust.configure((HttpsURLConnection) connection);
         }
-        Proxy proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort));
-        return (HttpURLConnection) url.openConnection(proxy);
+        return connection;
+    }
+
+    /** Read the available OpenAI-compatible model identifiers without consuming completion tokens. */
+    public java.util.List<String> listModels() throws IOException {
+        String suffix = "/chat/completions";
+        String normalized = endpoint.trim().replaceAll("/+$", "");
+        if (!normalized.endsWith(suffix)) {
+            throw new IOException("The KIPITZ URL must end with /chat/completions to list models.");
+        }
+        URI address = URI.create(normalized.substring(0, normalized.length() - suffix.length()) + "/models");
+        HttpURLConnection connection = openConnection(address);
+        try {
+            connection.setConnectTimeout(30000);
+            connection.setReadTimeout(60000);
+            connection.setRequestProperty("Accept", "application/json");
+            if (apiKey != null && !apiKey.trim().isEmpty()) {
+                connection.setRequestProperty("Authorization", "Bearer " + apiKey);
+            }
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                throw new IOException("Model listing returned HTTP " + status + " (proxy " +
+                        (routes == null ? "legacy" : routes.describe()) + ").");
+            }
+            try (InputStream input = connection.getInputStream()) {
+                com.google.gson.JsonArray data = new JsonParser().parse(readText(input, 2_000_000))
+                        .getAsJsonObject().getAsJsonArray("data");
+                java.util.List<String> models = new java.util.ArrayList<String>();
+                for (com.google.gson.JsonElement element : data) {
+                    models.add(element.getAsJsonObject().get("id").getAsString());
+                }
+                java.util.Collections.sort(models);
+                return models;
+            }
+        } catch (RuntimeException invalid) {
+            throw new IOException("Could not read the model list.", invalid);
+        } finally {
+            connection.disconnect();
+        }
     }
 
     private static JsonObject message(String role, String content) {
