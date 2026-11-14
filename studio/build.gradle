@@ -23,12 +23,13 @@ tasks.named('jar') {
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from mergedServicesDirectory
-    from {
+    from ({
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }) {
+        exclude 'META-INF/services/*'
     }
-    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'META-INF/services/*',
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA',
             'module-info.class', 'META-INF/versions/*/module-info.class'
-    from mergedServicesDirectory
 }
 
 tasks.named('run') {
