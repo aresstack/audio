@@ -12,8 +12,13 @@ public final class ExternalProcessRunner {
     public void execute(List<String> command, Path outputFile) throws IOException, InterruptedException {
         Path logFile = outputFile.resolveSibling(outputFile.getFileName().toString() + ".log");
         Files.createDirectories(outputFile.toAbsolutePath().getParent());
-        Process process = new ProcessBuilder(command).redirectErrorStream(true)
-                .redirectOutput(logFile.toFile()).start();
+        Process process;
+        try {
+            process = new ProcessBuilder(command).redirectErrorStream(true)
+                    .redirectOutput(logFile.toFile()).start();
+        } catch (IOException unavailable) {
+            throw new SamplerUnavailableException(command.get(0), unavailable);
+        }
         boolean completed;
         try {
             completed = process.waitFor(5, TimeUnit.MINUTES);

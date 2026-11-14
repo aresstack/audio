@@ -5,6 +5,7 @@ import com.aresstack.audio.instruments.InstrumentRegistry;
 import com.aresstack.audio.studio.render.ExternalProcessRunner;
 import com.aresstack.audio.studio.render.InstrumentSampleRenderer;
 import com.aresstack.audio.studio.render.MidiStemExporter;
+import com.aresstack.audio.studio.render.SamplerUnavailableException;
 import com.aresstack.audio.studio.render.WaveStemMixer;
 import java.io.File;
 import java.nio.file.Files;
@@ -69,8 +70,18 @@ public final class StudioMusicRenderer {
             midiExporter.isolate(directory.resolve("arrangement.mid"), track,
                     selectedProgram, trackMidi);
             Path stem = directory.resolve(track + "-sampled.wav");
-            sampler.render(library, bank, trackMidi, stem, fluidSynthExecutable, sfizzExecutable);
-            stems.add(stem);
+            try {
+                sampler.render(library, bank, trackMidi, stem, fluidSynthExecutable, sfizzExecutable);
+                stems.add(stem);
+            } catch (SamplerUnavailableException unavailable) {
+                String engine = library.format() == InstrumentLibrary.Format.SFZ
+                        ? "sfizz_render" : "FluidSynth";
+                progress.update("WARN: " + engine + " is not installed or cannot be launched ('"
+                        + unavailable.executable() + "'). Using the built-in Java sound for "
+                        + track + " instead. Install the sampler and configure its path under "
+                        + "3 · Einstellungen to hear " + library.name() + ".");
+                stems.add(directory.resolve(track + ".wav"));
+            }
         }
         Path mix = directory.resolve("arrangement-instruments.wav");
         progress.update("Mixing the instrument tracks ...");

@@ -759,6 +759,12 @@ public final class AudioStudioFrame extends JFrame {
                 } catch (Exception failed) {
                     Throwable reason = failed.getCause() == null ? failed : failed.getCause();
                     append("ERROR: " + reason.getMessage());
+                } finally {
+                    // Retain access to a successfully generated composition if sampled rendering fails.
+                    Path savedArrangement = Paths.get(directory.getText().trim(), "arrangement.tsv");
+                    if (Files.isRegularFile(savedArrangement)) {
+                        arrangementFile.setText(savedArrangement.toString());
+                    }
                 }
             }
         };
