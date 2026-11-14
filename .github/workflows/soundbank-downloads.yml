@@ -1,0 +1,32 @@
+name: Verify soundbank downloads
+
+on:
+  push:
+    paths:
+      - 'instruments/src/**'
+      - 'instruments/build.gradle'
+      - '.github/workflows/soundbank-downloads.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  official-downloads:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Install and verify all four direct soundbank downloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ./gradlew :instruments:test \
+            --tests 'com.aresstack.audio.instruments.download.InstrumentDownloadIntegrationTest' \
+            -Dsoundfont.live=true --no-daemon --stacktrace
