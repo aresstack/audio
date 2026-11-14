@@ -4,7 +4,7 @@ Small, modular Java audio experiments for [3d4j](https://github.com/aresstack/3d
 
 ## Modules
 
-- **`music`** — Original multitrack composition renderer, recovered from the Gemma/Cubase-style experiment. Accepts an eight-bar, four-track TSV arrangement, exports editable Standard MIDI Format type 1 and mono PCM WAV previews (one per instrument plus mix). Uses the Java Sound API only.
+- **`music`** — Original multitrack composition renderer, recovered from the Gemma/Cubase-style experiment. Accepts an eight-bar, variable-track (1–16) TSV arrangement, exports editable Standard MIDI Format type 1 and mono PCM WAV previews (one per instrument plus mix). Uses the Java Sound API only.
 - **`instruments`** — Registry of researched libraries (GeneralUser GS, MuseScore General, VSCO 2 CE, VPO, Salamander, Spanish Classical Guitar, FSBS Clean, FreePats, SFZ Instruments), local path storage and license/source links.
 - **`studio`** — Swing test application with KIPITZ/Gemma chat client, resumable multitrack composition, per-track sampled instruments and WAV mixing.
 - **`sounds`** — Game-event effect synthesis. Contains the original KIPITZ/Gemma PowerShell experiment and a Java renderer for the JSON sound plan. Uses Gson for input parsing and the Java Sound API for audio output.
@@ -101,7 +101,7 @@ The downloader uses a bounded HTTP(S) transfer, verifies the known GeneralUser S
 
 ### Scope and limitations
 
-The UI is a lightweight test application, not yet a complete DAW. The original Gemma pipeline still composes eight bars with four tracks. Real SF2/SF3/SFZ playback requires the appropriate external renderer (FluidSynth or sfizz_render), not merely the instrument samples. The offline demo with Java synthesis does not.
+The UI is a lightweight test application, not yet a complete DAW. The Gemma composer still creates eight bars in C major, but accepts 1–16 user-selected MIDI tracks instead of always composing four. Real SF2/SF3/SFZ playback requires the appropriate external renderer (FluidSynth or sfizz_render), not merely the instrument samples. The offline demo with Java synthesis does not.
 
 Sample-library licenses differ. Virtual Playing Orchestra draws on multiple origins; Salamander Grand Piano is CC BY 3.0. Not every ARIA-specific SFZ opcode can be used by sfizz. **Polyphone** may convert SFZ into SF2, but articulation and modulation information can be lost.
 
@@ -127,3 +127,28 @@ Under **3 · Einstellungen → SF2-Synthesizer**, the default is **Java / Gervil
 The JDK does not expose Gervill's offline PCM stream through its standard public Java Sound API. Audio Studio isolates this internal API access in a second Java process using the same installed Java runtime. For Java 9+ the program automatically supplies the necessary `--add-exports` flag; Java 8 requires no flag. Users do not have to configure these parameters manually. CI renders the actual GeneralUser SF2 on both Java 8 and Java 21, verifies non-silent WAV output and runs the studio's GeneralUser end-to-end smoke test.
 
 To continue an interrupted song, reopen Audio Studio. It automatically recognizes an existing `arrangement.tsv` in the saved output directory. Click **3 · Rendern**, then **4 · Anhören**. No additional AI requests are made.
+
+
+## Variable instrumentation: manual, AI suggestion or autopilot
+
+The **2 · Komponieren und abspielen** tab contains an editable Instrumentierung / Arrangement table.
+The original Melody, Harmony, Bass and Drums entries are just the initial defaults. Any row can be edited or removed with its right-hand **✕**, and **+ Spur hinzufügen** adds a new instrument.
+
+| Column | Meaning |
+| --- | --- |
+| Spur-ID | Unique filename-safe ID, such as `melody`, `cello` or `flute` |
+| Rolle | `melody`, `harmony`, `bass`, `drums` or `texture` |
+| Instrument / Klangfarbe | Musical description used in the model prompt |
+| GM-Programm | Zero-based General MIDI program 0–127 |
+| Soundbank | Locally installed library or built-in Java synth |
+| ✕ | Remove any track, including a default track |
+
+Three workflows are supported. **Manual**: edit the table and click **Aus Tabelle komponieren**. **KI-Instrumentvorschlag**: generate only an editable proposal of appropriate instruments, without notes. **Vollautomatisch**: generate a proposal, then the shared musical composition plan, then each selected track and the final WAV mix. Autopilot selects an installed GeneralUser SF2 bank automatically when it is available; otherwise it uses Java synthesis.
+
+Under **3 · Einstellungen**, **Parallele KI-Anfragen** defaults to **32**, independently of 3d4j's default of one. The real request count is limited to the number of configured tracks. The AI proposal and the shared eight-bar plan are each created sequentially, and then all part requests can run concurrently. Reducing parallelism can help with provider rate limits.
+
+General MIDI reserves channel 10 for percussion. The current MIDI renderer supports up to **15 melodic tracks plus one drum track**, and safely rejects incompatible channel layouts. The new TSV track line has five fields: `track<TAB>id<TAB>program<TAB>channel<TAB>role`. Original four-field lines still work. The Java renderer outputs an individual MIDI track and WAV stem per configured row, then mixes them.
+
+Each composition folder stores the editable list in `tracks.json` and the optional AI proposal in `instrument-proposal.json`. Cached notes for changed instrument descriptions use a prompt fingerprint to avoid reusing the wrong content. Existing `composition-plan.json`, `melody.json`, `harmony.json`, `bass.json`, and `drums.json` remain compatible with the original default arrangement.
+
+CI tests six dynamically selected tracks against a fake OpenAI-compatible server, verifies overlapping generation requests, reuses cached results without additional API requests, and renders six WAV stems and a multitrack MIDI. A separate offline test validates that an AI proposal can be reviewed and edited before composing.
