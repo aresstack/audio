@@ -117,7 +117,9 @@ public final class ParallelArrangementIntegrationTest {
             Assert.assertTrue(Files.size(mix) > 1000);
             Assert.assertTrue(Files.size(mix.getParent().resolve("flute.wav")) > 1000);
             Assert.assertTrue(Files.size(mix.getParent().resolve("cello.wav")) > 1000);
-            Assert.assertTrue(Files.size(mix.getParent().resolve("arrangement.mid")) > 1000);
+            Assert.assertTrue(Files.size(mix.getParent().resolve("arrangement.mid")) > 200);
+            Assert.assertEquals(7, javax.sound.midi.MidiSystem.getSequence(
+                    mix.getParent().resolve("arrangement.mid").toFile()).getTracks().length);
         } finally {
             server.stop(0);
             handlers.shutdownNow();
