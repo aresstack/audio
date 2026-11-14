@@ -14,7 +14,14 @@ public final class ExternalProcessRunner {
         Files.createDirectories(outputFile.toAbsolutePath().getParent());
         Process process = new ProcessBuilder(command).redirectErrorStream(true)
                 .redirectOutput(logFile.toFile()).start();
-        boolean completed = process.waitFor(5, TimeUnit.MINUTES);
+        boolean completed;
+        try {
+            completed = process.waitFor(5, TimeUnit.MINUTES);
+        } catch (InterruptedException cancelled) {
+            process.destroyForcibly();
+            Thread.currentThread().interrupt();
+            throw cancelled;
+        }
         if (!completed) {
             process.destroyForcibly();
             throw new IOException("Sampler exceeded five-minute timeout; see " + logFile);

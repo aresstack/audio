@@ -23,6 +23,7 @@ public final class KipitzChatClient {
     private final String model;
     private final String proxyHost;
     private final int proxyPort;
+    private volatile HttpURLConnection inFlight;
 
     public KipitzChatClient(String endpoint, String apiKey, String model, String proxyHost, int proxyPort) {
         this.endpoint = endpoint;
@@ -58,6 +59,7 @@ public final class KipitzChatClient {
         request.add("messages", messages);
 
         HttpURLConnection connection = openConnection();
+        inFlight = connection;
         try {
             byte[] body = gson.toJson(request).getBytes(StandardCharsets.UTF_8);
             connection.setRequestMethod("POST");
@@ -97,6 +99,15 @@ public final class KipitzChatClient {
         } catch (RuntimeException malformed) {
             throw new IOException("Could not parse the KIPITZ model response.", malformed);
         } finally {
+            connection.disconnect();
+            inFlight = null;
+        }
+    }
+
+    /** Disconnect a pending request when the user cancels the composition. */
+    public void cancel() {
+        HttpURLConnection connection = inFlight;
+        if (connection != null) {
             connection.disconnect();
         }
     }

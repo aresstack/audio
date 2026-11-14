@@ -77,6 +77,7 @@ public final class AudioStudioFrame extends JFrame {
     private final JButton renderButton = new JButton("Rendern");
     private final JButton cancelButton = new JButton("Abbrechen");
     private SwingWorker<Path, String> worker;
+    private volatile KipitzChatClient activeClient;
     private Clip currentPlayback;
 
     @SuppressWarnings("unchecked")
@@ -252,8 +253,13 @@ public final class AudioStudioFrame extends JFrame {
             @Override
             public Path execute(GemmaMusicComposer.Progress progress) throws Exception {
                 KipitzChatClient client = new KipitzChatClient(selectedUrl, key, selectedModel, host, port);
-                Path tsv = new GemmaMusicComposer(client).compose(prompt, output, progress);
-                return renderArrangement(tsv, output, settings, progress);
+                activeClient = client;
+                try {
+                    Path tsv = new GemmaMusicComposer(client).compose(prompt, output, progress);
+                    return renderArrangement(tsv, output, settings, progress);
+                } finally {
+                    activeClient = null;
+                }
             }
         });
     }
@@ -363,6 +369,10 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     private void cancel() {
+        KipitzChatClient request = activeClient;
+        if (request != null) {
+            request.cancel();
+        }
         if (worker != null) {
             worker.cancel(true);
             append("Cancellation requested.");
