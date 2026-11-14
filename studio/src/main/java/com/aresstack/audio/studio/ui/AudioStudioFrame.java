@@ -331,45 +331,124 @@ public final class AudioStudioFrame extends JFrame {
         panel.add(component, field);
     }
 
+    /** Compose exactly the rows currently selected by the user. */
     private void generate() {
-        String url = endpoint.getText().trim();
-        if (url.isEmpty()) {
-            message("Enter the exact KIPITZ Completions URL first.");
-            return;
-        }
-        char[] password = apiKey.getPassword();
-        final String key = new String(password);
-        Arrays.fill(password, '\0');
-        final String selectedUrl = url;
-        final String selectedModel = model.getText().trim();
-        final int selectedTokenLimit = (Integer) tokenLimit.getValue();
-        final AudioProxyRoutes routes;
+        final TrackArrangement chosen;
+        final KipitzChatClient client;
         try {
-            routes = configureNetworkRoutes();
-        } catch (RuntimeException invalidProxy) {
-            message("Ungültige Proxy-Einstellung: " + invalidProxy.getMessage());
+            chosen = trackTable.arrangement();
+            client = createAiClient();
+        } catch (RuntimeException invalid) {
+            message(invalid.getMessage());
             return;
         }
         final String prompt = description.getText().trim();
         final Path output = Paths.get(directory.getText().trim());
-        final RenderSettings settings = captureRenderSettings();
+        final int tokens = (Integer) tokenLimit.getValue();
+        final int parallel = (Integer) parallelRequests.getValue();
+        final RenderSettings settings;
+        try {
+            settings = captureRenderSettings(chosen);
+            trackStore.save(output, chosen);
+        } catch (Exception invalid) {
+            message(invalid.getMessage());
+            return;
+        }
         if (!saveSettings(false)) {
             return;
         }
+        activeClient = client;
         start(new Operation() {
             @Override
             public Path execute(GemmaMusicComposer.Progress progress) throws Exception {
-                KipitzChatClient client = new KipitzChatClient(selectedUrl, key, selectedModel, routes);
-                activeClient = client;
                 try {
-                    Path tsv = new GemmaMusicComposer(client, selectedTokenLimit)
-                            .compose(prompt, output, progress);
-                    return renderArrangement(tsv, output, settings, progress);
+                    Path arrangement = new GemmaMusicComposer(client, tokens, parallel)
+                            .compose(prompt, output, chosen, progress);
+                    return renderArrangement(arrangement, output, settings, progress);
                 } finally {
                     activeClient = null;
                 }
             }
         });
+    }
+
+    /** First ask the AI only for a proposal; optionally continue automatically. */
+    private void proposeInstruments(final boolean autopilot) {
+        final KipitzChatClient client;
+        try {
+            client = createAiClient();
+        } catch (RuntimeException invalid) {
+            message(invalid.getMessage());
+            return;
+        }
+        final Path output = Paths.get(directory.getText().trim());
+        final String prompt = description.getText().trim();
+        final int tokens = (Integer) tokenLimit.getValue();
+        final int parallel = (Integer) parallelRequests.getValue();
+        if (!saveSettings(false)) {
+            return;
+        }
+        activeClient = client;
+        start(new Operation() {
+            @Override
+            public Path execute(GemmaMusicComposer.Progress progress) throws Exception {
+                try {
+                    TrackArrangement proposed = new InstrumentProposalService(client, tokens)
+                            .propose(prompt, output, progress);
+                    final TrackArrangement selected = withPreferredSoundbanks(proposed);
+                    final AtomicReference<RenderSettings> rendering = new AtomicReference<RenderSettings>();
+                    SwingUtilities.invokeAndWait(new Runnable() {
+                        @Override
+                        public void run() {
+                            trackTable.setArrangement(selected);
+                            if (autopilot) {
+                                rendering.set(captureRenderSettings(selected));
+                            }
+                        }
+                    });
+                    if (!autopilot) {
+                        progress.update("Instrumentenvorschlag bereit. "
+                                + "Du kannst die Tabelle ändern und danach auf 'Aus Tabelle komponieren' klicken.");
+                        return null;
+                    }
+                    new TrackArrangementStore().save(output, selected);
+                    Path arrangement = new GemmaMusicComposer(client, tokens, parallel)
+                            .compose(prompt, output, selected, progress);
+                    return renderArrangement(arrangement, output, rendering.get(), progress);
+                } finally {
+                    activeClient = null;
+                }
+            }
+        });
+    }
+
+    private TrackArrangement withPreferredSoundbanks(TrackArrangement original) {
+        String preferred = "builtin";
+        for (InstrumentLibrary library : registry.installedInstruments()) {
+            if (library.id().startsWith("generaluser::") || library.id().equals("generaluser")) {
+                preferred = library.id();
+                break;
+            }
+        }
+        List<MusicTrack> selected = new ArrayList<MusicTrack>();
+        for (MusicTrack track : original.tracks()) {
+            selected.add(track.withLibrary(preferred));
+        }
+        return new TrackArrangement(selected);
+    }
+
+    private KipitzChatClient createAiClient() {
+        String url = endpoint.getText().trim();
+        if (url.isEmpty()) {
+            throw new IllegalArgumentException("Trage unter 3 · Einstellungen die KIPITZ-URL ein.");
+        }
+        char[] secret = apiKey.getPassword();
+        try {
+            return new KipitzChatClient(url, new String(secret), model.getText().trim(),
+                    configureNetworkRoutes());
+        } finally {
+            Arrays.fill(secret, '\\0');
+        }
     }
 
     private void render() {
@@ -742,7 +821,10 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         generateButton.setEnabled(false);
+        proposalButton.setEnabled(false);
+        autopilotButton.setEnabled(false);
         renderButton.setEnabled(false);
+        trackTable.setEditingEnabled(false);
         cancelButton.setEnabled(true);
         worker = new SwingWorker<Path, String>() {
             @Override
@@ -765,12 +847,19 @@ public final class AudioStudioFrame extends JFrame {
             @Override
             protected void done() {
                 generateButton.setEnabled(true);
+                proposalButton.setEnabled(true);
+                autopilotButton.setEnabled(true);
                 renderButton.setEnabled(true);
+                trackTable.setEditingEnabled(true);
                 cancelButton.setEnabled(false);
                 try {
                     Path result = get();
-                    arrangementFile.setText(result.getParent().resolve("arrangement.tsv").toString());
-                    append("Finished: " + result);
+                    if (result != null) {
+                        arrangementFile.setText(result.getParent().resolve("arrangement.tsv").toString());
+                        append("Finished: " + result);
+                    } else {
+                        append("Instrumentenvorschlag bereit.");
+                    }
                 } catch (java.util.concurrent.CancellationException cancelled) {
                     append("Operation cancelled.");
                 } catch (Exception failed) {
