@@ -4027,6 +4027,7 @@ public final class AudioStudioFrame extends JFrame {
         }
         if (albumTree != null) {
             albumTree.show(all, songs, currentAlbum, current);
+            markAlbumInTree();
         }
         Album chosen = currentAlbum == null ? null : albumMembers.albums().album(currentAlbum).orElse(null);
         setTitle("AresStack Audio Studio — " + (chosen == null ? "" : chosen.title() + " — ") + songs.name(current));
@@ -5160,7 +5161,17 @@ public final class AudioStudioFrame extends JFrame {
             player.pause();
             albumPlay = false; // paused by the user: no next title
         } else {
-            if (player.ready()) {
+            // On the album page Play plays the title selected in the album's table, not the one
+            // that happens to be open.
+            Path chosen = "albums".equals(shownPage) && albumsPanel != null ? albumsPanel.selectedPiece() : null;
+            if (chosen != null && !chosen.toAbsolutePath().normalize().equals(
+                    Paths.get(directory.getText().trim()).toAbsolutePath().normalize())) {
+                openSong(chosen);
+                if (!chosen.equals(Paths.get(directory.getText().trim()))) {
+                    return; // could not be opened (said)
+                }
+                play();
+            } else if (player.ready()) {
                 player.play();
             } else {
                 play();
@@ -5207,6 +5218,7 @@ public final class AudioStudioFrame extends JFrame {
         String albumId = albumsPanel.album().id();
         currentAlbum = albumId;
         openSong(next);
+        albumsPanel.selectPiece(next);
         if (!next.equals(Paths.get(directory.getText().trim()))) {
             return; // the piece could not be opened (said)
         }
@@ -5218,6 +5230,29 @@ public final class AudioStudioFrame extends JFrame {
             armAlbumPlay();
         });
     }
+
+    /**
+     * The tree at the left says what the page shows: while the album page is open its album is
+     * selected there, not a title (the title in use is selected again when a piece page shows).
+     */
+    private void markAlbumInTree() {
+        if (albumTree == null) {
+            return;
+        }
+        if ("albums".equals(shownPage)) {
+            if (albumsPanel != null && albumsPanel.album() != null) {
+                albumTree.selectAlbum(albumsPanel.album().id());
+            }
+        } else if (PIECE_PAGES.contains(shownPage) && albumMarked) {
+            albumMarked = false;
+            refreshSongs(); // the title in use is selected again
+            return;
+        }
+        albumMarked = "albums".equals(shownPage);
+    }
+
+    /** Whether the tree shows the album of the album page instead of the title in use. */
+    private boolean albumMarked;
 
     /** The title after this piece in the album that has a mix to play; {@code null} if none follows. */
     private Path nextAlbumPiece(String albumId, Path current) {
@@ -5367,6 +5402,7 @@ public final class AudioStudioFrame extends JFrame {
     private void showPage(String page) {
         shownPage = page;
         pages.show(pageHolder, page);
+        markAlbumInTree();
         javax.swing.JToggleButton key = pageKeys.get(page);
         if (key != null) {
             key.setSelected(true);

@@ -946,6 +946,32 @@ final class AlbumsPanel extends JPanel {
         change(changed, to);
     }
 
+    /** The piece of the title selected in the table, or {@code null} if it has none (yet). */
+    Path selectedPiece() {
+        int row = table.getSelectedRow();
+        if (album == null || row < 0 || row >= album.tracks().size() || !album.tracks().get(row).hasPiece()) {
+            return null;
+        }
+        Path piece = songs.root().resolve(album.tracks().get(row).piece());
+        return java.nio.file.Files.isDirectory(piece) ? piece : null;
+    }
+
+    /** Selects the title of this piece in the table, if the album shown has it. */
+    void selectPiece(Path piece) {
+        if (album == null || piece == null) {
+            return;
+        }
+        Path wanted = piece.toAbsolutePath().normalize();
+        for (int row = 0; row < album.tracks().size(); row++) {
+            AlbumTrack track = album.tracks().get(row);
+            if (track.hasPiece() && songs.root().resolve(track.piece()).toAbsolutePath().normalize().equals(wanted)) {
+                table.setRowSelectionInterval(row, row);
+                table.scrollRectToVisible(table.getCellRect(row, 0, true));
+                return;
+            }
+        }
+    }
+
     private void openPiece() {
         int row = table.getSelectedRow();
         if (row >= 0 && album.tracks().get(row).hasPiece()) {
