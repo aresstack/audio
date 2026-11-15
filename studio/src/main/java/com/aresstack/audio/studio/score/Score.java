@@ -1,7 +1,7 @@
 package com.aresstack.audio.studio.score;
 
+import com.aresstack.audio.music.arrangement.ArrangementFile;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -154,7 +154,7 @@ public final class Score {
             return null;
         }
         try {
-            return of(Files.readAllLines(arrangement, StandardCharsets.UTF_8));
+            return of(ArrangementFile.read(arrangement));
         } catch (IOException | RuntimeException unreadable) {
             return null;
         }
@@ -162,33 +162,34 @@ public final class Score {
 
     /** The score of the lines of an arrangement: tempo, tracks and notes. */
     public static Score of(List<String> lines) {
-        int tempo = 108;
+        return of(ArrangementFile.parse(lines));
+    }
+
+    /** The score of a read arrangement; a note counts only after the line that names its track. */
+    public static Score of(ArrangementFile arrangement) {
         Map<String, Boolean> drums = new LinkedHashMap<String, Boolean>();
         Map<String, TreeMap<Integer, List<int[]>>> sounding = new LinkedHashMap<String, TreeMap<Integer, List<int[]>>>();
         int end = 0;
-        for (String line : lines) {
-            String[] fields = line.split("\\t");
-            if (fields.length == 2 && "tempo".equals(fields[0])) {
-                tempo = Math.max(20, Math.min(400, Integer.parseInt(fields[1].trim())));
-            } else if (fields.length >= 4 && "track".equals(fields[0])) {
-                drums.put(fields[1], "9".equals(fields[3].trim())
-                        || (fields.length >= 5 && "drums".equals(fields[4].trim())));
-                sounding.put(fields[1], new TreeMap<Integer, List<int[]>>());
-            } else if (fields.length >= 6 && "note".equals(fields[0]) && sounding.containsKey(fields[1])) {
-                long startTicks = Long.parseLong(fields[2].trim());
-                long lengthTicks = Long.parseLong(fields[3].trim());
+        for (ArrangementFile.Entry entry : arrangement.entries()) {
+            if (entry instanceof ArrangementFile.Track line) {
+                drums.put(line.id(), line.onDrumChannel() || (line.role() != null && "drums".equals(line.role().trim())));
+                sounding.put(line.id(), new TreeMap<Integer, List<int[]>>());
+            } else if (entry instanceof ArrangementFile.Note note && sounding.containsKey(note.trackId())) {
+                long startTicks = note.tick();
+                long lengthTicks = note.length();
                 int start = (int) Math.round(startTicks / (double) TICKS_PER_SIXTEENTH);
                 int stop = Math.max(start + 1, (int) Math.round((startTicks + lengthTicks) / (double) TICKS_PER_SIXTEENTH));
-                TreeMap<Integer, List<int[]>> track = sounding.get(fields[1]);
+                TreeMap<Integer, List<int[]>> track = sounding.get(note.trackId());
                 List<int[]> together = track.get(start);
                 if (together == null) {
                     together = new ArrayList<int[]>();
                     track.put(start, together);
                 }
-                together.add(new int[]{Integer.parseInt(fields[4].trim()), stop});
+                together.add(new int[]{note.pitch(), stop});
                 end = Math.max(end, stop);
             }
         }
+        int tempo = arrangement.tempoOrDefault();
         int bars = Math.max(1, (end + BAR - 1) / BAR);
         List<Staff> staves = new ArrayList<Staff>();
         for (Map.Entry<String, TreeMap<Integer, List<int[]>>> track : sounding.entrySet()) {
@@ -213,13 +214,41 @@ public final class Score {
     }
 
     /**
-     * The notes of a track as one voice or two.
+     * The voice the score writes each note of one track in, as the heuristic of this class
+     * decides it: 0 for the upper (or only) voice, 1 for the lower one. The model of a piece
+     * keeps this once, when an old piece is imported, as the voice of each note.
      *
-     * @param struck whether the track is struck, not held (drums): a hit ends when the next one comes
+     * @param notes  tick, length and pitch of each note, in the order of the file
+     * @param struck whether the track is struck, not held (drums); struck tracks have one voice
+     * @return the voice of each note, in the order given
      */
-    private static List<List<List<Event>>> voices(TreeMap<Integer, List<int[]>> track, int bars, boolean struck) {
+    public static int[] voicesOf(List<long[]> notes, boolean struck) {
+        TreeMap<Integer, List<int[]>> track = new TreeMap<Integer, List<int[]>>();
+        int end = 0;
+        for (int index = 0; index < notes.size(); index++) {
+            long[] note = notes.get(index);
+            int start = (int) Math.round(note[0] / (double) TICKS_PER_SIXTEENTH);
+            int stop = Math.max(start + 1, (int) Math.round((note[0] + note[1]) / (double) TICKS_PER_SIXTEENTH));
+            track.computeIfAbsent(start, at -> new ArrayList<int[]>()).add(new int[]{(int) note[2], stop, index});
+            end = Math.max(end, stop);
+        }
+        int[] voices = new int[notes.size()];
+        List<List<int[]>> parts = struck ? null : separate(sounding(track, Math.max(1, (end + BAR - 1) / BAR), false));
+        if (parts != null) {
+            for (int[] note : parts.get(1)) {
+                voices[note[3]] = 1;
+            }
+        }
+        return voices;
+    }
+
+    /**
+     * The notes of a track as pitch, start, stop (in sixteenths) and their place among the notes
+     * given, cut at the end of the last bar; a struck note ends when the next one comes.
+     */
+    private static List<int[]> sounding(TreeMap<Integer, List<int[]>> track, int bars, boolean struck) {
         int end = bars * BAR;
-        List<int[]> notes = new ArrayList<int[]>(); // pitch, start, stop
+        List<int[]> notes = new ArrayList<int[]>(); // pitch, start, stop, index
         for (Map.Entry<Integer, List<int[]>> together : track.entrySet()) {
             for (int[] note : together.getValue()) {
                 int start = Math.min(end, together.getKey());
@@ -229,10 +258,20 @@ public final class Score {
                     stop = Math.min(stop, following);
                 }
                 if (start < stop) {
-                    notes.add(new int[]{note[0], start, stop});
+                    notes.add(new int[]{note[0], start, stop, note.length > 2 ? note[2] : -1});
                 }
             }
         }
+        return notes;
+    }
+
+    /**
+     * The notes of a track as one voice or two.
+     *
+     * @param struck whether the track is struck, not held (drums): a hit ends when the next one comes
+     */
+    private static List<List<List<Event>>> voices(TreeMap<Integer, List<int[]>> track, int bars, boolean struck) {
+        List<int[]> notes = sounding(track, bars, struck);
         List<List<List<Event>>> written = new ArrayList<List<List<Event>>>();
         List<List<int[]>> parts = struck ? null : separate(notes);
         if (parts == null) {
