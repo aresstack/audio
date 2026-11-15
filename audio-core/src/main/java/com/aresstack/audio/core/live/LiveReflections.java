@@ -9,26 +9,45 @@ import com.aresstack.audio.core.dsp.BiquadFilter;
  * {@link com.aresstack.audio.core.dsp.EarlyReflections}: the channel folded to mono, dulled by a
  * low-pass and added to a bus once per wall, each time delayed and placed on its own.
  *
- * <p>When the source moves, the gains of each echo glide, and a changed delay is not jumped to
- * (that would cut the echo and click) but crossfaded: for a short while the echo is read at the
- * old and the new delay at once, the old fading out as the new fades in. The history holds as many
- * frames as the longest echo the channel was made for; longer delays are shortened to it.
+ * <p>When the source moves, the gains of each echo glide, and so does its delay:
+ * <ul>
+ *   <li>A small change, as when a source is dragged (at most {@link #GLIDE_SHARE} of the glide
+ *       time per glide), is <b>glided</b>: the echo is read between two samples, so the wall moves
+ *       continuously, with the slight change of pitch a moving source has (Doppler). Nothing is
+ *       mixed with a delayed copy of itself, so a tone does not partly cancel out.</li>
+ *   <li>A large change (a jump across the stage) would sweep the pitch audibly; it is
+ *       <b>crossfaded</b> from the old delay to the new one instead. A change that arrives during
+ *       a crossfade waits until it has ended.</li>
+ * </ul>
+ * While nothing moves, the echo is read at a whole delay exactly as {@code EarlyReflections}
+ * reads it. The history holds as many frames as the longest echo the channel was made for;
+ * longer delays are shortened to it.
  */
 final class LiveReflections {
+    /** The largest delay change, as a share of the glide time, that is glided rather than crossfaded (≈ 1 semitone). */
+    static final double GLIDE_SHARE = 0.06;
+
     private final int walls;
     private final int capacity;
     private final BiquadFilter lowPass;
-    private final int[] delay;
-    private final int[] oldDelay;
+    /** The delay now, in frames; between two whole frames while it glides. */
+    private final double[] delay;
+    private final double[] step;
+    private final int[] glideLeft;
+    /** Where the delay is going: whole frames. */
+    private final int[] target;
+    /** Where a glide ends: the target, or a place between two frames for a source that moves with the piece. */
+    private final double[] goal;
+    private final double[] oldDelay;
     private final int[] fadeLeft;
-    /** A delay that arrived while a fade was running; it is faded to when that fade ends. -1 for none. */
+    /** A delay that arrived while a fade was running; it is taken when that fade ends. -1 for none. */
     private final int[] pending;
     private final Ramp[] toLeft;
     private final Ramp[] toRight;
     private float[] history = new float[0];
     private float[] mono = new float[0];
     private long written;
-    private int fadeFrames;
+    private int glideFrames;
 
     LiveReflections(int walls, int capacityFrames, BiquadCoefficients lowPass) {
         if (walls <= 0) {
@@ -37,8 +56,12 @@ final class LiveReflections {
         this.walls = walls;
         this.capacity = Math.max(0, capacityFrames);
         this.lowPass = new BiquadFilter(lowPass);
-        delay = new int[walls];
-        oldDelay = new int[walls];
+        delay = new double[walls];
+        step = new double[walls];
+        glideLeft = new int[walls];
+        target = new int[walls];
+        goal = new double[walls];
+        oldDelay = new double[walls];
         fadeLeft = new int[walls];
         pending = new int[walls];
         toLeft = new Ramp[walls];
@@ -53,10 +76,11 @@ final class LiveReflections {
         return walls;
     }
 
-    void prepare(int maxBlockFrames, int fadeFrames, ChannelParameters start) {
-        history = new float[capacity + maxBlockFrames];
+    void prepare(int maxBlockFrames, int glideFrames, ChannelParameters start) {
+        // one frame more than the longest delay: a delay between two frames reads the one behind it too
+        history = new float[capacity + maxBlockFrames + 1];
         mono = new float[maxBlockFrames];
-        this.fadeFrames = Math.max(1, fadeFrames);
+        this.glideFrames = Math.max(1, glideFrames);
         lowPass.reset();
         written = 0;
         jumpTo(start);
@@ -65,8 +89,11 @@ final class LiveReflections {
     /** Takes the echoes of these parameters at once. */
     void jumpTo(ChannelParameters parameters) {
         for (int i = 0; i < walls; i++) {
-            delay[i] = Math.min(capacity, parameters.echoDelay(i));
-            oldDelay[i] = delay[i];
+            target[i] = Math.min(capacity, parameters.echoDelay(i));
+            goal[i] = target[i];
+            delay[i] = target[i];
+            oldDelay[i] = target[i];
+            glideLeft[i] = 0;
             fadeLeft[i] = 0;
             pending[i] = -1;
             toLeft[i].reset(parameters.echoLeft(i));
@@ -77,18 +104,66 @@ final class LiveReflections {
     /** Glides to the echoes of these parameters, starting with the next frame. */
     void glideTo(ChannelParameters parameters, int frames) {
         for (int i = 0; i < walls; i++) {
-            int wanted = Math.min(capacity, parameters.echoDelay(i));
-            if (fadeLeft[i] > 0) {
-                // A fade is running: cutting it short would drop part of what is heard and click, so the
-                // new delay waits until it ends (at most one fade, 20 ms) and is then faded to.
-                pending[i] = wanted == delay[i] ? -1 : wanted;
-            } else if (wanted != delay[i]) {
-                oldDelay[i] = delay[i];
-                delay[i] = wanted;
-                fadeLeft[i] = fadeFrames;
-            }
+            change(i, Math.min(capacity, parameters.echoDelay(i)));
             toLeft[i].glideTo(parameters.echoLeft(i), frames);
             toRight[i].glideTo(parameters.echoRight(i), frames);
+        }
+    }
+
+    /** Takes the echoes of a moving source at once. */
+    void jumpTo(com.aresstack.audio.core.mix.Seat seat) {
+        for (int i = 0; i < walls; i++) {
+            goal[i] = Math.max(0, Math.min(capacity, seat.echoDelay[i]));
+            target[i] = (int) Math.round(goal[i]);
+            delay[i] = goal[i];
+            oldDelay[i] = target[i];
+            glideLeft[i] = 0;
+            fadeLeft[i] = 0;
+            pending[i] = -1;
+            toLeft[i].reset(seat.echoLeft[i]);
+            toRight[i].reset(seat.echoRight[i]);
+        }
+    }
+
+    /** Glides to the echoes of a moving source, starting with the next frame. */
+    void glideTo(com.aresstack.audio.core.mix.Seat seat, int frames) {
+        for (int i = 0; i < walls; i++) {
+            double wanted = Math.max(0, Math.min(capacity, seat.echoDelay[i]));
+            if (fadeLeft[i] > 0) {
+                // A crossfade from before the movement ends first; then the echo goes on from here.
+                pending[i] = (int) Math.round(wanted);
+            } else if (wanted != delay[i] || glideLeft[i] > 0) {
+                // The wall moves with the source, between samples, as in the file.
+                goal[i] = wanted;
+                target[i] = (int) Math.round(wanted);
+                glideLeft[i] = Math.max(1, frames);
+                step[i] = (wanted - delay[i]) / glideLeft[i];
+            }
+            toLeft[i].glideTo(seat.echoLeft[i], frames);
+            toRight[i].glideTo(seat.echoRight[i], frames);
+        }
+    }
+
+    /** Starts the way of one wall's delay to a new whole number of frames. */
+    private void change(int wall, int wanted) {
+        if (fadeLeft[wall] > 0) {
+            pending[wall] = wanted == target[wall] ? -1 : wanted;
+            return;
+        }
+        if (wanted == target[wall] && (delay[wall] == wanted || (glideLeft[wall] > 0 && goal[wall] == wanted))) {
+            return;
+        }
+        target[wall] = wanted;
+        goal[wall] = wanted;
+        double distance = wanted - delay[wall];
+        if (Math.abs(distance) <= GLIDE_SHARE * glideFrames) {
+            glideLeft[wall] = glideFrames;
+            step[wall] = distance / glideFrames;
+        } else {
+            oldDelay[wall] = delay[wall];
+            delay[wall] = wanted;
+            glideLeft[wall] = 0;
+            fadeLeft[wall] = glideFrames;
         }
     }
 
@@ -117,11 +192,14 @@ final class LiveReflections {
         }
         float[] busLeft = bus.left;
         float[] busRight = bus.right;
+        int base = (int) (written % size);
         for (int wall = 0; wall < walls; wall++) {
             Ramp gainLeft = toLeft[wall];
             Ramp gainRight = toRight[wall];
-            int read = Math.floorMod(written - delay[wall], size);
-            if (fadeLeft[wall] == 0 && gainLeft.settled() && gainRight.settled()) {
+            if (fadeLeft[wall] == 0 && glideLeft[wall] == 0 && delay[wall] == target[wall]
+                    && gainLeft.settled() && gainRight.settled()) {
+                // Nothing moves: a whole delay, exactly as EarlyReflections reads it.
+                int read = wrap(base - target[wall], size);
                 float gl = gainLeft.value();
                 float gr = gainRight.value();
                 for (int i = 0; i < count; i++) {
@@ -130,33 +208,47 @@ final class LiveReflections {
                     busRight[i] += echo * gr;
                     read = read + 1 == size ? 0 : read + 1;
                 }
-            } else {
-                int base = (int) (written % size);
-                int fade = fadeLeft[wall];
-                float share = 1f / fadeFrames;
-                for (int i = 0; i < count; i++) {
-                    int now = base + i;
-                    float echo = history[wrap(now - delay[wall], size)];
-                    if (fade > 0) {
-                        float in = 1f - fade * share;
-                        echo = history[wrap(now - oldDelay[wall], size)] * (1f - in) + echo * in;
-                        if (--fade == 0) {
-                            oldDelay[wall] = delay[wall];
-                            if (pending[wall] >= 0) {
-                                // The fade has arrived; the delay that waited fades in from here.
-                                delay[wall] = pending[wall];
-                                pending[wall] = -1;
-                                fade = fadeFrames;
-                            }
+                continue;
+            }
+            float share = 1f / glideFrames;
+            for (int i = 0; i < count; i++) {
+                int now = base + i;
+                if (glideLeft[wall] > 0) {
+                    if (--glideLeft[wall] == 0) {
+                        delay[wall] = goal[wall];
+                    } else {
+                        delay[wall] += step[wall];
+                    }
+                }
+                float echo = read(now, delay[wall], size);
+                if (fadeLeft[wall] > 0) {
+                    float in = 1f - fadeLeft[wall] * share;
+                    echo = read(now, oldDelay[wall], size) * (1f - in) + echo * in;
+                    if (--fadeLeft[wall] == 0) {
+                        oldDelay[wall] = delay[wall];
+                        if (pending[wall] >= 0) {
+                            int next = pending[wall];
+                            pending[wall] = -1;
+                            change(wall, next);
                         }
                     }
-                    busLeft[i] += echo * gainLeft.next();
-                    busRight[i] += echo * gainRight.next();
                 }
-                fadeLeft[wall] = fade;
+                busLeft[i] += echo * gainLeft.next();
+                busRight[i] += echo * gainRight.next();
             }
         }
         written += count;
+    }
+
+    /** The history {@code delay} frames before frame {@code now} of the ring, between two samples if need be. */
+    private float read(int now, double delay, int size) {
+        int whole = (int) delay;
+        float part = (float) (delay - whole);
+        float near = history[wrap(now - whole, size)];
+        if (part == 0f) {
+            return near;
+        }
+        return near + (history[wrap(now - whole - 1, size)] - near) * part;
     }
 
     /** An index into the history; {@code at} lies within one length below or above it. */

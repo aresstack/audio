@@ -7,6 +7,7 @@ import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.mix.MixLevel;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
 import com.aresstack.audio.studio.mix.StageAutomation;
+import com.aresstack.audio.studio.mix.StageSound;
 import com.aresstack.audio.studio.project.CompositionJson;
 import com.aresstack.audio.studio.project.MixJson;
 import com.aresstack.audio.studio.progress.Progress;
@@ -42,6 +43,19 @@ public final class StageMixService {
     private final SpatialSceneStore store = new SpatialSceneStore();
     private final SpatialStemMixer mixer = new SpatialStemMixer();
     private com.aresstack.audio.studio.mix.MixOutcome outcome;
+    private volatile StageSound sound = StageSound.LOUDSPEAKERS;
+
+    /**
+     * How the following mixes are heard (work package D4): loudspeakers or headphones,
+     * algorithmic or convolved room. The default is {@link StageSound#LOUDSPEAKERS}, the mix as before.
+     */
+    public void setSound(StageSound sound) {
+        this.sound = sound == null ? StageSound.LOUDSPEAKERS : sound;
+    }
+
+    public StageSound sound() {
+        return sound;
+    }
 
     /** The stage of a piece: the saved one, or the usual seating; always for exactly the tracks of the arrangement. */
     public SpatialScene scene(Path arrangement, Path directory) throws IOException {
@@ -124,14 +138,14 @@ public final class StageMixService {
         progress.update("Mische " + tracks.size() + " Spuren auf der Bühne · " + fitting.room().name()
                 + (heard ? "" : " · alle Spuren sind stumm") + " ...");
         int tempo = tempo(arrangement);
-        double secondsPerBar = 4 * 60.0 / tempo;
+        double secondsPerBar = secondsPerBar(arrangement);
         StageAutomation automation = StageAutomation.of(placements, secondsPerBar)
                 .movingAs(movements(directory, tempo, progress));
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
             MixLevel chosen = level != null ? level : level(fitting, null);
-            outcome = mixer.withAutomation(automation).mix(files, placements, fitting.room(), secondsPerBar, chosen,
-                    fresh, bits);
+            outcome = mixer.withAutomation(automation).withSound(sound)
+                    .mix(files, placements, fitting.room(), secondsPerBar, chosen, fresh, bits);
             Files.move(fresh, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(fresh);
@@ -156,6 +170,7 @@ public final class StageMixService {
         if (document == null || document.automation().isEmpty()) {
             return StageAutomation.NONE;
         }
+        // Seconds depend on the tempo alone, so one tempo is enough when the model does not fit.
         TimeMap time = TimeMap.of(tempo);
         if (Files.isRegularFile(directory.resolve(CompositionJson.FILE_NAME))) {
             try {

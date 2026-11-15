@@ -68,6 +68,10 @@ public final class SpatialSceneStore {
             source.addProperty("level", round(placement.levelDb()));
             source.addProperty("width", round(placement.width()));
             source.addProperty("reverb", round(placement.reverb()));
+            if (placement.height() > 0) {
+                // Only stages with height write it, so older files stay as they were (work package D4).
+                source.addProperty("height", round(placement.height()));
+            }
             source.addProperty("muted", placement.muted());
             source.addProperty("locked", placement.locked());
             if (!placement.dynamics().isEmpty()) {
@@ -125,7 +129,7 @@ public final class SpatialSceneStore {
                 }
                 placements.add(new SoundSourcePlacement(track, number(source, "x", 0), number(source, "depth", 0.4),
                         number(source, "level", 0), number(source, "width", 1), number(source, "reverb", 0.35),
-                        flag(source, "muted"), flag(source, "locked"), points));
+                        flag(source, "muted"), flag(source, "locked"), points, number(source, "height", 0)));
             }
         }
         return new SpatialScene(room, placements, number(root, "master", 0),

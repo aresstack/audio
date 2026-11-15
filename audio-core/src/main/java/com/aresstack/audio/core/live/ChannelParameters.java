@@ -2,7 +2,7 @@ package com.aresstack.audio.core.live;
 
 import com.aresstack.audio.core.BiquadCoefficients;
 import com.aresstack.audio.core.dsp.StereoStrip;
-import com.aresstack.audio.core.mix.ChannelMotion;
+import com.aresstack.audio.core.mix.SpatialMotion;
 import java.util.Arrays;
 
 /**
@@ -22,6 +22,9 @@ import java.util.Arrays;
  *       direct sound goes and what reaches the room at a frame; it then says these four gains
  *       instead of {@code toLeft}, {@code toRight}, {@code sendLeft} and {@code sendRight}, which
  *       are where the source stands when nothing moves. {@code null} for a source that stands.</li>
+ *   <li>{@code azimuth}, {@code elevation}: the direction in degrees for a channel heard on
+ *       headphones (work package D4, see {@link com.aresstack.audio.core.spatial.HrirSet}); then
+ *       {@code toLeft} and {@code toRight} carry only the distance gain.</li>
  * </ul>
  */
 public final class ChannelParameters {
@@ -36,7 +39,9 @@ public final class ChannelParameters {
     private final int[] echoDelays;
     private final float[] echoLeft;
     private final float[] echoRight;
-    private final ChannelMotion motion;
+    private final SpatialMotion motion;
+    private final double azimuth;
+    private final double elevation;
 
     private ChannelParameters(Builder builder) {
         motion = builder.motion;
@@ -54,6 +59,11 @@ public final class ChannelParameters {
         if (shelf != null && !(Math.abs(shelf.a2) < 1 && Math.abs(shelf.a1) < 1 + shelf.a2)) {
             throw new IllegalArgumentException("The shelf is not a stable filter.");
         }
+        if (!Double.isFinite(builder.azimuth) || !Double.isFinite(builder.elevation)) {
+            throw new IllegalArgumentException("A direction is given by finite angles.");
+        }
+        azimuth = builder.azimuth;
+        elevation = builder.elevation;
         echoDelays = builder.echoDelays.clone();
         echoLeft = builder.echoLeft.clone();
         echoRight = builder.echoRight.clone();
@@ -95,6 +105,8 @@ public final class ChannelParameters {
         builder.echoLeft = echoLeft.clone();
         builder.echoRight = echoRight.clone();
         builder.motion = motion;
+        builder.azimuth = azimuth;
+        builder.elevation = elevation;
         return builder;
     }
 
@@ -131,8 +143,18 @@ public final class ChannelParameters {
     }
 
     /** How the source moves with the piece, or {@code null} if it stands. */
-    public ChannelMotion motion() {
+    public SpatialMotion motion() {
         return motion;
+    }
+
+    /** The direction for headphones: degrees clockwise from ahead. */
+    public double azimuth() {
+        return azimuth;
+    }
+
+    /** The direction for headphones: degrees above ear height. */
+    public double elevation() {
+        return elevation;
     }
 
     public int echoes() {
@@ -163,7 +185,8 @@ public final class ChannelParameters {
     @Override
     public String toString() {
         return "level " + level + ", width " + width + ", pan " + toLeft + "/" + toRight + ", send " + sendLeft + "/"
-                + sendRight + ", shelf " + (shelf != null) + ", echoes " + Arrays.toString(echoDelays);
+                + sendRight + ", shelf " + (shelf != null) + ", echoes " + Arrays.toString(echoDelays) + ", direction "
+                + azimuth + "/" + elevation;
     }
 
     /** Collects the values; {@link #build} checks them. */
@@ -179,7 +202,9 @@ public final class ChannelParameters {
         private int[] echoDelays = new int[0];
         private float[] echoLeft = new float[0];
         private float[] echoRight = new float[0];
-        private ChannelMotion motion;
+        private SpatialMotion motion;
+        private double azimuth;
+        private double elevation;
 
         private Builder() {
         }
@@ -222,8 +247,15 @@ public final class ChannelParameters {
         }
 
         /** The source moves with the piece: the motion says its panner gains and its sends. */
-        public Builder motion(ChannelMotion motion) {
+        public Builder motion(SpatialMotion motion) {
             this.motion = motion;
+            return this;
+        }
+
+        /** The direction for headphones, in degrees (azimuth clockwise from ahead, elevation up). */
+        public Builder direction(double azimuth, double elevation) {
+            this.azimuth = azimuth;
+            this.elevation = elevation;
             return this;
         }
 

@@ -5,7 +5,10 @@ import com.aresstack.audio.core.BiquadCoefficients;
 import com.aresstack.audio.core.SeekableSource;
 import com.aresstack.audio.core.dsp.GlidingBiquad;
 import com.aresstack.audio.core.dsp.StereoStrip;
-import com.aresstack.audio.core.mix.ChannelMotion;
+import com.aresstack.audio.core.mix.Seat;
+import com.aresstack.audio.core.mix.SpatialMotion;
+import com.aresstack.audio.core.spatial.BinauralPanner;
+import com.aresstack.audio.core.spatial.HrirSet;
 
 /**
  * One channel of a live mix: the same chain as {@link com.aresstack.audio.core.mix.StemChannel},
@@ -24,11 +27,16 @@ import com.aresstack.audio.core.mix.ChannelMotion;
  * never differ by more than the signal itself and a glide step allow. While nothing glides, the
  * channel computes exactly what {@code StemChannel} computes, sample for sample.
  *
- * <p>A source that moves with the piece ({@link ChannelParameters#motion()}, work package D3) is
- * asked once per block where it will be at the end of that block, and its panner gains and sends
- * glide there in a straight line: the same curve as in the file, looked at once per block instead
- * of every {@link ChannelMotion#RAMP} frames. Other parameters handed over meanwhile, and a
- * changed motion, are reached within that block, without a jump.
+ * <p>A source that moves with the piece ({@link ChannelParameters#motion()}, work packages D3
+ * and D4) is asked once per block where it will be at the end of that block, and everything that
+ * follows it glides there over the block: panner gains, sends, distance shelf, wall echoes and,
+ * on headphones, the direction. It is the same course as in the file, looked at once per block
+ * instead of every {@link SpatialMotion#RAMP} frames. Other parameters handed over meanwhile,
+ * and a changed motion, are reached within that block, without a jump.
+ *
+ * <p>Made with a {@link HrirSet}, the channel is heard on headphones (work package D4): the
+ * direct sound goes through a {@link BinauralPanner} that glides to the direction of the
+ * parameters, and the panner gains are the distance gain only.
  */
 public final class LiveChannel {
     private final SeekableSource source;
@@ -45,6 +53,8 @@ public final class LiveChannel {
     private final Ramp sendRight = new Ramp(0);
     private final GlidingBiquad shelf = new GlidingBiquad(null);
     private final LiveReflections reflections;
+    private final BinauralPanner binaural;
+    private float[] mono = new float[0];
     private AudioBlock block;
     private int glide;
     /** The level curve between two looks at it, as in {@link StereoStrip}. */
@@ -55,7 +65,7 @@ public final class LiveChannel {
     /** Set after a seek or at the start: a moving source stands at once where its motion says. */
     private boolean replace = true;
     /** Where a moving source goes, written by its motion on the audio thread. */
-    private final float[] moved = new float[ChannelMotion.GAINS];
+    private final Seat moved;
 
     /**
      * @param source       the sound of the channel at the rate of the mix
@@ -68,6 +78,15 @@ public final class LiveChannel {
      */
     public LiveChannel(SeekableSource source, long frames, ChannelParameters start, int echoCapacity,
                        BiquadCoefficients echoLowPass) {
+        this(source, frames, start, echoCapacity, echoLowPass, null);
+    }
+
+    /**
+     * A live channel for headphones when {@code hrirs} is given (see the class documentation);
+     * {@code null} gives the loudspeaker channel of the other constructor.
+     */
+    public LiveChannel(SeekableSource source, long frames, ChannelParameters start, int echoCapacity,
+                       BiquadCoefficients echoLowPass, HrirSet hrirs) {
         if (source == null || start == null) {
             throw new IllegalArgumentException("A live channel needs a source and its first parameters.");
         }
@@ -80,6 +99,8 @@ public final class LiveChannel {
         this.echoLowPass = echoLowPass;
         this.wanted = start;
         reflections = start.echoes() > 0 ? new LiveReflections(start.echoes(), this.echoCapacity, echoLowPass) : null;
+        binaural = hrirs != null ? new BinauralPanner(hrirs) : null;
+        moved = new Seat(start.echoes());
     }
 
     /**
@@ -104,13 +125,18 @@ public final class LiveChannel {
     /** Whether the audio thread has reached the parameters handed over last (for tests and meters). */
     public boolean settled() {
         return taken == wanted && level.settled() && width.settled() && toLeft.settled() && toRight.settled()
-                && sendLeft.settled() && sendRight.settled() && shelf.settled();
+                && sendLeft.settled() && sendRight.settled() && shelf.settled()
+                && (binaural == null || binaural.settled());
     }
 
     void prepare(int sampleRate, int maxBlockFrames, int glideFrames) {
         block = new AudioBlock(maxBlockFrames);
         source.prepare(sampleRate, maxBlockFrames);
         shelf.prepare(sampleRate, maxBlockFrames);
+        if (binaural != null) {
+            binaural.prepare(sampleRate, maxBlockFrames);
+            mono = new float[maxBlockFrames];
+        }
         glide = glideFrames;
         ChannelParameters start = wanted;
         jumpTo(start);
@@ -129,9 +155,18 @@ public final class LiveChannel {
         sendLeft.reset(now.sendLeft());
         sendRight.reset(now.sendRight());
         shelf.jumpTo(now.shelf());
+        if (binaural != null) {
+            binaural.jumpTo(now.azimuth(), now.elevation());
+        }
         if (reflections != null) {
             reflections.jumpTo(now);
         }
+    }
+
+    /** Starts the source again from its first frame, as at the end of a loop; filters and echoes ring on. */
+    void rewind() {
+        source.seek(0);
+        realign = true;
     }
 
     /** Goes on at this frame of the mix; called by the graph on the audio thread. */
@@ -140,6 +175,9 @@ public final class LiveChannel {
         realign = true;
         replace = true;
         shelf.reset();
+        if (binaural != null) {
+            binaural.clear();
+        }
         if (reflections != null) {
             reflections.clear();
         }
@@ -161,27 +199,46 @@ public final class LiveChannel {
                 sendLeft.glideTo(now.sendLeft(), glide);
                 sendRight.glideTo(now.sendRight(), glide);
             }
-            shelf.glideTo(now.shelf(), glide);
-            if (reflections != null) {
-                reflections.glideTo(now, glide);
+            if (now.motion() == null) {
+                shelf.glideTo(now.shelf(), glide);
+                if (binaural != null) {
+                    binaural.aimAt(now.azimuth(), now.elevation(), glide);
+                }
+                if (reflections != null) {
+                    reflections.glideTo(now, glide);
+                }
             }
         }
-        ChannelMotion motion = now.motion();
+        SpatialMotion motion = now.motion();
         if (motion != null) {
             if (replace) {
                 // At the start and after a jump the source stands where it is at that frame.
-                motion.gainsAt(position, moved);
-                toLeft.reset(moved[ChannelMotion.TO_LEFT]);
-                toRight.reset(moved[ChannelMotion.TO_RIGHT]);
-                sendLeft.reset(moved[ChannelMotion.SEND_LEFT]);
-                sendRight.reset(moved[ChannelMotion.SEND_RIGHT]);
+                motion.seatAt(position, moved);
+                toLeft.reset(moved.toLeft);
+                toRight.reset(moved.toRight);
+                sendLeft.reset(moved.sendLeft);
+                sendRight.reset(moved.sendRight);
+                shelf.jumpTo(moved.shelf);
+                if (binaural != null) {
+                    binaural.jumpTo(moved.azimuth, moved.elevation);
+                }
+                if (reflections != null) {
+                    reflections.jumpTo(moved);
+                }
             }
-            // Where it will be when this block ends: the gains glide there over the block.
-            motion.gainsAt(position + count, moved);
-            toLeft.glideTo(moved[ChannelMotion.TO_LEFT], count);
-            toRight.glideTo(moved[ChannelMotion.TO_RIGHT], count);
-            sendLeft.glideTo(moved[ChannelMotion.SEND_LEFT], count);
-            sendRight.glideTo(moved[ChannelMotion.SEND_RIGHT], count);
+            // Where it will be when this block ends: everything glides there over the block.
+            motion.seatAt(position + count, moved);
+            toLeft.glideTo(moved.toLeft, count);
+            toRight.glideTo(moved.toRight, count);
+            sendLeft.glideTo(moved.sendLeft, count);
+            sendRight.glideTo(moved.sendRight, count);
+            shelf.glideTo(moved.shelf, count);
+            if (binaural != null) {
+                binaural.aimAt(moved.azimuth, moved.elevation, count);
+            }
+            if (reflections != null) {
+                reflections.glideTo(moved, count);
+            }
         }
         replace = false;
         int heard = 0;
@@ -202,10 +259,19 @@ public final class LiveChannel {
                 addTo(send, heard, sendLeft, sendRight);
             }
             shelf.process(block, heard);
-            addTo(master, heard, toLeft, toRight);
+            if (binaural == null) {
+                addTo(master, heard, toLeft, toRight);
+            } else {
+                place(master, heard, count);
+            }
         } else {
             // Nothing heard: the glides still run, so that they end on time.
             skip(count);
+            if (binaural != null) {
+                // The filters and delays of the head still ring out.
+                java.util.Arrays.fill(mono, 0, count, 0f);
+                binaural.process(mono, count, master);
+            }
         }
         if (reflections != null) {
             reflections.process(block, heard, count, master);
@@ -293,6 +359,17 @@ public final class LiveChannel {
             busLeft[i] += left[i] * gainLeft.next();
             busRight[i] += right[i] * gainRight.next();
         }
+    }
+
+    /** Folds the heard frames to mono with the gliding distance gains and places them for headphones. */
+    private void place(AudioBlock master, int heard, int count) {
+        float[] left = block.left;
+        float[] right = block.right;
+        for (int i = 0; i < heard; i++) {
+            mono[i] = (left[i] * toLeft.next() + right[i] * toRight.next()) * 0.5f;
+        }
+        java.util.Arrays.fill(mono, heard, count, 0f);
+        binaural.process(mono, count, master);
     }
 
     private void skip(int count) {
