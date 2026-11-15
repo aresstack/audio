@@ -66,6 +66,14 @@ public final class SpatialStemMixer {
     private static final double HALF_WIDTH = 6;
     private static final double DEPTH = 9;
     private static final double LISTENER = 3;
+    /**
+     * How loud the echoes of the walls are against the formula of the stage before: 0.5 since the
+     * decision of the product owner (PR #22, 2026-11-15) on the holes in a gliding source (measurement "Lauf B",
+     * {@code WallEchoMotionTest}). Each echo is an exact delayed copy of the direct sound; when the
+     * source moves, held tones run through cancellations, and how deep depends on how loud the
+     * echo is. Only that measurement sets it back to 1 to compare with the old sound.
+     */
+    static double wallEchoLevel = 0.5;
     private static final double SOUND_SPEED = 343;
 
     private final int blockFrames;
@@ -661,7 +669,7 @@ public final class SpatialStemMixer {
         mirror(wall, x, depth, height, room, image);
         double distance = length(image);
         seat.echoDelay[wall] = (float) ((distance - direct) / SOUND_SPEED * RATE);
-        float gain = (float) (room.reflections() * room.amount() * 1.6 * Math.pow(LISTENER / distance, 0.45));
+        float gain = (float) (wallEchoLevel * room.reflections() * room.amount() * 1.6 * Math.pow(LISTENER / distance, 0.45));
         double position = Math.max(-1, Math.min(1, Math.atan2(image[0],
                 image[2] == 0 ? image[1] : Math.hypot(image[1], image[2])) / Math.toRadians(60)));
         double angle = (position + 1) * Math.PI / 4;
@@ -718,7 +726,7 @@ public final class SpatialStemMixer {
         mirror(wall, x, depth, height, room, image);
         double distance = length(image);
         echo[0] = (float) Math.round((distance - direct) / SOUND_SPEED * RATE);
-        float gain = (float) (room.reflections() * room.amount() * 1.6 * Math.pow(LISTENER / distance, 0.45));
+        float gain = (float) (wallEchoLevel * room.reflections() * room.amount() * 1.6 * Math.pow(LISTENER / distance, 0.45));
         double position = Math.max(-1, Math.min(1, Math.atan2(image[0],
                 image[2] == 0 ? image[1] : Math.hypot(image[1], image[2])) / Math.toRadians(60)));
         double angle = (position + 1) * Math.PI / 4;
