@@ -384,11 +384,6 @@ public final class AudioStudioFrame extends JFrame {
         right.setOpaque(false);
         right.add(keysWithNames);
         right.add(master);
-        // In the corner, away from the pages of the piece: the settings, behind a gear.
-        JPanel corner = new JPanel(new BorderLayout());
-        corner.setOpaque(false);
-        corner.add(settingsKey, BorderLayout.NORTH);
-        right.add(corner);
 
         JPanel inner = new JPanel(new BorderLayout(18, 0));
         inner.setOpaque(false);
@@ -421,6 +416,9 @@ public final class AudioStudioFrame extends JFrame {
         inner.add(display, BorderLayout.CENTER);
         inner.add(right, BorderLayout.EAST);
         DeckWidgets.Module bar = new DeckWidgets.Module("Transport", inner);
+        // In the upper corner, above the master meters and away from the pages of the piece: the
+        // settings, behind a gear. The meters stay where they were.
+        bar.setHeadEnd(settingsKey);
         return bar;
     }
 

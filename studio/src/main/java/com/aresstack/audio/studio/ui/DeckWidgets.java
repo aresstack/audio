@@ -54,11 +54,16 @@ final class DeckWidgets {
             setOpaque(false);
             setBorder(AudioStudioTheme.modulePadding());
             head.setOpaque(false);
-            JPanel title = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 7, 0));
-            title.setOpaque(false);
+            // Lamp and name stand in the middle of the head's height, so that a key at its right
+            // end (see setHeadEnd) sits on the same line as the name.
+            javax.swing.Box title = javax.swing.Box.createHorizontalBox();
             lamp.setOn(true);
+            lamp.setMaximumSize(lamp.getPreferredSize());
+            title.add(javax.swing.Box.createHorizontalStrut(7));
             title.add(lamp);
+            title.add(javax.swing.Box.createHorizontalStrut(7));
             title.add(lettering(name));
+            title.add(javax.swing.Box.createHorizontalStrut(7));
             head.add(title, BorderLayout.WEST);
             add(head, BorderLayout.NORTH);
             if (contents != null) {
@@ -220,7 +225,7 @@ final class DeckWidgets {
             setFocusPainted(false);
             setOpaque(false);
             setFocusable(false);
-            setPreferredSize(new Dimension(30, 30));
+            setPreferredSize(new Dimension(22, 22));
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             setRolloverEnabled(true);
         }
