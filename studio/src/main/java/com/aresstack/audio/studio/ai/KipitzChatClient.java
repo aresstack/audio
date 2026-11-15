@@ -117,27 +117,44 @@ public final class KipitzChatClient implements ChatModel {
         messages.add(message("user", prompt));
         request.add("messages", messages);
 
-        Answer answer = null;
         int budget = maxTokens;
         int longer = 0;
-        for (int attempt = 1; answer == null; attempt++) {
+        int troubled = 0;
+        for (int attempt = 1; ; attempt++) {
             // Streamed: the answer arrives piece by piece while the model writes. A proxy or gateway
             // on the way gives up on a connection that stays silent (HTTP 504), and a long answer
             // keeps a connection silent for minutes when it only comes at the end.
             request.addProperty("stream", streaming);
             request.addProperty("max_tokens", budget);
+            String trouble;
             try {
-                answer = exchange(gson.toJson(request).getBytes(StandardCharsets.UTF_8), heard);
+                Answer answer = exchange(gson.toJson(request).getBytes(StandardCharsets.UTF_8), heard);
                 if ("length".equals(answer.finishReason) && longer < longerAnswers
                         && !cancelled && !Thread.currentThread().isInterrupted()) {
                     // Cut off at the limit: a model that thinks before it answers spends the tokens of
                     // its answer on that. Asked again with more room (studio.properties: longerAnswerFactor).
                     longer++;
                     budget *= longerFactor;
-                    answer = null;
-                    attempt = 0;
                     continue;
                 }
+                if (!"stop".equals(answer.finishReason)) {
+                    throw new IOException("The model output was not complete (finish_reason=" + answer.finishReason
+                            + ("length".equals(answer.finishReason) ? ", also with " + budget + " tokens" : "")
+                            + ", model " + model + ").");
+                }
+                String content = answer.text.trim();
+                JsonObject parsed;
+                try {
+                    parsed = jsonObjectIn(content);
+                } catch (RuntimeException malformed) {
+                    parsed = null;
+                }
+                if (parsed != null) {
+                    AnswerCache.store(cache, origin, gson.toJson(parsed));
+                    return parsed;
+                }
+                // An answer without a JSON object is not kept; the model is asked again.
+                trouble = "Antwort ohne JSON-Objekt (\"" + glimpse(content) + "\")";
             } catch (Refused refused) {
                 if (longer > 0) {
                     throw new IOException("The model output was not complete (finish_reason=length), and the "
@@ -149,47 +166,32 @@ public final class KipitzChatClient implements ChatModel {
                     streaming = false; // a service that does not stream: asked the old way from now on
                     continue;
                 }
-                throw new IOException("KIPITZ returned HTTP " + refused.status
-                        + ". Check endpoint, proxy, credentials and model.");
+                if (refused.status != 408 && refused.status != 429 && refused.status < 500) {
+                    throw new IOException("KIPITZ returned HTTP " + refused.status
+                            + ". Check endpoint, proxy, credentials and model.");
+                }
+                trouble = "HTTP " + refused.status; // busy or a gateway in between: asked again later
             } catch (Unusable unusable) {
-                throw unusable;
+                trouble = unusable.getMessage(); // an answer that cannot be read is not kept
             } catch (IOException broken) {
-                // The connection failed or broke off on the way: that says nothing about the request.
-                if (cancelled || Thread.currentThread().isInterrupted()) {
+                if (broken.getMessage() != null && broken.getMessage().startsWith("The model output was not complete")) {
                     throw broken;
                 }
-                if (attempt >= TRANSPORT_ATTEMPTS) {
-                    tell("Verbindung zur KI: " + broken.getMessage() + " · nach " + attempt
-                            + " Versuchen aufgegeben (" + name() + ").");
-                    throw new IOException("Die Verbindung zur KI ist " + attempt + "-mal abgerissen: "
-                            + broken.getMessage(), broken);
-                }
-                tell("Verbindung zur KI: " + broken.getMessage() + " · Versuch " + (attempt + 1) + " von "
-                        + TRANSPORT_ATTEMPTS + " folgt (" + name() + ").");
-                try {
-                    Thread.sleep(2000L * attempt);
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                    throw broken;
-                }
+                trouble = broken.getMessage(); // the connection failed or broke off on the way
             }
-        }
-        try {
-            if (!"stop".equals(answer.finishReason)) {
-                throw new IOException("The model output was not complete (finish_reason=" + answer.finishReason
-                        + ("length".equals(answer.finishReason) ? ", also with " + budget + " tokens" : "")
-                        + ", model " + model + ").");
+            if (cancelled || Thread.currentThread().isInterrupted()) {
+                throw new java.io.InterruptedIOException("KI-Anfrage abgebrochen.");
             }
-            String content = answer.text.trim();
-            JsonObject parsed = jsonObjectIn(content);
-            if (parsed == null) {
-                throw new IOException("Could not parse the KIPITZ model response (no JSON object in: \""
-                        + glimpse(content) + "\").");
+            // Never given up: tried again after a pause that grows up to its longest (studio.properties:
+            // retryFirstSeconds, retryMostSeconds); only cancelling ends it.
+            troubled++;
+            if (Backoff.givesUp(troubled)) {
+                throw new IOException("Die KI-Anfrage ist " + troubled + "-mal gescheitert: " + trouble);
             }
-            AnswerCache.store(cache, origin, gson.toJson(parsed));
-            return parsed;
-        } catch (RuntimeException malformed) {
-            throw new IOException("Could not parse the KIPITZ model response (" + malformed + ").", malformed);
+            long wait = Backoff.delay(troubled);
+            tell("Verbindung zur KI: " + trouble + " · Versuch " + (troubled + 1) + " in " + Backoff.words(wait)
+                    + " (" + name() + ").");
+            Backoff.pause(troubled, () -> cancelled);
         }
     }
 
@@ -352,7 +354,6 @@ public final class KipitzChatClient implements ChatModel {
     }
 
     /** How often a request is sent again when the connection fails or breaks off, before the failure counts. */
-    private static final int TRANSPORT_ATTEMPTS = 5;
 
     /** How long a request may stay without its first byte: the service may let it wait in a queue. */
     static volatile long firstByteMillis = 240_000;

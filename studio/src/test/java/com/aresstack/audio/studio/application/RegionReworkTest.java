@@ -370,11 +370,17 @@ public final class RegionReworkTest {
         FakeChatModel model = new FakeChatModel((instruction, prompt) -> "{\"part\":\"strings\",\"section\":\"chorus\","
                 + "\"notes\":[" + note(1, 0, 1, 60, 80) + "]}");
         Selection flute = Selection.bars(session.composition(), List.of("flute"), 5, 8);
+        // A wrong answer is asked for again without end (Backoff); the test gives up after two tries.
+        com.aresstack.audio.studio.ai.Backoff.forTests(2, 1);
         try {
-            RegionRework.start(session, RegionComposer.with(model), RegionRequest.replace(flute, ""), QUIET);
-            fail("refused");
-        } catch (ForeignPartException expected) {
-            assertTrue(expected.getMessage().contains("strings"));
+            try {
+                RegionRework.start(session, RegionComposer.with(model), RegionRequest.replace(flute, ""), QUIET);
+                fail("refused");
+            } catch (ForeignPartException expected) {
+                assertTrue(expected.getMessage().contains("strings"));
+            }
+        } finally {
+            com.aresstack.audio.studio.ai.Backoff.forTests(0, 2000);
         }
         assertFalse(session.pending().isPresent());
     }

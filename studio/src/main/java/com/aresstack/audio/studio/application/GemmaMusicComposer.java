@@ -478,14 +478,32 @@ public final class GemmaMusicComposer {
                                 allKnown &= known;
                                 arriving.asked(known);
                                 final int at = s;
-                                JsonObject answer = client.generate(instruction, prompt, maxTokens, cached,
-                                        text -> {
-                                            arriving.heard(target.id() + "/" + at, text.length());
-                                            if (sketch != null) {
-                                                sketch.heard(target.id(), at, text);
-                                            }
-                                        });
-                                validateResponse(target, answer);
+                                java.util.function.Consumer<String> heard = text -> {
+                                    arriving.heard(target.id() + "/" + at, text.length());
+                                    if (sketch != null) {
+                                        sketch.heard(target.id(), at, text);
+                                    }
+                                };
+                                JsonObject answer;
+                                for (int asked = 1; ; asked++) {
+                                    answer = client.generate(instruction, prompt, maxTokens, cached, heard);
+                                    try {
+                                        validateResponse(target, answer);
+                                        break;
+                                    } catch (IOException unusable) {
+                                        // An answer that cannot be used is never kept: asked again after a
+                                        // pause that grows up to its longest, until one can be used.
+                                        Files.deleteIfExists(cached);
+                                        if (com.aresstack.audio.studio.ai.Backoff.givesUp(asked)) {
+                                            throw unusable;
+                                        }
+                                        long wait = com.aresstack.audio.studio.ai.Backoff.delay(asked);
+                                        progress.update("WARN: " + target.id() + ", Abschnitt " + (s + 1) + ": "
+                                                + unusable.getMessage() + " · Versuch " + (asked + 1) + " in "
+                                                + com.aresstack.audio.studio.ai.Backoff.words(wait) + ".");
+                                        com.aresstack.audio.studio.ai.Backoff.pause(asked, null);
+                                    }
+                                }
                                 answers.add(answer);
                                 if (sketch != null) {
                                     sketch.written(target.id(), at, answer);

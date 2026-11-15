@@ -390,11 +390,17 @@ public final class VoiceAdditionTest {
         FakeChatModel liar = new FakeChatModel((instruction, prompt) ->
                 "{\"part\":\"melody\",\"notes\":[{\"bar\":1,\"beat\":0,\"duration\":1,\"pitch\":72,\"velocity\":90}]}");
         Composition before = session.composition();
+        // A wrong answer is asked for again without end (Backoff); the test gives up after two tries.
+        com.aresstack.audio.studio.ai.Backoff.forTests(2, 1);
         try {
-            VoiceAddition.start(session, VoiceComposer.with(liar), trumpet(List.of(), false), Ids.seeded(1), QUIET);
-            fail("an answer for the melody was taken");
-        } catch (ForeignPartException expected) {
-            assertTrue(expected.getMessage().contains("melody"));
+            try {
+                VoiceAddition.start(session, VoiceComposer.with(liar), trumpet(List.of(), false), Ids.seeded(1), QUIET);
+                fail("an answer for the melody was taken");
+            } catch (ForeignPartException expected) {
+                assertTrue(expected.getMessage().contains("melody"));
+            }
+        } finally {
+            com.aresstack.audio.studio.ai.Backoff.forTests(0, 2000);
         }
         assertTrue(session.pending().isEmpty());
         assertEquals(before, session.composition());
