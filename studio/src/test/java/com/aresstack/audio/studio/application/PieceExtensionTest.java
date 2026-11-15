@@ -4,6 +4,7 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -20,6 +21,10 @@ import com.aresstack.audio.composition.edit.Patch;
 import com.aresstack.audio.composition.edit.Proposal;
 import com.aresstack.audio.composition.edit.Revision;
 import com.aresstack.audio.composition.edit.ScopeProof;
+import com.aresstack.audio.composition.mix.MixChannel;
+import com.aresstack.audio.composition.mix.MixScene;
+import com.aresstack.audio.studio.stage.SpatialScene;
+import com.aresstack.audio.studio.stage.SpatialSceneStore;
 import com.aresstack.audio.studio.ai.ChatContinuationPlanner;
 import com.aresstack.audio.studio.ai.ComposedContinuation;
 import com.aresstack.audio.studio.ai.ContinuationComposer;
@@ -328,6 +333,44 @@ public final class PieceExtensionTest {
         assertEquals(AppendContinuation.hashBefore(before, ORIGINAL_END),
                 AppendContinuation.hashBefore(after, ORIGINAL_END));
         assertTrue(extension.proposal().changes().partsToRender().contains(timpani.id()));
+    }
+
+    @Test
+    public void newInstrumentsGetASeatAChannelAndAnEntryInTheOldFilesOnAcceptance() throws Exception {
+        MixScene mixBefore = session.mix();
+        int tracksBefore = new TrackArrangementStore().load(piece).tracks().size();
+        SpatialScene stageBefore = new SpatialSceneStore().load(piece);
+        PieceExtension extension = PieceExtension.start(session, composerWith(composer()),
+                ContinuationRequest.of(16, ContinuationPreset.DRAMATIC_BUILD, ContinuationEnding.CLOSED), Ids.seeded(11),
+                QUIET);
+        String id = extension.continuation().newParts().get(0).id();
+        assertEquals("nothing before acceptance", mixBefore, session.mix());
+        extension.accept();
+
+        // the timpani get a channel with the usual seat of their role; the existing channels stay
+        MixChannel channel = session.mix().channelOf(MixChannel.Owner.part(id));
+        assertNotNull(channel);
+        assertEquals(mixBefore.channels().size() + 1, session.mix().channels().size());
+        assertTrue(session.mix().channels().containsAll(mixBefore.channels()));
+        assertEquals(session.mix(), com.aresstack.audio.studio.project.MixJson.load(piece));
+        List<MusicTrack> tracks = new TrackArrangementStore().load(piece).tracks();
+        assertEquals(tracksBefore + 1, tracks.size());
+        assertEquals(id, tracks.get(tracks.size() - 1).id());
+        assertEquals(47, tracks.get(tracks.size() - 1).program());
+        SpatialScene stage = new SpatialSceneStore().load(piece);
+        assertEquals(channel.x(), stage.placement(id).x(), 1e-3);
+        assertEquals(stageBefore.placements().size() + 1, stage.placements().size());
+        assertFalse("our own writes are no external change", session.externalChanges());
+
+        // undo takes them out of mix and old files again, redo brings them back
+        session.undo();
+        assertEquals(mixBefore, session.mix());
+        assertEquals(tracksBefore, new TrackArrangementStore().load(piece).tracks().size());
+        assertEquals(null, new SpatialSceneStore().load(piece).placement(id));
+        assertFalse(session.externalChanges());
+        session.redo();
+        assertEquals(channel, session.mix().channelOf(MixChannel.Owner.part(id)));
+        assertNotNull(new SpatialSceneStore().load(piece).placement(id));
     }
 
     @Test
