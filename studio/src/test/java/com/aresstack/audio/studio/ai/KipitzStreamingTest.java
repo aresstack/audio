@@ -248,7 +248,7 @@ public final class KipitzStreamingTest {
             Assert.assertEquals("melody", answer.get("part").getAsString());
             Assert.assertEquals("asked again after the silence", 2, asked.size());
             Assert.assertEquals(troubles.toString(), 1, troubles.size());
-            Assert.assertTrue(troubles.get(0), troubles.get(0).contains("kein Text mehr")
+            Assert.assertTrue(troubles.get(0), troubles.get(0).contains("schweigt seit")
                     && troubles.get(0).contains("Versuch 2 in"));
         } finally {
             KipitzChatClient.silenceMillis = silence;

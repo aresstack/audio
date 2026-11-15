@@ -163,6 +163,12 @@ public final class AudioStudioFrame extends JFrame {
     /** The longest pause before an AI request is tried again, in seconds. */
     private final JSpinner retryMost = new JSpinner(new SpinnerNumberModel(
             com.aresstack.audio.studio.ai.Backoff.MOST_SECONDS, 1, 3600, 10));
+    /** How long the first text of an AI answer may take, in seconds. */
+    private final JSpinner firstText = new JSpinner(new SpinnerNumberModel(KipitzChatClient.FIRST_TEXT_SECONDS,
+            10, 3600, 10));
+    /** How long an AI answer may stay silent once its text flows, in seconds. */
+    private final JSpinner silence = new JSpinner(new SpinnerNumberModel(KipitzChatClient.SILENCE_SECONDS,
+            10, 3600, 10));
     private final JButton proposalButton = new JButton("KI-Instrumentvorschlag");
     private final JButton autopilotButton = new JButton("Vollautomatisch");
     private final JButton generateButton = new JButton("Mit Gemma komponieren");
@@ -1920,6 +1926,15 @@ public final class AudioStudioFrame extends JFrame {
                 (Integer) retryFirst.getValue(), (Integer) retryMost.getValue());
         retryFirst.addChangeListener(retry);
         retryMost.addChangeListener(retry);
+        firstText.setPreferredSize(new Dimension(110, 30));
+        silence.setPreferredSize(new Dimension(110, 30));
+        addRow(ai, row++, "Erste Antwort",
+                line(firstText, note("s Warten auf den ersten Text; danach darf die Antwort höchstens"), silence,
+                        note("s schweigen („Stille“). Wer länger schweigt, gilt als abgerissen und wird neu gefragt.")));
+        javax.swing.event.ChangeListener waits = event -> KipitzChatClient.waits((Integer) firstText.getValue(),
+                (Integer) silence.getValue());
+        firstText.addChangeListener(waits);
+        silence.addChangeListener(waits);
         com.aresstack.audio.studio.ai.Backoff.tellTo(line -> SwingUtilities.invokeLater(() -> troubleDigest.add(line)));
         // Many requests that break off together are said in one line per model and cause.
         new javax.swing.Timer(TroubleDigest.EVERY_MILLIS, event -> troubleDigest.flush()).start();
@@ -4421,6 +4436,9 @@ public final class AudioStudioFrame extends JFrame {
             sfizz.setText(saved.getProperty("sfizz", sfizz.getText()));
             description.setText(saved.getProperty("description", description.getText()));
             parallelRequests.setValue(parseParallel(saved.getProperty("parallel", "32")));
+            firstText.setValue(AiDefaults.firstTextSeconds(saved));
+            silence.setValue(AiDefaults.silenceSeconds(saved));
+            KipitzChatClient.waits((Integer) firstText.getValue(), (Integer) silence.getValue());
             retryFirst.setValue(AiDefaults.retryFirstSeconds(saved));
             retryMost.setValue(AiDefaults.retryMostSeconds(saved));
             com.aresstack.audio.studio.ai.Backoff.configure((Integer) retryFirst.getValue(),
@@ -4498,6 +4516,8 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("sfizz", sfizz.getText().trim());
             saved.setProperty("description", description.getText());
             saved.setProperty("parallel", parallelRequests.getValue().toString());
+            saved.setProperty("firstTextSeconds", firstText.getValue().toString());
+            saved.setProperty("silenceSeconds", silence.getValue().toString());
             saved.setProperty("retryFirstSeconds", retryFirst.getValue().toString());
             saved.setProperty("retryMostSeconds", retryMost.getValue().toString());
             saved.setProperty("instrumentMode", ownTracks.isSelected() ? "own" : "ai");

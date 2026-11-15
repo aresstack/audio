@@ -378,10 +378,23 @@ public final class KipitzChatClient implements ChatModel {
 
     /** How often a request is sent again when the connection fails or breaks off, before the failure counts. */
 
-    /** How long a request may stay without its first byte: the service may let it wait in a queue. */
-    static volatile long firstByteMillis = 240_000;
-    /** How long an answer that has begun may stay silent before the connection counts as dead. */
-    static volatile long silenceMillis = 90_000;
+    /** The wait for the first text of an answer by default, in seconds: a busy service lets requests queue. */
+    public static final int FIRST_TEXT_SECONDS = 300;
+    /** The silence allowed in the middle of an answer by default, in seconds. */
+    public static final int SILENCE_SECONDS = 90;
+    /** How long a request may stay without its first text: the service may let it wait in a queue. */
+    static volatile long firstByteMillis = FIRST_TEXT_SECONDS * 1000L;
+    /** How long an answer whose text has begun may stay silent before the connection counts as dead. */
+    static volatile long silenceMillis = SILENCE_SECONDS * 1000L;
+
+    /**
+     * Sets how long the first text of an answer may take and how long an answer may then stay
+     * silent, in seconds (studio.properties: {@code firstTextSeconds}, {@code silenceSeconds}).
+     */
+    public static void waits(int firstTextSeconds, int silenceSeconds) {
+        firstByteMillis = Math.max(1, firstTextSeconds) * 1000L;
+        silenceMillis = Math.max(1, silenceSeconds) * 1000L;
+    }
 
     /** Hears what goes wrong on the way and what is done about it; never the answer itself. */
     private volatile java.util.function.Consumer<String> troubles;
@@ -424,6 +437,12 @@ public final class KipitzChatClient implements ChatModel {
         volatile boolean begun;
         volatile String ended;
 
+        /** A sign of life: the service answered or sent something, maybe only to keep the line open. */
+        void alive() {
+            last = System.currentTimeMillis();
+        }
+
+        /** Text of the answer arrived: from now on it is expected to flow. */
         void beat() {
             last = System.currentTimeMillis();
             begun = true;
@@ -442,15 +461,32 @@ public final class KipitzChatClient implements ChatModel {
         @Override
         public int read() throws IOException {
             int value = super.read();
-            pulse.beat();
+            pulse.alive();
             return value;
         }
 
         @Override
         public int read(byte[] buffer, int offset, int length) throws IOException {
             int count = super.read(buffer, offset, length);
-            pulse.beat();
+            if (count > 0 && !pulse.begun && begins(buffer, offset, count)) {
+                pulse.beat();
+            } else if (count > 0 && pulse.begun) {
+                pulse.beat();
+            } else {
+                pulse.alive();
+            }
             return count;
+        }
+
+        /**
+         * Whether these bytes carry text of the answer, thinking included, and not only a sign that
+         * the line is open: a request may wait in the service's queue behind a first line of headers
+         * or keep-alive comments, and that wait has its own, longer limit.
+         */
+        private static boolean begins(byte[] buffer, int offset, int count) {
+            String seen = new String(buffer, offset, count, StandardCharsets.UTF_8);
+            return seen.contains("\"content\":\"") || seen.contains("\"reasoning_content\":\"")
+                    || seen.contains("\"reasoning\":\"") || seen.contains("\"choices\"") && seen.contains("\"message\"");
         }
     }
     private static final int RESPONSE_LIMIT = 2_000_000;
@@ -505,8 +541,10 @@ public final class KipitzChatClient implements ChatModel {
             long allowed = pulse.begun ? silenceMillis : firstByteMillis;
             if (silent > allowed && pulse.ended == null) {
                 pulse.ended = pulse.begun
-                        ? "seit " + silent / 1000 + " s kam kein Text mehr, die Verbindung gilt als abgerissen"
-                        : "nach " + silent / 1000 + " s kam noch keine Antwort";
+                        ? "die KI schweigt seit " + silent / 1000 + " s mitten in der Antwort (Grenze „Stille“ in den "
+                        + "Einstellungen: " + allowed / 1000 + " s), die Verbindung gilt als abgerissen"
+                        : "nach " + silent / 1000 + " s noch kein Text der Antwort (Grenze „Erste Antwort“ in den "
+                        + "Einstellungen: " + allowed / 1000 + " s)";
                 connection.disconnect(); // the read that hangs ends with an error and the request is sent again
             }
         }, 2, 2, java.util.concurrent.TimeUnit.SECONDS);
@@ -526,7 +564,7 @@ public final class KipitzChatClient implements ChatModel {
                 throw new Refused(status);
             }
             String type = String.valueOf(connection.getContentType());
-            pulse.beat(); // the service answered: from here on text is expected to flow
+            pulse.alive(); // the service answered; the text may still wait in its queue
             try (InputStream input = new Watched(connection.getInputStream(), pulse)) {
                 if (type.contains("event-stream")) {
                     return readStream(input, heard);
