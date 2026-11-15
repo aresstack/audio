@@ -6,6 +6,7 @@ import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.composition.mix.MixScene;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.mix.MixLevel;
+import com.aresstack.audio.studio.mix.MixOutcome;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
 import com.aresstack.audio.studio.mix.StageAutomation;
 import com.aresstack.audio.studio.mix.StageSound;
@@ -43,7 +44,7 @@ public final class StageMixService {
 
     private final SpatialSceneStore store = new SpatialSceneStore();
     private final SpatialStemMixer mixer = new SpatialStemMixer();
-    private com.aresstack.audio.studio.mix.MixOutcome outcome;
+    private volatile float legacyFactor = Float.NaN;
     private volatile StageSound sound = StageSound.LOUDSPEAKERS;
 
     /**
@@ -162,32 +163,13 @@ public final class StageMixService {
     }
 
     /**
-     * Writes the mix on the stage to a file with this level strategy: in {@code FIXED} with the
-     * limiter and, if chosen, a peak or loudness normalization of the file. Without a strategy
-     * ({@code null}) the piece is mixed as its stage says ({@link #level}): in the compatibility
-     * mode, as every piece is until the user switches it, or with the fixed level it was switched to.
+     * The factor the last mix of the whole stage to a file applied (peak normalization and master
+     * level), or NaN before the first. Files and exports are always mixed as before
+     * ({@code LEGACY_PEAK}); live playback takes this factor as its fixed gain
+     * ({@link MixLevel#liveMaster}) so that it sounds like the file.
      */
-    public Path export(Path arrangement, Path directory, SpatialScene scene, Path target, int bits, MixLevel level)
-            throws Exception {
-        return export(Piece.written(arrangement), directory, scene, target, bits, level);
-    }
-
-    /**
-     * The level strategy the stage of a piece asks for: the compatibility mode, or the fixed level
-     * with the usual limiter once the piece was switched. A normalization applies to an exported
-     * file of a switched piece only; the compatibility mode already brings the mix to its peak.
-     */
-    public static MixLevel level(SpatialScene scene, com.aresstack.audio.core.mix.ExportNormalization normalization) {
-        if (!scene.fixedLevel()) {
-            return MixLevel.legacy(scene.masterDb());
-        }
-        return MixLevel.fixed(scene.masterDb(), com.aresstack.audio.core.dsp.LookaheadLimiter.Settings.DEFAULT,
-                normalization == null ? com.aresstack.audio.core.mix.ExportNormalization.NONE : normalization);
-    }
-
-    /** What the last mix of this service found out about its level, or {@code null} before the first. */
-    public com.aresstack.audio.studio.mix.MixOutcome outcome() {
-        return outcome;
+    public float legacyFactor() {
+        return legacyFactor;
     }
 
     /** Mixes the rendered tracks of a piece on its saved stage; no written arrangement is read for a model. */
@@ -196,27 +178,21 @@ public final class StageMixService {
     }
 
     public Path mix(Piece piece, Path directory, SpatialScene scene, Progress progress) throws Exception {
-        return mix(piece, directory, scene, null, directory.resolve(MIX_FILE), 16, null, progress);
+        return mix(piece, directory, scene, null, directory.resolve(MIX_FILE), 16, progress);
     }
 
     /** One track alone, but as it stands on the stage: with its level, its place and the room. */
     public Path solo(Piece piece, Path directory, SpatialScene scene, String trackId) throws Exception {
-        return mix(piece, directory, scene, trackId, directory.resolve(SOLO_FILE), 16, null, message -> { });
+        return mix(piece, directory, scene, trackId, directory.resolve(SOLO_FILE), 16, message -> { });
     }
 
     /** Writes the mix on the stage to a file of the user's choice, with 16 or 24 bits. */
     public Path export(Piece piece, Path directory, SpatialScene scene, Path target, int bits) throws Exception {
-        return mix(piece, directory, scene, null, target, bits, null, message -> { });
-    }
-
-    /** As {@link #export(Path, Path, SpatialScene, Path, int, MixLevel)}, for a piece with a model. */
-    public Path export(Piece piece, Path directory, SpatialScene scene, Path target, int bits, MixLevel level)
-            throws Exception {
-        return mix(piece, directory, scene, null, target, bits, level, message -> { });
+        return mix(piece, directory, scene, null, target, bits, message -> { });
     }
 
     private Path mix(Piece piece, Path directory, SpatialScene scene, String only, Path target, int bits,
-                     MixLevel level, Progress progress) throws Exception {
+                     Progress progress) throws Exception {
         List<MusicTrack> tracks = piece.tracks();
         SpatialScene fitting = scene.fitting(tracks);
         Map<String, String> stems = stems(directory);
@@ -237,15 +213,19 @@ public final class StageMixService {
             files.add(file);
             placements.add(placement);
         }
-        progress.update("Mische " + tracks.size() + " Spuren auf der Bühne · " + fitting.room().name()
+        heard |= addAudioLanes(directory, only, files, placements, progress);
+        progress.update("Mische " + files.size() + " Spuren auf der Bühne · " + fitting.room().name()
                 + (heard ? "" : " · alle Spuren sind stumm") + " ...");
         double secondsPerBar = piece.secondsPerBar();
         StageAutomation automation = piece.levels(placements).movingAs(piece.movements(directory, progress));
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
-            MixLevel chosen = level != null ? level : level(fitting, null);
-            outcome = mixer.withAutomation(automation).withSound(sound)
-                    .mix(files, placements, fitting.room(), secondsPerBar, chosen, fresh, bits);
+            // Files and exports sound exactly as before (decision of the product owner: "export old, live new").
+            MixOutcome outcome = mixer.withAutomation(automation).withSound(sound)
+                    .mix(files, placements, fitting.room(), secondsPerBar, MixLevel.legacy(fitting.masterDb()), fresh, bits);
+            if (only == null) {
+                legacyFactor = outcome.legacyFactor();
+            }
             Files.move(fresh, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(fresh);
@@ -264,6 +244,50 @@ public final class StageMixService {
         }
         return document == null || document.automation().isEmpty() ? StageAutomation.NONE
                 : StageAutomation.of(document, time);
+    }
+
+    /**
+     * The audio lanes of the model (work package B3), each as a stem of its clips under
+     * {@code render/audio/}, standing on the stage as their channel strip in {@code mix.json} says.
+     * A piece without a model or without audio lanes adds nothing. Returns whether one is heard.
+     */
+    static boolean addAudioLanes(Path directory, String only, List<Path> files, List<SoundSourcePlacement> placements,
+                                 Progress progress) throws IOException {
+        if (!Files.isRegularFile(directory.resolve(CompositionJson.FILE_NAME))) {
+            return false;
+        }
+        Composition model;
+        MixScene document;
+        try {
+            model = CompositionJson.load(directory);
+            document = MixJson.load(directory);
+        } catch (IOException | RuntimeException unreadable) {
+            progress.update("Das Werkmodell ist nicht lesbar; die Audiospuren fehlen im Mix.");
+            return false;
+        }
+        boolean heard = false;
+        for (com.aresstack.audio.composition.Track track : model.tracks()) {
+            if (track.kind() != com.aresstack.audio.composition.Track.Kind.AUDIO || track.clips().isEmpty()) {
+                continue;
+            }
+            Path stem = directory.resolve("render").resolve("audio").resolve(track.id() + ".wav");
+            for (String warning : com.aresstack.audio.studio.render.AudioTrackStem.write(model, directory, track, stem)) {
+                progress.update("WARN: " + warning);
+            }
+            com.aresstack.audio.composition.mix.MixChannel channel = document == null ? null
+                    : document.channelOf(new com.aresstack.audio.composition.mix.MixChannel.Owner(
+                    com.aresstack.audio.composition.mix.MixChannel.Owner.Kind.AUDIO_TRACK, track.id()));
+            SoundSourcePlacement placement = channel == null ? new SoundSourcePlacement(track.id(), 0, 0.35)
+                    : new SoundSourcePlacement(track.id(), channel.x(), channel.depth(), channel.levelDb(),
+                    channel.width(), channel.reverb(), channel.muted(), channel.locked(), null);
+            if (only != null) {
+                placement = placement.withMuted(!only.equals(track.id()));
+            }
+            heard |= !placement.muted();
+            files.add(stem);
+            placements.add(placement);
+        }
+        return heard;
     }
 
     /**

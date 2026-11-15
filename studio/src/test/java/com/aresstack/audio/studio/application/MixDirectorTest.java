@@ -42,7 +42,8 @@ public final class MixDirectorTest {
     @Test
     public void anInstrumentProposalBringsItsStageAndOneWithoutGetsTheUsualSeating() throws Exception {
         KipitzChatClient offline = new KipitzChatClient(
-                "http://127.0.0.1:1/v1/chat/completions", "", "local", "", 8080);
+                "http://127.0.0.1:1/v1/chat/completions", "", "local", "", 8080)
+                .legacyModel("local"); // the kept answers below were written for this model
         Path staged = folder.newFolder().toPath();
         Files.write(staged.resolve("instrument-proposal.json"), ("{\"tracks\":["
                 + "{\"id\":\"clarinet\",\"role\":\"melody\",\"instrument\":\"Warm clarinet\",\"program\":71},"
