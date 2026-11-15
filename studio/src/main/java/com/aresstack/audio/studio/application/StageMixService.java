@@ -1,8 +1,15 @@
 package com.aresstack.audio.studio.application;
 
+import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.TimeMap;
+import com.aresstack.audio.composition.mix.MixScene;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.mix.MixLevel;
+import com.aresstack.audio.studio.mix.MixOutcome;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
+import com.aresstack.audio.studio.mix.StageAutomation;
+import com.aresstack.audio.studio.project.CompositionJson;
+import com.aresstack.audio.studio.project.MixJson;
 import com.aresstack.audio.studio.progress.Progress;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
@@ -20,6 +27,11 @@ import java.util.Map;
  * Mixes the tracks that were already rendered, as they stand on the stage of the
  * piece. It needs neither the AI nor a synthesizer: after moving an instrument or a
  * fader, only this runs again.
+ *
+ * <p>The level curves come from the stage as the window keeps it ({@code spatial-scene.json});
+ * a movement of the place or of the room share, which only the mix document can hold, comes from
+ * {@code mix.json} of the piece, read through its time map (work package D3). A piece without
+ * such a lane mixes exactly as before.
  */
 public final class StageMixService {
     public static final String MIX_FILE = "arrangement-instruments.wav";
@@ -30,6 +42,7 @@ public final class StageMixService {
 
     private final SpatialSceneStore store = new SpatialSceneStore();
     private final SpatialStemMixer mixer = new SpatialStemMixer();
+    private volatile float legacyFactor = Float.NaN;
 
     /** The stage of a piece: the saved one, or the usual seating; always for exactly the tracks of the arrangement. */
     public SpatialScene scene(Path arrangement, Path directory) throws IOException {
@@ -45,32 +58,31 @@ public final class StageMixService {
 
     public Path mix(Path arrangement, Path directory, SpatialScene scene, Progress progress)
             throws Exception {
-        return mix(arrangement, directory, scene, null, directory.resolve(MIX_FILE), 16, null, progress);
+        return mix(arrangement, directory, scene, null, directory.resolve(MIX_FILE), 16, progress);
     }
 
     /** One track alone, but as it stands on the stage: with its level, its place and the room. */
     public Path solo(Path arrangement, Path directory, SpatialScene scene, String trackId) throws Exception {
-        return mix(arrangement, directory, scene, trackId, directory.resolve(SOLO_FILE), 16, null, message -> { });
+        return mix(arrangement, directory, scene, trackId, directory.resolve(SOLO_FILE), 16, message -> { });
     }
 
     /** Writes the mix on the stage to a file of the user's choice, with 16 or 24 bits. */
     public Path export(Path arrangement, Path directory, SpatialScene scene, Path target, int bits) throws Exception {
-        return mix(arrangement, directory, scene, null, target, bits, null, message -> { });
+        return mix(arrangement, directory, scene, null, target, bits, message -> { });
     }
 
     /**
-     * Writes the mix on the stage to a file with this level strategy: in {@code FIXED} with the
-     * limiter and, if chosen, a peak or loudness normalization of the file. Without a strategy
-     * ({@code null}) the piece is mixed in the compatibility mode with the master level of its
-     * stage, as every piece is until the user switches it.
+     * The factor the last mix of the whole stage to a file applied (peak normalization and master
+     * level), or NaN before the first. Files and exports are always mixed as before
+     * ({@code LEGACY_PEAK}); live playback takes this factor as its fixed gain
+     * ({@link MixLevel#liveMaster}) so that it sounds like the file.
      */
-    public Path export(Path arrangement, Path directory, SpatialScene scene, Path target, int bits, MixLevel level)
-            throws Exception {
-        return mix(arrangement, directory, scene, null, target, bits, level, message -> { });
+    public float legacyFactor() {
+        return legacyFactor;
     }
 
     private Path mix(Path arrangement, Path directory, SpatialScene scene, String only, Path target, int bits,
-                     MixLevel level, Progress progress) throws Exception {
+                     Progress progress) throws Exception {
         List<MusicTrack> tracks = tracks(arrangement);
         SpatialScene fitting = scene.fitting(tracks);
         Map<String, String> stems = stems(directory);
@@ -93,10 +105,18 @@ public final class StageMixService {
         }
         progress.update("Mische " + tracks.size() + " Spuren auf der Bühne · " + fitting.room().name()
                 + (heard ? "" : " · alle Spuren sind stumm") + " ...");
+        int tempo = tempo(arrangement);
+        double secondsPerBar = secondsPerBar(arrangement);
+        StageAutomation automation = StageAutomation.of(placements, secondsPerBar)
+                .movingAs(movements(directory, tempo, progress));
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
-            MixLevel chosen = level != null ? level : MixLevel.legacy(fitting.masterDb());
-            mixer.mix(files, placements, fitting.room(), 4 * 60.0 / tempo(arrangement), chosen, fresh, bits);
+            // Files and exports sound exactly as before (decision of the product owner: "export old, live new").
+            MixOutcome outcome = mixer.withAutomation(automation).mix(files, placements, fitting.room(), secondsPerBar,
+                    MixLevel.legacy(fitting.masterDb()), fresh, bits);
+            if (only == null) {
+                legacyFactor = outcome.legacyFactor();
+            }
             Files.move(fresh, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(fresh);
@@ -104,11 +124,57 @@ public final class StageMixService {
         return target;
     }
 
+    /**
+     * How the tracks move according to the mix document of the piece: place and room share over
+     * time, for the tracks named as the owners of their channels. The time map of the model is
+     * taken while it has the tempo of the arrangement the stems were rendered from; otherwise one
+     * tempo. A piece without {@code mix.json}, or with one that cannot be read, does not move.
+     */
+    static StageAutomation movements(Path directory, int tempo, Progress progress) {
+        MixScene document;
+        try {
+            document = MixJson.load(directory);
+        } catch (IOException | RuntimeException unreadable) {
+            progress.update("mix.json ist nicht lesbar; die Bühne wird ohne ihre Bewegungen gemischt.");
+            return StageAutomation.NONE;
+        }
+        if (document == null || document.automation().isEmpty()) {
+            return StageAutomation.NONE;
+        }
+        // Seconds depend on the tempo alone, so one tempo is enough when the model does not fit.
+        TimeMap time = TimeMap.of(tempo);
+        if (Files.isRegularFile(directory.resolve(CompositionJson.FILE_NAME))) {
+            try {
+                Composition model = CompositionJson.load(directory);
+                if (model.timeMap().tempoAt(0) == tempo) {
+                    time = model.timeMap();
+                }
+            } catch (IOException | RuntimeException unreadable) {
+                // then the tempo of the arrangement, as the stems were rendered
+            }
+        }
+        return StageAutomation.of(document, time);
+    }
+
     /** Notes which file holds the sound of each track, for the mixes that follow without rendering. */
     public static void keepStems(Path directory, List<String> trackIds, Path[] files) throws IOException {
         List<String> lines = new ArrayList<String>();
         for (int i = 0; i < trackIds.size(); i++) {
             lines.add(trackIds.get(i) + "\t" + files[i].getFileName());
+        }
+        Files.write(directory.resolve(STEMS_FILE), lines, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Notes which file holds the sound of each track, as a path relative to the folder of the
+     * piece; the stem cache keeps its files under {@code render/stems/}.
+     */
+    public static void keepStems(Path directory, Map<String, Path> files) throws IOException {
+        Path base = directory.toAbsolutePath().normalize();
+        List<String> lines = new ArrayList<String>();
+        for (Map.Entry<String, Path> file : files.entrySet()) {
+            lines.add(file.getKey() + "\t"
+                    + base.relativize(file.getValue().toAbsolutePath().normalize()).toString().replace('\\', '/'));
         }
         Files.write(directory.resolve(STEMS_FILE), lines, StandardCharsets.UTF_8);
     }
@@ -126,7 +192,9 @@ public final class StageMixService {
 
     private static Path stem(Path directory, String trackId, Map<String, String> stems) {
         String named = stems.get(trackId);
-        if (named != null && named.matches("[A-Za-z0-9_.-]+") && Files.isRegularFile(directory.resolve(named))) {
+        // A name, or a path below the folder of the piece (the stem cache), never one that leaves it.
+        if (named != null && named.matches("[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*")
+                && !named.matches("(.*/)?\\.\\.(/.*)?") && Files.isRegularFile(directory.resolve(named))) {
             return directory.resolve(named);
         }
         Path sampled = directory.resolve(trackId + "-sampled.wav");
@@ -194,6 +262,12 @@ public final class StageMixService {
             throw new IllegalArgumentException("Arrangement must contain at least one track.");
         }
         return tracks;
+    }
+
+    /** How long one bar of a written arrangement lasts: its meter at its tempo (4/4 for pieces from before F2). */
+    public static double secondsPerBar(Path arrangement) throws IOException {
+        ArrangementFile file = ArrangementFile.read(arrangement);
+        return file.quartersPerBar() * 60.0 / file.tempoOrDefault();
     }
 
     /** The tempo of a written arrangement, kept within 20..400; 108 if it names none that can be read. */

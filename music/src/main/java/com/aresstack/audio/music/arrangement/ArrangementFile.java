@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.OptionalInt;
 
 /**
@@ -17,9 +18,16 @@ import java.util.OptionalInt;
  * <p>The format, one entry per line, columns separated by a tab:
  * <pre>
  * tempo  &lt;bpm&gt;
+ * meter  &lt;numerator&gt;  &lt;denominator&gt;          (optional; 4 4 if missing)
+ * key    &lt;tonic&gt;  &lt;major|minor&gt;              (optional; C major if missing)
+ * bars   &lt;number of bars&gt;                     (optional; see {@link #bars()})
  * track  &lt;id&gt;  &lt;program&gt;  &lt;channel&gt;  [&lt;role&gt;]
  * note   &lt;track id&gt;  &lt;tick&gt;  &lt;length&gt;  &lt;pitch&gt;  &lt;velocity&gt;
  * </pre>
+ * Ticks are at {@link #PPQ} per quarter note. The tonic of a key is written as a letter with
+ * {@code #} or {@code b}, for example {@code key  D  minor} or {@code key  Bb  major}. Pieces
+ * from before work package F2 have no {@code meter}, {@code key} or {@code bars} line; they
+ * are four quarters to the bar in C major, as the studio then only knew.
  * Byte order marks are ignored, and so are blank lines and lines that start with {@code #}.
  *
  * <p>The reader itself is lenient: it records what each line says, in the order of the
@@ -32,8 +40,14 @@ public final class ArrangementFile {
     /** The tempo a view assumes when the arrangement names none, or none that can be read. */
     public static final int DEFAULT_TEMPO = 108;
 
+    /** Ticks per quarter note in every arrangement. */
+    public static final int PPQ = 480;
+
+    /** The length of every piece from before F2, which had no {@code bars} line: eight bars. */
+    public static final int LEGACY_BARS = 8;
+
     /** One understood or not understood line, in the order of the file. */
-    public sealed interface Entry permits Tempo, Track, Note, Problem {
+    public sealed interface Entry permits Tempo, Meter, Key, Bars, Track, Note, Problem {
         /** The line number, counted from 1. */
         int line();
 
@@ -47,6 +61,41 @@ public final class ArrangementFile {
         public OptionalInt bpm() {
             return number(value);
         }
+    }
+
+    /** A {@code meter} line whose two numbers can be read; not checked for range here. */
+    public record Meter(int line, String text, int numerator, int denominator) implements Entry {
+        /** Whether this is four quarters to the bar. */
+        public boolean fourFour() {
+            return numerator == 4 && denominator == 4;
+        }
+
+        /** How many quarter notes a bar has: 3 for 3/4, 3 for 6/8, 3.5 for 7/8. */
+        public double quartersPerBar() {
+            return numerator * 4.0 / denominator;
+        }
+
+        /** The length of a bar in ticks. */
+        public long barTicks() {
+            return (long) PPQ * 4 * numerator / denominator;
+        }
+    }
+
+    /** A {@code key} line with a tonic and a mode, as written. */
+    public record Key(int line, String text, String tonic, String mode) implements Entry {
+        /** Whether the key is C major, the key of the pieces from before. */
+        public boolean cMajor() {
+            return "C".equals(tonic) && "major".equals(mode);
+        }
+
+        /** For example {@code "D minor"}. */
+        public String name() {
+            return tonic + " " + mode;
+        }
+    }
+
+    /** A {@code bars} line whose number can be read. */
+    public record Bars(int line, String text, int value) implements Entry {
     }
 
     /**
@@ -105,6 +154,17 @@ public final class ArrangementFile {
             if ("tempo".equals(keyword)) {
                 entries.add(fields.length == 2 ? new Tempo(number, line, fields[1])
                         : new Problem(number, line, "a tempo line has two columns"));
+            } else if ("meter".equals(keyword)) {
+                entries.add(meter(number, line, fields));
+            } else if ("key".equals(keyword)) {
+                entries.add(fields.length == 3 && fields[1].trim().matches("[A-G][#b]?")
+                        && fields[2].trim().matches("major|minor")
+                        ? new Key(number, line, fields[1].trim(), fields[2].trim())
+                        : new Problem(number, line, "a key line names a tonic (C, F#, Bb, ...) and major or minor"));
+            } else if ("bars".equals(keyword)) {
+                OptionalInt bars = fields.length == 2 ? number(fields[1]) : OptionalInt.empty();
+                entries.add(bars.isPresent() && bars.getAsInt() > 0 ? new Bars(number, line, bars.getAsInt())
+                        : new Problem(number, line, "a bars line has one whole number above 0"));
             } else if ("track".equals(keyword)) {
                 entries.add(fields.length >= 4
                         ? new Track(number, line, fields.length, fields[1], fields[2], fields[3],
@@ -117,6 +177,18 @@ public final class ArrangementFile {
             }
         }
         return new ArrangementFile(entries);
+    }
+
+    private static Entry meter(int number, String line, String[] fields) {
+        if (fields.length == 3) {
+            OptionalInt numerator = number(fields[1]);
+            OptionalInt denominator = number(fields[2]);
+            if (numerator.isPresent() && denominator.isPresent() && numerator.getAsInt() > 0
+                    && denominator.getAsInt() > 0 && Integer.bitCount(denominator.getAsInt()) == 1) {
+                return new Meter(number, line, numerator.getAsInt(), denominator.getAsInt());
+            }
+        }
+        return new Problem(number, line, "a meter line has a numerator and a power of two as denominator");
     }
 
     private static Entry note(int number, String line, String[] fields) {
@@ -152,6 +224,77 @@ public final class ArrangementFile {
     public int tempoOrDefault() {
         OptionalInt tempo = tempo();
         return tempo.isPresent() ? Math.max(20, Math.min(400, tempo.getAsInt())) : DEFAULT_TEMPO;
+    }
+
+    /** The meter as the last meter line says it; empty for four quarters to the bar, as before F2. */
+    public Optional<Meter> meter() {
+        return last(Meter.class);
+    }
+
+    /** Quarter notes per bar: 4 unless a meter line says otherwise. */
+    public double quartersPerBar() {
+        return meter().map(Meter::quartersPerBar).orElse(4.0);
+    }
+
+    /** The length of a bar in ticks: 1920 unless a meter line says otherwise. */
+    public long barTicks() {
+        return meter().map(Meter::barTicks).orElse((long) PPQ * 4);
+    }
+
+    /** The key as the last key line says it; empty for C major, as before F2. */
+    public Optional<Key> key() {
+        return last(Key.class);
+    }
+
+    /**
+     * The number of bars as the last bars line says it. Empty for a piece without one: then the
+     * piece ends with the bar of its last note, and the reference renderer, as before F2, makes
+     * at least {@link #LEGACY_BARS} bars of sound.
+     */
+    public OptionalInt bars() {
+        return last(Bars.class).map(b -> OptionalInt.of(b.value())).orElse(OptionalInt.empty());
+    }
+
+    /** The number of bars that hold every note, at least one. */
+    public int barsCovering() {
+        long end = 0;
+        for (Note note : notes()) {
+            end = Math.max(end, note.tick() + note.length());
+        }
+        return barsCovering(end, barTicks());
+    }
+
+    /** The number of whole bars of this length that hold the time up to this tick, at least one. */
+    public static int barsCovering(long endTick, long barTicks) {
+        return (int) Math.max(1, (endTick + barTicks - 1) / barTicks);
+    }
+
+    /**
+     * The length of a piece without a {@code bars} line: the bars its notes reach into, and for a
+     * piece in four quarters and C major (every piece from before F2 looks so) at least
+     * {@link #LEGACY_BARS}, because the studio always made those eight bars long.
+     */
+    public static int defaultBars(int barsCovering, boolean fourFourInCMajor) {
+        return fourFourInCMajor ? Math.max(LEGACY_BARS, barsCovering) : barsCovering;
+    }
+
+    /**
+     * Whether a piece of this many bars needs a {@code bars} line: whenever a reader would
+     * otherwise take another length ({@link #defaultBars}). Old pieces of eight bars need none and
+     * stay as they were.
+     */
+    public static boolean needsBarsLine(int bars, int barsCovering, boolean fourFourInCMajor) {
+        return bars != defaultBars(barsCovering, fourFourInCMajor);
+    }
+
+    private <T extends Entry> Optional<T> last(Class<T> kind) {
+        T found = null;
+        for (Entry entry : entries) {
+            if (kind.isInstance(entry)) {
+                found = kind.cast(entry);
+            }
+        }
+        return Optional.ofNullable(found);
     }
 
     /** The track lines in their written order, a repeated id as often as it is written. */

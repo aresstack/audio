@@ -33,21 +33,28 @@ import javax.sound.sampled.AudioSystem;
 public final class GervillOfflineRenderer {
     private static final int SAMPLE_RATE = 44100;
     private static final long TAIL_MICROS = 2500000L;
-    private static final long MAX_DURATION_MICROS = 180000000L;
     private static final int DEFAULT_TEMPO_MICROS = 500000;
 
     private GervillOfflineRenderer() {
     }
 
     public static void main(String[] arguments) throws Exception {
-        if (arguments.length != 3) {
+        if (arguments.length != 3 && arguments.length != 4) {
             throw new IllegalArgumentException(
-                    "Usage: GervillOfflineRenderer input.mid soundfont.sf2 output.wav");
+                    "Usage: GervillOfflineRenderer input.mid soundfont.sf2 output.wav [max-seconds]");
         }
-        render(Paths.get(arguments[0]), Paths.get(arguments[1]), Paths.get(arguments[2]));
+        RenderLimits limits = arguments.length == 4
+                ? new RenderLimits(java.time.Duration.ofSeconds(Long.parseLong(arguments[3])),
+                RenderLimits.STANDARD.minProcess())
+                : RenderLimits.STANDARD;
+        render(Paths.get(arguments[0]), Paths.get(arguments[1]), Paths.get(arguments[2]), limits);
     }
 
     public static void render(Path midiFile, Path soundFont, Path output) throws Exception {
+        render(midiFile, soundFont, output, RenderLimits.STANDARD);
+    }
+
+    public static void render(Path midiFile, Path soundFont, Path output, RenderLimits limits) throws Exception {
         requireFile(midiFile, "MIDI arrangement");
         requireFile(soundFont, "SF2 soundbank");
         if (!soundFont.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".sf2")) {
@@ -83,9 +90,7 @@ public final class GervillOfflineRenderer {
             }
 
             long endMicros = sendEvents(sequence, synthesizer.getReceiver());
-            if (endMicros > MAX_DURATION_MICROS) {
-                throw new IOException("MIDI is longer than the supported three-minute render limit.");
-            }
+            limits.checkPiece(endMicros / 1000000.0, "The MIDI file");
             long frames = (long) Math.ceil(
                     (endMicros + TAIL_MICROS) * (double) SAMPLE_RATE / 1000000.0);
             Path destination = output.toAbsolutePath().normalize();

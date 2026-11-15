@@ -1,5 +1,7 @@
 package com.aresstack.audio.studio.application;
 
+import com.aresstack.audio.composition.Chord;
+import com.aresstack.audio.composition.Key;
 import com.aresstack.audio.studio.progress.Progress;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
@@ -9,17 +11,39 @@ import java.util.List;
 /**
  * Repair small, deterministic note-level deviations without changing the model's JSON.
  * Keep a readable audit trail for every change made to the playable arrangement.
+ *
+ * <p>Formal repairs always happen: the grid of sixteenths, the length of a note, the bounds of
+ * the section, the velocity. What happens to a pitch depends on the {@link CompositionSpec}
+ * (architecture review E4): with {@link CompositionSpec#snapToHarmony()} a melody note is moved
+ * to the nearest tone of the key and a harmony or bass note to the nearest tone of the chord of
+ * its bar, as the studio always did; without it a pitch is only moved by octaves into the range
+ * of its role, and a tone outside the key is reported, not changed.
  */
 public final class CompositionNoteNormalizer {
-    private static final double SONG_BEATS = 32.0;
     private static final double STEP = 0.25;
-    private static final String[] CHORDS = {"C", "G", "Am", "F", "C", "G", "F", "G"};
 
     private final Progress progress;
+    private final CompositionSpec spec;
+    private final List<Chord> chords;
     private final List<String> corrections = new ArrayList<String>();
 
+    /** The normalizer of every piece from before F2: eight bars of C major on the locked chords. */
     public CompositionNoteNormalizer(Progress progress) {
+        this(progress, CompositionSpec.legacy(), CompositionSpec.LEGACY_CHORDS);
+    }
+
+    /**
+     * @param chordsByBar the chord of each bar from the plan, as written; bars without one, or
+     *                    with a symbol that is no chord, fall back to the scale of the key
+     */
+    public CompositionNoteNormalizer(Progress progress, CompositionSpec spec, List<String> chordsByBar) {
         this.progress = progress;
+        this.spec = spec;
+        List<Chord> parsed = new ArrayList<Chord>();
+        for (String symbol : chordsByBar == null ? List.<String>of() : chordsByBar) {
+            parsed.add(Chord.tryParse(symbol));
+        }
+        this.chords = parsed;
         corrections.add("part\tnote\tfield\toriginal\tcorrected\treason");
     }
 
@@ -27,7 +51,22 @@ public final class CompositionNoteNormalizer {
         return normalize(source, part, part, noteIndex);
     }
 
+    /** A note of an answer for the whole piece, its beat counted from the start of the piece. */
     public NormalizedNote normalize(JsonObject source, String part, String role, int noteIndex) {
+        return normalize(source, part, role, noteIndex, 0, spec.bars());
+    }
+
+    /**
+     * A note of an answer for one section, its beat counted in quarter notes from the start of the
+     * section; the note that is returned counts from the start of the piece.
+     *
+     * @param firstBar the bar the section begins with, counted from 0
+     * @param bars     the bars of the section
+     */
+    public NormalizedNote normalize(JsonObject source, String part, String role, int noteIndex,
+                                    int firstBar, int bars) {
+        final double sectionBeats = bars * spec.quartersPerBar();
+        final double offset = firstBar * spec.quartersPerBar();
         final double beat;
         final double duration;
         final int pitch;
@@ -41,8 +80,9 @@ public final class CompositionNoteNormalizer {
             skip(part, noteIndex, "Malformed or missing note values");
             return null;
         }
-        if (!Double.isFinite(beat) || beat < 0 || beat >= SONG_BEATS) {
-            skip(part, noteIndex, "Start beat outside the eight-bar song: " + beat);
+        if (!Double.isFinite(beat) || beat < 0 || beat >= sectionBeats) {
+            skip(part, noteIndex, "Start beat outside the " + bars + "-bar " + (bars == spec.bars() ? "song" : "section")
+                    + ": " + beat);
             return null;
         }
         if (!Double.isFinite(duration) || duration <= 0) {
@@ -51,25 +91,30 @@ public final class CompositionNoteNormalizer {
         }
 
         double alignedBeat = Math.round(beat / STEP) * STEP;
-        if (alignedBeat >= SONG_BEATS) {
-            alignedBeat = SONG_BEATS - STEP;
+        if (alignedBeat >= sectionBeats) {
+            alignedBeat = sectionBeats - STEP;
         }
         double alignedDuration = Math.round(duration / STEP) * STEP;
         alignedDuration = Math.max(STEP, Math.min(4.0, alignedDuration));
-        alignedDuration = Math.min(alignedDuration, SONG_BEATS - alignedBeat);
+        alignedDuration = Math.min(alignedDuration, sectionBeats - alignedBeat);
 
         int midiPitch = Math.max(0, Math.min(127, pitch));
-        int correctedPitch = normalizePitch(role, alignedBeat, midiPitch);
+        int correctedPitch = normalizePitch(role, offset + alignedBeat, midiPitch);
         int correctedVelocity = Math.max(35, Math.min(105, velocity));
 
         report(part, noteIndex, "beat", beat, alignedBeat, "Align to 16th-note grid");
         report(part, noteIndex, "duration", duration, alignedDuration,
-                "Align and fit within the 32-beat composition");
-        report(part, noteIndex, "pitch", pitch, correctedPitch,
-                "Choose allowed instrument pitch and active chord");
+                "Align and fit within the " + format(sectionBeats) + "-beat composition");
+        report(part, noteIndex, "pitch", pitch, correctedPitch, spec.snapToHarmony()
+                ? "Choose allowed instrument pitch and active chord"
+                : "Move by octaves into the range of the instrument");
         report(part, noteIndex, "velocity", velocity, correctedVelocity,
                 "Keep velocity in the supported range");
-        return new NormalizedNote(alignedBeat, alignedDuration, correctedPitch, correctedVelocity);
+        if (!spec.snapToHarmony() && !"drums".equals(role) && !spec.key().contains(correctedPitch)) {
+            corrections.add(part + "\t" + noteIndex + "\tpitch\t" + correctedPitch + "\t" + correctedPitch
+                    + "\tOutside " + spec.key().name() + "; kept");
+        }
+        return new NormalizedNote(offset + alignedBeat, alignedDuration, correctedPitch, correctedVelocity);
     }
 
     public List<String> corrections() {
@@ -96,22 +141,65 @@ public final class CompositionNoteNormalizer {
                 + " " + original + " -> " + corrected);
     }
 
+    private static String format(double beats) {
+        return beats == Math.rint(beats) ? String.valueOf((long) beats) : String.valueOf(beats);
+    }
+
+    /** The lowest and highest pitch of a role. */
+    private static int[] range(String role) {
+        if ("melody".equals(role)) {
+            return new int[]{60, 88};
+        }
+        if ("texture".equals(role)) {
+            return new int[]{48, 88};
+        }
+        if ("bass".equals(role)) {
+            return new int[]{36, 60};
+        }
+        return new int[]{48, 76};
+    }
+
+    /** @param beat the beat of the note in quarter notes from the start of the piece */
     private int normalizePitch(String role, double beat, int pitch) {
         if ("drums".equals(role)) {
+            if (!spec.snapToHarmony() && pitch >= 35 && pitch <= 81) {
+                return pitch; // any sound of the General MIDI kit
+            }
             return nearest(pitch, new int[]{36, 38, 42, 46}, 36, 46, false);
         }
-        if ("melody".equals(role)) {
-            return nearest(pitch, new int[]{0, 2, 4, 5, 7, 9, 11}, 60, 88, true);
+        int[] range = range(role);
+        if (!spec.snapToHarmony()) {
+            int moved = pitch;
+            while (moved < range[0]) {
+                moved += 12;
+            }
+            while (moved > range[1]) {
+                moved -= 12;
+            }
+            return moved >= range[0] ? moved : Math.max(range[0], Math.min(range[1], pitch));
         }
-        String chord = CHORDS[(int) Math.floor(beat / 4)];
-        int[] chordTones = "C".equals(chord) ? new int[]{0, 4, 7}
-                : "G".equals(chord) ? new int[]{7, 11, 2}
-                : "Am".equals(chord) ? new int[]{9, 0, 4} : new int[]{5, 9, 0};
-        if ("texture".equals(role)) {
-            return nearest(pitch, new int[]{0, 2, 4, 5, 7, 9, 11}, 48, 88, true);
+        int[] scale = scale(spec.key());
+        if ("melody".equals(role) || "texture".equals(role)) {
+            return nearest(pitch, scale, range[0], range[1], true);
         }
-        return nearest(pitch, chordTones, "bass".equals(role) ? 36 : 48,
-                "bass".equals(role) ? 60 : 76, true);
+        int bar = (int) Math.floor(beat / spec.quartersPerBar() + 1e-9);
+        Chord chord = bar < chords.size() ? chords.get(bar) : null;
+        return nearest(pitch, chord == null ? scale : chord.tones(), range[0], range[1], true);
+    }
+
+    /** The pitch classes a melody may use in a key: its scale, in minor also the raised sixth and seventh. */
+    private static int[] scale(Key key) {
+        List<Integer> tones = new ArrayList<Integer>();
+        for (int pc = 0; pc < 12; pc++) {
+            if (key.contains(pc)) {
+                tones.add(pc);
+            }
+        }
+        int[] scale = new int[tones.size()];
+        for (int i = 0; i < scale.length; i++) {
+            scale[i] = tones.get(i);
+        }
+        return scale;
     }
 
     private static int nearest(int pitch, int[] allowed, int minimum, int maximum,
