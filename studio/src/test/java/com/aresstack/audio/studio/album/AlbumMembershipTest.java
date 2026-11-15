@@ -125,4 +125,32 @@ public final class AlbumMembershipTest {
         assertEquals(List.of(second.getFileName().toString()), pieces(untitled));
         assertEquals(named.id(), members.albumOf(first).get().id());
     }
+
+    @Test
+    public void aNewCompositionTakesTitleAndTempoFromItsPlanButAProducedTitleStaysAsPlanned() throws Exception {
+        Path library = temporary.newFolder("compositions").toPath();
+        SongLibrary songs = new SongLibrary(library);
+        AlbumFiles files = new AlbumFiles(library);
+        AlbumMembership members = new AlbumMembership(files, songs);
+        Album album = files.create("Winter", new AlbumConcept("", "", 12, 300));
+        Path piece = songs.createUntitled("ein ruhiges stueck");
+        members.add(album.id(), piece);
+        Files.write(piece.resolve("composition-plan.json"),
+                "{\"title\":\"Eisblume\",\"tempoBpm\":72,\"key\":\"E minor\",\"timeSignature\":\"6/8\",\"bars\":40}"
+                        .getBytes(StandardCharsets.UTF_8));
+
+        assertTrue(members.refresh(piece));
+        AlbumTrack track = files.album(album.id()).get().tracks().get(0);
+        assertEquals("Eisblume", track.title());
+        assertEquals(72, track.bpm());
+        assertEquals("6/8", track.meter());
+        assertFalse("again: nothing to change", members.refresh(piece));
+
+        AlbumProductionState.load(files.folder(album.id())).with(track.id(), AlbumProductionState.Status.DONE)
+                .save(files.folder(album.id()));
+        Files.write(piece.resolve("composition-plan.json"),
+                "{\"title\":\"Anders\",\"tempoBpm\":120}".getBytes(StandardCharsets.UTF_8));
+        assertFalse("a produced title says what it was made from", members.refresh(piece));
+        assertEquals("Eisblume", files.album(album.id()).get().tracks().get(0).title());
+    }
 }

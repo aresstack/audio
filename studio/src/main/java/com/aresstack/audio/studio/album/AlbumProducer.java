@@ -199,7 +199,9 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
                     if (!pieceThere(track)) {
                         Path made = songs.create(track.title());
                         track = track.withPiece(made.getFileName().toString());
-                        album = album.with(track);
+                        // The album as the file has it now: the window may have put a piece into it meanwhile.
+                        Album now = albums.album(album.id()).orElse(album);
+                        album = (now.track(trackId) != null ? now : album).with(track);
                         albums.save(album); // first the album knows its piece, then the piece is filled
                     }
                     piece = pieceFolder(track);

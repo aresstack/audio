@@ -3253,6 +3253,7 @@ public final class AudioStudioFrame extends JFrame {
                     append(adopted == 1 ? "Ein Stück ohne Album liegt jetzt im Album „" + AlbumMembership.UNTITLED + "“."
                             : adopted + " Stücke ohne Album liegen jetzt im Album „" + AlbumMembership.UNTITLED + "“.");
                 }
+                albumMembers.refresh(current); // the plan may have given the piece its title, tempo and key
             } catch (IOException failed) {
                 append("Die Stücke ohne Album ließen sich nicht ins unbenannte Album legen: " + failed.getMessage());
             }

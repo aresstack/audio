@@ -175,6 +175,42 @@ public final class AlbumMembership {
         return loose.size();
     }
 
+    /**
+     * Brings the title of a piece in its album in step with the piece, once the plan of the AI gave
+     * it a name, tempo, key and meter: for a piece put into the album by hand or as a new
+     * composition, never for a piece the production of the album made from the title, whose title
+     * says what it was made from.
+     *
+     * @return whether the album changed
+     */
+    public synchronized boolean refresh(Path piece) throws IOException {
+        String name = folderName(piece);
+        if (name == null || !Files.isRegularFile(piece.resolve("composition-plan.json"))) {
+            return false;
+        }
+        for (Album album : albums.albums()) {
+            AlbumTrack track = null;
+            for (AlbumTrack each : album.tracks()) {
+                if (name.equals(each.piece())) {
+                    track = each;
+                }
+            }
+            if (track == null
+                    || AlbumProductionState.load(albums.folder(album.id())).status(track.id())
+                    != AlbumProductionState.Status.PLANNED) {
+                continue;
+            }
+            AlbumTrack now = trackOf(track.id(), piece, track.targetSeconds());
+            now = new AlbumTrack(now.id(), now.title(), now.mood(), now.bpm(), now.key(), now.meter(),
+                    track.instrumentation(), track.form(), now.targetSeconds(), now.piece());
+            if (!now.equals(track)) {
+                albums.save(album.with(now));
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** The name of the folder of a piece directly in the library, or {@code null} for any other folder. */
     String folderName(Path piece) {
         if (piece == null || piece.getFileName() == null) {

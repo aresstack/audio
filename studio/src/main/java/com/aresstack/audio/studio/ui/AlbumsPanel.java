@@ -447,6 +447,9 @@ final class AlbumsPanel extends JPanel {
         if (table.isEditing()) {
             table.getCellEditor().stopCellEditing();
         }
+        if (album != null) {
+            keepConcept(); // what was typed into title, description or style is kept, not thrown away
+        }
         reload(id);
     }
 
@@ -497,7 +500,9 @@ final class AlbumsPanel extends JPanel {
         cancel.setEnabled(running);
         again.setEnabled(free && selected != null && selected.hasPiece());
         open.setEnabled(there && selected != null && selected.hasPiece());
-        export.setEnabled(free && state.count(album, Status.DONE) > 0);
+        // A piece put into the album by hand, or an old one in the unnamed album, can be exported as well.
+        export.setEnabled(free && (state.count(album, Status.DONE) > 0
+                || album != null && album.tracks().stream().anyMatch(AlbumTrack::hasPiece)));
     }
 
     // ---- proposals of the AI for the fields ----
@@ -659,7 +664,8 @@ final class AlbumsPanel extends JPanel {
             AlbumConcept concept = new AlbumConcept(description.getText(), style.getText(),
                     (Integer) trackCount.getValue(),
                     (int) Math.round(((Number) minutes.getValue()).doubleValue() * 60));
-            Album changed = album.withTitle(title.getText()).withConcept(concept);
+            // The titles as the file has them: the window may have put a piece into the album meanwhile.
+            Album changed = files.album(album.id()).orElse(album).withTitle(title.getText()).withConcept(concept);
             if (!changed.equals(album)) {
                 keep(changed);
             }
@@ -689,6 +695,7 @@ final class AlbumsPanel extends JPanel {
         try {
             Album made = files.create(name.trim(), new AlbumConcept("", "", 12, 300));
             reload(made.id());
+            host.albumChosen(made.id()); // the album chosen above follows the new one
             description.requestFocusInWindow();
         } catch (IOException failed) {
             say("Das Album ließ sich nicht anlegen: " + failed.getMessage());
@@ -703,6 +710,9 @@ final class AlbumsPanel extends JPanel {
         try {
             files.delete(album.id());
             reload(null);
+            if (album != null) {
+                host.albumChosen(album.id());
+            }
         } catch (IOException failed) {
             say("Das Album ließ sich nicht löschen: " + failed.getMessage());
         }
