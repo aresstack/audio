@@ -28,6 +28,8 @@ final class PieceSpecFields extends JPanel {
     private final JSpinner numerator = new JSpinner(new SpinnerNumberModel(4, 1, 32, 1));
     private final JComboBox<Integer> denominator = new JComboBox<Integer>(new Integer[]{1, 2, 4, 8, 16});
     private final JCheckBox snap = new JCheckBox("auf Harmonie ziehen", true);
+    private static final String SNAP_HINT = "Töne, die nicht zur Tonart und zum Akkord des Takts passen,"
+            + " werden beim Komponieren auf den nächsten passenden Ton gezogen";
     private final JLabel planned = new JLabel(" ");
     private boolean locked;
 
@@ -123,11 +125,16 @@ final class PieceSpecFields extends JPanel {
         for (Component field : new Component[]{bars, bpm, key, numerator, denominator, snap}) {
             field.setEnabled(!locked);
         }
-        planned.setText(locked ? "so geplant" : " ");
+        planned.setText(locked ? "Gesperrt: Das Stück ist mit diesen Vorgaben geplant" : " ");
         String why = locked ? "Dieses Stück ist mit diesen Vorgaben geplant. Für andere Vorgaben ein neues Stück beginnen"
                 + " oder beim Komponieren „Neues Stück“ oder „Dieses ersetzen“ wählen." : null;
         planned.setToolTipText(why);
         setToolTipText(why);
+        // A disabled field shows no tooltip of the panel behind it: each one says why it is locked.
+        for (javax.swing.JComponent field : new javax.swing.JComponent[]{bars, bpm, key, numerator, denominator}) {
+            field.setToolTipText(why);
+        }
+        snap.setToolTipText(locked ? why : SNAP_HINT);
     }
 
     /** Whether the fields show a planned piece and cannot be changed. */
