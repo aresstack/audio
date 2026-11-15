@@ -705,9 +705,10 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
-            public void movementsTaken(com.aresstack.audio.studio.application.MovementDirector.Proposal proposal,
-                                       com.aresstack.audio.studio.stage.SpatialScene stage) {
-                AudioStudioFrame.this.movementsTaken(proposal, stage);
+            public boolean takeWithMovements(com.aresstack.audio.studio.stage.SpatialScene before,
+                                             com.aresstack.audio.studio.stage.SpatialScene taken,
+                                             com.aresstack.audio.studio.application.MovementDirector.Proposal moves) {
+                return AudioStudioFrame.this.takeWithMovements(before, taken, moves);
             }
         });
         listeningPanel = new ListeningPanel(new ListeningPanel.Host() {
@@ -1266,15 +1267,30 @@ public final class AudioStudioFrame extends JFrame {
         }
     }
 
-    /** The user took a mix proposal with movements: its curves go into the mix document, as if drawn. */
-    private void movementsTaken(com.aresstack.audio.studio.application.MovementDirector.Proposal proposal,
-                                com.aresstack.audio.studio.stage.SpatialScene stage) {
-        int kept = pieceModel.takeMovements(proposal, stage);
-        showMovements();
-        if (kept > 0) {
-            player.movementsChanged(); // heard at once where the stage is played live
-            remixTimer.restart();
+    /**
+     * The user took a mix proposal with movements: stage file and model take it together, as one
+     * step that one undo takes back ({@link com.aresstack.audio.studio.application.MixProposalTaking}).
+     * If it cannot be kept, nothing of it is taken and the proposal stays.
+     */
+    private boolean takeWithMovements(com.aresstack.audio.studio.stage.SpatialScene before,
+                                      com.aresstack.audio.studio.stage.SpatialScene taken,
+                                      com.aresstack.audio.studio.application.MovementDirector.Proposal moves) {
+        int kept;
+        try {
+            kept = com.aresstack.audio.studio.application.MixProposalTaking.take(pieceModel, stageFollowsMix,
+                    sceneStore, before, taken, moves);
+        } catch (IOException | RuntimeException failed) {
+            message("Der Vorschlag ließ sich nicht übernehmen, die Bühne bleibt, wie sie war: " + failed.getMessage());
+            return false;
         }
+        scene = taken;
+        trackTable.refreshStage();
+        showStage();
+        player.movementsChanged(); // heard at once where the stage is played live
+        remixTimer.restart();
+        append("Abmischung der KI übernommen, mit " + kept + (kept == 1 ? " Bewegung." : " Bewegungen.")
+                + " Rückgängig nimmt beides zurück.");
+        return true;
     }
 
     private JPanel libraryPage() {
@@ -2267,6 +2283,7 @@ public final class AudioStudioFrame extends JFrame {
         saveScene();
         trackTable.refreshStage();
         showStage();
+        player.movementsChanged(); // the movements of the mix that came back are heard live too
         return true;
     }
 

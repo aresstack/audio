@@ -30,10 +30,14 @@ public final class StagePanelMovementProposalTest {
     private static final class Told implements StagePanel.Host {
         final List<Boolean> wishes = new ArrayList<>();
         final List<MovementDirector.Proposal> taken = new ArrayList<>();
+        final List<SpatialScene> befores = new ArrayList<>();
         final List<SpatialScene> stages = new ArrayList<>();
+        final List<SpatialScene> scenes = new ArrayList<>();
+        boolean keeps = true;
 
         @Override
         public void sceneChanged(SpatialScene scene, boolean settled) {
+            scenes.add(scene);
         }
 
         @Override
@@ -55,9 +59,11 @@ public final class StagePanelMovementProposalTest {
         }
 
         @Override
-        public void movementsTaken(MovementDirector.Proposal proposal, SpatialScene stage) {
+        public boolean takeWithMovements(SpatialScene before, SpatialScene stage, MovementDirector.Proposal proposal) {
             taken.add(proposal);
+            befores.add(before);
             stages.add(stage);
+            return keeps;
         }
     }
 
@@ -115,18 +121,29 @@ public final class StagePanelMovementProposalTest {
             Assert.assertTrue(panel.proposedMovements().empty());
             Assert.assertFalse(text(panel).contains("◌"));
 
-            // Taken: the stage first, then the movements with the stage as it stands then.
+            // Taken, but it could not be kept: the proposal stays, the page changed nothing itself.
             panel.setProposal(proposed, moves);
+            told.keeps = false;
             button(panel, "Übernehmen").doClick();
             Assert.assertEquals(List.of(moves), told.taken);
-            Assert.assertEquals(-0.5, told.stages.get(0).placement("melody").x(), 1e-9);
-            Assert.assertTrue(panel.proposedMovements().empty());
+            Assert.assertSame(moves, panel.proposedMovements());
+            Assert.assertTrue("the page leaves stage and movements to the host as one step", told.scenes.isEmpty());
 
-            // A proposal without movements (the switch off) tells nothing of them when taken.
+            // Taken and kept: the host had the stage before and with the proposal, as one step.
+            told.keeps = true;
+            button(panel, "Übernehmen").doClick();
+            Assert.assertEquals(2, told.taken.size());
+            Assert.assertEquals(-0.5, told.stages.get(1).placement("melody").x(), 1e-9);
+            Assert.assertEquals(scene.placement("melody").x(), told.befores.get(1).placement("melody").x(), 1e-9);
+            Assert.assertTrue(panel.proposedMovements().empty());
+            Assert.assertTrue(told.scenes.isEmpty());
+
+            // A proposal without movements (the switch off) is taken on the stage as before.
             panel.setProposal(proposed);
             Assert.assertFalse(text(panel).contains("Bewegungen für"));
             button(panel, "Übernehmen").doClick();
-            Assert.assertEquals(1, told.taken.size());
+            Assert.assertEquals(2, told.taken.size());
+            Assert.assertEquals(1, told.scenes.size());
         });
     }
 

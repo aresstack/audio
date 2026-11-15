@@ -53,6 +53,24 @@ public final class EditHistory<S> {
         current = new Step<>(next, description == null ? "" : description);
     }
 
+    /**
+     * Corrects the current state without making a step of it: what the state is, as it turns out
+     * to be (for example the stage the studio kept beside the model, taken over just before a step
+     * that changes it, so that undoing that step brings back what the user saw). An undo goes back
+     * to the state before, as it would have; a redo still waiting is forgotten, since it was made
+     * from the uncorrected state.
+     */
+    public synchronized void amend(S state) {
+        if (state == null) {
+            throw new IllegalArgumentException("A state of the history is never null.");
+        }
+        if (state.equals(current.state())) {
+            return;
+        }
+        redo.clear();
+        current = new Step<>(state, current.description());
+    }
+
     /** Starts again from a state that is not a step, for example a piece loaded anew; forgets both stacks. */
     public synchronized void reset(S state) {
         undo.clear();

@@ -66,12 +66,16 @@ final class StagePanel extends JPanel {
         }
 
         /**
-         * The user took a proposal that came with movements: the stage itself is already changed
-         * ({@link #sceneChanged}); these curves are to be kept in the mix document of the piece.
+         * The user took a proposal that came with movements: the stage and the movements are one
+         * step, which the host keeps together (stage file and model) and then shows. The page does
+         * not change its stage itself for it.
          *
-         * @param stage the stage as it stands now, after the proposal was taken
+         * @param before the stage as the page shows it
+         * @param taken  the stage with the proposal taken
+         * @return whether it was taken; if not, the proposal stays on the page
          */
-        default void movementsTaken(MovementDirector.Proposal proposal, SpatialScene stage) {
+        default boolean takeWithMovements(SpatialScene before, SpatialScene taken, MovementDirector.Proposal moves) {
+            return false;
         }
     }
 
@@ -403,12 +407,15 @@ final class StagePanel extends JPanel {
         take.addActionListener(event -> {
             if (proposal != null) {
                 SpatialScene taken = scene.taking(proposal);
-                MovementDirector.Proposal moves = motions;
+                if (!motions.empty()) {
+                    // One proposal, one step: the host keeps stage and movements together and shows them.
+                    if (host.takeWithMovements(scene, taken, motions)) {
+                        setProposal(null);
+                    }
+                    return;
+                }
                 setProposal(null);
                 change(taken, true);
-                if (!moves.empty()) {
-                    host.movementsTaken(moves, taken);
-                }
             }
         });
         drop.addActionListener(event -> setProposal(null));

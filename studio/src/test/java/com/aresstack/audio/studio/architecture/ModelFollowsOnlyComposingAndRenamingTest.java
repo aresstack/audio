@@ -41,15 +41,15 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
                         + " the switch of the level is noted, rendering reads it, movements of the AI are kept"
                         + " once taken; nothing else reaches it",
                 new java.util.TreeSet<String>(List.of("askDirector", "composeIntoPiece", "levelSwitched",
-                        "loadArrangementForCurrentDirectory", "loadDemo", "movementChanged", "movementsTaken",
+                        "loadArrangementForCurrentDirectory", "loadDemo", "movementChanged", "takeWithMovements",
                         "pieceToEdit", "renamed", "renderArrangement", "savedPiece", "showMovements")), users);
         assertTrue("asking the AI for a mix only reads the model",
                 bodyOf(source, "private void askDirector()").replace("pieceModel.movements()", "")
                         .indexOf("pieceModel") < 0);
-        assertEquals("movements of the AI are written only when the user took them", List.of("movementsTaken"),
-                callers(source, "pieceModel\\.takeMovements\\("));
-        assertTrue("taking movements brings no old files into the model",
-                bodyOf(source, "private void movementsTaken(").indexOf("synchronize") < 0);
+        assertEquals("a proposal with movements is written only when the user took it", List.of("takeWithMovements"),
+                callers(source, "MixProposalTaking\\.take\\("));
+        assertTrue("taking it brings no old files into the model",
+                bodyOf(source, "private boolean takeWithMovements(").indexOf("synchronize") < 0);
         assertEquals("only a curve the user drew is written into the mix of the model", List.of("movementChanged"),
                 callers(source, "pieceModel\\.move\\("));
         assertTrue("showing the movements only reads the model",

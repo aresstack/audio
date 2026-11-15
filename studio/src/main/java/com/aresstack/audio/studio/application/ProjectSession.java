@@ -324,24 +324,122 @@ public final class ProjectSession {
     }
 
     /**
-     * Sets several curves at once, as {@link #automate} does each, but as ONE undoable step: the
-     * movements the AI proposed and the user took with one click go back with one undo.
+     * The user took a mix proposal of the AI together with the movements it proposed ("Übernehmen"
+     * with "Mit Bewegungen"): the places, levels, level curves, room and master the proposal
+     * changed on the stage, and the movement curves, go into the mix of the model as ONE step, so
+     * that one undo takes back all of it and one redo brings all of it again. Like an accepted
+     * change of the AI it gets a revision before and after.
      *
-     * @param description what the step is called in the history
+     * <p>The stage the window keeps ({@code spatial-scene.json}) may be ahead of the mix of the
+     * model where the user moved something by hand. For what the proposal changes, the state
+     * before the step is first corrected to the stage as the user saw it ({@link EditHistory#amend}),
+     * so that an undo brings back that stage and not an older one. Nothing else of the mix is
+     * touched. The window writes the stage file itself and lets the stage follow the mix on undo
+     * and redo ({@link StageFollowsMix}).
+     *
+     * @param before      the stage as the user saw it before taking
+     * @param taken       the stage with the proposal taken
+     * @param curves      the movement curves, in ticks; a curve without points takes a lane away
+     * @param description what the step is called in the history and the revision
      * @return whether the mix changed
-     * @throws IOException if the piece has no mix or no channel of an owner (then nothing changed),
-     *                     or the file cannot be written
+     * @throws IOException if the piece has no mix or a curve names no channel (then nothing changed),
+     *                     or a file cannot be written
      */
-    public boolean automateAll(List<Curve> curves, String description) throws IOException {
+    public boolean takeStage(com.aresstack.audio.studio.stage.SpatialScene before,
+                             com.aresstack.audio.studio.stage.SpatialScene taken, List<Curve> curves,
+                             String description) throws IOException {
         if (mix == null) {
             throw new IOException("Das Stück hat noch keine Abmischung im Werkmodell: " + folder);
         }
-        MixScene changed = mix;
+        Set<String> changed = new java.util.LinkedHashSet<>();
+        for (com.aresstack.audio.studio.stage.SoundSourcePlacement placement : taken.placements()) {
+            com.aresstack.audio.studio.stage.SoundSourcePlacement was = before.placement(placement.trackId());
+            if (was == null || !samePlace(was, placement)) {
+                changed.add(placement.trackId());
+            }
+        }
+        boolean room = !sameRoom(before.room(), taken.room());
+        boolean master = before.masterDb() != taken.masterDb();
+        MixScene seen = staged(mix, before, changed, room, master);
+        MixScene result = staged(seen, taken, changed, room, master);
         for (Curve curve : curves) {
-            changed = automated(changed, curve.ownerId(), curve.parameter(),
+            result = automated(result, curve.ownerId(), curve.parameter(),
                     curve.points() == null ? List.of() : curve.points());
         }
-        return keepMix(changed, description);
+        if (result.equals(mix)) {
+            return false;
+        }
+        dropPending();
+        if (!seen.equals(mix)) {
+            MixJson.save(folder, seen);
+            mix = seen;
+            history.amend(new State(composition, mix));
+        }
+        record(Revision.Author.USER, "Stand vor: " + description, null);
+        MixJson.save(folder, result); // first the file, then the session
+        mix = result;
+        history.push(new State(composition, mix), description);
+        record(Revision.Author.AI, description, null);
+        return true;
+    }
+
+    /** Whether two placements say the same of what the mix document holds (height it does not hold). */
+    private static boolean samePlace(com.aresstack.audio.studio.stage.SoundSourcePlacement one,
+                                     com.aresstack.audio.studio.stage.SoundSourcePlacement other) {
+        if (one.x() != other.x() || one.depth() != other.depth() || one.levelDb() != other.levelDb()
+                || one.width() != other.width() || one.reverb() != other.reverb() || one.muted() != other.muted()
+                || one.locked() != other.locked() || one.dynamics().size() != other.dynamics().size()) {
+            return false;
+        }
+        for (int i = 0; i < one.dynamics().size(); i++) {
+            if (one.dynamics().get(i).bar() != other.dynamics().get(i).bar()
+                    || one.dynamics().get(i).db() != other.dynamics().get(i).db()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean sameRoom(com.aresstack.audio.studio.stage.AcousticRoom one,
+                                    com.aresstack.audio.studio.stage.AcousticRoom other) {
+        return one.kind().equals(other.kind()) && one.reverbSeconds() == other.reverbSeconds()
+                && one.amount() == other.amount();
+    }
+
+    /**
+     * A mix with what a stage says of these tracks (place, level, width, room share, mute, lock and
+     * level curve), and of the room and the master if wanted; the rest as it was.
+     */
+    private MixScene staged(MixScene base, com.aresstack.audio.studio.stage.SpatialScene stage, Set<String> tracks,
+                            boolean room, boolean master) throws IOException {
+        long barTicks = composition.timeMap().meters().get(0).barTicks();
+        List<MixChannel> channels = new ArrayList<>();
+        List<String> levels = new ArrayList<>();
+        for (MixChannel channel : base.channels()) {
+            com.aresstack.audio.studio.stage.SoundSourcePlacement placement =
+                    channel.owner().kind() == MixChannel.Owner.Kind.PART && tracks.contains(channel.owner().id())
+                            ? stage.placement(channel.owner().id()) : null;
+            if (placement == null) {
+                channels.add(channel);
+                continue;
+            }
+            channels.add(new MixChannel(channel.id(), channel.owner(), placement.x(), placement.depth(),
+                    placement.levelDb(), placement.width(), placement.reverb(), placement.muted(), placement.locked()));
+            levels.add(channel.owner().id());
+        }
+        MixScene result = new MixScene(
+                room ? new com.aresstack.audio.composition.mix.Room(stage.room().kind(),
+                        stage.room().reverbSeconds(), stage.room().amount()) : base.room(),
+                master ? stage.masterDb() : base.masterDb(), base.levelMode(), channels, base.automation());
+        for (String track : levels) {
+            List<AutomationLane.Point> points = new ArrayList<>();
+            for (com.aresstack.audio.studio.stage.SoundSourcePlacement.LevelPoint point
+                    : stage.placement(track).dynamics()) {
+                points.add(new AutomationLane.Point(Math.round(point.bar() * barTicks), point.db()));
+            }
+            result = automated(result, track, AutomationLane.LEVEL, points);
+        }
+        return result;
     }
 
     /** Keeps a changed mix: first the file, then the session, then a step in the history. */

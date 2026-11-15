@@ -80,6 +80,9 @@ public final class MovementDirectorTest {
         assertTrue(MovementDirector.wanted(settings));
         MovementDirector.into(settings, false);
         assertFalse(MovementDirector.wanted(settings));
+        // A role of its own for the model, which follows the mix until the user gives it another.
+        assertEquals(com.aresstack.audio.studio.ai.ModelRoles.MIX.key(),
+                com.aresstack.audio.studio.ai.ModelRoles.byKey("movements").fallback());
     }
 
     @Test
@@ -163,17 +166,9 @@ public final class MovementDirectorTest {
     }
 
     @Test
-    public void aTakenProposalIsKeptInTheMixDocumentAndProtectedTracksStay() throws Exception {
-        List<String> log = new ArrayList<>();
-        PieceModel model = new PieceModel(log::add);
+    public void onlyCurvesOfTracksThatMayMoveAreTakenInTicks() throws Exception {
+        PieceModel model = new PieceModel(line -> { });
         model.open(piece);
-        // Drawn by hand before: the depth of the harmony and the side of the bass.
-        StageMovements drawn = model.movements()
-                .with("harmony", AutomationLane.DEPTH, List.of(new StageMovements.Point(1, 0.2)))
-                .with("bass", AutomationLane.X, List.of(new StageMovements.Point(0, 0.3)));
-        assertTrue(model.move(drawn, "harmony", AutomationLane.DEPTH));
-        assertTrue(model.move(drawn, "bass", AutomationLane.X));
-
         SpatialScene stage = new SpatialSceneStore().load(piece).fitting(StageMixService.tracks(piece.resolve("arrangement.tsv")));
         MovementDirector.Proposal proposal = new MovementDirector.Proposal(Map.of(
                 "harmony", Map.of(AutomationLane.X, List.of(new StageMovements.Point(0, -0.45),
@@ -181,36 +176,12 @@ public final class MovementDirectorTest {
                 // protected by the user after the proposal came: it stays
                 "melody", Map.of(AutomationLane.X, List.of(new StageMovements.Point(0, 0),
                         new StageMovements.Point(4, 1))),
-                "bass", Map.of(AutomationLane.X, List.of(new StageMovements.Point(0, 0.1),
-                        new StageMovements.Point(8, -0.1)))));
-
-        assertEquals(2, model.takeMovements(proposal, stage));
-
-        MixScene mix = MixJson.load(piece);
-        String harmony = mix.channelOf(MixChannel.Owner.part("harmony")).id();
-        String melody = mix.channelOf(MixChannel.Owner.part("melody")).id();
-        String bass = mix.channelOf(MixChannel.Owner.part("bass")).id();
-        assertEquals(List.of(new AutomationLane.Point(0, -0.45), new AutomationLane.Point(4 * BAR, 0.2)),
-                mix.lane(harmony, "x").points());
-        assertEquals("a curve the AI did not propose stays", List.of(new AutomationLane.Point(BAR, 0.2)),
-                mix.lane(harmony, "depth").points());
-        assertEquals("a proposed curve replaces the drawn one",
-                List.of(new AutomationLane.Point(0, 0.1), new AutomationLane.Point(8 * BAR, -0.1)),
-                mix.lane(bass, "x").points());
-        assertNull("the protected melody does not move", mix.lane(melody, "x"));
-        assertEquals(List.of(), MixValidator.validate(mix));
-        assertEquals(List.of(), log.stream().filter(line -> line.startsWith("WARN: Der Verlauf")).toList());
-        assertEquals(0, model.takeMovements(MovementDirector.Proposal.NONE, stage));
-
-        // Taken with one click, gone with one undo: all curves of the proposal are one step.
-        ProjectSession session = model.session().orElseThrow();
-        assertEquals("Bewegungen der KI übernommen", session.undoDescription());
-        session.undo();
-        MixScene before = MixJson.load(piece);
-        assertNull(before.lane(harmony, "x"));
-        assertEquals(List.of(new AutomationLane.Point(0, 0.3)), before.lane(bass, "x").points());
-        assertEquals(List.of(new AutomationLane.Point(BAR, 0.2)), before.lane(harmony, "depth").points());
-        assertTrue(model.movements().of("harmony", AutomationLane.X).isEmpty());
+                "choir", Map.of(AutomationLane.X, List.of(new StageMovements.Point(0, 0),
+                        new StageMovements.Point(4, 1)))));
+        List<ProjectSession.Curve> curves = MixProposalTaking.curves(model.movements(), proposal, stage);
+        assertEquals(List.of(new ProjectSession.Curve("harmony", AutomationLane.X,
+                List.of(new AutomationLane.Point(0, -0.45), new AutomationLane.Point(4 * BAR, 0.2)))), curves);
+        assertTrue(MixProposalTaking.curves(model.movements(), MovementDirector.Proposal.NONE, stage).isEmpty());
     }
 
     @Test
