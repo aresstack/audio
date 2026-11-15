@@ -4,4 +4,4 @@ pad	pad.wav
 double	double.wav
 low	low.wav
 kit	kit.wav
-mix	arrangement-instruments.wav	eca4dca11466198d345532474a919c4353bdac531a2ec438e7f03e8ff60d0dfe
+mix	arrangement-instruments.wav	8ad483d3a563db0e7f49a942334390e34630547dc66a79d89aa64b7a9c1f82da
