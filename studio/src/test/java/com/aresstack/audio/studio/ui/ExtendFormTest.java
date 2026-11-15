@@ -26,7 +26,7 @@ public final class ExtendFormTest {
     public void untouchedItAsksForAStandalonePieceThatProtectsTheOriginal() {
         ContinuationRequest request = new ExtendForm(piece, 12, 0).read();
         // Open unless the user chooses an ending: a piece that was closed by accident could not be extended well.
-        assertEquals(ContinuationRequest.of(16, ContinuationPreset.STANDALONE, ContinuationEnding.OPEN), request);
+        assertEquals(ContinuationRequest.of(40, ContinuationPreset.STANDALONE, ContinuationEnding.OPEN), request);
         assertFalse(request.inserts());
     }
 

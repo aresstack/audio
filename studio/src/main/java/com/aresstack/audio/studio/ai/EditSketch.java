@@ -1,12 +1,12 @@
 package com.aresstack.audio.studio.ai;
 
 import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.Key;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.Role;
 import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.studio.progress.Progress;
 import com.aresstack.audio.studio.progress.SketchProgress;
-import com.aresstack.audio.studio.project.TsvExport;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -35,23 +35,42 @@ public final class EditSketch {
     private final Map<String, String> newTracks = new LinkedHashMap<>();
     /** What was written so far, by part and frame: the frame and the lines of its notes. */
     private final Map<String, Object[]> written = new LinkedHashMap<>();
-    private final long baseEnd;
+    private long baseEnd;
     private long last;
 
     private EditSketch(Composition piece, SketchProgress shown) {
         this.shown = shown;
         this.time = piece.timeMap();
-        for (String line : TsvExport.lines(piece)) {
-            String[] cells = line.split("\t");
-            if (cells[0].equals("note") && cells.length > 2) {
-                notes.add(new Object[]{cells[1], Long.parseLong(cells[2]), line});
-            } else if (cells[0].equals("track") || cells[0].equals("staff")) {
-                tracks.add(line);
-            } else if (!cells[0].equals("bars")) {
-                head.add(line);
-            }
+        // The lines of the piece, written here: the AI knows no project files (architecture rule).
+        if (time.tempos().size() != 1 || time.meters().size() != 1 || time.keys().size() != 1) {
+            throw new IllegalArgumentException("the lines of an arrangement know one tempo, meter and key only");
         }
+        head.add("tempo\t" + Math.round(time.tempoAt(0)));
+        TimeMap.Meter meter = time.meterAt(0);
+        if (meter.numerator() != 4 || meter.denominator() != 4) {
+            head.add("meter\t" + meter.numerator() + "\t" + meter.denominator());
+        }
+        Key key = time.keys().get(0).key();
+        if (!key.equals(Key.C_MAJOR)) {
+            head.add("key\t" + key.tonicName() + "\t" + (key.mode() == Key.Mode.MAJOR ? "major" : "minor"));
+        }
+        int melodic = 0;
         for (Part part : piece.parts()) {
+            boolean drums = Role.DRUMS.equals(part.role());
+            int next = melodic % 15;
+            int channel = drums ? 9 : next >= 9 ? next + 1 : next;
+            if (!drums) {
+                melodic++;
+            }
+            tracks.add("track\t" + part.id() + "\t" + part.program() + "\t" + channel
+                    + (part.role() == null ? "" : "\t" + part.role()));
+            if (part.staffLayout() == Part.StaffLayout.GRAND) {
+                tracks.add("staff\t" + part.id() + "\tgrand");
+            }
+            for (Composition.PlacedNote placed : piece.notesOf(part.id())) {
+                notes.add(new Object[]{part.id(), placed.tick(), "note\t" + part.id() + "\t" + placed.tick() + "\t"
+                        + placed.note().length() + "\t" + placed.note().pitch() + "\t" + placed.note().velocity()});
+            }
             partIds.add(part.id());
         }
         this.baseEnd = piece.endTick();
@@ -70,6 +89,12 @@ public final class EditSketch {
         } catch (RuntimeException unsayable) {
             return null;
         }
+    }
+
+    /** The piece will reach this tick: the picture has that length from the first note on. */
+    public EditSketch until(long endTick) {
+        baseEnd = Math.max(baseEnd, endTick);
+        return this;
     }
 
     /** Tells the listener which step runs before the notes, see {@link SketchProgress#preparing}. */

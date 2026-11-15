@@ -47,12 +47,21 @@ public final class AiDefaults {
         }
     }
 
-    /** The bars a long piece begins with and grows by per step: 4 to 256, 16 when missing or malformed. */
+    /** The bars of a piece and of each step that makes it longer, unless the user says otherwise. */
+    public static final int PIECE_BARS = 40;
+
+    /**
+     * The bars a new piece has, an extension adds and a long piece grows by per step: 4 to 256,
+     * {@link #PIECE_BARS} when missing or malformed. Kept as {@code pieceBars}; the older
+     * {@code growBars} (16 by default, saved with every setting) is no longer read, so that the
+     * new default reaches everyone.
+     */
     public static int growBars(Properties settings) {
         try {
-            return Math.max(4, Math.min(256, Integer.parseInt(settings.getProperty("growBars", "16").trim())));
+            return Math.max(4, Math.min(256,
+                    Integer.parseInt(settings.getProperty("pieceBars", Integer.toString(PIECE_BARS)).trim())));
         } catch (NumberFormatException invalid) {
-            return 16;
+            return PIECE_BARS;
         }
     }
 

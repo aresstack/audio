@@ -129,7 +129,7 @@ public final class ContinuationComposer {
         plan.newParts().forEach(part -> voices.add(ContinuationVoice.of(part)));
 
         Map<String, Written> written = write(room, piece, task, plan, frames, voices, cacheDirectory, progress,
-                EditSketch.of(room, progress));
+                sketchUntil(EditSketch.of(room, progress), frames));
         ComposedContinuation result = assemble(room, task, plan, frames, voices, written, new Fresh(room, ids),
                 task.inserts() ? holds(piece, task) : List.of());
         if (result.clips().stream().allMatch(c -> c.clip().notes().isEmpty())) {
@@ -140,6 +140,10 @@ public final class ContinuationComposer {
                 + result.sections().size() + " Abschnitt(en), " + result.newParts().size() + " neue Instrumente, " + result.corrections().size()
                 + " Korrekturen.");
         return result;
+    }
+
+    private static EditSketch sketchUntil(EditSketch sketch, List<VoiceFrame> frames) {
+        return sketch == null ? null : sketch.until(frames.get(frames.size() - 1).endTick());
     }
 
     /** What the generators wrote for one part: the shaped notes per frame, and the repairs. */
@@ -314,7 +318,8 @@ public final class ContinuationComposer {
                 Track track = trackOf.get(voice.key());
                 List<Note> notes = new ArrayList<>();
                 for (ShapedNote n : shaped) {
-                    notes.add(new Note(fresh.next(), n.tick(), n.length(), n.pitch(), n.velocity(), voiceId));
+                    notes.add(new Note(fresh.next(), n.tick(), n.length(), n.pitch(), n.velocity(), voiceId,
+                            n.articulation()));
                 }
                 String clipPart = player.id().equals(track.defaultPartId()) ? null : player.id();
                 clips.add(new ComposedContinuation.PlacedClip(track.id(),
@@ -433,7 +438,7 @@ public final class ContinuationComposer {
                 ends.merge(home.id(), tick + length, Math::max);
             }
             added.computeIfAbsent(home.id(), id -> new ArrayList<>()).add(new Note(fresh.next(), tick - home.startTick(),
-                    length, n.pitch(), n.velocity(), voiceId));
+                    length, n.pitch(), n.velocity(), voiceId, n.articulation()));
         }
         List<ComposedContinuation.TailChange> changes = new ArrayList<>();
         Set<String> clips = new java.util.LinkedHashSet<>(removed.keySet());

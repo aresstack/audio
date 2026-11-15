@@ -84,7 +84,8 @@ public final class ChatContinuationPlanner implements ContinuationPlanner {
                             + "place.\n");
         }
         prompt.append(Dramaturgy.ensembleRule(task.parts().size())).append('\n');
-        prompt.append("Tempo, meter and key stay as they are.\n");
+        prompt.append("Meter and key stay as they are; the tempo goes on as it is unless the performance below "
+                + "changes it.\n");
         prompt.append("Parts that go on (use their ids):\n");
         for (Part part : task.parts()) {
             prompt.append("  ").append(ContinuationTask.describe(part)).append('\n');
@@ -104,7 +105,7 @@ public final class ChatContinuationPlanner implements ContinuationPlanner {
                 + "\"motifs\":\"<which motifs of the piece come back and how>\",\"arc\":\"<the dramaturgy in one sentence>\"}. "
                 + "The bars of all sections add up to exactly ").append(request.bars()).append(". Sections have 4 to ")
                 .append(ContinuationPlan.MAX_SECTION_BARS).append(" bars. Chords are symbols such as C, Dm, G7, F#m, Bb. "
-                        + "No notes yet.").append(task.take());
+                        + "No notes yet.\n").append(ContinuationPerformance.request(task)).append(task.take());
         return prompt.toString();
     }
 
@@ -150,8 +151,9 @@ public final class ChatContinuationPlanner implements ContinuationPlanner {
             sections.add(new ContinuationPlan.PlannedSection("s" + (sections.size() + 1), name, text(given, "function"),
                     bars, level, chords, text(given, "idea"), parts));
         }
+        ContinuationPerformance performance = ContinuationPerformance.read(answer, task, repairs);
         return ContinuationPlan.complete(sections, newParts, text(answer, "motifs"), text(answer, "arc"), task, piece,
-                repairs);
+                repairs).withPerformance(performance);
     }
 
     /**

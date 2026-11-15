@@ -4,7 +4,7 @@ import com.aresstack.audio.composition.Articulation;
 import com.aresstack.audio.composition.Dynamics;
 import com.aresstack.audio.composition.Key;
 import com.aresstack.audio.composition.TimeMap;
-import com.aresstack.audio.studio.project.PlanShape;
+import com.aresstack.audio.studio.performance.PlanShape;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.ai.ChatModel;

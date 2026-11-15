@@ -44,7 +44,8 @@ final class ExtendForm extends JPanel {
     private final boolean inserting;
     private final List<Part> parts;
     private final JSpinner before;
-    private final JSpinner bars = new JSpinner(new SpinnerNumberModel(16, 1, ContinuationRequest.MAX_BARS, 1));
+    private final JSpinner bars = new JSpinner(new SpinnerNumberModel(
+            com.aresstack.audio.studio.settings.AiDefaults.PIECE_BARS, 1, ContinuationRequest.MAX_BARS, 1));
     private final JComboBox<String> preset = new JComboBox<String>();
     private final JTextArea instruction = new JTextArea(3, 30);
     private final JComboBox<String> ending = new JComboBox<String>();
@@ -165,8 +166,10 @@ final class ExtendForm extends JPanel {
     }
 
     /** Shows the form for a longer piece in a dialog and waits; the request, or {@code null} if the user gave up. */
-    static ContinuationRequest ask(Window owner, Composition piece, int pieceBars) {
-        return ask(owner, new ExtendForm(piece, pieceBars, 0), "Stück verlängern",
+    static ContinuationRequest ask(Window owner, Composition piece, int pieceBars, int newBars) {
+        ExtendForm form = new ExtendForm(piece, pieceBars, 0);
+        form.bars.setValue(Math.max(1, Math.min(ContinuationRequest.MAX_BARS, newBars)));
+        return ask(owner, form, "Stück verlängern",
                 "<html>Die KI plant die neuen Takte (Abschnitte, Akkorde, Besetzung) und schreibt sie dann. Die neuen"
                         + " Takte<br>kommen direkt ans Ende des Stücks; „Rückgängig“ nimmt sie wieder weg.</html>",
                 "Verlängern lassen");

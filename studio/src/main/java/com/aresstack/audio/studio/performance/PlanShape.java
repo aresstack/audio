@@ -1,4 +1,4 @@
-package com.aresstack.audio.studio.project;
+package com.aresstack.audio.studio.performance;
 
 import com.aresstack.audio.composition.Dynamics;
 import com.aresstack.audio.composition.TimeMap;
@@ -169,7 +169,7 @@ public final class PlanShape {
     }
 
     /** The tick of a bar and a beat in it, both counted from 1; the beat is a quarter note. */
-    static long tick(TimeMap time, JsonObject entry, String barKey, String beatKey) {
+    public static long tick(TimeMap time, JsonObject entry, String barKey, String beatKey) {
         int bar = entry.get(barKey).getAsInt();
         if (bar < 1) {
             throw new IllegalArgumentException("Bars count from 1: " + bar);

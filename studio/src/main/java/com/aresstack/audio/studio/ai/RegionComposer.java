@@ -96,7 +96,7 @@ public final class RegionComposer {
                 }
                 List<ShapedNote> shaped = normalizer.shape(frame, generated);
                 for (ShapedNote n : shaped) {
-                    notes.add(new NewNote(frame.startTick() + n.tick(), n.length(), n.pitch(), n.velocity()));
+                    notes.add(new NewNote(frame.startTick() + n.tick(), n.length(), n.pitch(), n.velocity(), n.articulation()));
                 }
                 connection = VoiceComposer.connection(piece.timeMap(), frame, shaped);
             }

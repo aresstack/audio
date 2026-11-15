@@ -1,5 +1,6 @@
 package com.aresstack.audio.studio.project;
 
+import com.aresstack.audio.studio.performance.PlanShape;
 import com.aresstack.audio.composition.Articulation;
 import com.aresstack.audio.composition.Composition;
 import com.aresstack.audio.composition.CompositionValidator;

@@ -120,6 +120,11 @@ final class DeckWidgets {
             return lamp.on;
         }
 
+        /** Something for the head right after the module's name, from the left: its keys. */
+        void setHeadStart(JComponent component) {
+            head.add(component, BorderLayout.CENTER);
+        }
+
         /** Something for the right end of the module's head: a key, a counter. */
         void setHeadEnd(JComponent component) {
             head.add(component, BorderLayout.EAST);
@@ -501,6 +506,60 @@ final class DeckWidgets {
             String text = getText().toUpperCase(java.util.Locale.ROOT);
             g.drawString(text, (width - metrics.stringWidth(text)) / 2f,
                     top + 7f + (height - 10.5f + metrics.getAscent() - metrics.getDescent()) / 2f);
+            g.dispose();
+        }
+    }
+
+    /**
+     * A key in the head of a module, beside its name: flat and narrow, so that it fits the line
+     * of the name, and built like the keys under the display of a player, standing out of the
+     * panel and sitting lower while pressed. It has no lamp: it does something, it shows no state.
+     */
+    static final class HeadKey extends javax.swing.JButton {
+        HeadKey(String text) {
+            super(text);
+            setFont(AudioStudioTheme.lettering(9.2f));
+            setContentAreaFilled(false);
+            setBorderPainted(false);
+            setFocusPainted(false);
+            setOpaque(false);
+            setFocusable(false);
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            setRolloverEnabled(true);
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            FontMetrics metrics = getFontMetrics(getFont());
+            return new Dimension(metrics.stringWidth(getText().toUpperCase(java.util.Locale.ROOT)) + 22, 24);
+        }
+
+        @Override
+        protected void paintComponent(Graphics graphics) {
+            Graphics2D g = smooth(graphics);
+            boolean down = isEnabled() && getModel().isPressed();
+            float width = getWidth();
+            float height = getHeight();
+            g.setColor(new Color(0, 0, 0, 120));
+            g.fill(new RoundRectangle2D.Float(0.5f, 2f, width - 1f, height - 2.5f, 7f, 7f));
+            float top = down ? 2f : 0.5f;
+            RoundRectangle2D body = new RoundRectangle2D.Float(0.5f, top, width - 1f, height - 3.5f, 6f, 6f);
+            Color light = new Color(isEnabled() && getModel().isRollover() ? 0x4A4E5C : 0x3F434F);
+            g.setPaint(new GradientPaint(0, top, light, 0, top + height - 3.5f, new Color(0x23252D)));
+            g.fill(body);
+            g.setColor(new Color(0x15161B));
+            g.draw(body);
+            if (!down) {
+                g.setColor(new Color(255, 255, 255, 46));
+                g.draw(new java.awt.geom.Line2D.Float(4f, top + 1.2f, width - 4f, top + 1.2f));
+            }
+            g.setFont(getFont());
+            g.setColor(!isEnabled() ? AudioStudioTheme.withAlpha(AudioStudioTheme.TEXT_DIM, 110)
+                    : getModel().isRollover() ? AudioStudioTheme.TEXT : AudioStudioTheme.TEXT_DIM);
+            FontMetrics metrics = g.getFontMetrics();
+            String text = getText().toUpperCase(java.util.Locale.ROOT);
+            g.drawString(text, (width - metrics.stringWidth(text)) / 2f,
+                    top + (height - 3.5f + metrics.getAscent() - metrics.getDescent()) / 2f);
             g.dispose();
         }
     }

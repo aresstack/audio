@@ -159,7 +159,7 @@ public final class VoiceComposer {
             List<Note> notes = new ArrayList<>();
             for (ShapedNote n : playedNotes.get(f)) {
                 notes.add(new Note(ids.more().get(), n.tick(), n.length(), n.pitch(), n.velocity(),
-                        voiceIds.get(tokenOf[index++])));
+                        voiceIds.get(tokenOf[index++]), n.articulation()));
             }
             VoiceFrame frame = played.get(f);
             clips.add(new MidiClip(ids.more().get(), frame.startTick(), frame.lengthTicks(), null, notes));
