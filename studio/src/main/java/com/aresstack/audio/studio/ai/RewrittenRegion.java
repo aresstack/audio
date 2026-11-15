@@ -1,5 +1,6 @@
 package com.aresstack.audio.studio.ai;
 
+import com.aresstack.audio.composition.Articulation;
 import java.util.List;
 import java.util.Map;
 
@@ -19,7 +20,11 @@ public record RewrittenRegion(RegionRequest request, Map<String, List<NewNote>> 
      *
      * @param tick tick of the piece the note begins at
      */
-    public record NewNote(long tick, long length, int pitch, int velocity) {
+    public record NewNote(long tick, long length, int pitch, int velocity, Articulation articulation) {
+        public NewNote(long tick, long length, int pitch, int velocity) {
+            this(tick, length, pitch, velocity, null);
+        }
+
         public long endTick() {
             return tick + length;
         }

@@ -68,23 +68,38 @@ public final class InsertPassage {
         Set<String> tracks = new HashSet<>();
         insertion.newTracks().forEach(track -> tracks.add(track.id()));
         long transition = task.newStart() - insertion.editFrom();
-        return new EditScope(false, parts, tracks, Set.of(), task.newStart(), task.newEnd(), kinds(transition > 0), true,
-                transition);
+        return new EditScope(false, parts, tracks, Set.of(), task.newStart(), task.newEnd(),
+                AppendContinuation.performed(kinds(transition > 0), insertion), true, transition);
     }
 
-    /** The patch: the shift, then the whole new form, then what a continuation brings. */
+    /** The patch: the shift, then the whole new form, then what a continuation brings; the notes only, without the planned performance. */
     public static Patch patch(ComposedContinuation insertion) {
+        return patch(null, insertion);
+    }
+
+    /**
+     * The patch: the shift, then the whole new form, then what a continuation brings, then the
+     * tempo and dynamics the plan gives the inserted bars (with the tempo and level of the
+     * original set again where it goes on).
+     *
+     * @param piece the piece before the insertion; {@code null} leaves the performance out
+     */
+    public static Patch patch(Composition piece, ComposedContinuation insertion) {
         ContinuationTask task = requireInsertion(insertion);
         List<EditOp> operations = new ArrayList<>();
         operations.add(new EditOp.ShiftTime(task.newStart(), task.shiftTicks()));
         operations.add(new EditOp.SetSections(insertion.form()));
         operations.addAll(AppendContinuation.body(insertion));
+        List<String> said = new ArrayList<>();
+        if (piece != null) {
+            operations.addAll(AppendContinuation.performance(task.room(piece), insertion, said));
+        }
         var request = task.request();
         int shortened = insertion.shortened().size();
         return new Patch(request.bars() + " Takte vor Takt " + request.insertBeforeBar() + " eingefügt ("
                 + request.preset().label() + ", " + request.transition().label() + ")"
                 + (shortened == 0 ? "" : "; " + shortened + " über den Einfügepunkt klingende Note(n) gekürzt,"
-                + " Originaldauer nicht erhaltbar"), operations);
+                + " Originaldauer nicht erhaltbar") + AppendContinuation.told(said), operations);
     }
 
     /**
@@ -162,9 +177,12 @@ public final class InsertPassage {
                 differences.add("section " + section.id() + " of the original changed");
             }
         }
-        if (!reference.timeMap().equals(after.timeMap()) || !reference.meta().equals(after.meta())
-                || !reference.assets().equals(after.assets())) {
+        if (!AppendContinuation.sameTimeApartFrom(reference.timeMap(), after.timeMap(), point, end)
+                || !reference.meta().equals(after.meta()) || !reference.assets().equals(after.assets())) {
             differences.add("time map, meta or assets changed beyond the shift");
+        }
+        if (!AppendContinuation.sameDynamicsApartFrom(reference.dynamics(), after.dynamics(), point, end)) {
+            differences.add("dynamics of the original changed beyond the shift");
         }
         for (Part part : after.parts()) {
             if (before.part(part.id()) == null && !newParts.contains(part.id())) {

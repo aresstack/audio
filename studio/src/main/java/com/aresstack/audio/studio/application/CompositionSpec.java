@@ -28,8 +28,8 @@ import java.util.Locale;
  *                      keeps them (review E4: "logged, not silently changed")
  */
 public record CompositionSpec(int bars, int bpm, Key key, int numerator, int denominator, boolean snapToHarmony) {
-    public static final int MIN_BPM = com.aresstack.audio.studio.project.PlanShape.MIN_BPM;
-    public static final int MAX_BPM = com.aresstack.audio.studio.project.PlanShape.MAX_BPM;
+    public static final int MIN_BPM = com.aresstack.audio.studio.performance.PlanShape.MIN_BPM;
+    public static final int MAX_BPM = com.aresstack.audio.studio.performance.PlanShape.MAX_BPM;
     public static final int MAX_BARS = 1024;
 
     /** The chords every piece from before F2 was locked to. */

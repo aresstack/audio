@@ -87,6 +87,7 @@ public final class ChatOrchestrationGenerator implements OrchestrationGenerator 
                 : "The part played just before (bar beat dur pitch vel, bars of the piece):\n" + connection
                 + "Continue smoothly from there.\n");
         prompt.append(ChatPartGenerator.rules(voice.role())).append('\n');
+        prompt.append(GeneratedNotes.articulationRule()).append('\n');
         int middle = (voice.range().low() + voice.range().high()) / 2;
         prompt.append("Return exactly one JSON object: {\"part\":\"").append(voice.key()).append("\",\"section\":\"")
                 .append(frame.sectionId()).append("\",\"notes\":[{\"bar\":1,\"beat\":0,\"duration\":1,\"pitch\":")

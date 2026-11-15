@@ -103,7 +103,7 @@ public final class RegionEdit {
                 if (holder != null) {
                     long length = cut(log, partId, n, holder.clip.endTick(), "Clip-Ende");
                     additions.computeIfAbsent(holder.clip.id(), k -> new ArrayList<>()).add(new Note(fresh(ids, used),
-                            n.tick() - holder.clip.startTick(), length, n.pitch(), n.velocity(), voice));
+                            n.tick() - holder.clip.startTick(), length, n.pitch(), n.velocity(), voice, n.articulation()));
                     continue;
                 }
                 int stretch = -1;
@@ -125,7 +125,8 @@ public final class RegionEdit {
                 List<Note> notes = new ArrayList<>();
                 for (NewNote n : group.getValue()) {
                     long length = cut(log, partId, n, end, "Ende der freien Stelle");
-                    notes.add(new Note(fresh(ids, used), n.tick() - start, length, n.pitch(), n.velocity(), voice));
+                    notes.add(new Note(fresh(ids, used), n.tick() - start, length, n.pitch(), n.velocity(), voice,
+                            n.articulation()));
                 }
                 String clipPart = partId.equals(home.defaultPartId()) ? null : partId;
                 newClips.add(new EditOp.AddClip(home.id(), new MidiClip(fresh(ids, used), start, end - start, clipPart,

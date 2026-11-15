@@ -132,7 +132,7 @@ public final class PieceExtension {
         ComposedContinuation composed = composer.compose(base, request, ids, next,
                 session.folder().resolve(request.inserts() ? INSERT_CACHE : CACHE), progress);
         Proposal made = request.inserts()
-                ? session.propose(InsertPassage.patch(composed), InsertPassage.scope(composed), Revision.Author.AI,
+                ? session.propose(InsertPassage.patch(base, composed), InsertPassage.scope(composed), Revision.Author.AI,
                 composed.runId())
                 : session.propose(AppendContinuation.patch(base, composed), AppendContinuation.scope(composed),
                 Revision.Author.AI, composed.runId());
