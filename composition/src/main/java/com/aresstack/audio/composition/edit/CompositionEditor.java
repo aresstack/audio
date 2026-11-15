@@ -166,6 +166,25 @@ public final class CompositionEditor {
                 Track landing = without.track(target.id());
                 yield replaceTrack(without, landing, withClip(landing.clips(), moved));
             }
+            case EditOp.ResizeClip resize -> {
+                Located at = locate(piece, resize.clipId());
+                MidiClip midi = midi(at);
+                if (!reach.targetsClip(at.track, midi)) {
+                    throw new Refused(midi.id(), "the clip is not a target of the scope");
+                }
+                long end = midi.startTick() + resize.lengthTicks();
+                if (midi.endTick() < scope.editFrom()) {
+                    throw new Refused(midi.id(), "the clip ends at tick " + midi.endTick() + ", before the time of the scope");
+                }
+                if (end < scope.editFrom()) {
+                    throw new Refused(midi.id(), "the clip would end at tick " + end + ", before the time of the scope");
+                }
+                if (end > scope.toTick()) {
+                    throw new Refused(midi.id(), "the clip would end at tick " + end + ", beyond the time of the scope");
+                }
+                yield replaceClip(piece, at,
+                        new MidiClip(midi.id(), midi.startTick(), resize.lengthTicks(), midi.partId(), midi.notes()));
+            }
             case EditOp.SplitClip split -> {
                 Located at = locate(piece, split.clipId());
                 MidiClip midi = midi(at);
