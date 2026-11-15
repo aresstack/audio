@@ -11,6 +11,9 @@ public final class MixReport {
     /** Below this the limiter's work is not worth a number: rounding of a gain that is 1. */
     private static final double UNTOUCHED_DB = 0.05;
 
+    /** At most this sample peak is silence: {@link ExportNormalization} does not touch such a mix. */
+    private static final float SILENT_PEAK = 1e-4f;
+
     private MixReport() {
     }
 
@@ -50,26 +53,43 @@ public final class MixReport {
     }
 
     /**
-     * What the normalization of an exported file reached; {@code null} if the file was not
-     * normalized. A loudness target the peaks do not allow is said as it came out.
+     * What the normalization of an exported file did; {@code null} if none was asked for. A mix
+     * that is silent or whose loudness cannot be measured is left as it is, and that is what is
+     * said: never that a target was reached. A loudness target the peaks do not allow is said as
+     * it came out.
      */
     public static String normalization(MixOutcome outcome, ExportNormalization wanted) {
-        if (outcome == null || outcome.fixed() == null || wanted == null
-                || wanted.kind() == ExportNormalization.Kind.NONE) {
+        if (outcome == null || outcome.fixed() == null) {
             return null;
         }
         OfflineMix.Result result = outcome.fixed();
-        double gainDb = 20 * Math.log10(result.normalizationGain());
-        if (Double.isNaN(gainDb) || Double.isInfinite(gainDb)) {
-            return "nicht normalisiert (die Mischung ist still)";
+        return normalization(wanted, result.peakBeforeNormalization(), result.loudnessBeforeNormalization(),
+                result.normalizationGain());
+    }
+
+    /**
+     * The same from what the mix measured before the normalization (sample peak, integrated
+     * loudness in LUFS) and the factor it then applied.
+     */
+    public static String normalization(ExportNormalization wanted, float peak, double loudness, double gain) {
+        if (wanted == null || wanted.kind() == ExportNormalization.Kind.NONE) {
+            return null;
+        }
+        // The same bound below which ExportNormalization leaves a mix alone.
+        if (!(peak > SILENT_PEAK)) {
+            return "Nicht normalisiert: Die Mischung ist still.";
+        }
+        double gainDb = 20 * Math.log10(gain);
+        if (!(gain > 0) || Double.isNaN(gainDb) || Double.isInfinite(gainDb)) {
+            return "Nicht normalisiert: Der Pegel der Mischung ließ sich nicht messen.";
         }
         if (wanted.kind() == ExportNormalization.Kind.PEAK) {
             return String.format(Locale.GERMANY, "Spitze auf %.1f dBFS gebracht (%+.1f dB)", wanted.target(), gainDb);
         }
-        double reached = result.loudnessBeforeNormalization() + gainDb;
-        if (Double.isNaN(reached)) {
-            return "Lautheit nicht messbar (die Mischung ist zu kurz oder zu leise)";
+        if (Double.isNaN(loudness) || Double.isInfinite(loudness)) {
+            return "Nicht normalisiert: Die Lautheit ließ sich nicht messen (die Mischung ist zu kurz oder zu leise).";
         }
+        double reached = loudness + gainDb;
         if (reached < wanted.target() - 0.1) {
             return String.format(Locale.GERMANY,
                     "Lautheit %.1f LUFS statt %.1f LUFS (%+.1f dB): mehr lassen die Spitzen bei %.1f dBFS nicht zu",

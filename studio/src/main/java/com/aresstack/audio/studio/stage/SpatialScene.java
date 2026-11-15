@@ -1,6 +1,6 @@
 package com.aresstack.audio.studio.stage;
 
-import com.aresstack.audio.studio.application.MusicTrack;
+import com.aresstack.audio.composition.Role;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -52,7 +52,7 @@ public final class SpatialScene {
     }
 
     /** The usual seating for these tracks: melody in front, bass and drums in the middle, the rest around. */
-    public static SpatialScene standard(List<MusicTrack> tracks) {
+    public static SpatialScene standard(List<? extends Performer> tracks) {
         return new SpatialScene(AcousticRoom.HALL, null).fitting(tracks);
     }
 
@@ -111,10 +111,10 @@ public final class SpatialScene {
      * belongs to no track any more is dropped. This is also how a piece from before
      * the stage gets its scene.
      */
-    public SpatialScene fitting(List<MusicTrack> tracks) {
+    public SpatialScene fitting(List<? extends Performer> tracks) {
         List<SoundSourcePlacement> seats = new ArrayList<SoundSourcePlacement>();
         Map<String, Integer> seen = new LinkedHashMap<String, Integer>();
-        for (MusicTrack track : tracks) {
+        for (Performer track : tracks) {
             SoundSourcePlacement existing = placements.get(track.id());
             if (existing != null) {
                 seats.add(existing);
@@ -143,19 +143,19 @@ public final class SpatialScene {
     }
 
     /** The usual seat of a role; several tracks of one role fan out to both sides in turn. */
-    private static SoundSourcePlacement seat(MusicTrack track, int nth) {
+    private static SoundSourcePlacement seat(Performer track, int nth) {
         double side = nth == 0 ? 0 : (nth % 2 == 1 ? -1 : 1) * Math.min(1, 0.3 * ((nth + 1) / 2));
         String role = track.role();
-        if (MusicTrack.MELODY.equals(role)) {
+        if (Role.MELODY.equals(role)) {
             return new SoundSourcePlacement(track.id(), side, 0.22, 0, 0.6, 0.30, false, false, null);
         }
-        if (MusicTrack.BASS.equals(role)) {
+        if (Role.BASS.equals(role)) {
             return new SoundSourcePlacement(track.id(), 0.12 + side * 0.5, 0.50, -1, 0.3, 0.15, false, false, null);
         }
-        if (MusicTrack.DRUMS.equals(role)) {
+        if (Role.DRUMS.equals(role)) {
             return new SoundSourcePlacement(track.id(), side * 0.5, 0.68, -3, 0.8, 0.20, false, false, null);
         }
-        if (MusicTrack.HARMONY.equals(role)) {
+        if (Role.HARMONY.equals(role)) {
             double x = nth == 0 ? -0.45 : nth == 1 ? 0.45 : side;
             return new SoundSourcePlacement(track.id(), x, 0.48, -4, 1.0, 0.40, false, false, null);
         }

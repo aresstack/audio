@@ -58,7 +58,7 @@ public final class MixDirector {
         Map<String, Summary> played = summaries(arrangement);
         StringBuilder text = new StringBuilder("You are the mixing engineer of this instrumental piece: ")
                 .append(description).append("\nTempo ").append(StageMixService.tempo(arrangement))
-                .append(" BPM, 4/4. The tracks and what they play:\n");
+                .append(" BPM, ").append(meterAndKey(arrangement)).append(". The tracks and what they play:\n");
         for (MusicTrack track : tracks) {
             Summary summary = played.get(track.id());
             text.append("- ").append(track.id()).append(" (").append(track.role()).append(", General MIDI program ")
@@ -89,15 +89,24 @@ public final class MixDirector {
         return text.toString();
     }
 
+    /** {@code "4/4"} for a piece from before F2; since then also the key, as {@code "3/4, D minor"}. */
+    private static String meterAndKey(Path arrangement) throws IOException {
+        ArrangementFile file = ArrangementFile.read(arrangement);
+        String meter = file.meter().map(m -> m.numerator() + "/" + m.denominator()).orElse("4/4");
+        return file.key().map(key -> meter + ", " + key.name()).orElse(meter);
+    }
+
     private static Map<String, Summary> summaries(Path arrangement) throws IOException {
         Map<String, Summary> played = new LinkedHashMap<String, Summary>();
-        for (ArrangementFile.Note note : ArrangementFile.read(arrangement).notes()) {
+        ArrangementFile file = ArrangementFile.read(arrangement);
+        long barTicks = file.barTicks();
+        for (ArrangementFile.Note note : file.notes()) {
             Summary summary = played.get(note.trackId());
             if (summary == null) {
                 summary = new Summary();
                 played.put(note.trackId(), summary);
             }
-            int bar = (int) (note.tick() / (480 * 4));
+            int bar = (int) (note.tick() / barTicks);
             summary.notes++;
             summary.lowest = Math.min(summary.lowest, note.pitch());
             summary.highest = Math.max(summary.highest, note.pitch());

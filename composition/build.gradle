@@ -1,0 +1,6 @@
+// The model of a piece of music: what it is made of and how its time runs. Nothing but the
+// JDK, and no other module of this repository: the model knows no files, no windows, no
+// sound and no AI (see docs/architecture/2026-11-architekturpruefung.md, 2.1).
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}
