@@ -55,6 +55,17 @@ public final class FixedLevelTest {
     }
 
     @Test
+    public void theMakeUpGainComesBeforeTheMasterLevel() {
+        Assert.assertEquals(Math.pow(10, 9 / 20.0), MasterBus.Settings.fixed(12, -3, LookaheadLimiter.Settings.DEFAULT).gain(), 1e-6);
+        Assert.assertEquals(Math.pow(10, 12 / 20.0), MasterBus.Settings.fixed(12, 4, LookaheadLimiter.Settings.DEFAULT).gain(), 1e-6);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void aMakeUpGainAbove24DbIsRefused() {
+        MasterBus.Settings.fixed(25, 0, LookaheadLimiter.Settings.DEFAULT);
+    }
+
+    @Test
     public void liveAndExportGiveTheSameSamples() throws Exception {
         // live: the master bus behind the graph, block by block, late by its latency
         Signal signal = signal(TestSignals.noise(2 * RATE, 8, 2.5), TestSignals.noise(2 * RATE, 9, 2.5));
