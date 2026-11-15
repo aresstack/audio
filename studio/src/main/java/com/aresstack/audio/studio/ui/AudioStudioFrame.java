@@ -4565,6 +4565,9 @@ public final class AudioStudioFrame extends JFrame {
             if (trackTable != null && !loadingTracks && trackTable.arrangement() != null) {
                 trackStore.save(Paths.get(directory.getText().trim()), trackTable.currentArrangement());
             }
+            if (visualizer != null) {
+                visualizer.settings().into(saved); // the settings file is written whole: the visualizer's numbers stay in it
+            }
             settingsStore.save(saved);
             if (notifyUser) {
                 JOptionPane.showMessageDialog(this, "Gespeichert unter " + settingsStore.location()
@@ -5603,6 +5606,9 @@ public final class AudioStudioFrame extends JFrame {
     private long newShownRead;
     private static final long NEW_READ_MILLIS = 1000;
 
+    /** The visualizer on the player page; made with the page. */
+    private VisualizerPanel visualizer;
+
     /** The page of the player, with the settings it was saved with. */
     private JPanel playerPage() {
         playerPanel.setOptions(albumHeardPercent, albumCrossfadeSeconds, albumOnlyNew);
@@ -5615,6 +5621,10 @@ public final class AudioStudioFrame extends JFrame {
             }
             saveSettings(false);
         });
+        // The area right of the tree is the visualizer: the heard sound as a picture, or the score to read along.
+        visualizer = new VisualizerPanel(player.feed(), scoreView, settingsStore);
+        playerPanel.setVisualizer(visualizer);
+        playerPanel.addHeadKeys(visualizer.headKeys());
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
         DeckWidgets.Module module = new DeckWidgets.Module("Player", playerPanel);

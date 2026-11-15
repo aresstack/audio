@@ -139,6 +139,11 @@ final class VisualizerPanel extends JPanel {
         return head;
     }
 
+    /** The settings of the visualizer as they stand, for the settings file. */
+    VisualSettings settings() {
+        return settings;
+    }
+
     /** What is shown now: the key of an effect, or {@link #SCORE}. */
     String shown() {
         return shown;
