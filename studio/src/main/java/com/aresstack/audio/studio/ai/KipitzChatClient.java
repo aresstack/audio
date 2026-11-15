@@ -135,15 +135,17 @@ public final class KipitzChatClient implements ChatModel {
      * The model an answer kept before origins were written down is taken to come from: the
      * studio's single model of before. Until told otherwise the studio's default.
      */
-    private volatile String legacyModel = com.aresstack.audio.studio.settings.AiDefaults.MODEL;
+    private volatile String legacyModel = FORMER_DEFAULT_MODEL;
+
+    /** The studio's default model ({@code AiDefaults.MODEL}, not imported: settings sit above the AI). */
+    static final String FORMER_DEFAULT_MODEL = "google/gemma-4-31B-it";
 
     /**
      * Says which model the answers kept without an origin came from, normally the {@code model}
      * of the settings. Such an answer is given again only when this client asks that model.
      */
     public KipitzChatClient legacyModel(String model) {
-        this.legacyModel = model == null || model.isBlank() ? com.aresstack.audio.studio.settings.AiDefaults.MODEL
-                : model.trim();
+        this.legacyModel = model == null || model.isBlank() ? FORMER_DEFAULT_MODEL : model.trim();
         return this;
     }
 

@@ -117,6 +117,11 @@ public final class AnswerCacheTest {
     }
 
     @Test
+    public void theFormerSingleModelIsTheStudiosDefault() {
+        assertEquals(com.aresstack.audio.studio.settings.AiDefaults.MODEL, KipitzChatClient.FORMER_DEFAULT_MODEL);
+    }
+
+    @Test
     public void theSamplingIsPartOfTheIdentityTheAnswerLengthIsNot() {
         AnswerOrigin one = new AnswerOrigin(GEMMA, "i", "p", 2048, 0.55, 0.9, 40);
         assertEquals(one.key(), new AnswerOrigin(GEMMA, "i", "p", 16384, 0.55, 0.9, 40).key());
