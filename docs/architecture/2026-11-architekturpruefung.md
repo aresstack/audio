@@ -1,10 +1,12 @@
 # Architekturprüfung: Weiterentwicklung AresStack Audio Studio
 
-**Stand:** 15. November 2026 · **Geprüfter Code:** `main`, Commit `e60793f` · **Status:** Planung, keine Implementierung beauftragt
+**Stand:** 15. November 2026, Fassung 2 · **Geprüfter Code:** `aresstack/audio` `main` `e60793f`; `aresstack/askai` `develop` `5b788e2`; `aresstack/3d4j` `main` `62ce975` · **Status:** fachlich bestätigt mit Präzisierungen (Abschnitt 8); freigegeben sind F0 bis F3, danach C1
 
 Dieses Dokument beantwortet den Architekturbericht vom 15. November 2026 (Abschnitte 16 und 17) auf Grundlage einer erneuten Prüfung des Repositorys. Es liefert Ist-Architektur, Zielarchitektur, Abweichungsanalyse, Architekturentscheidungen, Migrationskonzept, Umsetzungsplan und Abnahmekonzept.
 
-**Grenzen der Prüfung.** Gelesen wurde ausschließlich `aresstack/audio`. Der Code von AskAI und 3d4j liegt nicht in diesem Repository und konnte nicht geprüft werden; alle Aussagen dazu sind als Annahme gekennzeichnet. Aussagen zu externen Bibliotheken stammen aus allgemeinem Kenntnisstand und sind vor einer Entscheidung (Version, Lizenz, Abhängigkeiten) zu verifizieren. Der Build wurde für diese Prüfung nicht ausgeführt; die CI für `e60793f` gilt laut Bericht als grün.
+**Grenzen der Prüfung.** `aresstack/audio` wurde vollständig gelesen. In AskAI wurden gezielt die Module `audio-dsp` und `audio-openal` sowie der Build geprüft, in 3d4j der Build, die Paketstruktur und die Dokumentation; beide nicht Zeile für Zeile. Aussagen zu externen Bibliotheken stammen aus allgemeinem Kenntnisstand und sind vor einer Entscheidung (Version, Lizenz, Abhängigkeiten) zu verifizieren. Der Build wurde für diese Prüfung nicht ausgeführt; die CI für `e60793f` gilt laut Bericht als grün.
+
+**Änderungen in Fassung 2.** Eingearbeitet sind die Entscheidungen des Product Owners zu O1 bis O4 samt Bedingungen, die Bestandsaufnahme von AskAI und 3d4j (E8, neuer Abschnitt 4a), die geänderte Empfehlung zu FFT und Limiter, die Behandlung von `INSERT` in der Änderungsprüfung (E5), die verbindliche KI-Unabhängigkeit des Werkmodells (2.1) sowie drei Korrekturen aus dem Review des PR (Altdateien in `legacy/`, Länge der Java-Synthese, Rolle im Cache-Schlüssel).
 
 ---
 
@@ -16,7 +18,8 @@ Dieses Dokument beantwortet den Architekturbericht vom 15. November 2026 (Abschn
 4. **Typisierte Bahnen** (MIDI oder Audio), keine gemischten. Instrumentenwechsel innerhalb einer Bahn entsteht dadurch, dass ein Clip auf einen anderen Part zeigt.
 5. **Ein zweites neues Modul `audio-core`** (nur JDK, blockbasiert) entsteht durch Herauslösen des vorhandenen Mixers, nicht durch Neuentwicklung. Offline-Mix und Echtzeit-Vorschau benutzen denselben Graphen.
 6. **Zwingende Reihenfolge:** Sicherheitsnetz → Werkmodell mit Import → parametrische Zeit/Tonart → Änderungskern. Danach können Editor, KI-Bearbeitung, inkrementelles Rendern und Audio-Kern parallel entstehen.
-7. **Vier Entscheidungen brauchen eine Bestätigung** des Auftraggebers (Abschnitt 8).
+7. **Die vier offenen Entscheidungen sind getroffen** (Abschnitt 8): `Part` als fachlicher Begriff, typisierte Bahnen als erste Ausbaustufe, Normalisierung nur beim Export mit Kompatibilitätsmodus, Java 21 ohne Preview-Funktionen als Basis des Audio-Kerns.
+8. **AskAI besitzt bereits eine DSP-Infrastruktur** (`audio-dsp`, PCM16, Sprachaufbereitung). Ihre FFT-Abstraktion und ihre Filterkoeffizienten werden vor jeder Neuentwicklung geprüft; 3d4j hat noch keinen Audio-Code.
 
 ---
 
@@ -135,6 +138,7 @@ Bestätigt aus dem Bericht: alle in Abschnitt 2.1 genannten Funktionen sind vorh
 Regeln:
 
 - `composition` kennt weder Swing noch KI noch Dateien noch Audio. Es ist reine Fachlogik und damit vollständig unit-testbar.
+- **Verbindlich: Das Werkmodell ist unabhängig vom KI-Generator.** `Composition`, `Track`, `Part`, `Voice`, `Clip`, `Note`, `Patch` und `EditScope` kennen weder Gemma noch KIPITZ noch irgendein Modell. Das Modul `composition` hat keine Abhängigkeit auf andere Module; ein Architekturtest prüft, dass kein Typ daraus etwas aus `studio.ai` importiert. Die Herkunft einer Änderung steht in der Revision als neutraler Verweis auf einen Lauf, nicht als Modelltyp. Ein anderer Generator und die manuelle Bearbeitung benutzen denselben Änderungskern.
 - `audio-core` kennt keine Musik: nur Signale, Parameter und Zeit in Samples. Es ist das Modul, das AskAI und 3d4j mitbenutzen sollen.
 - Abhängigkeiten zeigen nur nach unten. `stage` (Bühnenmodell) wandert fachlich zu `composition` beziehungsweise wird von dort referenziert; der Zyklus F7 entfällt.
 - **Nur zwei neue Gradle-Module.** `ai`, `render`, `project`, `score` bleiben Packages in `studio`. Mehr Module brächten Verwaltungsaufwand ohne zusätzliche Trennung.
@@ -153,9 +157,9 @@ Composition
  └─ assets[]      Audiodateien, die Quelldaten sind (Aufnahmen, Soundeffekte)
 
 MixScene (eigenes Dokument, Nachfolger von spatial-scene.json)
- ├─ room, master
- ├─ sources[]     je Part: Platz, Pegel, Breite, Hallanteil, stumm, gesperrt
- └─ automation[]  Ziel (Part + Parameter | Master), Punkte auf der Zeitachse
+ ├─ room, master, levelMode
+ ├─ channels[]    Kanalzüge: Besitzer (Part | Audio-Bahn), Platz, Pegel, Breite, Hallanteil, stumm, gesperrt
+ └─ automation[]  Ziel (Kanalzug + Parameter | Master), Punkte auf der Zeitachse
 ```
 
 Zuordnung zu den Begriffen des Berichts:
@@ -165,13 +169,13 @@ Zuordnung zu den Begriffen des Berichts:
 | Composition | `Composition` | unveränderlich; jede Änderung ergibt ein neues Objekt |
 | MusicalSection | `Section` | Formgliederung, kein Container für Noten |
 | ArrangementTrack | `Track` | nur Bahn im Editor; trägt keine Klangeigenschaften außer einem Standard-Part |
-| MidiClip / AudioClip | `MidiClip` / `AudioClip` | Clips einer Bahn überlappen sich nicht |
-| InstrumentAssignment + AudioSource + MixerChannel | **`Part`** | bewusst *ein* Begriff, siehe E3 |
+| MidiClip / AudioClip | `MidiClip` / `AudioClip` | in der ersten Ausbaustufe ohne Überlappung (Regel des Validators, nicht des Formats) |
+| InstrumentAssignment + AudioSource + MixerChannel | **`Part`** als fachlicher Begriff; im Mischdokument ein eigener `MixChannel`, im Audio-Kern getrennte Quellen, Prozessoren und Busse | siehe E3 |
 | MusicalVoice | `Voice` innerhalb eines Parts | explizit, jede Note trägt `voiceId` |
 | AutomationLane | `AutomationLane` in `MixScene` | Pegelkurve von heute ist der erste Fall |
 | Bus | zunächst implizit (Raum, Master) | wird im Audio-Kern explizit, sobald Routing gebraucht wird |
 
-**Part** ist „ein Spieler auf der Bühne": genau ein Klangerzeuger, genau ein Platz, genau ein Kanalzug, ein Notensystem (oder ein Doppelsystem) in der Partitur, ein Stem im Renderer. Ein Clip verweist auf einen Part; fehlt der Verweis, gilt der Standard-Part der Bahn. Damit ist „Klavier Takt 1–8, Flöte Takt 9–16 auf derselben Bahn" (A7) zwei Clips mit zwei Parts, und beide stehen unabhängig auf der Bühne (Abschnitt 11.5 des Berichts).
+**Part** ist „ein Spieler auf der Bühne": genau ein Klangerzeuger, ein Notensystem (oder ein Doppelsystem) in der Partitur, ein Stem im Renderer, und er besitzt genau einen Kanalzug im Mischdokument. Ein Clip verweist auf einen Part; fehlt der Verweis, gilt der Standard-Part der Bahn. Damit ist „Klavier Takt 1–8, Flöte Takt 9–16 auf derselben Bahn" (A7) zwei Clips mit zwei Parts, und beide stehen unabhängig auf der Bühne (Abschnitt 11.5 des Berichts).
 
 **Stimmen, Notensysteme, Doppelsystem** (Rückmeldung vom 15. November):
 
@@ -193,7 +197,7 @@ EditRequest ─► (KI oder Benutzer) ─► Patch ─► Validator(scope) ─�
                                                                       └─► Verwerfen
 ```
 
-- **`Patch`**: geordnete Liste von Operationen auf IDs: `AddPart`, `AddTrack`, `AddClip`, `RemoveClip`, `MoveClip`, `SplitClip`, `SetClipPart`, `AddNotes`, `RemoveNotes`, `ChangeNote`, `SetSections`, `SetTimeMap`, `SetMeta`.
+- **`Patch`**: geordnete Liste von Operationen auf IDs: `AddPart`, `AddTrack`, `AddClip`, `RemoveClip`, `MoveClip`, `SplitClip`, `SetClipPart`, `AddNotes`, `RemoveNotes`, `ChangeNote`, `SetSections`, `SetTimeMap`, `SetMeta`, `ShiftTime` (alles ab einem Tick um eine Dauer verschieben).
 - **`EditScope`**: erlaubte Part-/Track-/Clip-IDs, Tickbereich, erlaubte Operationsarten (zum Beispiel „darf Part anlegen"), optional Übergangszone.
 - **`CompositionEditor.apply(composition, patch, scope)`** prüft jede Operation gegen den Bereich und liefert ein neues `Composition` oder eine Liste von Verstößen. Es gibt keinen anderen Weg, ein Werk zu verändern.
 - **`Proposal`**: ein angewendeter, noch nicht übernommener Patch samt gerenderter Vorschau. Übernehmen erzeugt eine Revision; Verwerfen löscht nur die Vorschau.
@@ -298,7 +302,12 @@ Jede Entscheidung nennt Empfehlung, Begründung und verworfene Alternativen. Die
 
 ### E2 Spurkonzept
 
-**Empfehlung.** **Typisierte Bahnen**: eine Bahn ist entweder MIDI oder Audio. Clips einer Bahn überlappen sich nicht. Gleichzeitiges liegt auf einer weiteren Bahn. Keine Unterspuren; eine spätere Gruppierung (Ordner) bleibt möglich.
+**Entscheidung (bestätigt für die erste Ausbaustufe).** **Typisierte Bahnen**: eine Bahn ist entweder MIDI oder Audio. Clips einer Bahn überlappen sich zunächst nicht. Gleichzeitiges liegt auf einer weiteren Bahn. Keine Unterspuren; eine spätere Gruppierung (Ordner) bleibt möglich.
+
+**Bedingungen des Product Owners, übernommen:**
+
+- Das Überlappungsverbot ist **nur eine Regel von Editor und Validator**, keine Eigenschaft des Datenmodells. Das Format speichert Clips mit Anfang und Länge ohne Annahme über Überlappung; `AudioClip` trägt von Anfang an `fadeIn` und `fadeOut`. Überblendungen zwischen Audio-Clips sind damit später eine gelockerte Regel plus Mischlogik, keine Formatänderung.
+- **Ein Clip-Ende schneidet keinen Klang ab.** Das Clip-Ende begrenzt Noten-*Ereignisse* (spätestens dort endet eine Note), nicht das Signal: Ausklang des Instruments und Hallfahne laufen weiter. Stems werden je Part über die ganze Länge mit Nachlauf gerendert; folgt auf derselben Bahn ein Clip eines anderen Parts, klingen beide Stems übereinander aus und ein.
 
 **Begründung.**
 - MIDI- und Audio-Clips werden verschieden gerendert (Synthese gegen Datei), verschieden bearbeitet (Noten gegen Schnitt) und verschieden dargestellt (Partitur gibt es nur für MIDI).
@@ -320,7 +329,19 @@ Die Typisierung ist eine Regel des Validators, keine Struktur des Formats: `Clip
 | `Part` | Spieler: Instrument + Schallquelle + Kanalzug + Notensystem | Kopf der Bahn, Punkt auf der Bühne, System in der Partitur |
 | `Voice` | Stimme innerhalb eines Parts | Halsrichtung und System in der Partitur |
 
-`InstrumentAssignment`, `AudioSource` und `MixerChannel` werden **nicht** getrennt modelliert, sondern sind Eigenschaften des Parts. MIDI-Kanal und -Port bleiben wie heute abgeleitet (`TrackArrangement.channelFor`), nie gespeichert.
+`InstrumentAssignment` wird nicht getrennt modelliert, sondern ist Eigenschaft des Parts. MIDI-Kanal und -Port bleiben wie heute abgeleitet (`TrackArrangement.channelFor`), nie gespeichert.
+
+**Entscheidung (bestätigt mit Erweiterungsgrenze).** `Part` ist eine **fachliche** Abstraktion. Die technischen Routing-Objekte werden nicht mit ihm verschmolzen:
+
+| Ebene | Objekte | Beziehung zum Part |
+|---|---|---|
+| Werk (`composition.json`) | `Part` | Instrument, Rolle, Stimmen, Notensystem |
+| Mischung (`mix.json`) | `MixChannel` | eigener Datensatz mit eigener ID; *Besitzer* ist ein Part oder eine Audio-Bahn |
+| Audio-Kern | `AudioSource`, `AudioProcessor`, `Bus` | unabhängige Bausteine; ein `MixChannel` wird beim Aufbau des Graphen in Quelle → Prozessorkette → Sends → Bus übersetzt |
+
+Der Part *konfiguriert* also seine Quelle und seinen Kanalzug, ist aber keines von beiden. Die Erweiterungsgrenze: mehrere Quellen je Part, gemeinsame Busse mehrerer Parts oder Einschleif-Effekte je Kanal werden später im Mischdokument und im Graphen ergänzt, ohne das Werkmodell zu ändern.
+
+**Routing von Audio-Clips.** Eine Audio-Bahn ist kein Spieler und bekommt keinen Part, kein Instrument und kein Notensystem. Sie besitzt stattdessen direkt einen `MixChannel` und erhält darüber Pegel, Bühnenplatz, Breite, Hallanteil, Automation und später Effekte, genau wie der Kanalzug eines Parts. Alle Clips der Bahn laufen durch diesen Kanalzug; je Clip gibt es zusätzlich Verstärkung und Blenden. Für die Bühne ist ein Soundeffekt damit eine Schallquelle wie jede andere, für Partitur und KI-Kontext ist er kein Instrument (die KI erfährt höchstens „Effekt in Takt 20").
 
 **Begründung.** In allen Anwendungsfällen des Berichts gilt 1:1:1 zwischen Klangerzeuger, Schallquelle und Kanalzug. Drei getrennte Objekte mit zwei Verweisen dazwischen würden jede Bedienhandlung („neues Instrument") zu drei Schritten machen. Für die Bedienung bleibt alles wie heute, solange eine Bahn nur ihren Standard-Part benutzt; erst wer einem Clip ein anderes Instrument gibt, sieht einen zweiten Part auf der Bühne. Die Trennung lässt sich später nachholen (ein Part bekommt mehrere Quellen, etwa Stereo-Mikrofonierung, oder mehrere Parts teilen einen Bus), weil der Audio-Kern ohnehin mit Quellen und Bussen arbeitet.
 
@@ -372,6 +393,11 @@ Die Typisierung ist eine Regel des Validators, keine Struktur des Formats: `Clip
 1. **Konstruktiv:** Die KI erhält als Ziel nur „Part X, Abschnitt Y" und liefert nur Noten. Der Patch wird von der Anwendung gebaut. Fremde Objekte sind für die KI nicht adressierbar.
 2. **Prüfend:** Der Validator lehnt jede Operation ab, deren Ziel oder Zeitbereich außerhalb des `EditScope` liegt.
 3. **Nachweisend:** Vor und nach dem Anwenden wird ein Hash über alles außerhalb des Bereichs gebildet; die Hashes müssen gleich sein. Das ist zugleich die Testbedingung für A4, A5, A10.
+
+**Genehmigte Verschiebung (`INSERT`).** Beim Einfügen eines Abschnitts verschiebt sich alles Nachfolgende, also auch Musik außerhalb des Bereichs. Das ist keine musikalische Veränderung und wird getrennt behandelt:
+
+- Die Verschiebung ist eine eigene, deterministische Operation `ShiftTime(abTick, dauer)`, die nur die Anwendung erzeugt und die der `EditScope` ausdrücklich erlauben muss (`allowsShift`). Sie verschiebt Clip-Anfänge, Abschnittsgrenzen, Ereignisse der `TimeMap` und Automationspunkte ab dem Einfügepunkt. Noten sind relativ zum Clip gespeichert und bleiben unberührt. Ein Clip, der über den Einfügepunkt reicht, wird vorher deterministisch geteilt.
+- Die Nachweisprüfung vergleicht deshalb nicht „vorher gegen nachher", sondern **„vorher plus genehmigte Verschiebung" gegen „nachher"**: der Validator wendet die strukturellen Operationen selbst auf das Original an und bildet darüber den Vergleichs-Hash. Ein legitimes Einfügen besteht, eine zusätzliche Notenänderung außerhalb des Bereichs fällt weiterhin auf.
 
 **Grenzregeln.** Eine Note gehört zu dem Bereich, in dem sie *beginnt*. Noten, die vor dem Bereich beginnen und hineinklingen, bleiben unverändert und werden der KI als „gehalten" mitgeteilt. Neue Noten werden am Bereichsende abgeschnitten, außer im Übergangsmodus.
 
@@ -436,11 +462,23 @@ Die Typisierung ist eine Regel des Validators, keine Struktur des Formats: `Clip
 
 **Abnahme des Herauslösens:** Der Block-Mixer liefert für die vorhandenen Testfälle dasselbe Ergebnis wie `SpatialStemMixer` (Toleranz im Bereich der Gleitkomma-Rundung) und ist unabhängig von der Blockgröße. Erst dann wird der alte Mixer ersetzt.
 
-**Gesamtpegel (F9).** Die nachträgliche Normalisierung auf den Spitzenwert ist in Echtzeit nicht möglich. Empfehlung: im Graphen feste Pegelstruktur plus Limiter im Master; die Normalisierung bleibt als Option *nur* beim Datei-Export. Folge: die Vorschau klingt wie der Export ohne Normalisierung. Das ändert das heutige Klangergebnis leicht und braucht eine Bestätigung (Abschnitt 8).
+**Gesamtpegel (F9), entschieden.** Die nachträgliche Normalisierung auf den Spitzenwert ist in Echtzeit nicht möglich.
+
+| Betriebsart | Pegelverarbeitung |
+|---|---|
+| Live-Wiedergabe und Echtzeit-Vorschau | feste Pegelstruktur, Master-Limiter; beide benutzen denselben Graphen |
+| WAV-Export | derselbe Mix, wahlweise mit abschließender Spitzen- oder Lautheits-Normalisierung |
+| Bestehende Projekte | Kompatibilitätsmodus: `mix.json` trägt `levelMode = LEGACY_PEAK`; der Offline-Mix rechnet wie heute, und der dabei ermittelte Verstärkungsfaktor wird im Manifest gespeichert, damit die Echtzeit-Vorschau denselben Pegel benutzt |
+
+Neue Stücke beginnen mit `levelMode = FIXED`. Der Wechsel eines alten Stücks ist eine bewusste Handlung des Benutzers.
+
+**Limiter.** Der Master-Limiter ist ein echter Dynamikprozessor mit Vorausschau, Ansprech- und Rücklaufzeit, kein Abschneiden von Samplewerten. `LimiterProcessor` aus AskAI klemmt PCM16-Werte hart und ist dafür nicht geeignet; er wird neu entwickelt, die Hüllkurvenlogik von `CompressorProcessor` aus AskAI wird als Ausgangspunkt geprüft.
+
+**Getrennte Umstellung.** Zuerst reproduziert der Block-Mixer den bisherigen Klang einschließlich der bisherigen Normalisierung (D1a). Erst danach wird die Pegelstrategie geändert (D1b). Klangunterschiede lassen sich so eindeutig der Architektur oder der Pegelverarbeitung zuordnen.
 
 **Erweiterungen in dieser Reihenfolge:** Echtzeit-Wiedergabe mit Parameterwechsel (A13) → Faltungshall (partitionierte Faltung) → Höhe als dritte Koordinate und bewegte Quellen (Positions-Automation ist bereits durch `AutomationLane` abgedeckt) → HRTF-Panner.
 
-**FFT.** Für Faltung und HRTF genügt eine Radix-2-FFT. Empfehlung: eigene, kleine Implementierung hinter einer Schnittstelle, damit der Kern abhängigkeitsfrei bleibt; JTransforms als Ausweichlösung, falls die Messung es verlangt.
+**FFT (geändert in Fassung 2).** Für Faltung und HRTF genügt eine FFT mit Zweierpotenz-Länge. AskAI besitzt dafür bereits die Schnittstelle `FourierTransform` (in-place, getrennte Real- und Imaginärfelder) mit der getesteten Implementierung `CommonsMathFourierTransform`. **Diese wird zuerst geprüft**, gemessen an Durchsatz bei den Partitionsgrößen der Faltung, an Allokation je Aufruf (der Aufruf legt heute ein kleines Hüllfeld an) und an der Abhängigkeit auf Apache Commons Math 3. Die Schnittstelle wird übernommen. Eine eigene Implementierung oder JTransforms kommt nur in Betracht, wenn die Messung im Audio-Thread es verlangt.
 
 **Externe Bibliotheken** (Kenntnisstand, vor Entscheidung zu verifizieren):
 
@@ -452,9 +490,7 @@ Die Typisierung ist eine Regel des Validators, keine Struktur des Formats: `Clip
 | JDSP | Filterentwurf und Signalanalyse für Offline-Auswertung, umfangreiche Abhängigkeiten. **Nicht verwenden**; die benötigten Filter sind vorhanden. |
 | RaphiMC AudioMixer | Mischt PCM-Quellen auf eine Ausgabeleitung. Deckt den einfachsten Teil ab, den `DeckPlayer` bereits löst; kein Raum, kein Hall. **Kein Gewinn.** |
 
-**AskAI (Annahme, nicht prüfbar).** Vor Beginn des Herauslösens ist eine zeitlich begrenzte Bestandsaufnahme nötig: Welche DSP-Bausteine gibt es, arbeiten sie blockweise mit Float, sind sie frei von Fremdabhängigkeiten, wem gehören sie? Die Schnittstelle `AudioProcessor` ist so schmal, dass vorhandene AskAI-Bausteine dahinter eingehängt werden können. Dafür muss das Repository dem Projekt zugänglich gemacht werden.
-
-**Sprachniveau des Kerns.** Wenn AskAI oder 3d4j unter einem älteren Java laufen, muss `audio-core` für das niedrigste gemeinsame Niveau kompiliert werden. Das ist zu klären (Abschnitt 8).
+**AskAI und 3d4j.** Beide Repositories wurden geprüft; das Ergebnis steht in Abschnitt 4a. Kurz: Java 21 ist der gemeinsame Nenner, der Kern benutzt keine Preview-Funktionen, und aus AskAI werden FFT-Schnittstelle, Filterkoeffizienten, Algorithmen und Tests wiederverwendet, nicht aber die PCM16-Pipeline als Ganzes.
 
 **Verworfen.** *Neuentwicklung auf der grünen Wiese:* verwirft getesteten, deterministischen Code. *Native Engine (JNI):* widerspricht der Anforderung, native Abhängigkeiten zu vermeiden.
 
@@ -475,6 +511,63 @@ Nicht zwingend, obwohl es so wirkt: Der Audio-Kern hängt vom Werkmodell nur üb
 
 ---
 
+## 4a. Bestandsaufnahme AskAI und 3d4j (D0, erster Teil)
+
+### AskAI (`develop` `5b788e2`; `audio-dsp` und `audio-openal` sind dort identisch zu `main`)
+
+| Merkmal | Befund |
+|---|---|
+| Lizenz, Java | MIT; gesamter Build über Toolchain auf Java 21. `audio-dsp` ist laut Kommentar und eigener `pom.xml` bewusst Java-8-verträglich gehalten. |
+| Zweck | Mikrofonaufnahme und **Sprachaufbereitung** für Spracherkennung, nicht Musikmischung |
+| Signalformat | durchgehend `short[]`, PCM 16 Bit; intern teils `double` |
+| Verarbeitungsmodell | zwei Stufen: `Pcm16Processor.process(short[], count, format)` arbeitet rahmenweise in-place mit Zustand (streaming-fähig); `AudioBlockProcessor.process(AudioBuffer, …)` arbeitet auf **ganzen Puffern** (Profil-Pipeline, `OverlapAddFramer`, `ShortTimeFourierTransform`) |
+| Abhängigkeiten | `uk.me.berndporr:iirj` (Butterworth), `org.apache.commons:commons-math3` (FFT) |
+| Paketname | `com.aresstack.audio.{domain,dsp,pipeline,application,infrastructure,profile,enhance,openal}` – derselbe Wurzelname wie in diesem Repository |
+| Umfang | rund 19 000 Zeilen in `audio-dsp` und `audio-openal` einschließlich Tests |
+
+| Baustein in AskAI | Bewertung für `audio-core` |
+|---|---|
+| `FourierTransform`, `CommonsMathFourierTransform`, `WindowFunctions` | **Schnittstelle übernehmen**, Implementierung messen (siehe E8) |
+| `BiquadCoefficients` (Bandpass, Tiefpass, Glocke, Tief- und Hochshelf) | **übernehmen**: Obermenge dessen, was `studio.mix.Biquad` kann; Koeffizienten sind formatunabhängig |
+| `BiquadProcessor`, `ParametricEqualizerProcessor`, `HighShelf…`, `LowShelf…` | Algorithmus und Tests übernehmen, Verarbeitung auf Float-Blöcke umstellen |
+| `CompressorProcessor`, `ExpanderProcessor`, `AudioLevelMeter` | Algorithmus als Ausgangspunkt für Dynamikprozessoren und Pegelabgriff; Schwellen sind heute PCM16-Werte |
+| `LimiterProcessor` | **nicht übernehmen**: hartes Klemmen |
+| `StereoOps` (Mitte/Seite) | deckungsgleich mit der Breitenregelung im Mixer; eine der beiden Fassungen bleibt |
+| `Pcm16Resampler`, `ResamplingQuality` | Algorithmus prüfen; der Mixer interpoliert heute nur linear |
+| `OverlapAddFramer`, `ShortTimeFourierTransform` | arbeiten auf ganzen Puffern mit Allokation je Lauf: für den Echtzeit-Graphen nicht direkt geeignet, als Referenz für die partitionierte Faltung nützlich |
+| `AudioBlockRegistry`, `AudioParameterDescriptor`, Profile | Muster für beschreibbare, konfigurierbare Prozessoren; interessant, sobald Einschleif-Effekte je Kanal kommen |
+| Sprachbausteine (Sprachaktivität, Enthallung, Rauschminderung, De-Esser, Richtungsschätzung) | für die Musikmischung ohne Bedeutung; bleiben in AskAI |
+| `audio-openal` (`OpenAlPlayback`, LWJGL, OpenAL Soft über WASAPI) | **mögliche zweite Ausgabe** hinter `AudioSink`, wenn Java Sound ein Gerät nicht öffnet; spielt heute einen fertigen Puffer ab, nicht fortlaufend; native Bibliotheken sind dort bewusst optional |
+
+**Folgerungen.**
+
+1. Der Kern rechnet in Float-Blöcken. Für AskAI entsteht ein schmaler Adapter zwischen `Pcm16Processor` und `AudioProcessor`, sodass AskAI Kernbausteine nutzen kann, ohne seine Pipeline umzubauen.
+2. Der Kern erhält einen Paketnamen, der mit keinem bestehenden Paket beider Repositories kollidiert, zum Beispiel `com.aresstack.audio.core`.
+3. Wiederverwendet werden Schnittstellen, Koeffizienten, Algorithmen und Tests. Die Profil-Pipeline von AskAI wird nicht zum Kern.
+4. Offen für D1: Audio-Thread-Eigenschaften der zu übernehmenden Bausteine (Allokation, Sperren) im Einzelnen und die FFT-Messung.
+
+### 3d4j (`main` `62ce975`)
+
+| Merkmal | Befund |
+|---|---|
+| Java | Toolchain 21, `--enable-preview` und `--enable-native-access` für die FFM-Anbindung; Launcher für Java 8 wie im Audio Studio |
+| Audio | **noch nicht vorhanden**; die README nennt Audio ausdrücklich als fehlend |
+| Umgebung | eigene Fenster- und Grafikanbindung (Win32, X11, OpenGL, Direct3D 11) ohne Swing; `Engine`/`Game`-Schleife; `math.Vec3`, `math.Mat4` |
+
+**Anforderungen an den Kern, die sich daraus ergeben.**
+
+- Java 21 **ohne** Preview-Funktionen, damit Audio Studio und AskAI ihn ohne JVM-Schalter benutzen können.
+- Keine Abhängigkeit auf Swing oder AWT. Auch `javax.sound` bleibt in einem Adapterpaket (`LineSink`, WAV-Ein- und Ausgabe); der Rechenkern kennt nur `AudioSource` und `AudioSink`. 3d4j kann so eine eigene Ausgabe über FFM anschließen.
+- Der Graph wird *gezogen* (`render(block)`), von welchem Thread auch immer; er besitzt keinen eigenen Zeitgeber.
+- Positionen sind im Kern von Anfang an dreidimensional, und es gibt einen Hörer mit Ort und Blickrichtung. Die zweidimensionale Bühne des Studios ist eine Abbildung darauf; für ein Spiel liefert die Kamera den Hörer.
+- Parameterwechsel je Block ohne Allokation, weil ein Spiel Quellen in jedem Bild bewegt.
+
+### Ort und Auslieferung des Kerns
+
+Drei Verbraucher liegen in drei Repositories. AskAI bezieht AresStack-Bibliotheken bereits als Maven-Central-Artefakte. Empfehlung: `audio-core` entsteht als Modul in `aresstack/audio`, weil hier der zu zerlegende Mixer und seine Tests liegen, und wird nach D1 als `com.aresstack:audio-core` veröffentlicht. Die Umstellung von AskAI auf den Kern ist kein Teil dieses Plans. Dieser Punkt ist noch zu bestätigen (O5).
+
+---
+
 ## 5. Migrationskonzept
 
 ### 5.1 Grundsätze
@@ -491,7 +584,7 @@ Nicht zwingend, obwohl es so wirkt: Der Audio-Kern hängt vom Werkmodell nur üb
 | `tracks.json` | Rolle, Instrumentname, Programm, `libraryId` des Parts |
 | `composition-plan.json` | Titel, Stimmung, Akkorde → `meta` und ein `Section` mit Harmonieplan |
 | `song.properties` | Name, Beschreibung, `plannedFrom` → `meta` |
-| `spatial-scene.json` | → `mix.json`; `track` wird `part`; `dynamics` wird eine `AutomationLane` für den Pegel |
+| `spatial-scene.json` | → `mix.json`; je Eintrag ein `MixChannel` mit dem Part als Besitzer; `dynamics` wird eine `AutomationLane` für den Pegel; `levelMode = LEGACY_PEAK`, damit das Stück klingt wie bisher |
 | `stems.tsv`, `*-sampled.wav`, `*.wav` | Eintrag im `manifest.json` mit Kennzeichen „übernommen", gilt bis zur ersten Änderung des Parts |
 | `<track>[-hash].json`, `instrument-proposal.json`, `mix-proposal.json`, `earlier/` | bleiben liegen; werden als Lauf „Altbestand" referenziert |
 | Stimmen | Heuristik aus `Score` einmal ausführen, Ergebnis als `voiceId` speichern |
@@ -543,15 +636,16 @@ Größe: S ≈ Tage, M ≈ ein bis zwei Wochen, L ≈ mehrere Wochen. Das sind E
 | C1 | `ContextBuilder`, `ADD_TRACK` mit Kontext der anderen Parts | M | F3 | A4 |
 | C2 | `REPLACE_REGION`, `VARIATE_REGION` mit Bereichsauswahl im Arrangement | M | F3, C1 | A5, A6 |
 | C3 | Planer, `Section`-Modell in der Oberfläche, `APPEND` mit Presets, Schlussart, Übergangsmodus | L | F2, C1 | A2, A3 |
-| C4 | `INSERT`, `REORCHESTRATE`, Intensitätskurve je Abschnitt | M | C3, B2 | Dramaturgie nach 10.4 |
+| C4 | `INSERT` (mit `ShiftTime`), `REORCHESTRATE`, Intensitätskurve je Abschnitt | M | C3, B2 | Dramaturgie nach 10.4 |
 | B1 | Noteneditor in `ArrangementView`: Auswahl, Ziehen, Länge, Einfügen, Löschen, Raster, Kopieren; alles als Patch | L | F3 | A9, A10 |
 | B2 | Trennung Track/Part in der Oberfläche, Clips (Verschieben, Teilen, Kopieren), Instrumentenwechsel je Clip, Bühne je Part | L | F3, R1 | A7 |
-| B3 | Audio-Bahnen, `AudioClip`, Assets, Anbindung des Moduls `sounds` | M | B2, D1 | A8 |
+| B3 | Audio-Bahnen mit eigenem `MixChannel`, `AudioClip` mit Blenden, Assets, Anbindung des Moduls `sounds` | M | B2, D1a | A8 |
 | S1 | Explizite Stimmen in Modell, KI-Format und Partitur; Doppelsystem; mehr als zwei Stimmen | M | F2 | Partitur liest Stimmen statt zu raten |
-| D0 | Bestandsaufnahme AskAI-DSP und Klärung Sprachniveau | S | Zugang | Entscheidungsgrundlage für D1 |
-| D1 | Modul `audio-core`: Blockprozessoren aus dem Mixer herauslösen, streamender Offline-Mix, Gleichheit zum Altmixer | M | F0, D0 | kein Ganzpuffer mehr; `MAX_SECONDS` entfällt |
-| D2 | Echtzeit-Graph, `LineSink`, Parameterwechsel mit Glättung, Bühne live | L | D1 | A13 |
-| D3 | `AutomationLane` allgemein (Pegel, Position, Hall), Limiter im Master | M | D1 | A12 erweitert, bewegte Quellen vorbereitet |
+| D0 | Bestandsaufnahme AskAI und 3d4j: erster Teil erledigt (Abschnitt 4a). Rest: Audio-Thread-Eigenschaften der zu übernehmenden Bausteine, FFT-Messung | S | — | Entscheidungsgrundlage für D1 |
+| D1a | Modul `audio-core`: Blockprozessoren aus dem Mixer herauslösen, streamender Offline-Mix, **Gleichheit zum Altmixer einschließlich bisheriger Normalisierung** | M | F0, D0 | kein Ganzpuffer mehr; `MAX_SECONDS` entfällt; Klang unverändert |
+| D1b | Pegelstrategie: `levelMode`, feste Pegelstruktur, Master-Limiter, Normalisierung als Exportoption, Kompatibilitätsmodus | M | D1a | O3 umgesetzt, getrennt von D1a abgenommen |
+| D2 | Echtzeit-Graph, `LineSink`, Parameterwechsel mit Glättung, Bühne live | L | D1b | A13 |
+| D3 | `AutomationLane` allgemein (Pegel, Position, Hall) | M | D1a | A12 erweitert, bewegte Quellen vorbereitet |
 | D4 | Faltungshall, Höhe, HRTF | L | D2 | 11.2 des Berichts |
 
 ### 6.2 Abhängigkeiten
@@ -562,18 +656,20 @@ F0 ─► F1 ─► F2 ─────────────► C3 ─► C4
       ├─► F3 ─► C1 ─► C2            │
       │    ├─► B1                   │
       │    └─► B2 ──────────────────┘
-      │         └─► B3 ◄── D1
+      │         └─► B3 ◄── D1a
       └─► R1 ─► (B2)
-F0 ─► D0 ─► D1 ─► D2 ─► D4
-              └─► D3
+F0 ─► D0 ─► D1a ─► D1b ─► D2 ─► D4
+               └─► D3
 ```
 
-### 6.3 Empfohlene erste Lieferungen
+### 6.3 Freigegebene Reihenfolge
+
+Freigegeben durch den Product Owner sind **F0, F1, F2, F3 und danach C1**. C1 (neue Stimme hinzukomponieren) ist bewusst die erste sichtbare KI-Funktion: eine kleine, musikalisch sinnvolle Änderung, an der sich Änderungskern, Kontextaufbau und Vorschau prüfen lassen, bevor die deutlich schwierigere Verlängerung (C3) folgt.
 
 1. **F0 + F1** als erste Lieferung: unsichtbar, aber danach ist jedes Stück ein Werk mit IDs.
 2. **F2**: das erste sichtbare Ergebnis (24 Takte, 96 BPM, d-Moll, korrekte Vorzeichnung).
 3. **F3 + C1**: Trompete hinzukomponieren mit Vorschau und Verwerfen. Damit ist das Kernprinzip des Berichts („die KI ändert gezielt Teile") erstmals vollständig erlebbar.
-4. Danach zwei bis drei Stränge parallel: B1 (Editor), C2/C3 (KI), D1 (Audio-Kern).
+4. Danach, nach erneuter Freigabe, zwei bis drei Stränge parallel: B1 (Editor), C2/C3 (KI), D1a (Audio-Kern).
 
 ### 6.4 Risiken
 
@@ -584,7 +680,7 @@ F0 ─► D0 ─► D1 ─► D2 ─► D4
 | Klangänderung durch Ablösung der Normalisierung (F9) | Bestandsstücke klingen leiser oder lauter | Normalisierung beim Export behalten; Vergleichshören vor Umschalten |
 | Echtzeit unter Java (GC-Pausen, Puffergröße) | Knackser in A13 | keine Allokation im Audio-Thread, vorab belegte Blöcke, Messung auf Zielhardware; Rückfall auf heutigen Dateitausch bleibt erhalten |
 | `AudioStudioFrame` wächst weiter, während migriert wird | Zerlegung wird teurer | Regel: neue Ablauflogik nur noch in Diensten der Anwendungsschicht |
-| AskAI-Bestand passt nicht zur Blockschnittstelle | Doppelarbeit | D0 vor D1, zeitlich begrenzt |
+| AskAI-Bausteine arbeiten auf PCM16 und teils auf ganzen Puffern | Übernahme kostet Umbau | Schnittstellen, Koeffizienten, Algorithmen und Tests übernehmen statt Klassen; Adapter für AskAI |
 | Gervill bei sehr langen Stücken (Speicher, Laufzeit im Kindprozess) | A14 | nach F2 messen; falls nötig abschnittsweises Rendern nachziehen |
 
 ---
@@ -607,18 +703,19 @@ F0 ─► D0 ─► D1 ─► D2 ─► D4
 | F0 | Golden: Demo-TSV → identische MIDI-Bytes vor und nach dem Umbau; identischer Mix-Hash; `ScoreTest` unverändert grün | Demo klingt und sieht aus wie zuvor |
 | F1 | Rundreise TSV → Modell → TSV zeilengleich für alle Beispiele; `legacy/` nach Import und nach Speichern bytegleich zum Original; Rückweg stellt den Altzustand her; Import mit fehlenden Dateien; Stems werden nicht neu gerendert (Manifest „übernommen") | A15: drei echte Alt-Stücke öffnen, vergleichen |
 | F2 | Parametrisierte Tests: Taktzahl, Tempo, Tonart, Taktart → MIDI-Länge, Tempo-/Taktart-/Tonart-Meta-Ereignisse; `Key.spell` für alle 24 Tonarten; Normalizer verändert keine korrekten Noten in d-Moll; 12-Minuten-MIDI durchläuft alle Renderer ohne Grenzfehler; die WAV der Java-Synthese ist so lang wie das Stück und im letzten Takt nicht stumm | A1, A14 |
-| F3 | Jede Operation innerhalb und außerhalb des Bereichs; `hashOutside` konstant; Undo/Redo über 100 zufällige Patches ergibt Ausgangszustand; Revision laden = gespeicherter Zustand | A11 |
+| F3 | Jede Operation innerhalb und außerhalb des Bereichs; `hashOutside` konstant; `ShiftTime` mit `allowsShift` besteht die Prüfung, dieselbe Verschiebung plus eine Notenänderung außerhalb des Bereichs fällt durch; Architekturtest: `composition` importiert nichts aus `studio.ai`; Undo/Redo über 100 zufällige Patches ergibt Ausgangszustand; Revision laden = gespeicherter Zustand | A11 |
 | R1 | Änderung an einem Part rendert genau einen Stem; Änderung an `mix.json` rendert keinen; reine Rollenänderung rendert den Stem der Java-Synthese neu | A12 |
 | C1 | Kontext ist für gleiches Werk und gleichen Bereich bytegleich; `ADD_TRACK` verändert keinen bestehenden Part; Antwort mit fremdem Part wird abgelehnt | A4 |
 | C2 | Bereich Takte 5–8 eines Parts: Noten außerhalb identisch; gehaltene Noten über die Grenze bleiben; Antwort mit Noten in Takt 9 wird beschnitten und protokolliert | A5, A6 |
 | C3 | Plan deckt genau die neuen Takte ab; Modus „Original schützen": Hash der Takte 1–8 gleich; Modus „Übergang": nur die letzten n Takte dürfen abweichen | A2, A3 (Hörprüfung) |
 | B1 | Jede Editorhandlung erzeugt genau einen Patch; nach Speichern und Laden identisch; nachfolgende KI-Änderung an anderem Part lässt die Handänderung unberührt | A9, A10 |
-| B2 | Zwei Clips mit verschiedenen Parts auf einer Bahn → zwei Stems, zwei Bühnenplätze, zwei Systeme; Überlappung wird abgelehnt | A7 |
+| B2 | Zwei Clips mit verschiedenen Parts auf einer Bahn → zwei Stems, zwei Bühnenplätze, zwei Systeme; Überlappung wird vom Validator abgelehnt, das Format kann sie speichern; der Ausklang des ersten Clips ist nach dem Clip-Ende im Mix vorhanden | A7 |
 | B3 | Audio-Clip bei Takt 20 beginnt im Mix beim berechneten Sample (± 1 Block) | A8 |
 | S1 | KI-Antwort mit `voice` → Partitur zeigt diese Zuordnung; ohne `voice` → Heuristik; Klavier-Part ergibt Doppelsystem | Notenbild zweier gleichzeitig einsetzender Linien |
-| D1 | Block-Mixer gegen Altmixer innerhalb Toleranz; gleiches Ergebnis für Blockgrößen 64, 512, 4096; Speicherbedarf unabhängig von der Stücklänge | Vergleichshören |
+| D1a | Block-Mixer gegen Altmixer innerhalb Toleranz, **mit** bisheriger Normalisierung; gleiches Ergebnis für Blockgrößen 64, 512, 4096; Speicherbedarf unabhängig von der Stücklänge | Vergleichshören: kein Unterschied |
+| D1b | `LEGACY_PEAK` ergibt weiterhin das Ergebnis von D1a; `FIXED` übersteuert bei keinem Testsignal; Limiter: Ausgang nie über der Schwelle, Verzerrung eines Sinus unterhalb der Schwelle null, Regelverlauf stetig; Export mit Normalisierung erreicht den Zielpegel | Vergleichshören alt gegen neu an Bestandsstücken |
 | D2 | Parameterwechsel ohne Sprung im Signal (Differenz benachbarter Samples begrenzt); keine Allokation im Audio-Thread (Messung) | A13 auf Zielhardware |
-| D3 | Automation bei Tempowechsel bleibt am Takt; Limiter hält Spitzenwert | A12 |
+| D3 | Automation bei Tempowechsel bleibt am Takt | A12 |
 | D4 | Faltung mit Dirac-Impuls = Eingang; HRTF links/rechts symmetrisch | Hörprüfung mit Kopfhörer |
 
 ### 7.3 Zuordnung der Abnahmeszenarien
@@ -641,13 +738,24 @@ F0 ─► D0 ─► D1 ─► D2 ─► D4
 
 ---
 
-## 8. Offene Punkte für den Auftraggeber
+## 8. Entscheidungen des Auftraggebers
 
-| Nr. | Frage | Empfehlung | Wirkt auf |
-|---|---|---|---|
-| O1 | Ein Begriff „Part" statt getrennter Instrumentinstanz, Schallquelle und Kanalzug (E3)? | ja | F1, B2 |
-| O2 | Typisierte Bahnen ohne überlappende Clips (E2)? | ja | B2, B3 |
-| O3 | Normalisierung des Gesamtpegels nur noch beim Export, sonst feste Pegelstruktur mit Limiter (F9/E8)? | ja, nach Vergleichshören | D1, D2 |
-| O4 | Zugang zum AskAI-Repository für D0, und welches Java-Niveau brauchen AskAI und 3d4j für `audio-core`? | Zugang gewähren; Niveau = niedrigstes gemeinsames | D0, D1 |
+Entschieden am 15. November 2026 durch den Product Owner. Die Bedingungen sind in die genannten Abschnitte eingearbeitet.
 
-Bis zur Antwort gelten die Empfehlungen als Arbeitsannahme; keines der Fundament-Pakete F0 bis F3 hängt von O3 oder O4 ab.
+| Nr. | Frage | Entscheidung | Bedingungen | eingearbeitet in |
+|---|---|---|---|---|
+| O1 | Ein Begriff „Part" | ja, als fachliche Abstraktion | Routing-Objekte im Audio-Kern bleiben getrennt; Audio-Bahnen brauchen ein eigenes Routing ohne künstliches Instrument | E3, 2.2 |
+| O2 | Typisierte Bahnen ohne überlappende Clips | ja, für die erste Ausbaustufe | Überlappungsverbot nur als Regel von Editor und Validator; Überblendungen bleiben möglich; Ausklang über das Clip-Ende hinaus | E2 |
+| O3 | Normalisierung nur beim Export, sonst feste Pegel und Limiter | ja, mit Bestandskompatibilität | echter Limiter; Kompatibilitätsmodus für alte Stücke; Mixer-Migration und Pegelumstellung getrennt testen | E8, D1a/D1b |
+| O4 | Zugang zu AskAI, Java-Niveau | geklärt | Java 21 ohne Preview-Funktionen; vorhandene FFT aus AskAI vor einer Eigenentwicklung prüfen; `LimiterProcessor` nicht übernehmen | E8, 4a |
+| A | `INSERT` gegen Hash-Prüfung | präzisiert | genehmigte, deterministische Verschiebung von unerlaubter Änderung unterscheiden | E5 |
+| B | Werkmodell unabhängig vom KI-Generator | verbindlich | — | 2.1 |
+| — | Reihenfolge | F0 bis F3, danach C1 freigegeben | — | 6.3 |
+
+**Noch offen**
+
+| Nr. | Frage | Empfehlung |
+|---|---|---|
+| O5 | Wo entsteht `audio-core` und wie wird es ausgeliefert? | als Modul in `aresstack/audio`, nach D1 als `com.aresstack:audio-core` auf Maven Central |
+
+O5 muss erst vor D1a entschieden sein und berührt die freigegebenen Pakete nicht.
