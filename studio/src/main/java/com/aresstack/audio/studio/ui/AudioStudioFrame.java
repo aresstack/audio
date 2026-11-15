@@ -118,7 +118,9 @@ public final class AudioStudioFrame extends JFrame {
     private final JTextField proxyNonProxyHosts = new JTextField(24);
     private final JCheckBox proxyBasic = new JCheckBox("Proxy-BASIC via KeePass");
     /** Whether the arrangement is fitted into the window; off, every bar has its width and the lanes scroll. */
-    private final JCheckBox fitArrangement = new JCheckBox("Ganzes Stück in die Fensterbreite einpassen", false);
+    private final JCheckBox fitArrangement = new JCheckBox("Ganzes Stück in die Fensterbreite einpassen", true);
+    /** The same switch in the head of the arrangement: on fits the piece, off gives each bar its width and a scroll bar. */
+    private final JCheckBox fitArrangementHead = new JCheckBox("Einpassen", true);
     /** How wide a bar of the arrangement is when the piece is not fitted into the window, in pixels. */
     private final JSpinner arrangementBarWidth = new JSpinner(new SpinnerNumberModel(ArrangementView.BAR_WIDTH,
             ArrangementView.MIN_BAR_WIDTH, ArrangementView.MAX_BAR_WIDTH, 8));
@@ -692,7 +694,23 @@ public final class AudioStudioFrame extends JFrame {
         arrangementBody.add(trackTable, BorderLayout.CENTER);
         DeckWidgets.Module output = new DeckWidgets.Module("Arrangement", arrangementBody);
         output.setHeadStart(pieceActions);
-        output.setHeadEnd(withPieceMenu(sourceChoice));
+        // On: the whole piece fits the window. Off: every bar has its width, a scroll bar below,
+        // and Shift with the wheel moves along the piece. The same switch as in the settings.
+        fitArrangementHead.setModel(fitArrangement.getModel());
+        fitArrangementHead.setOpaque(false);
+        fitArrangementHead.setFocusable(false);
+        fitArrangementHead.setForeground(AudioStudioTheme.TEXT_DIM);
+        fitArrangementHead.setToolTipText("An: das ganze Stück passt ins Fenster. Aus: jeder Takt hat seine feste Breite"
+                + " (Einstellungen › Taktbreite), unten ein Rollbalken; Umschalt + Mausrad rollt seitwärts.");
+        fitArrangementHead.addActionListener(event -> {
+            trackTable.setFit(fitArrangement.isSelected());
+            saveSettings(false);
+        });
+        JPanel arrangementHeadEnd = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        arrangementHeadEnd.setOpaque(false);
+        arrangementHeadEnd.add(fitArrangementHead);
+        arrangementHeadEnd.add(withPieceMenu(sourceChoice));
+        output.setHeadEnd(arrangementHeadEnd);
 
         // The piece: which one, and what it shall be. What is seldom needed is in the menu "Mehr".
         final javax.swing.JPopupMenu moreMenu = pieceMenu;
@@ -4130,8 +4148,7 @@ public final class AudioStudioFrame extends JFrame {
             proxyNonProxyHosts.setText(saved.getProperty("proxyNonProxyHosts", ""));
             proxyBasic.setSelected("BASIC".equalsIgnoreCase(saved.getProperty("proxyAuthMode", "")));
             proxyCredentialRef.setText(saved.getProperty("proxyCredentialRef", ""));
-            // A new key: the old "arrangementFit" was saved as true by every studio, and squeezed long pieces.
-            fitArrangement.setSelected("true".equalsIgnoreCase(saved.getProperty("arrangementFitWindow", "false")));
+            fitArrangement.setSelected(!"false".equalsIgnoreCase(saved.getProperty("arrangementFit", "true")));
             trackTable.setFit(fitArrangement.isSelected());
             int barWidth = ArrangementView.BAR_WIDTH;
             try {
@@ -4231,7 +4248,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("proxyNonProxyHosts", proxyNonProxyHosts.getText().trim());
             saved.setProperty("proxyAuthMode", proxyBasic.isSelected() ? "BASIC" : "");
             saved.setProperty("proxyCredentialRef", proxyCredentialRef.getText().trim());
-            saved.setProperty("arrangementFitWindow", String.valueOf(fitArrangement.isSelected()));
+            saved.setProperty("arrangementFit", String.valueOf(fitArrangement.isSelected()));
             saved.setProperty("arrangementBarWidth", String.valueOf(arrangementBarWidth.getValue()));
             saved.setProperty(AppIcon.SETTING, ((AppIcon) appIconChoice.getSelectedItem()).key());
             saved.setProperty("outputDirectory", directory.getText().trim());
