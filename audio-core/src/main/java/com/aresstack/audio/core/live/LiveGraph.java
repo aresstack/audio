@@ -91,7 +91,7 @@ public final class LiveGraph implements AudioSource {
         seekTo.set(Math.max(0, Math.min(frames, frame)));
     }
 
-    /** Whether a jump was asked for that the audio thread has not taken yet. */
+    /** Whether a jump was asked for that the audio thread has not made yet. */
     public boolean seekPending() {
         return seekTo.get() >= 0;
     }
@@ -126,6 +126,9 @@ public final class LiveGraph implements AudioSource {
             position = jump;
             for (LiveChannel channel : channels) {
                 channel.seek(jump);
+            }
+            if (room != null) {
+                room.reset();
             }
         }
         int wanted = block.frames();
