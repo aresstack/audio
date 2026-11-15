@@ -154,9 +154,13 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
                 : "Plan an ORIGINAL instrumental album.\n");
         prompt.append("{\"album\":\"").append(escape(album.title())).append("\",\"wish\":\"")
                 .append(escape(concept.description())).append("\",\"style\":\"").append(escape(concept.style()))
-                .append("\",\"tracksWanted\":").append(wanted).append(",\"secondsPerTrack\":")
-                .append(concept.secondsPerTrack()).append(",\"secondsMin\":").append(concept.minSeconds())
-                .append(",\"secondsMax\":").append(concept.maxSeconds()).append("}\n");
+                .append("\",\"tracksWanted\":").append(wanted);
+        if (!concept.original()) {
+            // A work that is rebuilt has the lengths of its movements: no range of the album is named to it.
+            prompt.append(",\"secondsPerTrack\":").append(concept.secondsPerTrack()).append(",\"secondsMin\":")
+                    .append(concept.minSeconds()).append(",\"secondsMax\":").append(concept.maxSeconds());
+        }
+        prompt.append("}\n");
         if (!kept.isEmpty()) {
             prompt.append("These tracks of the album exist already; do not repeat them, plan tracks that go with them:\n");
             for (AlbumTrack track : kept) {

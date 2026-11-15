@@ -17,7 +17,7 @@ public final class OriginalWork {
     public static final String ALBUM_GUIDANCE = "REBUILD THE ORIGINAL: the wish names an existing work or sources. "
             + "Plan one track per movement (or per piece) of the original, in its order, with the real titles "
             + "(e.g. \"Spring – I. Allegro\" in the language of the wish), the original keys, meters and tempi, the "
-            + "original players, and the length a usual performance has; the length range above does not apply. "
+            + "original players, and the length a usual performance has; no length range of the album applies; the meter of each movement is its own (3/4, 12/8 ...), not 4/4 unless the original is. "
             + "In form describe the original sections and themes of the movement. Invent nothing.";
 
     private OriginalWork() {
