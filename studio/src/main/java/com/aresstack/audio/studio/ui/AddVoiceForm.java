@@ -139,8 +139,8 @@ final class AddVoiceForm extends JPanel {
         JPanel keys = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         keys.add(compose);
         keys.add(cancel);
-        JLabel words = new JLabel("<html>Die KI schreibt eine neue Stimme zu dem, was die anderen spielen. Das Stück bleibt<br>"
-                + "unverändert, bis der Vorschlag angehört und übernommen ist.</html>");
+        JLabel words = new JLabel("<html>Die KI schreibt eine neue Stimme zu dem, was die anderen spielen. Sie kommt<br>"
+                + "direkt ins Stück; „Rückgängig“ nimmt sie wieder heraus.</html>");
         JPanel content = new JPanel(new BorderLayout(0, 12));
         content.setBorder(BorderFactory.createEmptyBorder(16, 16, 14, 16));
         content.add(words, BorderLayout.NORTH);
