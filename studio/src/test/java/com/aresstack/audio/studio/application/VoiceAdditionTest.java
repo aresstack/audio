@@ -216,6 +216,36 @@ public final class VoiceAdditionTest {
     }
 
     @Test
+    public void theMixOfTheOtherPartsAndItsLevelModeSurviveAddingAndUndo() throws Exception {
+        MixScene opened = session.mix();
+        MixChannel first = opened.channels().get(0);
+        List<MixChannel> channels = new ArrayList<>(opened.channels());
+        channels.set(0, new MixChannel(first.id(), first.owner(), -0.8, 0.9, -7.5, 0.25, 0.7, true, true));
+        MixScene own = new MixScene(opened.room(), -3, com.aresstack.audio.composition.mix.LevelMode.FIXED, channels,
+                opened.automation());
+        com.aresstack.audio.studio.project.MixJson.save(piece, own);
+        session = ProjectSession.open(piece).orElseThrow();
+        assertEquals(own, session.mix());
+
+        VoiceAddition addition = VoiceAddition.start(session, VoiceComposer.with(trumpetPlayer()),
+                trumpet(List.of(), false), Ids.seeded(19), QUIET);
+        addition.accept();
+        MixScene accepted = session.mix();
+        assertEquals(com.aresstack.audio.composition.mix.LevelMode.FIXED, accepted.levelMode());
+        assertEquals(-3, accepted.masterDb(), 0);
+        assertEquals(own.room(), accepted.room());
+        assertEquals(own.automation(), accepted.automation());
+        assertEquals(own.channels(), accepted.channels().subList(0, own.channels().size()));
+        assertEquals(accepted, com.aresstack.audio.studio.project.MixJson.load(piece));
+
+        session.undo();
+        assertEquals(own, session.mix());
+        assertEquals(own, com.aresstack.audio.studio.project.MixJson.load(piece));
+        session.redo();
+        assertEquals(accepted, session.mix());
+    }
+
+    @Test
     public void anAcceptedVoiceSurvivesTakingOverChangedOldFiles() throws Exception {
         VoiceAddition addition = VoiceAddition.start(session, VoiceComposer.with(trumpetPlayer()),
                 trumpet(List.of(), false), Ids.seeded(17), QUIET);
