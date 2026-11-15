@@ -97,12 +97,12 @@ public final class KipitzChatClient implements ChatModel {
             request.addProperty("max_tokens", budget);
             try {
                 answer = exchange(gson.toJson(request).getBytes(StandardCharsets.UTF_8), heard);
-                if ("length".equals(answer.finishReason) && longer < LONGER_ANSWERS
+                if ("length".equals(answer.finishReason) && longer < longerAnswers
                         && !cancelled && !Thread.currentThread().isInterrupted()) {
                     // Cut off at the limit: a model that thinks before it answers spends the tokens of
-                    // its answer on that. Asked again with room for twice as much.
+                    // its answer on that. Asked again with more room (studio.properties: longerAnswerFactor).
                     longer++;
-                    budget *= 2;
+                    budget *= longerFactor;
                     answer = null;
                     attempt = 0;
                     continue;
@@ -268,7 +268,20 @@ public final class KipitzChatClient implements ChatModel {
     }
 
     /** How often an answer that was cut off at its limit is asked for again, each time with twice the room. */
-    static final int LONGER_ANSWERS = 3;
+    public static final int LONGER_ANSWERS = 3;
+
+    /** By how much the room grows each time, by default. */
+    public static final int LONGER_FACTOR = 2;
+
+    private volatile int longerAnswers = LONGER_ANSWERS;
+    private volatile int longerFactor = LONGER_FACTOR;
+
+    /** How often a cut-off answer is asked for again, and by how much its room grows each time. */
+    public KipitzChatClient longerAnswers(int times, int factor) {
+        this.longerAnswers = Math.max(0, times);
+        this.longerFactor = Math.max(2, factor);
+        return this;
+    }
 
     /** The sampling of every request; part of the identity of a kept answer. */
     static final double TEMPERATURE = 0.55;
