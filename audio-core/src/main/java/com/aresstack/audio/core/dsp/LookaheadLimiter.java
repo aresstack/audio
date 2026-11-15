@@ -30,28 +30,58 @@ public final class LookaheadLimiter implements AudioProcessor {
     public static final double DEFAULT_LOOKAHEAD_MS = 2;
     /** Below this distance from 1 the gain lands on exactly 1, so quiet passages pass bit for bit again. */
     private static final double UNITY_SNAP = 1e-6;
+    /** A gain below this (about −0.26 dB) counts as the limiter acting, for the material-dependent release. */
+    private static final double BUSY_BELOW = 0.97;
 
     /** Ceiling and release; checked here, outside the audio thread. */
     public static final class Settings {
         /** Ceiling −1 dBFS, release 80 ms. */
         public static final Settings DEFAULT = new Settings(-1, 80);
+        /**
+         * For live playback of a mix whose level was set like the file (peaks at most 0.92):
+         * ceiling −0.3 dBFS, just above such a mix, so it passes untouched; an isolated peak
+         * recovers in 40 ms, while under lasting overload the release slides to 400 ms, so the
+         * gain stops riding on every beat and dense passages do not turn dull.
+         */
+        public static final Settings LIVE = new Settings(-0.3, 40, 400);
 
         private final double ceilingDb;
         private final double releaseMs;
+        private final double sustainedReleaseMs;
 
         /**
          * @param ceilingDb the highest sample value that leaves the limiter, in dBFS, at most +6
          * @param releaseMs how fast the gain comes back after a peak, more than 0
          */
         public Settings(double ceilingDb, double releaseMs) {
+            this(ceilingDb, releaseMs, releaseMs);
+        }
+
+        /**
+         * A release that depends on the material: {@code releaseMs} after an isolated peak,
+         * sliding towards {@code sustainedReleaseMs} the longer the limiter keeps acting (a
+         * window of about 300 ms decides).
+         *
+         * @param sustainedReleaseMs the release under lasting overload, at least {@code releaseMs}
+         */
+        public Settings(double ceilingDb, double releaseMs, double sustainedReleaseMs) {
             if (!(ceilingDb <= 6) || Double.isInfinite(ceilingDb)) {
                 throw new IllegalArgumentException("The ceiling must be a level of at most +6 dBFS: " + ceilingDb);
             }
             if (!(releaseMs > 0) || Double.isInfinite(releaseMs)) {
                 throw new IllegalArgumentException("The release must be longer than 0 ms: " + releaseMs);
             }
+            if (!(sustainedReleaseMs >= releaseMs) || Double.isInfinite(sustainedReleaseMs)) {
+                throw new IllegalArgumentException("The sustained release is at least the release: " + sustainedReleaseMs);
+            }
             this.ceilingDb = ceilingDb;
             this.releaseMs = releaseMs;
+            this.sustainedReleaseMs = sustainedReleaseMs;
+        }
+
+        /** The release under lasting overload; equal to {@link #releaseMs()} when the release is fixed. */
+        public double sustainedReleaseMs() {
+            return sustainedReleaseMs;
         }
 
         public double ceilingDb() {
@@ -76,6 +106,10 @@ public final class LookaheadLimiter implements AudioProcessor {
     private int n;
     private float ceiling;
     private double release;
+    private double sustainedRelease;
+    // how much of the last ~300 ms the limiter was acting, 0 to 1; chooses between the two releases
+    private double busy;
+    private double busyCoefficient;
     // audio delay lines
     private float[] delayLeft;
     private float[] delayRight;
@@ -157,6 +191,7 @@ public final class LookaheadLimiter implements AudioProcessor {
         averageAt = 0;
         averageSum = n;
         released = 1.0;
+        busy = 0;
         lastGain = 1f;
         lowestGain = 1f;
         lowestPublished = 1f;
@@ -168,6 +203,8 @@ public final class LookaheadLimiter implements AudioProcessor {
         applied = now;
         ceiling = now.ceiling();
         release = 1.0 - Math.exp(-1.0 / (now.releaseMs() * rate / 1000.0));
+        sustainedRelease = 1.0 - Math.exp(-1.0 / (now.sustainedReleaseMs() * rate / 1000.0));
+        busyCoefficient = 1.0 - Math.exp(-1.0 / (0.3 * rate));
     }
 
     @Override
@@ -187,7 +224,10 @@ public final class LookaheadLimiter implements AudioProcessor {
             double peak = Math.max(Math.abs(inLeft), Math.abs(inRight));
             double needed = peak > ceiling ? ceiling / peak : 1.0;
             // release: down at once, up with one pole; land on exactly 1 when close and nothing is over
-            released = needed < released ? needed : released + release * (needed - released);
+            // busy while the gain is held down more than a quarter dB; an isolated click lets it rise only a little
+            busy += busyCoefficient * ((released < BUSY_BELOW ? 1.0 : 0.0) - busy);
+            double coefficient = release + (sustainedRelease - release) * busy;
+            released = needed < released ? needed : released + coefficient * (needed - released);
             if (needed == 1.0 && released > 1.0 - UNITY_SNAP) {
                 released = 1.0;
             }
