@@ -79,6 +79,11 @@ final class AlbumTree extends JPanel {
         default void deleteTitle(String albumId, String trackId) {
         }
 
+        /** Produces this one title now, with its album as context, as the album page does. */
+        default void produceTitle(String albumId, String trackId) {
+            albumClicked(albumId);
+        }
+
         /** Produces the album, as its page does. */
         default void produceAlbum(String albumId) {
             albumClicked(albumId);
@@ -379,6 +384,8 @@ final class AlbumTree extends JPanel {
                     host.plannedClicked(album, track);
                 }
             }));
+            menu.add(item(title.folder() == null ? "Im Album produzieren" : "Im Album neu produzieren",
+                    () -> host.produceTitle(album, track)));
             menu.add(item("Umbenennen …   (F2)", () -> host.renameTitle(album, track)));
             javax.swing.JMenu into = new javax.swing.JMenu("In Album verschieben");
             for (int i = 0; i < root.getChildCount(); i++) {

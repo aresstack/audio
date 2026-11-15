@@ -1051,6 +1051,24 @@ final class AlbumsPanel extends JPanel {
         }
     }
 
+    /**
+     * Produces this one title of the album shown, at once, with what the album tells it: the same
+     * as choosing it in the list and "Titel neu produzieren".
+     */
+    void produceTitle(String trackId) {
+        if (album == null) {
+            return;
+        }
+        for (int row = 0; row < album.tracks().size(); row++) {
+            if (album.tracks().get(row).id().equals(trackId)) {
+                table.getSelectionModel().setSelectionInterval(row, row);
+                produceAgain();
+                return;
+            }
+        }
+        say("Dieser Titel steht nicht in „" + album.title() + "“.");
+    }
+
     private void produceAgain() {
         int row = table.getSelectedRow();
         if (row < 0) {
