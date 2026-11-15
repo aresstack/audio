@@ -115,4 +115,50 @@ public final class InsertAndReorchestrateFormTest {
         }
         return null;
     }
+
+    @Test
+    public void bothHalvesOfAClipSplitAtTheInsertionPointAreShownInTheLane() {
+        // An insertion splits the clip that lies across the point; the second half is a clip of its own ("-2").
+        Composition piece = RegionReworkTest.flutePiece();
+        com.aresstack.audio.composition.Track track = piece.tracks().get(0);
+        com.aresstack.audio.composition.MidiClip whole = (com.aresstack.audio.composition.MidiClip) track.clips().get(0);
+        long half = whole.lengthTicks() / 2 / 1920 * 1920;
+        List<com.aresstack.audio.composition.Note> before = new ArrayList<com.aresstack.audio.composition.Note>();
+        List<com.aresstack.audio.composition.Note> after = new ArrayList<com.aresstack.audio.composition.Note>();
+        for (com.aresstack.audio.composition.Note note : whole.notes()) {
+            if (note.tick() < half) {
+                before.add(note);
+            } else {
+                after.add(new com.aresstack.audio.composition.Note(note.id(), note.tick() - half, note.length(),
+                        note.pitch(), note.velocity(), note.voiceId()));
+            }
+        }
+        assertFalse(before.isEmpty() || after.isEmpty());
+        long gap = 2 * 1920; // the two inserted bars
+        List<com.aresstack.audio.composition.Clip> clips = new ArrayList<com.aresstack.audio.composition.Clip>();
+        clips.add(new com.aresstack.audio.composition.MidiClip(whole.id(), whole.startTick(), half, whole.partId(),
+                before));
+        clips.add(new com.aresstack.audio.composition.MidiClip(whole.id() + "-2", whole.startTick() + half + gap,
+                whole.lengthTicks() - half, whole.partId(), after));
+        List<com.aresstack.audio.composition.Track> tracks =
+                new ArrayList<com.aresstack.audio.composition.Track>(piece.tracks());
+        tracks.set(0, new com.aresstack.audio.composition.Track(track.id(), track.name(), track.kind(),
+                track.defaultPartId(), clips));
+
+        ArrangementView.Arrangement shown = ArrangementView.Arrangement.of(piece.withTracks(tracks));
+
+        List<ArrangementView.Note> lane = shown.lanes.get(track.id());
+        assertEquals("every note of both halves", whole.notes().size(), lane.size());
+        long firstOfSecond = Long.MAX_VALUE;
+        int inSecond = 0;
+        for (ArrangementView.Note note : lane) {
+            if ((whole.id() + "-2").equals(note.clipId)) {
+                inSecond++;
+                firstOfSecond = Math.min(firstOfSecond, note.start);
+            }
+        }
+        assertEquals(after.size(), inSecond);
+        assertTrue("the second half lies behind the inserted bars", firstOfSecond >= whole.startTick() + half + gap);
+        assertTrue(shown.ticks >= whole.startTick() + whole.lengthTicks() + gap);
+    }
 }

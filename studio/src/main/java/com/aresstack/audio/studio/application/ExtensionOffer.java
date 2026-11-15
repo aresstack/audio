@@ -107,6 +107,10 @@ public final class ExtensionOffer implements AiOffer {
             notes.add(request.inserts() ? "Die Takte davor und danach bleiben Note für Note, wie sie sind;"
                     + " alles ab der Einfügestelle rückt nach hinten."
                     : "Das bisherige Stück bleibt Note für Note unverändert.");
+        } else if (request.tailBars() == 0) {
+            // Nothing was written anew before the point; only notes that sound across it had to end earlier.
+            notes.add("Bis auf die unten aufgezählten gekürzten Noten bleiben die Takte davor und danach,"
+                    + " wie sie sind; alles ab der Einfügestelle rückt nach hinten.");
         } else {
             notes.add((request.tailBars() == 1 ? "Der letzte Takt" : "Die letzten " + request.tailBars() + " Takte")
                     + (request.inserts() ? " vor der Einfügestelle" : " des bisherigen Stücks")
