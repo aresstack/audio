@@ -122,9 +122,17 @@ public final class KipitzChatClient implements ChatModel {
                 throw unusable;
             } catch (IOException broken) {
                 // The connection failed or broke off on the way: that says nothing about the request.
-                if (cancelled || Thread.currentThread().isInterrupted() || attempt >= TRANSPORT_ATTEMPTS) {
+                if (cancelled || Thread.currentThread().isInterrupted()) {
                     throw broken;
                 }
+                if (attempt >= TRANSPORT_ATTEMPTS) {
+                    tell("Verbindung zur KI: " + broken.getMessage() + " · nach " + attempt
+                            + " Versuchen aufgegeben (" + name() + ").");
+                    throw new IOException("Die Verbindung zur KI ist " + attempt + "-mal abgerissen: "
+                            + broken.getMessage(), broken);
+                }
+                tell("Verbindung zur KI: " + broken.getMessage() + " · Versuch " + (attempt + 1) + " von "
+                        + TRANSPORT_ATTEMPTS + " folgt (" + name() + ").");
                 try {
                     Thread.sleep(2000L * attempt);
                 } catch (InterruptedException interrupted) {
@@ -193,7 +201,83 @@ public final class KipitzChatClient implements ChatModel {
     }
 
     /** How often a request is sent again when the connection fails or breaks off, before the failure counts. */
-    private static final int TRANSPORT_ATTEMPTS = 3;
+    private static final int TRANSPORT_ATTEMPTS = 5;
+
+    /** How long a request may stay without its first byte: the service may let it wait in a queue. */
+    static volatile long firstByteMillis = 240_000;
+    /** How long an answer that has begun may stay silent before the connection counts as dead. */
+    static volatile long silenceMillis = 90_000;
+
+    /** Hears what goes wrong on the way and what is done about it; never the answer itself. */
+    private volatile java.util.function.Consumer<String> troubles;
+
+    /**
+     * Tells this listener when a connection breaks off, stays silent or is tried again, so that a
+     * wait is not taken for a standstill. Called on the thread that asks.
+     */
+    public KipitzChatClient troubles(java.util.function.Consumer<String> listener) {
+        this.troubles = listener;
+        return this;
+    }
+
+    private void tell(String line) {
+        java.util.function.Consumer<String> listener = troubles;
+        if (listener != null) {
+            try {
+                listener.accept(line);
+            } catch (RuntimeException unheard) {
+                // telling about trouble must not make more of it
+            }
+        }
+    }
+
+    /**
+     * Watches the connections that wait for an answer and ends one that stays silent too long. The
+     * timeout of the socket alone is not enough: a proxy layer may not honour it, and a dead Wi-Fi
+     * connection then holds a request for ever.
+     */
+    private static final java.util.concurrent.ScheduledExecutorService WATCH =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "kipitz-connection-watch");
+                thread.setDaemon(true);
+                return thread;
+            });
+
+    /** One request on its way: when it last gave a sign of life, and whether the watch ended it. */
+    private static final class Pulse {
+        volatile long last = System.currentTimeMillis();
+        volatile boolean begun;
+        volatile String ended;
+
+        void beat() {
+            last = System.currentTimeMillis();
+            begun = true;
+        }
+    }
+
+    /** A stream that notes every byte that arrives as a sign of life. */
+    private static final class Watched extends java.io.FilterInputStream {
+        private final Pulse pulse;
+
+        Watched(InputStream in, Pulse pulse) {
+            super(in);
+            this.pulse = pulse;
+        }
+
+        @Override
+        public int read() throws IOException {
+            int value = super.read();
+            pulse.beat();
+            return value;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            int count = super.read(buffer, offset, length);
+            pulse.beat();
+            return count;
+        }
+    }
     private static final int RESPONSE_LIMIT = 2_000_000;
 
     /** Whether answers are asked for as a stream; switched off for a service that refuses to stream. */
@@ -230,8 +314,19 @@ public final class KipitzChatClient implements ChatModel {
 
     /** Sends one request and reads its answer, streamed or whole, whichever the service sends. */
     private Answer exchange(byte[] body, java.util.function.Consumer<String> heard) throws IOException {
-        HttpURLConnection connection = openConnection();
+        final HttpURLConnection connection = openConnection();
         activeConnections.add(connection);
+        final Pulse pulse = new Pulse();
+        java.util.concurrent.ScheduledFuture<?> watch = WATCH.scheduleWithFixedDelay(() -> {
+            long silent = System.currentTimeMillis() - pulse.last;
+            long allowed = pulse.begun ? silenceMillis : firstByteMillis;
+            if (silent > allowed && pulse.ended == null) {
+                pulse.ended = pulse.begun
+                        ? "seit " + silent / 1000 + " s kam kein Text mehr, die Verbindung gilt als abgerissen"
+                        : "nach " + silent / 1000 + " s kam noch keine Antwort";
+                connection.disconnect(); // the read that hangs ends with an error and the request is sent again
+            }
+        }, 2, 2, java.util.concurrent.TimeUnit.SECONDS);
         try {
             connection.setRequestMethod("POST");
             connection.setConnectTimeout(30000);
@@ -248,7 +343,8 @@ public final class KipitzChatClient implements ChatModel {
                 throw new Refused(status);
             }
             String type = String.valueOf(connection.getContentType());
-            try (InputStream input = connection.getInputStream()) {
+            pulse.beat(); // the service answered: from here on text is expected to flow
+            try (InputStream input = new Watched(connection.getInputStream(), pulse)) {
                 if (type.contains("event-stream")) {
                     return readStream(input, heard);
                 }
@@ -262,7 +358,15 @@ public final class KipitzChatClient implements ChatModel {
                     throw new Unusable("Could not parse the KIPITZ model response.", malformed);
                 }
             }
+        } catch (Refused | Unusable told) {
+            throw told;
+        } catch (IOException broken) {
+            if (pulse.ended != null) {
+                throw new IOException(pulse.ended, broken); // said in words, not as "Socket closed"
+            }
+            throw broken;
         } finally {
+            watch.cancel(false);
             activeConnections.remove(connection);
             connection.disconnect();
         }
