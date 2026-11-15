@@ -90,4 +90,40 @@ public final class ModelRolesTest {
         lineup.model(ModelRoles.INSTRUMENTS); // known model: no new one
         assertEquals(3, cancelled.get()); // handed out after cancelling: told to stop at once
     }
+
+    /** A lineup with every model wrapped keeps the models and the assignment of the lineup it came from. */
+    @Test
+    public void aWrappedLineupSharesTheModelsOfItsLineup() {
+        java.util.List<String> made = new java.util.ArrayList<>();
+        java.util.List<String> cancelled = new java.util.ArrayList<>();
+        ModelLineup lineup = new ModelLineup(ModelAssignment.single("base").with(ModelRoles.COMPOSITION, "big"),
+                name -> {
+                    made.add(name);
+                    return new ChatModel() {
+                        @Override
+                        public com.google.gson.JsonObject generate(String instruction, String prompt, int maxTokens,
+                                                                   java.nio.file.Path cache) {
+                            return new com.google.gson.JsonObject();
+                        }
+
+                        @Override
+                        public void cancel() {
+                            cancelled.add(name);
+                        }
+                    };
+                });
+        java.util.List<ChatModel> wrapped = new java.util.ArrayList<>();
+        ModelLineup through = lineup.through(model -> {
+            wrapped.add(model);
+            return model;
+        });
+        org.junit.Assert.assertSame(lineup.model(ModelRoles.COMPOSITION), through.model(ModelRoles.COMPOSITION));
+        through.model(ModelRoles.PLANNING);
+        through.model(ModelRoles.PLANNING);
+        org.junit.Assert.assertEquals(java.util.List.of("big", "base"), made);
+        org.junit.Assert.assertEquals(2, wrapped.size());
+        org.junit.Assert.assertEquals(lineup.assignment(), through.assignment());
+        through.cancel();
+        org.junit.Assert.assertEquals(java.util.List.of("big", "base"), cancelled);
+    }
 }

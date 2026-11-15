@@ -72,8 +72,11 @@ import javax.swing.table.DefaultTableCellRenderer;
 final class AlbumsPanel extends JPanel {
     /** What the page needs from the window. */
     interface Host {
-        /** The model as the settings say; throws with words for the user if they are incomplete. */
-        ChatModel model();
+        /**
+         * The models as the settings say, one lineup per call: for one plan or one production.
+         * Throws with words for the user if the settings are incomplete.
+         */
+        ModelLineup models();
 
         int tokens();
 
@@ -617,7 +620,7 @@ final class AlbumsPanel extends JPanel {
         }
         final ChatModel model;
         try {
-            model = ModelLineup.of(host.model()).model(AlbumRoles.ALBUM);
+            model = host.models().model(AlbumRoles.ALBUM);
         } catch (RuntimeException invalid) {
             say(invalid.getMessage());
             return;
@@ -720,7 +723,7 @@ final class AlbumsPanel extends JPanel {
         try {
             // Every model of the production goes through the same permits: the limit holds over all pieces.
             Semaphore permits = new Semaphore(Math.max(1, host.parallelRequests()), true);
-            ModelLineup lineup = ModelLineup.of(new LimitedChatModel(host.model(), permits));
+            ModelLineup lineup = host.models().through(model -> new LimitedChatModel(model, permits));
             PieceAutopilot autopilot = new PieceAutopilot(registry, lineup, host.tokens(),
                     Math.max(1, host.parallelRequests()), host.rendering());
             producer = new AlbumProducer(files, songs, new AutopilotPieceProduction(autopilot, songs), PIECES_AT_ONCE);
