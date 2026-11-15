@@ -448,6 +448,10 @@ final class AlbumsPanel extends JPanel {
                 javax.swing.Box.createHorizontalStrut(10), scores, noScore}) {
             headKeys.add(key);
         }
+        if (assistant != null) {
+            headKeys.add(assistant.key("KI-Hilfe für die Noten des gewählten Titels: aus einer Beschreibung, Akkorden, "
+                    + "einer Melodie in Worten oder ABC schreibt die KI mit dir die Notenvorlage", this::scoreHelp));
+        }
         status.setForeground(AudioStudioTheme.TEXT_DIM);
         JPanel bottom = new JPanel(new BorderLayout(0, 8));
         bottom.setOpaque(false);
@@ -1042,6 +1046,36 @@ final class AlbumsPanel extends JPanel {
                 };
             }
         };
+    }
+
+    /** The help of the score template of the title chosen in the list. */
+    private Assistant.Field scoreHelp() {
+        int row = table.getSelectedRow();
+        if (album == null || row < 0 || row >= album.tracks().size()) {
+            say("Erst den Titel wählen, für den die KI Noten schreiben soll.");
+            return null;
+        }
+        final String id = album.id();
+        final AlbumTrack track = album.tracks().get(row);
+        if (track.hasPiece()) {
+            say("Dieser Titel ist schon ein Stück; seine Noten ändert der Editor.");
+            return null;
+        }
+        final AlbumTemplates templates = new AlbumTemplates(files);
+        return Assistant.scoreField("Noten für „" + track.title() + "“", "album-" + id + "-" + track.id() + "-score",
+                () -> templates.titleFolder(id, track.id()),
+                () -> {
+                    Album now = current(id);
+                    AlbumTrack shown = now.track(track.id());
+                    return "Titel: " + (shown == null ? track : shown) + "\nAlbum:\n" + AlbumTools.read(now);
+                },
+                () -> {
+                    if (album != null && album.id().equals(id)) {
+                        readTemplates();
+                        tracks.fireTableDataChanged();
+                        keys();
+                    }
+                });
     }
 
     /** The album as its file has it now. */

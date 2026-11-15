@@ -162,6 +162,165 @@ final class Assistant {
         };
     }
 
+    /** The endings a score the AI writes may have: text formats the template reader takes. */
+    static final java.util.Set<String> SCORE_FORMATS = java.util.Set.of("abc", "ly", "musicxml", "krn");
+    /** The most characters of a template the AI is given to read. */
+    static final int SCORE_READ_LIMIT = 200_000;
+
+    /**
+     * The help of a score template: the AI writes notes with the user, from a description,
+     * chords, a melody in words or any notation, and keeps them as the template of a piece or of
+     * a title of an album, which is then made from them instead of being composed freely.
+     *
+     * @param folder     the folder whose template it writes (of a piece, or of a title); {@code null}
+     *                   while there is none, read on the event thread
+     * @param afterWrite what the page does after the template changed, on the event thread
+     */
+    static Field scoreField(String label, String key, Supplier<Path> folder, Supplier<String> context,
+                            Runnable afterWrite) {
+        return new Field() {
+            @Override
+            public String label() {
+                return label;
+            }
+
+            @Override
+            public String key() {
+                return key;
+            }
+
+            @Override
+            public String system() {
+                return "You write the notes of a score template with the user of a music studio. The user may give a "
+                        + "description, chords, a melody in words, ABC, LilyPond or anything else; make real notes of "
+                        + "it, faithful to what is given, and invent only what the user leaves open. Write the score "
+                        + "in ABC notation unless the user wants another format: headers X:, T:, M:, L:, Q:, K:, one "
+                        + "voice per part (V: with a name of the instrument, e.g. V:1 name=\"Violin\"), every bar "
+                        + "complete. Keep it with write_score, always the whole score; it replaces the template "
+                        + "before. Read what is there with read_score and read_context. Talk with the user in their "
+                        + "language and say in a few sentences what you wrote. You can change nothing else.";
+            }
+
+            @Override
+            public List<AssistTool> tools() {
+                return List.of(
+                        AssistTool.reading("read_score", "Reads the template kept now, if it is text.",
+                                arguments -> onScreen(() -> {
+                                    Path where = folder.get();
+                                    java.util.Optional<Path> kept = where == null ? java.util.Optional.empty()
+                                            : com.aresstack.audio.studio.application.ScoreTemplates.of(where);
+                                    if (kept.isEmpty()) {
+                                        return "Es gibt noch keine Notenvorlage.";
+                                    }
+                                    String name = kept.get().getFileName().toString();
+                                    if (!SCORE_FORMATS.contains(ending(name))) {
+                                        return "Die Vorlage ist die Datei „" + name + "“ (kein Text zum Lesen).";
+                                    }
+                                    try {
+                                        String text = java.nio.file.Files.readString(kept.get(),
+                                                java.nio.charset.StandardCharsets.UTF_8);
+                                        return "Datei „" + name + "“:\n" + (text.length() > SCORE_READ_LIMIT
+                                                ? text.substring(0, SCORE_READ_LIMIT) + "\n…" : text);
+                                    } catch (java.io.IOException unreadable) {
+                                        return "Die Vorlage ließ sich nicht lesen: " + unreadable.getMessage();
+                                    }
+                                })),
+                        AssistTool.reading("read_context", "Reads what the piece or title is meant to be.",
+                                arguments -> onScreen(context)),
+                        AssistTool.of("write_score", "Keeps the whole score as the template, in place of the one "
+                                        + "before. format: abc (default), ly, musicxml or krn.",
+                                "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"},"
+                                        + "\"format\":{\"type\":\"string\"},\"name\":{\"type\":\"string\","
+                                        + "\"description\":\"a short file name without ending\"}},"
+                                        + "\"required\":[\"text\"]}",
+                                arguments -> {
+                                    String text = arguments.has("text") ? arguments.get("text").getAsString() : "";
+                                    if (text.isBlank()) {
+                                        throw new IllegalArgumentException("Die Noten sind leer.");
+                                    }
+                                    String format = arguments.has("format")
+                                            ? arguments.get("format").getAsString().trim().toLowerCase(java.util.Locale.ROOT)
+                                            : "abc";
+                                    String ending = SCORE_FORMATS.contains(format) ? format : "abc";
+                                    String name = arguments.has("name") ? safe(arguments.get("name").getAsString())
+                                            : "ki-noten";
+                                    return onScreen(() -> {
+                                        Path where = folder.get();
+                                        if (where == null) {
+                                            throw new IllegalStateException("Es ist kein Stück oder Titel gewählt, "
+                                                    + "zu dem die Noten gehören.");
+                                        }
+                                        try {
+                                            keep(where, name + "." + ending,
+                                                    text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                                        } catch (java.io.IOException failed) {
+                                            throw new IllegalStateException(failed.getMessage(), failed);
+                                        }
+                                        if (afterWrite != null) {
+                                            afterWrite.run();
+                                        }
+                                        return "Die Notenvorlage „" + name + "." + ending + "“ ist gespeichert ("
+                                                + text.length() + " Zeichen).";
+                                    });
+                                }));
+            }
+
+            @Override
+            public Runnable snapshot() {
+                Path where = folder.get();
+                java.util.Optional<Path> kept = where == null ? java.util.Optional.empty()
+                        : com.aresstack.audio.studio.application.ScoreTemplates.of(where);
+                byte[] bytes = null;
+                String name = null;
+                if (kept.isPresent()) {
+                    try {
+                        bytes = java.nio.file.Files.readAllBytes(kept.get());
+                        name = kept.get().getFileName().toString();
+                    } catch (java.io.IOException unreadable) {
+                        return () -> { };
+                    }
+                }
+                final byte[] was = bytes;
+                final String wasName = name;
+                return () -> {
+                    if (where == null) {
+                        return;
+                    }
+                    try {
+                        if (was == null) {
+                            com.aresstack.audio.studio.application.ScoreTemplates.remove(where);
+                        } else {
+                            keep(where, wasName, was);
+                        }
+                    } catch (java.io.IOException failed) {
+                        // the template stays as the AI left it
+                    }
+                    if (afterWrite != null) {
+                        afterWrite.run();
+                    }
+                };
+            }
+        };
+    }
+
+    /** Keeps these bytes under this name as the template of the folder, in place of the one before. */
+    static void keep(Path folder, String name, byte[] bytes) throws java.io.IOException {
+        Path temporary = java.nio.file.Files.createTempDirectory("ki-noten");
+        try {
+            Path file = temporary.resolve(name);
+            java.nio.file.Files.write(file, bytes);
+            com.aresstack.audio.studio.application.ScoreTemplates.put(folder, file);
+            java.nio.file.Files.deleteIfExists(file);
+        } finally {
+            java.nio.file.Files.deleteIfExists(temporary);
+        }
+    }
+
+    private static String ending(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot < 0 ? "" : name.substring(dot + 1).toLowerCase(java.util.Locale.ROOT);
+    }
+
     /** Runs this on the event thread and waits for its answer. */
     static String onScreen(Supplier<String> work) throws Exception {
         if (SwingUtilities.isEventDispatchThread()) {

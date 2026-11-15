@@ -1082,6 +1082,22 @@ public final class AudioStudioFrame extends JFrame {
         templateRow.add(templateAsks);
         templateRow.add(templateShown);
         templateRow.add(chooseTemplate);
+        templateRow.add(assistant().key("KI-Hilfe für die Notenvorlage: aus einer Beschreibung, Akkorden, einer "
+                + "Melodie in Worten oder ABC schreibt die KI mit dir die Noten dieses Stücks", () -> {
+                    if (directory.getText().trim().isEmpty()) {
+                        append("Erst ein Stück wählen oder anlegen; dann schreibt die KI-Hilfe seine Noten.");
+                        return null;
+                    }
+                    return Assistant.scoreField("Notenvorlage", "piece-" + pieceKey() + "-score", () -> {
+                        String folder = directory.getText().trim();
+                        return folder.isEmpty() ? null : Paths.get(folder);
+                    }, () -> "Stück: " + pieceKey() + "\nBeschreibung: " + description.getText()
+                            + "\nLänge, Tempo, Tonart, Takt: " + specSaid(), () -> {
+                        showTemplate();
+                        updateComposeKey();
+                        append("Notenvorlage aus der KI-Hilfe gespeichert; „Komponieren“ macht das Stück daraus.");
+                    });
+                }));
         templateRow.add(dropTemplate);
         originalWork.setOpaque(false);
         originalWork.setToolTipText("Die Beschreibung nennt ein bestehendes Werk oder Quellen: die KI gibt es mit Titel,"
