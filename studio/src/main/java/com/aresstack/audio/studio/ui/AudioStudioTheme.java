@@ -58,7 +58,16 @@ public final class AudioStudioTheme {
         java.util.Map<java.awt.font.TextAttribute, Object> attributes =
                 new java.util.HashMap<java.awt.font.TextAttribute, Object>();
         attributes.put(java.awt.font.TextAttribute.TRACKING, 0.12f);
-        return UIManager.getFont("defaultFont").deriveFont(Font.BOLD, size).deriveFont(attributes);
+        // Without the studio's look and feel (a test, a picture made off screen) there is no such
+        // font; the lettering then takes the font of a label, or a plain one.
+        Font base = UIManager.getFont("defaultFont");
+        if (base == null) {
+            base = UIManager.getFont("Label.font");
+        }
+        if (base == null) {
+            base = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
+        }
+        return base.deriveFont(Font.BOLD, size).deriveFont(attributes);
     }
 
     public static Font display(float size) {

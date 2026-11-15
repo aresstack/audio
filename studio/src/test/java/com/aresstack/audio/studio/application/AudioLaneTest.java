@@ -180,6 +180,41 @@ public final class AudioLaneTest {
     }
 
     @Test
+    public void renderingFromTheModelTakesTheAudioLaneIntoTheMix() throws Exception { // A8 over R1
+        String lane = audioLane();
+        long bar3 = session.composition().timeMap().tickOfBar(2);
+        assertTrue(editing.placeFile(lane, bar3, tone("click.wav", 44100, 0.2, 0.9)).changed());
+        long expected = Math.round(session.composition().timeMap().seconds(bar3) * 44100);
+
+        // The parts are rendered as ever, but silent on the stage: what is heard is the audio lane.
+        SpatialSceneStore store = new SpatialSceneStore();
+        SpatialScene scene = store.load(folder).fitting(StageMixService.Piece.of(session.composition()).tracks());
+        for (SoundSourcePlacement placement : scene.placements()) {
+            scene = scene.with(placement.withMuted(true));
+        }
+        store.save(folder, scene);
+        java.util.Map<String, String> builtin = new java.util.HashMap<String, String>();
+        for (var part : session.composition().parts()) {
+            builtin.put(part.id(), "builtin");
+        }
+        PieceRendering.Outcome rendered = new PieceRendering(
+                new com.aresstack.audio.instruments.InstrumentRegistry(folder.resolve("none.properties")))
+                .render(session, builtin, com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine.GERVILL,
+                        "fluidsynth", "sfizz_render", new java.util.HashMap<String, Integer>(), message -> { });
+        float[] left = samples(rendered.mix());
+        int first = -1;
+        for (int i = 0; i < left.length; i++) {
+            if (Math.abs(left[i]) > 0.01) {
+                first = i;
+                break;
+            }
+        }
+        assertTrue("the click is in the mix", first >= 0);
+        assertTrue("begins at sample " + expected + " within one block, was " + first,
+                first >= expected - 512 && first <= expected + 512);
+    }
+
+    @Test
     public void soundEffectsOfTheModuleSoundsArePlacedAsAssets() throws Exception {
         List<SoundDesign> effects = AudioAssets.effects();
         assertFalse(effects.isEmpty());
