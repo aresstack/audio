@@ -1,6 +1,9 @@
 package com.aresstack.audio.studio.ai;
 
+import com.aresstack.audio.composition.Part;
+import com.aresstack.audio.composition.Role;
 import com.aresstack.audio.composition.TimeMap;
+import com.aresstack.audio.studio.score.Voicing;
 import java.util.List;
 
 /**
@@ -17,6 +20,11 @@ public record VoiceTask(MusicalContext context, AddVoiceRequest request, String 
         if (frames.isEmpty() || attempt < 1) {
             throw new IllegalArgumentException("A voice task needs a frame and an attempt from 1.");
         }
+    }
+
+    /** Whether the new part is written on a grand staff (piano, organ, harp; work package S1). */
+    public boolean grand() {
+        return Voicing.layoutFor(request.program(), Role.DRUMS.equals(request.role())) == Part.StaffLayout.GRAND;
     }
 
     /** Part, instrument and role of the new voice in one line, for prompts. */

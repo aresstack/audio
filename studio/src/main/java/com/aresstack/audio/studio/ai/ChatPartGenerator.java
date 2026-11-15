@@ -57,6 +57,10 @@ public final class ChatPartGenerator implements PartGenerator {
                 : "The new voice ended its previous section with (bar beat dur pitch vel, bars of the piece):\n"
                 + connection + "Continue smoothly from there.\n");
         prompt.append(rules(task.request().role())).append('\n');
+        String voices = voiceRule(task);
+        if (!voices.isEmpty()) {
+            prompt.append(voices).append('\n');
+        }
         prompt.append("Return exactly one JSON object: {\"part\":\"").append(task.partId()).append("\",\"section\":\"")
                 .append(frame.sectionId()).append("\",\"notes\":[{\"bar\":1,\"beat\":0,\"duration\":1,\"pitch\":")
                 .append((plan.low() + plan.high()) / 2).append(",\"velocity\":90}]}. ")
@@ -76,6 +80,24 @@ public final class ChatPartGenerator implements PartGenerator {
                 + ContextBuilder.sha256(prompt).substring(0, 12) + ".json");
         return GeneratedNotes.read(model.generate(INSTRUCTION, prompt, maxTokens, cache), task.partId(),
                 frame.sectionId());
+    }
+
+    /**
+     * What the prompt asks about voices (work package S1, as the composer asks it): on a grand staff
+     * the hand of every note, on a harmony or texture part the line of each note if it plays several.
+     */
+    static String voiceRule(VoiceTask task) {
+        if (task.grand()) {
+            return "This instrument is written on a grand staff: give every note a field voice, \"rh\" for the right "
+                    + "hand (treble staff) or \"lh\" for the left hand (bass staff); a hand that plays two independent "
+                    + "lines at once uses \"rh2\" or \"lh2\" for its second line.";
+        }
+        String role = task.request().role();
+        if ("harmony".equals(role) || "texture".equals(role)) {
+            return "If the part plays independent lines at the same time, give every note a field voice: \"1\" for the "
+                    + "top line, \"2\" for the next one, and so on.";
+        }
+        return "";
     }
 
     private static String rules(String role) {
