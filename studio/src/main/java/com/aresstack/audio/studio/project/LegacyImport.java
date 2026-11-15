@@ -158,6 +158,9 @@ public final class LegacyImport {
             if (planned > bars) {
                 bars = planned;
             }
+            // Without a bars line a piece in four quarters and C major sounds at least eight bars long.
+            bars = ArrangementFile.defaultBars(bars, time.meters().get(0).barTicks() == 1920
+                    && time.meters().get(0).numerator() == 4 && time.keys().get(0).key().equals(Key.C_MAJOR));
         }
         long length = time.tickOfBar(bars);
 

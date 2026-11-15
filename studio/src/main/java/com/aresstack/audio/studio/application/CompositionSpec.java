@@ -159,7 +159,7 @@ public record CompositionSpec(int bars, int bpm, Key key, int numerator, int den
         if (!key.equals(Key.C_MAJOR)) {
             lines.add("key\t" + key.tonicName() + "\t" + (key.mode() == Key.Mode.MAJOR ? "major" : "minor"));
         }
-        if (ArrangementFile.needsBarsLine(bars, barsCovering, fourFour())) {
+        if (ArrangementFile.needsBarsLine(bars, barsCovering, fourFour() && key.equals(Key.C_MAJOR))) {
             lines.add("bars\t" + bars);
         }
         return lines;

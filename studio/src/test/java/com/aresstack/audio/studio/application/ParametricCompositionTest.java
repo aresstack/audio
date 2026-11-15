@@ -115,6 +115,7 @@ public final class ParametricCompositionTest {
                 {9, 50, "A major", 5, 4, new String[]{"A", "D", "E7", "A"}},
                 {17, 180, "C major", 4, 4, new String[]{"C", "Am", "F", "G7"}},
                 {6, 400, "G minor", 7, 8, new String[]{"Gm", "Cm", "D7", "Gm"}},
+                {4, 120, "C major", 4, 4, new String[]{"C", "F", "G7", "C"}}, // shorter than the old eight bars
         };
         for (Object[] c : cases) {
             int bars = (Integer) c[0];
@@ -180,6 +181,20 @@ public final class ParametricCompositionTest {
         assertWave(out.resolve("lead.wav"), 720);
         assertEquals(360, Score.read(tsv).bars());
         com.aresstack.audio.studio.render.RenderLimits.STANDARD.checkPiece(720, "A14");
+    }
+
+    @Test
+    public void aChangedMeterOrKeyInTheFileIsTakenIntoTheModel() throws Exception {
+        Path dir = folder.newFolder().toPath();
+        Files.write(dir.resolve("arrangement.tsv"), List.of("tempo\t120", "track\tlead\t0\t0\tmelody",
+                "note\tlead\t0\t1920\t60\t90"), StandardCharsets.UTF_8);
+        ProjectSession session = ProjectSession.open(dir).orElseThrow();
+        assertEquals(Key.C_MAJOR, session.composition().timeMap().keyAt(0));
+        Files.write(dir.resolve("arrangement.tsv"), List.of("tempo\t120", "meter\t3\t4", "key\tD\tminor",
+                "track\tlead\t0\t0\tmelody", "note\tlead\t0\t1440\t62\t90"), StandardCharsets.UTF_8);
+        assertTrue(session.synchronize());
+        assertEquals(Key.parse("D minor"), session.composition().timeMap().keyAt(0));
+        assertEquals(3, session.composition().timeMap().meterAt(0).numerator());
     }
 
     @Test

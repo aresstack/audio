@@ -270,13 +270,21 @@ public final class ArrangementFile {
     }
 
     /**
-     * Whether a piece of this many bars needs a {@code bars} line, that is whether a reader would
-     * otherwise take it for shorter: only when it is longer than its notes. Eight bars in four
-     * quarters is the length of every piece from before F2 and needs no line, so that those
-     * files stay as they were.
+     * The length of a piece without a {@code bars} line: the bars its notes reach into, and for a
+     * piece in four quarters and C major (every piece from before F2 looks so) at least
+     * {@link #LEGACY_BARS}, because the studio always made those eight bars long.
      */
-    public static boolean needsBarsLine(int bars, int barsCovering, boolean fourFour) {
-        return bars > barsCovering && !(fourFour && bars == LEGACY_BARS);
+    public static int defaultBars(int barsCovering, boolean fourFourInCMajor) {
+        return fourFourInCMajor ? Math.max(LEGACY_BARS, barsCovering) : barsCovering;
+    }
+
+    /**
+     * Whether a piece of this many bars needs a {@code bars} line: whenever a reader would
+     * otherwise take another length ({@link #defaultBars}). Old pieces of eight bars need none and
+     * stay as they were.
+     */
+    public static boolean needsBarsLine(int bars, int barsCovering, boolean fourFourInCMajor) {
+        return bars != defaultBars(barsCovering, fourFourInCMajor);
     }
 
     private <T extends Entry> Optional<T> last(Class<T> kind) {
