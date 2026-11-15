@@ -1,0 +1,128 @@
+package com.aresstack.audio.studio.album;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * An album: several pieces that belong together. It is an aggregate of ordinary pieces of the
+ * library, not a kind of piece: it holds what the album is about and the list of its titles, and
+ * names the folder of each piece. Immutable; every change gives a new album.
+ *
+ * @param id      the name of the folder of the album, fixed when it is created
+ * @param title   what the album is called
+ * @param concept what the user said about the whole album
+ * @param tracks  its titles in order
+ */
+public record Album(String id, String title, AlbumConcept concept, List<AlbumTrack> tracks) {
+    public Album {
+        if (!isId(id)) {
+            throw new IllegalArgumentException("Keine Kennung eines Albums: " + id);
+        }
+        title = title == null || title.isBlank() ? "Album" : title.trim();
+        if (concept == null) {
+            throw new IllegalArgumentException("Ein Album braucht ein Konzept.");
+        }
+        tracks = List.copyOf(tracks);
+        List<String> seen = new ArrayList<String>();
+        for (AlbumTrack track : tracks) {
+            if (seen.contains(track.id())) {
+                throw new IllegalArgumentException("Zwei Titel haben dieselbe Kennung: " + track.id());
+            }
+            seen.add(track.id());
+        }
+    }
+
+    /**
+     * Whether this is the id of an album: lower-case letters, digits and hyphens, starting with a
+     * letter or digit. An id is the name of the album's folder, so nothing else may ever be one:
+     * no dot, no separator, nothing that leads out of the folder of the albums.
+     */
+    public static boolean isId(String id) {
+        return id != null && id.length() <= 80 && id.matches("[a-z0-9][a-z0-9-]*");
+    }
+
+    public Album withTracks(List<AlbumTrack> changed) {
+        return new Album(id, title, concept, changed);
+    }
+
+    public Album withTitle(String changed) {
+        return new Album(id, changed, concept, tracks);
+    }
+
+    public Album withConcept(AlbumConcept changed) {
+        return new Album(id, title, changed, tracks);
+    }
+
+    /** The title with this id, or {@code null}. */
+    public AlbumTrack track(String trackId) {
+        for (AlbumTrack track : tracks) {
+            if (track.id().equals(trackId)) {
+                return track;
+            }
+        }
+        return null;
+    }
+
+    /** The album with one title exchanged for another of the same id. */
+    public Album with(AlbumTrack changed) {
+        List<AlbumTrack> next = new ArrayList<AlbumTrack>();
+        for (AlbumTrack track : tracks) {
+            next.add(track.id().equals(changed.id()) ? changed : track);
+        }
+        return withTracks(next);
+    }
+
+    /** How long the album is meant to be: the sum of what its titles ask for, in seconds. */
+    public int targetSeconds() {
+        int sum = 0;
+        for (AlbumTrack track : tracks) {
+            sum += track.targetSeconds();
+        }
+        return sum;
+    }
+
+    /** An id no title of this album has yet: t1, t2, ... */
+    public String freshTrackId() {
+        for (int number = tracks.size() + 1; ; number++) {
+            if (track("t" + number) == null) {
+                return "t" + number;
+            }
+        }
+    }
+
+    /**
+     * What a piece is told about its album when it is composed: the album in a few lines, its own
+     * place in it, and one line for each other title, so that the pieces belong together without
+     * the whole plan being made again. This is part of the music wish of the piece, in words.
+     */
+    public String brief(AlbumTrack own) {
+        StringBuilder text = new StringBuilder();
+        text.append("This piece is track ").append(tracks.indexOf(own) + 1).append(" of ").append(tracks.size())
+                .append(" of the album \"").append(title).append("\": ").append(concept.description());
+        if (!concept.style().isEmpty()) {
+            text.append(" Style of the album: ").append(concept.style()).append('.');
+        }
+        text.append("\nThis track: \"").append(own.title()).append('"');
+        append(text, ", mood: ", own.mood());
+        append(text, ", played by: ", own.instrumentation());
+        append(text, ", form: ", own.form());
+        text.append(". Fill its whole length with this form; develop and vary the ideas instead of repeating a short one.");
+        if (tracks.size() > 1) {
+            text.append("\nThe other tracks of the album, so that this one fits in and differs from them:");
+            for (AlbumTrack other : tracks) {
+                if (!other.id().equals(own.id())) {
+                    text.append("\n- ").append(tracks.indexOf(other) + 1).append(". \"").append(other.title()).append('"');
+                    append(text, ": ", other.mood());
+                    text.append(" (").append(other.bpm()).append(" BPM, ").append(other.key()).append(')');
+                }
+            }
+        }
+        return text.toString();
+    }
+
+    private static void append(StringBuilder text, String label, String value) {
+        if (!value.isEmpty()) {
+            text.append(label).append(value);
+        }
+    }
+}
