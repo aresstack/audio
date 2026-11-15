@@ -24,6 +24,15 @@ public final class LimitedChatModel implements ChatModel {
         this.free = new Semaphore(atOnce, true);
     }
 
+    /**
+     * @param free the permits several models share: every model of the lineup of an album is
+     *             wrapped with the same semaphore, so that the limit holds across all of them
+     */
+    public LimitedChatModel(ChatModel model, Semaphore free) {
+        this.model = model;
+        this.free = free;
+    }
+
     @Override
     public JsonObject generate(String instruction, String prompt, int maxTokens, Path cache) throws IOException {
         try {

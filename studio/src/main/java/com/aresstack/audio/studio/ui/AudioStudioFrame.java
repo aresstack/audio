@@ -7,6 +7,7 @@ import com.aresstack.audio.instruments.network.AudioProxyRoutes;
 import com.aresstack.audio.studio.ai.KipitzChatClient;
 import com.aresstack.audio.studio.application.GemmaMusicComposer;
 import com.aresstack.audio.studio.application.InstrumentProposalService;
+import com.aresstack.audio.studio.application.PieceAutopilot;
 import com.aresstack.audio.studio.application.MusicTrack;
 import com.aresstack.audio.studio.application.StudioMusicRenderer;
 import com.aresstack.audio.studio.application.TrackArrangement;
@@ -1186,6 +1187,11 @@ public final class AudioStudioFrame extends JFrame {
         if (!saveSettings(false)) {
             return;
         }
+        // What the autopilot needs from the window, read here on the event thread.
+        final com.aresstack.audio.studio.stage.SpatialScene stageBefore = scene;
+        final PieceAutopilot.Rendering rendering = new PieceAutopilot.Rendering(
+                sf2Engine.getSelectedIndex() == 1 ? Sf2Engine.FLUIDSYNTH : Sf2Engine.GERVILL,
+                fluidSynth.getText().trim(), sfizz.getText().trim());
         if (!autopilot) {
             // A proposal is asked for anew each time; the one kept from before would only come again.
             try {
@@ -1200,35 +1206,25 @@ public final class AudioStudioFrame extends JFrame {
             @Override
             public Path execute(Progress progress) throws Exception {
                 try {
+                    if (autopilot) {
+                        // The AI decides everything: the same steps the production of an album runs.
+                        PieceAutopilot pilot = new PieceAutopilot(registry,
+                                com.aresstack.audio.studio.ai.ModelLineup.of(client), tokens, parallel, rendering);
+                        return composeIntoPiece(pilot, prompt, output, stageBefore, progress);
+                    }
                     final InstrumentProposalService.Staged staged = new InstrumentProposalService(client, tokens)
                             .proposeStaged(prompt, output, progress);
                     final TrackArrangement selected = withPreferredSoundbanks(staged.tracks());
-                    final AtomicReference<RenderSettings> rendering = new AtomicReference<RenderSettings>();
                     SwingUtilities.invokeAndWait(new Runnable() {
                         @Override
                         public void run() {
                             trackTable.setArrangement(selected);
-                            if (autopilot) {
-                                // The AI decides everything: its stage is taken too, but for what is protected.
-                                scene = scene.fitting(selected.tracks()).taking(staged.scene());
-                                saveScene();
-                                showStage();
-                                trackTable.refreshStage();
-                                rendering.set(captureRenderSettings(selected));
-                            } else {
-                                stagePanel.setProposal(staged.scene());
-                            }
+                            stagePanel.setProposal(staged.scene());
                         }
                     });
-                    if (!autopilot) {
-                        progress.update("Instrumentenvorschlag bereit. "
-                                + "Du kannst die Tabelle ändern und danach auf 'Aus Tabelle komponieren' klicken.");
-                        return null;
-                    }
-                    new TrackArrangementStore().save(output, selected);
-                    Path arrangement = composeIntoPiece(new GemmaMusicComposer(client, tokens, parallel),
-                            prompt, output, selected, progress);
-                    return renderArrangement(arrangement, output, rendering.get(), progress);
+                    progress.update("Instrumentenvorschlag bereit. "
+                            + "Du kannst die Tabelle ändern und danach auf 'Aus Tabelle komponieren' klicken.");
+                    return null;
                 } finally {
                     activeClient = null;
                 }
@@ -1236,19 +1232,25 @@ public final class AudioStudioFrame extends JFrame {
         });
     }
 
+    /**
+     * The autopilot composes into the folder of the piece (see {@link #composeIntoPiece} above):
+     * the players and the stage the AI chose are shown as soon as they are there, the stage is
+     * taken but for what is protected, and what was composed becomes part of the model.
+     */
+    private Path composeIntoPiece(PieceAutopilot pilot, String prompt, Path output,
+                                  com.aresstack.audio.studio.stage.SpatialScene stageBefore,
+                                  Progress progress) throws Exception {
+        return pilot.run(prompt, output, null, stageBefore, songs, pieceModel, progress,
+                (selected, staged) -> SwingUtilities.invokeAndWait(() -> {
+                    trackTable.setArrangement(selected);
+                    scene = staged;
+                    showStage();
+                    trackTable.refreshStage();
+                })).rendered();
+    }
+
     private TrackArrangement withPreferredSoundbanks(TrackArrangement original) {
-        String preferred = "builtin";
-        for (InstrumentLibrary library : registry.installedInstruments()) {
-            if (library.id().startsWith("generaluser::") || library.id().equals("generaluser")) {
-                preferred = library.id();
-                break;
-            }
-        }
-        List<MusicTrack> selected = new ArrayList<MusicTrack>();
-        for (MusicTrack track : original.tracks()) {
-            selected.add(track.withLibrary(preferred));
-        }
-        return new TrackArrangement(selected);
+        return PieceAutopilot.withPreferredSoundbanks(original, registry);
     }
 
     private KipitzChatClient createAiClient() {
