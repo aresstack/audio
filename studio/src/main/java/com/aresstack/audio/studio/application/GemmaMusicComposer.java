@@ -209,6 +209,9 @@ public final class GemmaMusicComposer {
                     + "\nInstrumentation: " + instruments
                     + "\nReturn JSON with title, mood, tempoBpm=" + spec.bpm() + ", key=\"" + spec.key().name()
                     + "\", timeSignature=\"" + spec.meter() + "\", bars=" + spec.bars()
+                    + ", sections (the form of the piece: an array of {name, function, bars} in order, name as "
+                    + "a listener would call the section, function for example intro, theme, variation, bridge, "
+                    + "climax, outro; the bars of all sections add up to exactly " + spec.bars() + ")"
                     + ", chords (an array of exactly " + spec.bars() + " chord symbols, one per bar, that suit "
                     + spec.key().name() + ", for example \"" + exampleChords(spec.key()) + "\"; give the piece a "
                     + "form with contrasting sections and a cadence at the end), arrangementNotes (how the "
@@ -221,49 +224,79 @@ public final class GemmaMusicComposer {
         final int[] chordsShown = {-1};
         if (watched != null) {
             watched.preparing(step, 0);
-            showForm(watched, spec, List.of(), chordsShown);
+            showForm(watched, spec, null, false, chordsShown);
         }
         JsonObject plan = planner.generate("Return valid JSON only, no Markdown.", prompt,
                 Math.min(spec.isLegacy() ? 2048 : 4096, maxTokens), directory.resolve("composition-plan.json"),
                 watched == null ? null : text -> {
                     watched.preparing(step, text.length());
-                    showForm(watched, spec, seenChords(text), chordsShown);
+                    showForm(watched, spec, com.aresstack.audio.studio.ai.PartialJson.read(text), false, chordsShown);
                 });
         validatePlan(plan, spec, progress);
         if (watched != null) {
-            List<String> chords = chords(plan, spec);
-            showForm(watched, spec, chords, chordsShown);
-            watched.planned(chords);
+            showForm(watched, spec, plan, true, chordsShown);
+            watched.planned(chords(plan, spec));
         }
         return plan;
     }
 
-    /** The chords of a plan that is still being written, bar by bar as far as they have arrived. */
-    static List<String> seenChords(String text) {
+    /** The chords of a plan as far as it is written, bar by bar. */
+    static List<String> seenChords(JsonObject seen) {
         List<String> chords = new ArrayList<String>();
-        try {
-            JsonObject seen = com.aresstack.audio.studio.ai.PartialJson.read(text);
-            if (seen != null && seen.has("chords") && seen.get("chords").isJsonArray()) {
-                for (JsonElement chord : seen.getAsJsonArray("chords")) {
-                    if (chord.isJsonPrimitive()) {
-                        chords.add(chord.getAsString().trim());
-                    }
+        if (seen != null && seen.has("chords") && seen.get("chords").isJsonArray()) {
+            for (JsonElement chord : seen.getAsJsonArray("chords")) {
+                if (chord.isJsonPrimitive()) {
+                    chords.add(chord.getAsString().trim());
                 }
             }
-        } catch (RuntimeException unreadable) {
-            // a look at the plan on its way
         }
         return chords;
     }
 
-    /** Shows the form of the new piece, one section over all its bars, with the chords known so far. */
-    private static void showForm(SketchProgress watched, CompositionSpec spec, List<String> chords, int[] shown) {
-        if (spec.isLegacy() || chords.size() == shown[0]) {
+    /**
+     * The form of a new piece as far as its plan is written: the sections it names, one behind the
+     * other, with the chords that have arrived; as long as it names none, one section over all bars.
+     *
+     * @param whole whether the plan is complete: then the sections cover the piece
+     */
+    static List<com.aresstack.audio.studio.progress.FormSection> seenForm(JsonObject seen, CompositionSpec spec,
+                                                                          boolean whole) {
+        List<String> chords = seenChords(seen);
+        List<com.aresstack.audio.studio.performance.PlanForm.Named> named = whole
+                ? com.aresstack.audio.studio.performance.PlanForm.read(seen, spec.bars())
+                : com.aresstack.audio.studio.performance.PlanForm.seen(seen, spec.bars());
+        if (named.isEmpty()) {
+            named = List.of(new com.aresstack.audio.studio.performance.PlanForm.Named(
+                    com.aresstack.audio.studio.performance.PlanForm.WHOLE, null, spec.bars()));
+        }
+        List<com.aresstack.audio.studio.progress.FormSection> form =
+                new ArrayList<com.aresstack.audio.studio.progress.FormSection>();
+        int bar = 0;
+        for (com.aresstack.audio.studio.performance.PlanForm.Named section : named) {
+            form.add(new com.aresstack.audio.studio.progress.FormSection(bar, section.bars(), section.name(),
+                    section.function(), null, chords.subList(Math.min(bar, chords.size()),
+                            Math.min(bar + section.bars(), chords.size()))));
+            bar += section.bars();
+        }
+        return form;
+    }
+
+    /** Shows the form of the new piece while its plan arrives, whenever a section or a chord is new. */
+    private static void showForm(SketchProgress watched, CompositionSpec spec, JsonObject seen, boolean whole,
+                                 int[] shown) {
+        if (spec.isLegacy()) {
             return;
         }
-        shown[0] = chords.size();
-        watched.form(List.of(new com.aresstack.audio.studio.progress.FormSection(0, spec.bars(), "A", null, null,
-                chords.subList(0, Math.min(chords.size(), spec.bars())))));
+        try {
+            List<com.aresstack.audio.studio.progress.FormSection> form = seenForm(seen, spec, whole);
+            int sign = form.size() * 100000 + form.get(form.size() - 1).bars() * 1000 + seenChords(seen).size();
+            if (sign != shown[0]) {
+                shown[0] = sign;
+                watched.form(form);
+            }
+        } catch (RuntimeException unreadable) {
+            // a look at the plan on its way
+        }
     }
 
     /** What the plan is to say about tempo and loudness, in the words of {@link PlanShape}. */

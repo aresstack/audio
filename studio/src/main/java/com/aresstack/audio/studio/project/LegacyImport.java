@@ -192,14 +192,38 @@ public final class LegacyImport {
         }
         parts = withLegacyChannels(parts, lines);
 
-        Section whole = new Section(previousSectionId(), "A", null, 0, length, null, chords(plan), null);
+        // The plan may name the form: sections with names, one behind the other. Without, one section "A".
+        List<Section> form = new ArrayList<>();
+        List<String> harmony = chords(plan);
+        int firstBar = 0;
+        List<com.aresstack.audio.studio.performance.PlanForm.Named> named =
+                com.aresstack.audio.studio.performance.PlanForm.read(plan, Math.max(1, time.barsCovering(length)));
+        for (int i = 0; i < named.size(); i++) {
+            com.aresstack.audio.studio.performance.PlanForm.Named section = named.get(i);
+            long start = time.tickOfBar(firstBar);
+            if (i > 0 && start >= length) {
+                break;
+            }
+            long sectionEnd = i == named.size() - 1 ? length : Math.min(length, time.tickOfBar(firstBar + section.bars()));
+            String id = i == 0 ? previousSectionId()
+                    : previous != null && previous.sections().size() > i ? previous.sections().get(i).id() : fresh();
+            form.add(new Section(id, section.name(), section.function(), start, sectionEnd - start, null,
+                    named.size() == 1 ? harmony : harmony.subList(Math.min(firstBar, harmony.size()),
+                            Math.min(firstBar + section.bars(), harmony.size())), null));
+            firstBar += section.bars();
+        }
+        if (form.get(form.size() - 1).endTick() < length) {
+            Section last = form.remove(form.size() - 1);
+            form.add(new Section(last.id(), last.name(), last.function(), last.startTick(), length - last.startTick(),
+                    null, last.harmony(), null));
+        }
         // Since the dynamics work package the plan may name how tempo and loudness run through the piece.
         Set<String> partIds = new LinkedHashSet<>();
         for (Part part : parts) {
             partIds.add(part.id());
         }
         PlanShape.Shape shape = PlanShape.read(plan, time, partIds, PlanShape.MIN_BPM, PlanShape.MAX_BPM, length, this::warn);
-        Composition composition = new Composition(meta(plan, song), shape.timeMap(), List.of(whole), parts, tracks,
+        Composition composition = new Composition(meta(plan, song), shape.timeMap(), form, parts, tracks,
                 List.of(), shape.dynamics());
         for (CompositionValidator.Violation violation : CompositionValidator.validate(composition)) {
             warn("Modell: " + violation);

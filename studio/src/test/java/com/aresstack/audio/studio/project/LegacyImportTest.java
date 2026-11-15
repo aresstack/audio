@@ -227,6 +227,39 @@ public final class LegacyImportTest {
     }
 
     @Test
+    public void theSectionsThePlanNamesBecomeTheFormOfThePiece() throws Exception {
+        Path folder = temporary.newFolder("named").toPath();
+        try (Stream<Path> files = Files.list(LEGACY.resolve("studio-piece"))) {
+            for (Path file : files.toList()) {
+                Files.copy(file, folder.resolve(file.getFileName()));
+            }
+        }
+        Path planFile = folder.resolve("composition-plan.json");
+        com.google.gson.JsonObject plan = com.google.gson.JsonParser.parseString(
+                new String(Files.readAllBytes(planFile), StandardCharsets.UTF_8)).getAsJsonObject();
+        plan.add("sections", com.google.gson.JsonParser.parseString("[{\"name\":\"Morgen\",\"function\":\"intro\","
+                + "\"bars\":4},{\"name\":\"no length\"},{\"name\":\"Aufbruch\",\"function\":\"theme\",\"bars\":2}]"));
+        Files.write(planFile, plan.toString().getBytes(StandardCharsets.UTF_8));
+
+        Composition composition = imported(folder).composition();
+
+        assertEquals(2, composition.sections().size());
+        Section first = composition.sections().get(0);
+        Section second = composition.sections().get(1);
+        assertEquals("Morgen", first.name());
+        assertEquals("intro", first.function());
+        assertEquals(4 * 1920, first.lengthTicks());
+        assertEquals(List.of("C", "G", "Am", "F"), first.harmony());
+        assertEquals("Aufbruch", second.name());
+        assertEquals("what the plan leaves open at the end joins the last section", 4 * 1920, second.lengthTicks());
+        assertEquals(List.of("C", "G", "F", "G"), second.harmony());
+        assertEquals(first.endTick(), second.startTick());
+        assertTrue(CompositionValidator.validate(composition).isEmpty());
+        assertEquals("importing again keeps the ids", composition.sections().stream().map(Section::id).toList(),
+                imported(folder).composition().sections().stream().map(Section::id).toList());
+    }
+
+    @Test
     public void whatCannotBeTakenOverIsLeftOutAndReported() throws Exception {
         LegacyImport.Result result = imported(LEGACY.resolve("damaged"));
         Composition composition = result.composition();
