@@ -174,6 +174,17 @@ public final class MixLevelTest {
     }
 
     @Test
+    public void liveTakesTheFactorOfTheFileBehindTheSofterLimiter() throws Exception {
+        MixOutcome outcome = new SpatialStemMixer().mix(files, placements, DRY, 2, MixLevel.legacy(-2), file("f.wav"), 16);
+        com.aresstack.audio.core.mix.MasterBus.Settings live = MixLevel.liveMaster(outcome.legacyFactor(), -2);
+        Assert.assertEquals(LevelMode.FIXED, live.mode());
+        Assert.assertEquals(outcome.legacyFactor(), live.gain(), 0f);
+        Assert.assertSame(LookaheadLimiter.Settings.LIVE, live.limiter());
+        // before the first mix: the fixed make-up and the master level
+        Assert.assertEquals(Math.pow(10, (MixLevel.MAKEUP_DB - 2) / 20), MixLevel.liveMaster(Float.NaN, -2).gain(), 1e-6);
+    }
+
+    @Test
     public void liveLevelHasNoNormalization() {
         MixLevel export = MixLevel.fixed(-3, LookaheadLimiter.Settings.DEFAULT, ExportNormalization.loudness(-14));
         Assert.assertEquals(ExportNormalization.Kind.NONE, export.live().normalization().kind());

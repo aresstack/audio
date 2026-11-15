@@ -72,6 +72,15 @@ public final class MasterBus implements AudioProcessor {
             return new Settings(LevelMode.LEGACY_PEAK, factor, new LookaheadLimiter.Settings(0, 80));
         }
 
+        /**
+         * Live playback with a fixed gain, usually the factor the last file mix found, and the
+         * {@link LookaheadLimiter.Settings#LIVE live limiter}: a mix at the level of its file
+         * passes untouched; only what a live change pushes over the ceiling is held.
+         */
+        public static Settings live(float gain) {
+            return new Settings(LevelMode.FIXED, gain, LookaheadLimiter.Settings.LIVE);
+        }
+
         public LevelMode mode() {
             return mode;
         }
