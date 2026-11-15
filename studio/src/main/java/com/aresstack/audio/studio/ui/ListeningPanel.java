@@ -3,9 +3,6 @@ package com.aresstack.audio.studio.ui;
 import com.aresstack.audio.studio.application.StageListening;
 import com.aresstack.audio.studio.hrtf.HrtfDataset;
 import java.awt.FlowLayout;
-import java.awt.Insets;
-import javax.swing.Box;
-import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JLabel;
@@ -37,20 +34,22 @@ final class ListeningPanel extends JPanel {
     private final Host host;
     private final JCheckBox headphones = new JCheckBox("Kopfhörer (3D)");
     private final JCheckBox convolution = new JCheckBox("Faltungshall");
-    private final JButton impulse = new JButton("Impulsantwort …");
-    private final JButton noImpulse = new JButton("×");
-    private final JButton folder = new JButton("HRTF-Ordner …");
-    private final JButton noFolder = new JButton("×");
-    private final JButton kemar = new JButton("MIT KEMAR laden");
+    private final JButton impulse = new DeckWidgets.HeadKey("Impulsantwort");
+    private final JButton noImpulse = new DeckWidgets.HeadKey("×");
+    private final JButton folder = new DeckWidgets.HeadKey("HRTF-Ordner");
+    private final JButton noFolder = new DeckWidgets.HeadKey("×");
+    private final JButton kemar = new DeckWidgets.HeadKey("KEMAR laden");
     private final JLabel room = new JLabel(" ");
     private final JLabel head = new JLabel(" ");
+    /** The switches and keys of the panel, for the head of the stage's module. */
+    private final JPanel keys = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
     private StageListening shown = StageListening.USUAL;
     private boolean filling;
 
     ListeningPanel(Host host) {
         this.host = host;
         setOpaque(false);
-        setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
+        setLayout(new FlowLayout(FlowLayout.LEFT, 14, 0));
         headphones.setOpaque(false);
         convolution.setOpaque(false);
         headphones.setToolTipText("Die Bühne für Kopfhörer: Richtung und Höhe über Kopfdaten (HRTF) statt über das Panorama. "
@@ -58,20 +57,21 @@ final class ListeningPanel extends JPanel {
         convolution.setToolTipText("Der Raum klingt durch Faltung mit einer Impulsantwort statt algorithmisch");
         impulse.setToolTipText("Eine gemessene Impulsantwort (WAV) als Raum laden; gilt mit „Faltungshall“");
         folder.setToolTipText("Einen eigenen Ordner mit Kopfdaten im Format des MIT-KEMAR-Satzes wählen");
-        kemar.setToolTipText("Zeigt Quelle, Bedingungen und Zitat und lädt den Satz erst nach Bestätigung");
+        kemar.setToolTipText("Kopfdaten des MIT-KEMAR-Satzes laden: zeigt Quelle, Bedingungen und Zitat und lädt den Satz erst nach Bestätigung");
         noImpulse.setToolTipText("Keine eigene Impulsantwort: der Raum klingt aus seinen Zahlen");
         noFolder.setToolTipText("Keinen eigenen Ordner: der geladene Satz oder das Kopfmodell");
-        for (JButton small : new JButton[]{impulse, noImpulse, folder, noFolder, kemar}) {
-            small.setMargin(new Insets(3, 8, 3, 8));
-        }
         for (JLabel line : new JLabel[]{room, head}) {
             line.setForeground(AudioStudioTheme.TEXT_DIM);
             line.setFont(line.getFont().deriveFont(11.5f));
-            line.setAlignmentX(LEFT_ALIGNMENT);
         }
-        add(row(headphones, convolution));
-        add(row(impulse, noImpulse, folder, noFolder, kemar));
-        add(Box.createVerticalStrut(2));
+        // The switches and keys stand in the head of the stage, beside its name; here, under the
+        // stage, is only what came of them: the room and the head that are heard.
+        keys.setOpaque(false);
+        keys.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 10, 0, 0));
+        for (java.awt.Component part : new java.awt.Component[]{headphones, convolution, impulse, noImpulse,
+                folder, noFolder, kemar}) {
+            keys.add(part);
+        }
         add(room);
         add(head);
 
@@ -95,14 +95,9 @@ final class ListeningPanel extends JPanel {
         kemar.addActionListener(event -> askForDownload());
     }
 
-    private static JPanel row(java.awt.Component... parts) {
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-        row.setOpaque(false);
-        row.setAlignmentX(LEFT_ALIGNMENT);
-        for (java.awt.Component part : parts) {
-            row.add(part);
-        }
-        return row;
+    /** The switches and keys, to stand in the head of the stage's module. */
+    JPanel keys() {
+        return keys;
     }
 
     private void change(StageListening wanted) {
@@ -165,7 +160,7 @@ final class ListeningPanel extends JPanel {
             noImpulse.setVisible(!listening.impulseFile().isEmpty());
             noFolder.setVisible(!listening.hrtfFolder().isEmpty());
             kemar.setEnabled(!installed && !busy);
-            kemar.setText(installed ? "MIT KEMAR geladen" : busy ? "MIT KEMAR lädt …" : "MIT KEMAR laden");
+            kemar.setText(installed ? "KEMAR geladen" : busy ? "KEMAR lädt …" : "KEMAR laden");
             if (loaded == null) {
                 room.setText("Wird gelesen …");
                 head.setText(" ");

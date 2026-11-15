@@ -248,7 +248,14 @@ public final class AudioStudioFrame extends JFrame {
             InstrumentProposalService.MAX_VOICES, 1));
     private final JSpinner voicesMax = new JSpinner(new SpinnerNumberModel(8, InstrumentProposalService.MIN_VOICES,
             InstrumentProposalService.MAX_VOICES, 1));
-    private final JButton composeButton = new JButton("Komponieren");
+    private final JButton composeButton = new DeckWidgets.HeadKey("Komponieren");
+    /** The two views of the composition page: what is asked of the AI, and the score that came of it. */
+    private final DeckWidgets.SegmentKey draftKey = new DeckWidgets.SegmentKey("Entwurf", true);
+    private final DeckWidgets.SegmentKey scoreKey = new DeckWidgets.SegmentKey("Partitur", false);
+    private final java.awt.CardLayout songViews = new java.awt.CardLayout();
+    private final JPanel songView = new JPanel(songViews);
+    /** Whether the piece shown last was composed already; a change of that chooses the view. */
+    private Boolean composedShown;
     private final DeckDisplays.Meter masterLeft = new DeckDisplays.Meter(false);
     private final DeckDisplays.Meter masterRight = new DeckDisplays.Meter(false);
     private final DeckWidgets.TransportKey playKey = new DeckWidgets.TransportKey(
@@ -766,7 +773,6 @@ public final class AudioStudioFrame extends JFrame {
         aiChooses.setToolTipText("Die KI schlägt zur Beschreibung passende Instrumente vor und komponiert dann für sie");
         ownTracks.setToolTipText("Für genau die Spuren im Arrangement komponieren; was schon komponiert ist, bleibt");
         composeButton.setToolTipText("Komponieren und gleich rendern");
-        composeButton.setFont(composeButton.getFont().deriveFont(java.awt.Font.BOLD, 15f));
         composeButton.addActionListener(event -> compose());
         getRootPane().setDefaultButton(composeButton);
 
@@ -807,20 +813,16 @@ public final class AudioStudioFrame extends JFrame {
         JPanel scoreHead = new JPanel(new BorderLayout());
         scoreHead.setOpaque(false);
         scoreHead.add(DeckWidgets.lettering("Partitur · was die Instrumente spielen"), BorderLayout.WEST);
-        JButton performance = new JButton("Vortrag: Tempo, Dynamik, Artikulation …");
+        JButton performance = new DeckWidgets.HeadKey("Vortrag: Tempo, Dynamik, Artikulation");
         performance.setToolTipText("Tempowechsel (auch accelerando, ritardando), Dynamikzeichen und Gabeln, "
                 + "Artikulationen und was die Stufen bedeuten");
         performance.addActionListener(event -> performance());
         scoreHead.add(performance, BorderLayout.EAST);
         notes.add(scoreHead, BorderLayout.NORTH);
         notes.add(sheet, BorderLayout.CENTER);
-        JPanel written = new JPanel(new BorderLayout(0, 14));
-        written.setOpaque(false);
-        written.add(wish, BorderLayout.NORTH);
-        written.add(notes, BorderLayout.CENTER);
 
         // One choice of two, shown as what it is: radio buttons behind the question they answer.
-        JPanel whoRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        JPanel whoRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
         whoRow.setOpaque(false);
         JLabel whoAsks = new JLabel("Instrumente:");
         whoAsks.setForeground(AudioStudioTheme.TEXT_DIM);
@@ -865,20 +867,40 @@ public final class AudioStudioFrame extends JFrame {
         whoRow.add(voicesMax);
         whoRow.add(voicesWord);
         whoRow.add(ownTracks);
-        composeButton.setPreferredSize(new Dimension(310, 44));
-        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
-        bottom.setOpaque(false);
-        bottom.add(whoRow);
-        bottom.add(javax.swing.Box.createHorizontalStrut(14));
-        bottom.add(composeButton);
+        // The page shows one of two things, never both: the draft, what the AI is asked for, or the
+        // score that came of it. The switch stands in the head beside the name, then the key that composes.
+        prompt.setPreferredSize(new Dimension(300, 200));
+        whoRow.setBorder(BorderFactory.createEmptyBorder(12, 0, 0, 0));
+        JPanel draft = new JPanel(new BorderLayout());
+        draft.setOpaque(false);
+        JPanel asked = new JPanel(new BorderLayout());
+        asked.setOpaque(false);
+        asked.add(wish, BorderLayout.CENTER);
+        asked.add(whoRow, BorderLayout.SOUTH);
+        draft.add(asked, BorderLayout.NORTH);
+        songView.setOpaque(false);
+        songView.add(draft, "draft");
+        songView.add(notes, "score");
+        javax.swing.ButtonGroup oneView = new javax.swing.ButtonGroup();
+        oneView.add(draftKey);
+        oneView.add(scoreKey);
+        draftKey.setToolTipText("Entwurf: was die KI gesagt bekommt, Takte, Tempo, Tonart, Instrumente, Modelle");
+        scoreKey.setToolTipText("Partitur: was die Instrumente spielen");
+        draftKey.addActionListener(event -> songViews.show(songView, "draft"));
+        scoreKey.addActionListener(event -> songViews.show(songView, "score"));
+        draftKey.setSelected(true);
+        JPanel composing = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        composing.setOpaque(false);
+        composing.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 0));
+        composing.add(draftKey);
+        composing.add(scoreKey);
+        composing.add(javax.swing.Box.createHorizontalStrut(12));
+        composing.add(composeButton);
 
-        JPanel session = new JPanel(new BorderLayout(0, 16));
-        session.setOpaque(false);
-        session.add(written, BorderLayout.CENTER);
-        session.add(bottom, BorderLayout.SOUTH);
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
-        DeckWidgets.Module module = new DeckWidgets.Module("Komposition", session);
+        DeckWidgets.Module module = new DeckWidgets.Module("Komposition", songView);
+        module.setHeadStart(composing);
         module.setHeadEnd(withPieceMenu(songFacts));
         page.add(module, BorderLayout.CENTER);
         return page;
@@ -950,8 +972,8 @@ public final class AudioStudioFrame extends JFrame {
         JPanel page = new JPanel(new BorderLayout(0, 10));
         page.setOpaque(false);
         page.add(stagePanel, BorderLayout.CENTER);
-        page.add(new DeckWidgets.Module("Hören · Lautsprecher oder Kopfhörer, Raum", listeningPanel),
-                BorderLayout.SOUTH);
+        // How the stage is heard stands in the head of the stage, not in a module of its own under it.
+        stagePanel.setListening(listeningPanel.keys(), listeningPanel);
         applyListening(false); // what the settings said, read from the disk in the background
         return page;
     }
@@ -1586,7 +1608,8 @@ public final class AudioStudioFrame extends JFrame {
         JScrollPane scroll = new JScrollPane(log);
         scroll.setBorder(BorderFactory.createLineBorder(new java.awt.Color(0x24352C), 1, true));
         DeckWidgets.Module module = new DeckWidgets.Module("Protokoll", scroll);
-        JButton clear = new JButton("Leeren");
+        JButton clear = new DeckWidgets.HeadKey("Leeren");
+        clear.setToolTipText("Das Protokoll leeren");
         clear.addActionListener(event -> log.setText(""));
         module.setHeadEnd(clear);
         JPanel page = new JPanel(new BorderLayout());
@@ -1803,6 +1826,12 @@ public final class AudioStudioFrame extends JFrame {
      * the tracks composed that have no notes yet.
      */
     private void updateComposeKey() {
+        // A piece that is composed opens on its score, one that is not on its draft; after that the
+        // switch in the head is the user's.
+        if (composedShown == null || composedShown.booleanValue() != specFields.locked()) {
+            composedShown = Boolean.valueOf(specFields.locked());
+            showSongView(specFields.locked());
+        }
         if (!specFields.locked()) {
             composeButton.setText("Komponieren");
             composeButton.setToolTipText("Komponieren und gleich rendern");
@@ -1818,12 +1847,21 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     /** The one key: the AI chooses the instruments first, or the tracks of the mixer are composed as they are. */
+    /** Shows the draft or the score on the composition page. */
+    private void showSongView(boolean score) {
+        (score ? scoreKey : draftKey).setSelected(true);
+        songViews.show(songView, score ? "score" : "draft");
+    }
+
     private void compose() {
+        // The draft is said: the page turns to the score, where the notes appear as they are written.
         if (aiChooses.isSelected()) {
             if (startAfresh()) {
+                showSongView(true);
                 proposeInstruments(true);
             }
         } else if (planStillFits()) {
+            showSongView(true);
             generate();
         }
     }

@@ -166,6 +166,19 @@ final class StagePanel extends JPanel {
     private final JPanel verdict = new JPanel(new GridLayout(1, 2, 8, 0));
     private final JLabel status = new JLabel(" ");
 
+    private DeckWidgets.Module stageModule;
+    /** Under the stage: what is heard, and how the discs are moved. */
+    private final JPanel stageFoot = new JPanel(new BorderLayout(14, 0));
+
+    /**
+     * How the stage is heard belongs to the stage: its switches and keys stand in the head of
+     * the stage's module, beside the name, and what came of them in a line under the stage.
+     */
+    void setListening(javax.swing.JComponent keys, javax.swing.JComponent heard) {
+        stageModule.setHeadStart(keys);
+        stageFoot.add(heard, BorderLayout.CENTER);
+    }
+
     StagePanel(Host host) {
         super(new BorderLayout(14, 0));
         this.host = host;
@@ -183,11 +196,17 @@ final class StagePanel extends JPanel {
                 showChosen();
             }
         });
-        DeckWidgets.Module stage = new DeckWidgets.Module("Bühne · von oben", view);
-        JLabel hint = new JLabel("Scheiben ziehen · Mausrad: lauter und leiser");
+        JPanel seen = new JPanel(new BorderLayout(0, 6));
+        seen.setOpaque(false);
+        seen.add(view, BorderLayout.CENTER);
+        JLabel hint = new JLabel("Von oben gesehen · Scheiben ziehen · Mausrad: lauter und leiser");
         hint.setForeground(AudioStudioTheme.TEXT_FAINT);
         hint.setFont(hint.getFont().deriveFont(11.5f));
-        stage.setHeadEnd(hint);
+        stageFoot.setOpaque(false);
+        stageFoot.add(hint, BorderLayout.EAST);
+        seen.add(stageFoot, BorderLayout.SOUTH);
+        stageModule = new DeckWidgets.Module("Bühne", seen);
+        DeckWidgets.Module stage = stageModule;
         add(stage, BorderLayout.CENTER);
 
         // The room.
