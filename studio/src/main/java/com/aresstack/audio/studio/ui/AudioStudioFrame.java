@@ -1577,10 +1577,11 @@ public final class AudioStudioFrame extends JFrame {
         addRow(ai, row++, "Takte je Abschnitt",
                 line(sectionBars, note("Takte je Anfrage und Spur; Stücke bis zur doppelten Länge entstehen in einem Zug.")));
         growBars.setPreferredSize(new Dimension(110, 30));
-        growBars.setToolTipText("Ein langes Stück beginnt mit so vielen Takten und wächst in Schritten dieser Größe, "
+        growBars.setToolTipText("So lang ist ein neues Stück, so viel fügt „Verlängern“ an, und in Schritten dieser Größe wächst ein langes Stück, "
                 + PieceAutopilot.MIN_GROW_BARS + " bis " + PieceAutopilot.MAX_GROW_BARS);
-        addRow(ai, row++, "Takte je Wachstumsschritt",
-                line(growBars, note("Längere Stücke beginnen so lang und werden schrittweise verlängert.")));
+        addRow(ai, row++, "Takte je Stück und Schritt",
+                line(growBars, note("Vorgabe für neue Stücke, für „Verlängern“ und für jeden Schritt, um den lange Stücke wachsen.")));
+        growBars.addChangeListener(event -> specFields.suggestBars((Integer) growBars.getValue()));
         addRow(ai, row++, "Parallel",
                 line(parallelRequests, note("Anfragen gleichzeitig; höchstens so viele wie Spuren.")));
         addRow(ai, row, "", note("Der API-Key wird lokal im Klartext gespeichert (studio.properties im Benutzerordner)."));
@@ -2622,7 +2623,7 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         final com.aresstack.audio.studio.ai.ContinuationRequest request =
-                ExtendForm.ask(this, piece.get().composition(), arrangementView.bars());
+                ExtendForm.ask(this, piece.get().composition(), arrangementView.bars(), (Integer) growBars.getValue());
         if (request == null) {
             return;
         }
@@ -3747,6 +3748,7 @@ public final class AudioStudioFrame extends JFrame {
             tokenLimit.setValue(AiDefaults.maxTokens(saved));
             sectionBars.setValue(AiDefaults.sectionBars(saved));
             growBars.setValue(AiDefaults.growBars(saved));
+            specFields.suggestBars((Integer) growBars.getValue());
             proxyHost.setText(saved.getProperty("proxyHost", ""));
             proxyPort.setText(saved.getProperty("proxyPort", ""));
             proxyPacUrl.setText(saved.getProperty("proxyPacUrl", ""));
@@ -3804,7 +3806,7 @@ public final class AudioStudioFrame extends JFrame {
             com.aresstack.audio.studio.settings.ModelSettings.write(saved, currentAssignment());
             saved.setProperty("maxTokens", tokenLimit.getValue().toString());
             saved.setProperty("sectionBars", sectionBars.getValue().toString());
-            saved.setProperty("growBars", growBars.getValue().toString());
+            saved.setProperty("pieceBars", growBars.getValue().toString());
             saved.setProperty("proxyHost", proxyHost.getText().trim());
             saved.setProperty("proxyPort", proxyPort.getText().trim());
             String selectedProxyMode = proxyMode.getSelectedIndex() == 0 ? ""

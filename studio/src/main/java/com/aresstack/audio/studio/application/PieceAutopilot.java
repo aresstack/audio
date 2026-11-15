@@ -58,9 +58,9 @@ public final class PieceAutopilot {
      * A long piece is not composed in one go: it begins with {@link #growBars} bars, and the
      * continuation (C3) adds the rest in steps of as many bars, each step planned with the piece so
      * far in view. One plan for minutes of music would need an answer of the model longer than any
-     * limit of tokens. The number is the setting "Takte je Wachstumsschritt"; this is its default.
+     * limit of tokens. The number is the setting "Takte je Stück und Schritt"; this is its default.
      */
-    public static final int GROW_BARS = 16;
+    public static final int GROW_BARS = 32;
     public static final int MIN_GROW_BARS = 4;
     public static final int MAX_GROW_BARS = 256;
 
