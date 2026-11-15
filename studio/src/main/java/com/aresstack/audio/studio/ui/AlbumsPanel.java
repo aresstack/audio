@@ -1016,6 +1016,9 @@ final class AlbumsPanel extends JPanel {
                     }
                 }
 
+                /** The last step of each title told in the protocol. */
+                private final java.util.Map<String, String> logged = new java.util.concurrent.ConcurrentHashMap<>();
+
                 /** The titles this run is working on. */
                 private final java.util.Set<String> running = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
@@ -1028,6 +1031,12 @@ final class AlbumsPanel extends JPanel {
 
                 @Override
                 public void progress(AlbumTrack track, String message) {
+                    // The protocol tells what the piece does, as when the window composes it: each
+                    // step once, not every count of characters on the way.
+                    String step = message.replaceAll("\\d+", "#");
+                    if (!step.equals(logged.put(track.id(), step))) {
+                        SwingUtilities.invokeLater(() -> host.log("„" + track.title() + "“: " + message));
+                    }
                     SwingUtilities.invokeLater(() -> {
                         if (album != null && album.id().equals(id)) {
                             doing.put(track.id(), message);
