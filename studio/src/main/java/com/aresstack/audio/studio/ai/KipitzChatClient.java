@@ -54,6 +54,13 @@ public final class KipitzChatClient implements ChatModel {
     }
 
     public JsonObject generate(String instruction, String prompt, int maxTokens, Path cache) throws IOException {
+        return generate(instruction, prompt, maxTokens, cache, null);
+    }
+
+    /** Answers and lets the answer be read while it arrives, see {@link ChatModel#generate(String, String, int, Path, java.util.function.Consumer)}. */
+    @Override
+    public JsonObject generate(String instruction, String prompt, int maxTokens, Path cache,
+                               java.util.function.Consumer<String> heard) throws IOException {
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("AI request was cancelled.");
         }
@@ -84,7 +91,7 @@ public final class KipitzChatClient implements ChatModel {
             // keeps a connection silent for minutes when it only comes at the end.
             request.addProperty("stream", streaming);
             try {
-                answer = exchange(gson.toJson(request).getBytes(StandardCharsets.UTF_8));
+                answer = exchange(gson.toJson(request).getBytes(StandardCharsets.UTF_8), heard);
             } catch (Refused refused) {
                 if (streaming && (refused.status == 400 || refused.status == 404 || refused.status == 415
                         || refused.status == 422 || refused.status == 501)) {
@@ -200,7 +207,7 @@ public final class KipitzChatClient implements ChatModel {
     }
 
     /** Sends one request and reads its answer, streamed or whole, whichever the service sends. */
-    private Answer exchange(byte[] body) throws IOException {
+    private Answer exchange(byte[] body, java.util.function.Consumer<String> heard) throws IOException {
         HttpURLConnection connection = openConnection();
         activeConnections.add(connection);
         try {
@@ -221,7 +228,7 @@ public final class KipitzChatClient implements ChatModel {
             String type = String.valueOf(connection.getContentType());
             try (InputStream input = connection.getInputStream()) {
                 if (type.contains("event-stream")) {
-                    return readStream(input);
+                    return readStream(input, heard);
                 }
                 String response = readText(input, RESPONSE_LIMIT);
                 try {
@@ -248,7 +255,19 @@ public final class KipitzChatClient implements ChatModel {
      * and the request is sent again. Thinking arrives in other fields and is left out.
      */
     static Answer readStream(InputStream input) throws IOException {
+        return readStream(input, null);
+    }
+
+    /** The time between two looks at an answer that is still arriving, in milliseconds. */
+    private static final long HEARD_EVERY = 200;
+
+    /**
+     * Reads a streamed answer as {@link #readStream(InputStream)} does and shows the text so far
+     * to a listener while it arrives, a few times a second at most.
+     */
+    static Answer readStream(InputStream input, java.util.function.Consumer<String> heard) throws IOException {
         StringBuilder text = new StringBuilder();
+        long lastHeard = 0;
         String finishReason = null;
         String broken = null;
         boolean done = false;
@@ -287,6 +306,15 @@ public final class KipitzChatClient implements ChatModel {
                         text.append(content.getAsString());
                         if (text.length() > RESPONSE_LIMIT) {
                             throw new Unusable("KIPITZ response exceeds the configured size limit.", null);
+                        }
+                        long now = System.currentTimeMillis();
+                        if (heard != null && now - lastHeard >= HEARD_EVERY) {
+                            lastHeard = now;
+                            try {
+                                heard.accept(text.toString());
+                            } catch (RuntimeException unheard) {
+                                // looking at the answer on its way must never break the answer
+                            }
                         }
                     }
                 }

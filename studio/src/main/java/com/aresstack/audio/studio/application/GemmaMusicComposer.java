@@ -6,7 +6,9 @@ import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.ai.ChatModel;
 import com.aresstack.audio.studio.ai.ModelLineup;
 import com.aresstack.audio.studio.ai.ModelRoles;
+import com.aresstack.audio.studio.ai.PartialNotes;
 import com.aresstack.audio.studio.progress.Progress;
+import com.aresstack.audio.studio.progress.SketchProgress;
 import com.aresstack.audio.studio.progress.TrackProgress;
 import com.aresstack.audio.studio.score.Voicing;
 import com.google.gson.GsonBuilder;
@@ -206,6 +208,8 @@ public final class GemmaMusicComposer {
         int threads = Math.min(maxParallel, tracks.tracks().size());
         List<int[]> sections = spec.sections();
         List<String> chords = chords(plan, spec);
+        final Sketch sketch = progress instanceof SketchProgress
+                ? new Sketch(tracks, spec, chords, (SketchProgress) progress) : null;
         ExecutorService executor = Executors.newFixedThreadPool(threads);
         CompletionService<TrackResponse> completion =
                 new ExecutorCompletionService<TrackResponse>(executor);
@@ -242,9 +246,16 @@ public final class GemmaMusicComposer {
                                 Path cached = cachedResponse(directory, target, prompt, spec);
                                 String instruction = "Compose original instrumental music. Return valid JSON only.";
                                 allKnown &= client.hasAnswer(instruction, prompt, maxTokens, cached);
-                                JsonObject answer = client.generate(instruction, prompt, maxTokens, cached);
+                                final int at = s;
+                                JsonObject answer = sketch == null
+                                        ? client.generate(instruction, prompt, maxTokens, cached)
+                                        : client.generate(instruction, prompt, maxTokens, cached,
+                                        text -> sketch.heard(target.id(), at, text));
                                 validateResponse(target, answer);
                                 answers.add(answer);
+                                if (sketch != null) {
+                                    sketch.written(target.id(), at, answer);
+                                }
                                 notes += answer.getAsJsonArray("notes").size();
                                 if (sections.size() > 1) {
                                     TrackProgress.tell(progress, target.id(), TrackProgress.Stage.COMPOSE,
@@ -466,21 +477,45 @@ public final class GemmaMusicComposer {
     private static Path assemble(TrackArrangement tracks, Map<String, List<JsonObject>> responses,
                                  CompositionSpec spec, List<String> chords, Path directory,
                                  Progress progress) throws IOException {
-        List<String> body = new ArrayList<String>();
         CompositionNoteNormalizer normalizer = new CompositionNoteNormalizer(progress, spec, chords);
+        List<String> arrangement = lines(tracks, responses, spec, normalizer, progress, false);
+        Path output = directory.resolve("arrangement.tsv");
+        Files.write(output, arrangement, StandardCharsets.UTF_8);
+        Files.write(directory.resolve("note-corrections.tsv"),
+                normalizer.corrections(), StandardCharsets.UTF_8);
+        progress.update("Created " + tracks.tracks().size() + " MIDI tracks; "
+                + normalizer.correctionCount() + " note corrections. Cached JSON preserved.");
+        return output;
+    }
+
+    /**
+     * The lines of the arrangement made of the answers.
+     *
+     * @param responses the answers of each track, one per section in the order of the sections
+     * @param unfinished whether the piece is still being composed: a track without an answer or
+     *                   without a playable note is then left out instead of being an error
+     */
+    private static List<String> lines(TrackArrangement tracks, Map<String, List<JsonObject>> responses,
+                                      CompositionSpec spec, CompositionNoteNormalizer normalizer,
+                                      Progress progress, boolean unfinished) throws IOException {
+        List<String> body = new ArrayList<String>();
         List<int[]> sections = spec.sections();
         long end = 0;
         for (MusicTrack track : tracks.tracks()) {
             List<JsonObject> parts = responses.get(track.id());
             if (parts == null) {
+                if (unfinished) {
+                    continue;
+                }
                 throw new IOException("Missing generated instrument: " + track.id());
             }
             int channel = tracks.channelFor(track.id());
-            body.add("track\t" + track.id() + "\t" + track.program() + "\t"
+            List<String> head = new ArrayList<String>();
+            head.add("track\t" + track.id() + "\t" + track.program() + "\t"
                     + channel + "\t" + track.role());
             boolean grand = grand(track);
             if (grand) {
-                body.add("staff\t" + track.id() + "\tgrand");
+                head.add("staff\t" + track.id() + "\tgrand");
             }
             // The voices the answer names (since S1); written only if it names any.
             List<String> lines = new ArrayList<String>();
@@ -488,10 +523,10 @@ public final class GemmaMusicComposer {
             List<String> named = new ArrayList<String>();
             int playable = 0;
             int index = 0;
-            for (int s = 0; s < parts.size(); s++) {
+            for (int s = 0; s < parts.size() && s < sections.size(); s++) {
                 int[] section = sections.get(s);
-                JsonArray notes = parts.get(s).getAsJsonArray("notes");
-                for (int n = 0; n < notes.size(); n++) {
+                JsonArray notes = parts.get(s) == null ? null : parts.get(s).getAsJsonArray("notes");
+                for (int n = 0; notes != null && n < notes.size(); n++) {
                     index++;
                     JsonElement element = notes.get(n);
                     if (!element.isJsonObject()) {
@@ -514,6 +549,13 @@ public final class GemmaMusicComposer {
                     playable++;
                 }
             }
+            if (playable == 0) {
+                if (unfinished) {
+                    continue;
+                }
+                throw new IOException("No playable notes for " + track.id()
+                        + ". The cached model response was preserved.");
+            }
             String[] answered = named.toArray(new String[0]);
             boolean struck = MusicTrack.DRUMS.equals(track.role());
             if (!struck && Voicing.named(answered, grand)) {
@@ -522,22 +564,74 @@ public final class GemmaMusicComposer {
                     lines.set(i, lines.get(i) + "\t" + voices[i]);
                 }
             }
+            body.addAll(head);
             body.addAll(lines);
-            if (playable == 0) {
-                throw new IOException("No playable notes for " + track.id()
-                        + ". The cached model response was preserved.");
-            }
         }
+        // A piece that is not yet as long as planned is given its length in the header, so the
+        // paper has the bars of the plan from the first note on.
         List<String> arrangement = new ArrayList<String>(
                 spec.headerLines(ArrangementFile.barsCovering(end, spec.barTicks())));
         arrangement.addAll(body);
-        Path output = directory.resolve("arrangement.tsv");
-        Files.write(output, arrangement, StandardCharsets.UTF_8);
-        Files.write(directory.resolve("note-corrections.tsv"),
-                normalizer.corrections(), StandardCharsets.UTF_8);
-        progress.update("Created " + tracks.tracks().size() + " MIDI tracks; "
-                + normalizer.correctionCount() + " note corrections. Cached JSON preserved.");
-        return output;
+        return arrangement;
+    }
+
+    /**
+     * The piece while it is composed: what every track has so far, the sections that are whole
+     * and the notes already written of the section a model is at. Shown a few times a second at
+     * most; nothing of it is kept, the piece is made of the whole answers at the end.
+     */
+    private static final class Sketch {
+        /** The time between two pictures of the piece, in milliseconds. */
+        private static final long EVERY = 250;
+        private final TrackArrangement tracks;
+        private final CompositionSpec spec;
+        private final List<String> chords;
+        private final SketchProgress shown;
+        private final Map<String, List<JsonObject>> soFar = new HashMap<String, List<JsonObject>>();
+        private long last;
+
+        private Sketch(TrackArrangement tracks, CompositionSpec spec, List<String> chords, SketchProgress shown) {
+            this.tracks = tracks;
+            this.spec = spec;
+            this.chords = chords;
+            this.shown = shown;
+        }
+
+        /** The text a model has written so far for a section of a track. */
+        void heard(String track, int section, String text) {
+            JsonObject partial = new JsonObject();
+            partial.add("notes", PartialNotes.read(text));
+            put(track, section, partial, false);
+        }
+
+        /** The whole answer for a section of a track. */
+        void written(String track, int section, JsonObject answer) {
+            put(track, section, answer, true);
+        }
+
+        private synchronized void put(String track, int section, JsonObject answer, boolean now) {
+            List<JsonObject> parts = soFar.get(track);
+            if (parts == null) {
+                parts = new ArrayList<JsonObject>();
+                soFar.put(track, parts);
+            }
+            while (parts.size() <= section) {
+                parts.add(null);
+            }
+            parts.set(section, answer);
+            long time = System.currentTimeMillis();
+            if (!now && time - last < EVERY) {
+                return;
+            }
+            last = time;
+            try {
+                Progress silent = message -> { };
+                shown.sketch(lines(tracks, soFar, spec, new CompositionNoteNormalizer(silent, spec, chords),
+                        silent, true));
+            } catch (IOException | RuntimeException unshown) {
+                // a picture of the piece on its way; the piece itself does not depend on it
+            }
+        }
     }
 
     /** Whether a track is written on a grand staff: piano, organ and harp (since S1). */
