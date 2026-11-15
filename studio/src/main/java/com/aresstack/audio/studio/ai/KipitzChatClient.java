@@ -468,7 +468,15 @@ public final class KipitzChatClient implements ChatModel {
         final HttpURLConnection connection = openConnection();
         activeConnections.add(connection);
         final Pulse pulse = new Pulse();
+        final Thread asking = Thread.currentThread();
         java.util.concurrent.ScheduledFuture<?> watch = WATCH.scheduleWithFixedDelay(() -> {
+            if (asking.isInterrupted() && pulse.ended == null) {
+                // The one who asked stopped (e.g. the other tracks of a piece whose track failed):
+                // only this request ends, the client keeps serving every other one.
+                pulse.ended = "die Anfrage wurde abgebrochen";
+                connection.disconnect();
+                return;
+            }
             long silent = System.currentTimeMillis() - pulse.last;
             long allowed = pulse.begun ? silenceMillis : firstByteMillis;
             if (silent > allowed && pulse.ended == null) {

@@ -516,17 +516,21 @@ public final class GemmaMusicComposer {
             return responses;
         } catch (InterruptedException cancelled) {
             Thread.currentThread().interrupt();
+            // Only the requests of this piece stop (their threads are interrupted, and the client ends an
+            // interrupted thread's connection): the models may serve other pieces at the same time.
             cancel(pending);
-            client.cancel();
             throw new IOException("Composition cancelled.", cancelled);
         } catch (ExecutionException failed) {
+            // One track failed: the other tracks of this piece stop, not every request of the models,
+            // which in an album also serve the pieces composed at the same time.
             cancel(pending);
-            client.cancel();
             Throwable cause = failed.getCause();
             if (cause instanceof IOException) {
                 throw (IOException) cause;
             }
-            throw new IOException("One instrument generation failed: " + cause, cause);
+            StackTraceElement[] where = cause == null ? new StackTraceElement[0] : cause.getStackTrace();
+            throw new IOException("One instrument generation failed: " + cause
+                    + (where.length > 0 ? " (at " + where[0] + ")" : ""), cause);
         } finally {
             executor.shutdownNow();
         }
@@ -545,7 +549,7 @@ public final class GemmaMusicComposer {
                 + track.program() + ") for an ORIGINAL 8-bar instrumental song. "
                 + "4/4, 108 BPM, C major, 32 quarter-note beats, chords by bar: "
                 + "C | G | Am | F | C | G | F | G. "
-                + "Arrangement: " + plan.get("arrangementNotes").getAsString()
+                + "Arrangement: " + words(plan.get("arrangementNotes"))
                 + "\n" + rules(track.role())
                 + "\nReturn exactly one JSON object with keys part, program, notes. "
                 + "Set part=\"" + track.id() + "\" and program=" + track.program() + ". "
@@ -584,8 +588,13 @@ public final class GemmaMusicComposer {
         if (!spec.fourFour()) {
             text.append("A bar has ").append(beats(spec.quartersPerBar())).append(" quarter-note beats. ");
         }
-        text.append("Arrangement: ").append(plan.has("arrangementNotes") ? plan.get("arrangementNotes").getAsString() : "");
-        String performance = performance(plan, spec, track.id(), section);
+        text.append("Arrangement: ").append(words(plan.get("arrangementNotes")));
+        String performance;
+        try {
+            performance = performance(plan, spec, track.id(), section);
+        } catch (RuntimeException unreadable) {
+            performance = null; // a performance plan written oddly is left out of the prompt, not fatal
+        }
         if (performance != null) {
             text.append("\nPerformance in these bars (the player applies it): ").append(performance)
                     .append(". Write velocity as the accent of a note within the marked level: about ")
@@ -612,6 +621,36 @@ public final class GemmaMusicComposer {
                         + ", where the music asks for it (short notes, stresses, bound lines)." : "")
                 .append(voiceRule(track, false));
         return text.toString();
+    }
+
+    /**
+     * The text of a field of the plan, however the model wrote it: a string as it is, a list or an
+     * object (for example notes per instrument) as its entries one after the other, nothing as "".
+     */
+    static String words(JsonElement written) {
+        if (written == null || written.isJsonNull()) {
+            return "";
+        }
+        if (written.isJsonPrimitive()) {
+            return written.getAsString();
+        }
+        List<String> parts = new ArrayList<String>();
+        if (written.isJsonArray()) {
+            for (JsonElement each : written.getAsJsonArray()) {
+                String part = words(each);
+                if (!part.isEmpty()) {
+                    parts.add(part);
+                }
+            }
+        } else {
+            for (Map.Entry<String, JsonElement> each : written.getAsJsonObject().entrySet()) {
+                String part = words(each.getValue());
+                if (!part.isEmpty()) {
+                    parts.add(each.getKey() + ": " + part);
+                }
+            }
+        }
+        return String.join("; ", parts);
     }
 
     private static String beats(double beats) {
@@ -999,7 +1038,7 @@ public final class GemmaMusicComposer {
         List<String> chords = new ArrayList<String>();
         JsonArray written = plan.getAsJsonArray("chords");
         for (int bar = 0; bar < spec.bars(); bar++) {
-            chords.add(bar < written.size() ? written.get(bar).getAsString().trim() : "");
+            chords.add(bar < written.size() ? words(written.get(bar)).trim() : "");
         }
         return chords;
     }
@@ -1011,15 +1050,38 @@ public final class GemmaMusicComposer {
         }
         try {
             CompositionSpec named = CompositionSpec.ofPlan(plan);
+            if (named != null && named.bars() != spec.bars()
+                    && new CompositionSpec(spec.bars(), named.bpm(), named.key(), named.numerator(),
+                    named.denominator(), spec.snapToHarmony()).equals(spec)) {
+                // Only the length differs (e.g. the whole piece named instead of this portion): the
+                // portion asked for counts, the chords are fitted to it below.
+                progress.update("WARN: The plan names " + named.bars() + " bars instead of " + spec.bars()
+                        + "; it is read as " + spec.bars() + " bars.");
+                plan.addProperty("bars", spec.bars());
+                named = CompositionSpec.ofPlan(plan);
+            }
             if (named == null || !named.withSnapToHarmony(spec.snapToHarmony()).equals(spec)) {
                 throw new IOException("Model changed locked tempo, key, meter or duration: " + named);
             }
             JsonArray chords = plan.getAsJsonArray("chords");
-            if (chords == null || chords.size() != spec.bars()) {
+            if (chords == null || chords.size() == 0) {
                 throw new IOException("Expected " + spec.bars() + " chords, one per bar.");
             }
+            if (chords.size() != spec.bars()) {
+                // A plan with a few chords too many or too few is not thrown away: what is missing
+                // repeats the progression from its start, what is too much is left out.
+                progress.update("WARN: The plan has " + chords.size() + " chords for " + spec.bars()
+                        + " bars; " + (chords.size() < spec.bars() ? "the progression is repeated to fill them."
+                        : "the chords after bar " + spec.bars() + " are left out."));
+                JsonArray fitted = new JsonArray();
+                for (int bar = 0; bar < spec.bars(); bar++) {
+                    fitted.add(chords.get(bar % chords.size()));
+                }
+                plan.add("chords", fitted);
+                chords = fitted;
+            }
             for (int bar = 0; bar < chords.size(); bar++) {
-                String symbol = chords.get(bar).getAsString();
+                String symbol = words(chords.get(bar));
                 if (com.aresstack.audio.composition.Chord.tryParse(symbol) == null) {
                     progress.update("WARN: Bar " + (bar + 1) + " has no chord symbol I can read (\"" + symbol
                             + "\"); notes there are checked against the key only.");
