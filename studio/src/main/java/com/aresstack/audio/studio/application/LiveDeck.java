@@ -11,6 +11,8 @@ import com.aresstack.audio.studio.mix.StageSound;
 import com.aresstack.audio.studio.stage.AcousticRoom;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
+import com.aresstack.audio.studio.visual.SoundFeed;
+import com.aresstack.audio.studio.visual.TrackLight;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -354,6 +356,51 @@ public final class LiveDeck implements AutoCloseable {
     /** How long the piece is on this stage, with the ring of the room at its end. */
     public double length() {
         return stage.graph().frames() / (double) playback.sampleRate();
+    }
+
+    /**
+     * The sound heard right now for the visualizer: the frames that went to the sound card after
+     * the limiter, and each track with its place on the stage (following its movements) and its level.
+     */
+    public SoundFeed feed() {
+        return feed;
+    }
+
+    private final SoundFeed feed = new SoundFeed() {
+        @Override
+        public boolean window(float[] left, float[] right, int count) {
+            return playback.playing() && playback.tap().read(playback.tapHeard(), left, right, count);
+        }
+
+        @Override
+        public int sampleRate() {
+            return playback.sampleRate();
+        }
+
+        @Override
+        public List<TrackLight> lights() {
+            return LiveDeck.this.lights();
+        }
+    };
+
+    /** The tracks at the heard frame: place as the movements have it then, level as the channel was then. */
+    List<TrackLight> lights() {
+        long frame = Math.max(0, playback.heardFrame());
+        List<String> ids = stage.trackIds();
+        SpatialScene shown = scene;
+        com.aresstack.audio.studio.mix.StageAutomation moving = stage.movements();
+        List<TrackLight> lights = new ArrayList<TrackLight>(ids.size());
+        for (int i = 0; i < ids.size() && i < stage.graph().channels(); i++) {
+            String id = ids.get(i);
+            SoundSourcePlacement placement = shown.placement(id);
+            com.aresstack.audio.studio.mix.StageAutomation.Lanes lanes = moving.of(id);
+            double x = lanes.x() != null ? lanes.x().valueAt(frame) : placement.x();
+            double depth = lanes.depth() != null ? lanes.depth().valueAt(frame) : placement.depth();
+            double height = lanes.height() != null ? lanes.height().valueAt(frame) : placement.height();
+            float level = placement.muted() ? 0f : stage.graph().channel(i).peakAt(frame);
+            lights.add(new TrackLight(id, i, x, depth, height, level));
+        }
+        return lights;
     }
 
     /** The peak of the block that was played last, after the master bus: for the master meters. */

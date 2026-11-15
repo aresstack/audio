@@ -47,6 +47,16 @@ public final class LiveChannel {
     private volatile ChannelParameters wanted;
     private ChannelParameters taken;
     private final Ramp level = new Ramp(0);
+    /**
+     * How loud the channel was, block by block, for pictures of the sound: the peak after its
+     * level and width, and the frame of the mix the block began at. Written by the audio thread
+     * only; a reader may see a block of one and the frame of the next, which a picture forgives.
+     */
+    private final float[] peaks = new float[PEAK_HISTORY];
+    private final long[] peakFrames = new long[PEAK_HISTORY];
+    private volatile int peakCount;
+    /** How many blocks of peaks a channel keeps: at 512 frames a block, more than the longest sink buffer. */
+    public static final int PEAK_HISTORY = 128;
     private final Ramp width = new Ramp(1);
     private final Ramp toLeft = new Ramp(0);
     private final Ramp toRight = new Ramp(0);
@@ -250,7 +260,9 @@ public final class LiveChannel {
         if (motion != null) {
             if (heard > 0) {
                 strip(now.curve(), position, heard);
-            } else {
+            }
+            remember(position, heard);
+            if (heard <= 0) {
                 for (int i = 0; i < count; i++) {
                     level.next();
                     width.next();
@@ -261,6 +273,9 @@ public final class LiveChannel {
         }
         if (heard > 0) {
             strip(now.curve(), position, heard);
+        }
+        remember(position, heard);
+        if (heard > 0) {
             if (send != null) {
                 addTo(send, heard, sendLeft, sendRight);
             }
@@ -364,6 +379,45 @@ public final class LiveChannel {
     }
 
     /** Level and width; with a level curve exactly as {@link StereoStrip} while the level does not glide. */
+    /** Notes the peak of the block just stripped (silence if nothing was heard) for {@link #peakAt}. */
+    private void remember(long position, int heard) {
+        float peak = 0f;
+        float[] left = block.left;
+        float[] right = block.right;
+        for (int i = 0; i < heard; i++) {
+            float l = Math.abs(left[i]);
+            float r = Math.abs(right[i]);
+            if (l > peak) {
+                peak = l;
+            }
+            if (r > peak) {
+                peak = r;
+            }
+        }
+        int count = peakCount;
+        int slot = count % PEAK_HISTORY;
+        peaks[slot] = peak;
+        peakFrames[slot] = position;
+        peakCount = count + 1;
+    }
+
+    /**
+     * How loud this channel was at a frame of the mix, after its level and width and before its
+     * place on the stage: the peak of the block that frame lay in, 0 if that block is no longer
+     * kept or not rendered yet. Any thread; meant for pictures, which ask for the heard frame.
+     */
+    public float peakAt(long frame) {
+        int count = peakCount;
+        int kept = Math.min(count, PEAK_HISTORY);
+        for (int back = 1; back <= kept; back++) {
+            int slot = (count - back) % PEAK_HISTORY;
+            if (peakFrames[slot] <= frame) {
+                return peaks[slot];
+            }
+        }
+        return 0f;
+    }
+
     private void strip(StereoStrip.LevelCurve curve, long position, int count) {
         float[] left = block.left;
         float[] right = block.right;

@@ -431,6 +431,7 @@ final class DeckPlayer {
                     }
                     if (count > 0) {
                         louder(piece, count, playing.format.getChannels());
+                        tap.write16(piece, 0, count, playing.format.getChannels(), 1f); // as heard, after the fade
                         next += count / frame;
                         writtenSince += count / frame;
                     } else if (heard() >= playing.frames()) {
@@ -513,6 +514,42 @@ final class DeckPlayer {
             }
         }
     }
+
+    /** How many seconds of sound the tap of the visualizer keeps at the highest usual rate. */
+    static final double TAP_SECONDS = 1.5;
+    /** The highest sample rate the tap is made for; a faster file only leaves the visualizer a shorter window. */
+    static final int TAP_RATE = 48000;
+    /** What went to the sound card, for the visualizer: written by the feeder, after the fade. */
+    private final com.aresstack.audio.core.scope.SoundTap tap =
+            new com.aresstack.audio.core.scope.SoundTap((int) Math.ceil(TAP_SECONDS * TAP_RATE));
+
+    /** The sound that is heard right now, for pictures of it; silent while nothing plays. */
+    com.aresstack.audio.studio.visual.SoundFeed soundFeed() {
+        return soundFeed;
+    }
+
+    private final com.aresstack.audio.studio.visual.SoundFeed soundFeed = new com.aresstack.audio.studio.visual.SoundFeed() {
+        @Override
+        public boolean window(float[] left, float[] right, int count) {
+            javax.sound.sampled.SourceDataLine out = line;
+            Sound playing = sound;
+            if (!running || out == null || playing == null) {
+                return false;
+            }
+            try {
+                long waiting = Math.max(0, (out.getBufferSize() - out.available()) / playing.format.getFrameSize());
+                return tap.read(tap.written() - waiting, left, right, count);
+            } catch (RuntimeException closedMeanwhile) {
+                return false; // the line was closed while the picture asked: one picture without sound
+            }
+        }
+
+        @Override
+        public int sampleRate() {
+            Sound playing = sound;
+            return playing == null ? TAP_RATE : Math.round(playing.format.getSampleRate());
+        }
+    };
 
     /** The frame that is being heard: what was written, less what still waits in the sound card. */
     private long heard() {

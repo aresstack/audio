@@ -3,6 +3,7 @@ package com.aresstack.audio.core.live;
 import com.aresstack.audio.core.AudioBlock;
 import com.aresstack.audio.core.dsp.PeakMeter;
 import com.aresstack.audio.core.mix.MasterBus;
+import com.aresstack.audio.core.scope.SoundTap;
 import java.util.concurrent.locks.LockSupport;
 
 /**
@@ -36,6 +37,10 @@ public final class LivePlayback implements AutoCloseable {
     private long jumpsSeen;
     private final LiveSink sink;
     private final PeakMeter meter = new PeakMeter();
+    /** What went to the sink, for pictures of the sound; written by the audio thread after the limiter. */
+    private final SoundTap tap;
+    /** How many seconds of sound the tap keeps: enough for the largest window a picture takes plus the sink's buffer. */
+    public static final double TAP_SECONDS = 1.5;
     private final int sampleRate;
     private final int blockFrames;
     private final long blockNanos;
@@ -67,6 +72,7 @@ public final class LivePlayback implements AutoCloseable {
         this.graph = graph;
         this.master = master;
         this.sink = sink;
+        this.tap = new SoundTap((int) Math.ceil(TAP_SECONDS * Math.max(1, sampleRate)));
         this.sampleRate = sampleRate;
         this.blockFrames = blockFrames;
         this.blockNanos = blockFrames * 1_000_000_000L / sampleRate;
@@ -92,6 +98,16 @@ public final class LivePlayback implements AutoCloseable {
 
     public MasterBus master() {
         return master;
+    }
+
+    /** The frames that went to the sink, after the limiter; see {@link #tapHeard()} for where the listener is in it. */
+    public SoundTap tap() {
+        return tap;
+    }
+
+    /** The frame of the {@link #tap()} the listener hears now: what went in, less what waits in the sink. */
+    public long tapHeard() {
+        return tap.written() - Math.max(0, sink.bufferedFrames());
     }
 
     /** The peaks of what goes to the sink, after the limiter. */
@@ -261,6 +277,7 @@ public final class LivePlayback implements AutoCloseable {
                 long took = System.nanoTime() - started;
                 measure(took);
                 if (count > 0) {
+                    tap.write(block.left, block.right, count);
                     sink.write(block);
                 }
                 if (count < blockFrames) {
@@ -301,6 +318,7 @@ public final class LivePlayback implements AutoCloseable {
             block.clear();
             master.process(block);
             meter.process(block);
+            tap.write(block.left, block.right, block.frames());
             sink.write(block);
         }
         sink.drain();

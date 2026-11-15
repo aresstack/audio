@@ -96,6 +96,59 @@ final class StageDeck {
         return file.envelope();
     }
 
+    // ---- the sound for the visualizer ----
+
+    /**
+     * The sound that is heard right now, whatever plays it: the live stage with its tracks and their
+     * places, or the file, together with a title that still fades out. Asked from the event thread.
+     */
+    com.aresstack.audio.studio.visual.SoundFeed feed() {
+        return visualFeed;
+    }
+
+    private final com.aresstack.audio.studio.visual.SoundFeed visualFeed = new com.aresstack.audio.studio.visual.SoundFeed() {
+        private float[] fadingLeft = new float[0];
+        private float[] fadingRight = new float[0];
+
+        @Override
+        public boolean window(float[] left, float[] right, int count) {
+            LiveDeck deck = live;
+            if (deck != null) {
+                return deck.feed().window(left, right, count);
+            }
+            boolean heard = file.soundFeed().window(left, right, count);
+            DeckPlayer fading = outgoing;
+            if (fading == null) {
+                return heard;
+            }
+            if (fadingLeft.length < count) {
+                fadingLeft = new float[count];
+                fadingRight = new float[count];
+            }
+            boolean also = fading.soundFeed().window(fadingLeft, fadingRight, count);
+            if (!also) {
+                return heard;
+            }
+            for (int i = 0; i < count; i++) {
+                left[i] = (heard ? left[i] : 0f) + fadingLeft[i];
+                right[i] = (heard ? right[i] : 0f) + fadingRight[i];
+            }
+            return true;
+        }
+
+        @Override
+        public int sampleRate() {
+            LiveDeck deck = live;
+            return deck != null ? deck.feed().sampleRate() : file.soundFeed().sampleRate();
+        }
+
+        @Override
+        public java.util.List<com.aresstack.audio.studio.visual.TrackLight> lights() {
+            LiveDeck deck = live;
+            return deck != null ? deck.feed().lights() : java.util.List.of();
+        }
+    };
+
     // ---- the overlap of two titles of an album ----
 
     /**
