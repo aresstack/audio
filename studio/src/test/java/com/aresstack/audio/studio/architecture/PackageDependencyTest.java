@@ -31,6 +31,13 @@ public final class PackageDependencyTest {
         assertEquals(List.of(), referencesFrom("project", "studio.ui", "studio.ai", "studio.application", "javax.swing"));
     }
 
+    /** S1: the score is notation only; it knows no window, no AI, no application and no project files. */
+    @Test
+    public void theScoreKnowsNothingAboveIt() throws IOException {
+        assertEquals(List.of(), referencesFrom("score", "studio.ui", "studio.ai", "studio.application",
+                "studio.project", "javax.swing"));
+    }
+
     private static List<String> referencesFrom(String pkg, String... forbidden) throws IOException {
         List<String> found = new ArrayList<>();
         try (Stream<Path> files = Files.walk(ROOT.resolve(pkg))) {

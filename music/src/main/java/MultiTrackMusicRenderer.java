@@ -70,7 +70,12 @@ public final class MultiTrackMusicRenderer {
                 String role = track.role() != null ? track.role() : track.id();
                 arrangement.parts.put(track.id(), new Part(track.id(), Integer.parseInt(track.program().trim()),
                         Integer.parseInt(track.channel().trim()), role));
-            } else if (entry instanceof ArrangementFile.Note line && line.columns() == 6) {
+            } else if (entry instanceof ArrangementFile.Staff staff) {
+                if (!arrangement.parts.containsKey(staff.trackId())) {
+                    throw new IllegalArgumentException("Unknown part: " + staff.trackId());
+                }
+                // How a track is written in the score; it does not change what sounds.
+            } else if (entry instanceof ArrangementFile.Note line && (line.columns() == 6 || line.columns() == 7)) {
                 Part part = arrangement.parts.get(line.trackId());
                 if (part == null) {
                     throw new IllegalArgumentException("Unknown part: " + line.trackId());

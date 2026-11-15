@@ -6,7 +6,9 @@ import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.Role;
 import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
+import com.aresstack.audio.studio.score.Voicing;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +23,11 @@ import java.util.Map;
  * since F2, and only where they differ from what every older piece was). Anything more is
  * refused with {@link NotExpressible}; then {@code arrangement.mid} is the format to exchange
  * the piece in.
+ *
+ * <p>Since S1 a part on a grand staff gets a {@code staff} line after its track line, and the
+ * notes of a part name their voice in a seventh column ({@link Voicing}) where the voices of the
+ * model are not those the score would guess anyway. A piece whose voices are the guessed ones,
+ * as every imported old piece, is therefore written exactly as before.
  */
 public final class TsvExport {
     /** The composition says something the TSV format cannot. */
@@ -71,17 +78,46 @@ public final class TsvExport {
         for (Part part : composition.parts()) {
             lines.add("track\t" + part.id() + "\t" + part.program() + "\t" + channels.get(part.id())
                     + (part.role() == null ? "" : "\t" + part.role()));
-            for (Composition.PlacedNote placed : composition.notesOf(part.id())) {
+            boolean grand = part.staffLayout() == Part.StaffLayout.GRAND;
+            if (grand) {
+                lines.add("staff\t" + part.id() + "\tgrand");
+            }
+            List<Composition.PlacedNote> placedNotes = composition.notesOf(part.id());
+            String[] voices = voices(part, placedNotes);
+            for (int i = 0; i < placedNotes.size(); i++) {
+                Composition.PlacedNote placed = placedNotes.get(i);
                 lines.add("note\t" + part.id() + "\t" + placed.tick() + "\t" + placed.note().length() + "\t"
-                        + placed.note().pitch() + "\t" + placed.note().velocity());
+                        + placed.note().pitch() + "\t" + placed.note().velocity()
+                        + (voices == null ? "" : "\t" + voices[i]));
             }
         }
         return lines;
     }
 
     /**
-     * The lines of one part as {@link #lines} writes them: its track line and its notes. They
-     * say all that sounds of the part, so that their hash tells whether a stem is still current.
+     * The voice of each note of a part in the words of {@link Voicing}, or {@code null} where
+     * the file need not say them: for drums, and where they are the voices the score guesses.
+     */
+    static String[] voices(Part part, List<Composition.PlacedNote> placed) {
+        boolean grand = part.staffLayout() == Part.StaffLayout.GRAND;
+        if (Voicing.struck(part)) {
+            return null;
+        }
+        Map<String, String> tokens = Voicing.tokens(part);
+        String[] voices = new String[placed.size()];
+        List<long[]> notes = new ArrayList<>();
+        for (int i = 0; i < placed.size(); i++) {
+            Composition.PlacedNote note = placed.get(i);
+            String token = tokens.get(note.note().voiceId());
+            voices[i] = token != null ? token : tokens.get(part.firstVoice().id());
+            notes.add(new long[]{note.tick(), note.note().length(), note.note().pitch()});
+        }
+        return Arrays.equals(voices, Voicing.heuristic(notes, false, grand)) ? null : voices;
+    }
+
+    /**
+     * The lines of one part as {@link #lines} writes them: its track line, its staff line and
+     * its notes. They say all that sounds of the part and, since S1, how it is written.
      */
     public static List<String> linesOf(Composition composition, String partId) {
         List<String> all = lines(composition);
@@ -166,6 +202,19 @@ public final class TsvExport {
                 List<String> own = new ArrayList<>();
                 own.add(track.text());
                 tracks.put(track.id(), own);
+            }
+        }
+        // Since S1: a grand staff, as the last staff line of a track says it.
+        for (ArrangementFile.Track track : arrangement.tracks()) {
+            List<String> own = tracks.get(track.id());
+            ArrangementFile.Staff staff = null;
+            for (ArrangementFile.Entry entry : arrangement.entries()) {
+                if (entry instanceof ArrangementFile.Staff line && line.trackId().equals(track.id())) {
+                    staff = line;
+                }
+            }
+            if (own != null && own.size() == 1 && staff != null && staff.grand()) {
+                own.add(staff.text());
             }
         }
         for (ArrangementFile.Note note : arrangement.notes()) {
