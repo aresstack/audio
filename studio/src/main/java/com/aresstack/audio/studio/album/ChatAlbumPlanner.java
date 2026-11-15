@@ -95,7 +95,15 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
                 progress.update("Die Beschreibung nennt " + given.size() + " Titel; sie werden übernommen.");
             }
         }
-        int fresh = Math.max(0, concept.trackCount() - kept.size() - given.size());
+        int open = 0;
+        for (AlbumTrack track : album.tracks()) {
+            if (!track.hasPiece() && !track.given()) {
+                open++;
+            }
+        }
+        // "aus der Trackliste": the list says how many; its titles are filled in, none added.
+        int fresh = concept.fromList() ? (listed ? 0 : open)
+                : Math.max(0, concept.trackCount() - kept.size() - given.size());
         int wanted = given.size() + fresh;
         if (wanted == 0) {
             return album.withTracks(kept);
@@ -181,19 +189,48 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         progress.update("Trackliste bereit: " + tracks.size() + " Titel"
                 + (theme.isEmpty() ? "." : ", mit dem Hauptthema „" + theme.name() + "“."));
         Album result = album.withTracks(tracks).withTheme(theme);
-        if (tracks.size() > concept.trackCount() && tracks.size() <= AlbumConcept.MAX_TRACKS) {
-            result = result.withConcept(new AlbumConcept(concept.description(), concept.style(), tracks.size(),
-                    concept.minSeconds(), concept.maxSeconds(), concept.original()));
+        if ((tracks.size() > concept.trackCount() || concept.fromList()) && tracks.size() >= 1
+                && tracks.size() <= AlbumConcept.MAX_TRACKS) {
+            result = result.withConcept(concept.withTrackCount(tracks.size()));
         }
         return result;
+    }
+
+    /** The fields of a given title the user set, as the plan is told them; empty if none. */
+    static String fixedValues(AlbumTrack track) {
+        List<String> said = new ArrayList<String>();
+        if (track.isFixed(AlbumTrack.BPM)) {
+            said.add("tempoBpm " + track.bpm());
+        }
+        if (track.isFixed(AlbumTrack.KEY)) {
+            said.add("key " + track.key());
+        }
+        if (track.isFixed(AlbumTrack.METER)) {
+            said.add("meter " + track.meter());
+        }
+        if (track.isFixed(AlbumTrack.PLAYERS)) {
+            said.add("instrumentation " + escape(track.instrumentation()));
+        }
+        if (track.isFixed(AlbumTrack.FORM)) {
+            said.add("form " + escape(track.form()));
+        }
+        if (track.isFixed(AlbumTrack.LENGTH)) {
+            said.add("targetSeconds " + track.targetSeconds());
+        }
+        return String.join(", ", said);
     }
 
     /** A given title with what the plan says about the rest: its name stays, and its mood if the user said one. */
     private static AlbumTrack filled(AlbumTrack given, JsonObject entry, int number, AlbumConcept concept) {
         AlbumTrack planned = track(given.id(), entry, number, concept);
         return new AlbumTrack(given.id(), given.title(), given.mood().isEmpty() ? planned.mood() : given.mood(),
-                planned.bpm(), planned.key(), planned.meter(), planned.instrumentation(), planned.form(),
-                planned.targetSeconds(), "", true, planned.theme());
+                given.isFixed(AlbumTrack.BPM) ? given.bpm() : planned.bpm(),
+                given.isFixed(AlbumTrack.KEY) ? given.key() : planned.key(),
+                given.isFixed(AlbumTrack.METER) ? given.meter() : planned.meter(),
+                given.isFixed(AlbumTrack.PLAYERS) ? given.instrumentation() : planned.instrumentation(),
+                given.isFixed(AlbumTrack.FORM) ? given.form() : planned.form(),
+                given.isFixed(AlbumTrack.LENGTH) ? given.targetSeconds() : planned.targetSeconds(), "", true,
+                planned.theme(), given.fixed());
     }
 
     /**
@@ -304,7 +341,7 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         tracks.addAll(kept);
         progress.update("Trackliste bereit: " + tracks.size() + " Sätze des Originals.");
         AlbumConcept counted = new AlbumConcept(concept.description(), concept.style(), Math.max(1, tracks.size()),
-                concept.minSeconds(), concept.maxSeconds(), true);
+                concept.minSeconds(), concept.maxSeconds(), true).withFromList(concept.fromList());
         return album.withConcept(counted).withTracks(tracks);
     }
 
@@ -437,11 +474,15 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
                 if (!track.mood().isEmpty()) {
                     prompt.append(": ").append(escape(track.mood()));
                 }
+                String set = fixedValues(track);
+                if (!set.isEmpty()) {
+                    prompt.append(" (set by the user, keep: ").append(set).append(')');
+                }
                 prompt.append('\n');
             }
         }
         if (!concept.original()) {
-            if (album.theme().isEmpty()) {
+            if (album.theme().isEmpty() && kept.size() + wanted > 1) {
                 prompt.append(THEME_GUIDANCE).append('\n');
             } else {
                 prompt.append("The album has this main theme (leitmotif), \"").append(escape(album.theme().name()))
@@ -473,7 +514,7 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         } else {
             prompt.append(", theme (how the main theme appears in this track, e.g. \"hopeful, on solo horn\" or "
                     + "\"dark variant in minor, low strings\"; empty if it does not appear).");
-            if (album.theme().isEmpty()) {
+            if (album.theme().isEmpty() && kept.size() + wanted > 1) {
                 prompt.append(" Also return 'mainTheme': {name, description, key, notes: [{beat, duration, pitch}, "
                         + "...]}, beats in quarters from the start of the theme, MIDI pitches 55-84.");
             }

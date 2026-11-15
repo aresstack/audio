@@ -11,10 +11,13 @@ package com.aresstack.audio.studio.album;
  * @param minSeconds  how long a piece is at least, 10 seconds to {@link #MAX_SECONDS}
  * @param maxSeconds  how long a piece is at most, not below {@code minSeconds}
  * @param original    whether it rebuilds an existing work the wish names, see {@link #withOriginal}
+ * @param fromList    whether the track list says how many pieces there are ("aus der Trackliste"),
+ *                    not {@code trackCount}: planning fills in the titles of the list and adds none
  */
 public record AlbumConcept(String description, String style, int trackCount, int minSeconds, int maxSeconds,
-                           boolean original) {
+                           boolean original, boolean fromList) {
     public static final int MAX_TRACKS = 99;
+    public static final int MIN_SECONDS = 10;
     public static final int MAX_SECONDS = 3600;
     /** The range an album gets unless the user says otherwise: four to six minutes. */
     public static final int DEFAULT_MIN_SECONDS = 240;
@@ -31,10 +34,26 @@ public record AlbumConcept(String description, String style, int trackCount, int
             minSeconds = maxSeconds;
             maxSeconds = swap;
         }
-        if (minSeconds < 10 || maxSeconds > MAX_SECONDS) {
+        if (minSeconds < MIN_SECONDS || maxSeconds > MAX_SECONDS) {
             throw new IllegalArgumentException("Ein Stück dauert 10 Sekunden bis 60 Minuten: " + minSeconds + " bis "
                     + maxSeconds + " s");
         }
+    }
+
+    /** An album whose number of pieces is set ("automatisch"). */
+    public AlbumConcept(String description, String style, int trackCount, int minSeconds, int maxSeconds,
+                        boolean original) {
+        this(description, style, trackCount, minSeconds, maxSeconds, original, false);
+    }
+
+    /** The same concept with this many pieces. */
+    public AlbumConcept withTrackCount(int count) {
+        return new AlbumConcept(description, style, count, minSeconds, maxSeconds, original, fromList);
+    }
+
+    /** Whether the number of pieces follows the track list ("aus der Trackliste") or is set ("automatisch"). */
+    public AlbumConcept withFromList(boolean listed) {
+        return new AlbumConcept(description, style, trackCount, minSeconds, maxSeconds, original, listed);
     }
 
     /** An album of new music (not "Original nachbilden"). */
@@ -47,7 +66,7 @@ public record AlbumConcept(String description, String style, int trackCount, int
      * plan takes the real movements with their titles, keys and lengths, the pieces their themes.
      */
     public AlbumConcept withOriginal(boolean rebuild) {
-        return new AlbumConcept(description, style, trackCount, minSeconds, maxSeconds, rebuild);
+        return new AlbumConcept(description, style, trackCount, minSeconds, maxSeconds, rebuild, fromList);
     }
 
     /** An album whose pieces all have about the same length. */

@@ -104,23 +104,25 @@ public final class AlbumTools {
         if (entry.has("mood")) {
             changed = changed.withMood(AlbumFiles.text(entry, "mood"));
         }
+        // What the help sets counts as set by the user: planning keeps it.
         if (entry.has("tempoBpm")) {
-            changed = changed.withBpm(AlbumFiles.number(entry, "tempoBpm", changed.bpm()));
+            changed = changed.withBpm(AlbumFiles.number(entry, "tempoBpm", changed.bpm())).fix(AlbumTrack.BPM);
         }
         if (entry.has("key")) {
-            changed = changed.withKey(AlbumFiles.text(entry, "key"));
+            changed = changed.withKey(AlbumFiles.text(entry, "key")).fix(AlbumTrack.KEY);
         }
         if (entry.has("meter")) {
-            changed = changed.withMeter(AlbumFiles.text(entry, "meter"));
+            changed = changed.withMeter(AlbumFiles.text(entry, "meter")).fix(AlbumTrack.METER);
         }
         if (entry.has("instrumentation")) {
-            changed = changed.withInstrumentation(AlbumFiles.text(entry, "instrumentation"));
+            changed = changed.withInstrumentation(AlbumFiles.text(entry, "instrumentation")).fix(AlbumTrack.PLAYERS);
         }
         if (entry.has("form")) {
-            changed = changed.withForm(AlbumFiles.text(entry, "form"));
+            changed = changed.withForm(AlbumFiles.text(entry, "form")).fix(AlbumTrack.FORM);
         }
         if (entry.has("targetSeconds")) {
-            changed = changed.withSeconds(AlbumFiles.number(entry, "targetSeconds", changed.targetSeconds()));
+            changed = changed.withSeconds(AlbumFiles.number(entry, "targetSeconds", changed.targetSeconds()))
+                    .fix(AlbumTrack.LENGTH);
         }
         if (entry.has("theme")) {
             changed = changed.withTheme(AlbumFiles.text(entry, "theme"));
@@ -153,8 +155,7 @@ public final class AlbumTools {
         if (count == concept.trackCount()) {
             return album;
         }
-        return album.withConcept(new AlbumConcept(concept.description(), concept.style(), count,
-                concept.minSeconds(), concept.maxSeconds(), concept.original()));
+        return album.withConcept(concept.withTrackCount(count));
     }
 
     /** The tools' argument schemas, for the chat API. */

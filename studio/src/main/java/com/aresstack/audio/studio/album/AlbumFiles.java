@@ -155,6 +155,9 @@ public final class AlbumFiles implements AlbumRepository {
         if (album.concept().original()) {
             concept.addProperty("original", true);
         }
+        if (album.concept().fromList()) {
+            concept.addProperty("fromList", true);
+        }
         json.add("concept", concept);
         JsonArray tracks = new JsonArray();
         for (AlbumTrack track : album.tracks()) {
@@ -177,6 +180,11 @@ public final class AlbumFiles implements AlbumRepository {
             if (!track.theme().isEmpty()) {
                 entry.addProperty("theme", track.theme());
             }
+            if (!track.fixed().isEmpty()) {
+                JsonArray fixed = new JsonArray();
+                track.fixed().forEach(fixed::add);
+                entry.add("fixed", fixed);
+            }
             tracks.add(entry);
         }
         json.add("tracks", tracks);
@@ -198,7 +206,7 @@ public final class AlbumFiles implements AlbumRepository {
                         // A folder name that is not one plain name in the library is not followed.
                         AlbumTrack.isFolderName(text(entry, "piece")) ? text(entry, "piece") : "",
                         entry.has("given") && entry.get("given").isJsonPrimitive() && entry.get("given").getAsBoolean(),
-                        text(entry, "theme")));
+                        text(entry, "theme"), fixed(entry)));
             }
         }
         // An album from before the range has one length for all pieces, meant as "about": it
@@ -210,9 +218,23 @@ public final class AlbumFiles implements AlbumRepository {
         return new Album(id, text(json, "title"), new AlbumConcept(text(concept, "description"),
                 text(concept, "style"), number(concept, "trackCount", Math.max(1, tracks.size())),
                 low, high).withOriginal(concept.has("original") && concept.get("original").isJsonPrimitive()
-                && concept.get("original").getAsBoolean()), tracks,
+                && concept.get("original").getAsBoolean()).withFromList(concept.has("fromList")
+                && concept.get("fromList").isJsonPrimitive() && concept.get("fromList").getAsBoolean()), tracks,
                 json.has("theme") && json.get("theme").isJsonObject() ? readTheme(json.getAsJsonObject("theme"))
                         : AlbumTheme.NONE);
+    }
+
+    /** The fields of a title the user set, as the file names them. */
+    private static java.util.Set<String> fixed(JsonObject entry) {
+        java.util.Set<String> names = new java.util.TreeSet<String>();
+        if (entry.has("fixed") && entry.get("fixed").isJsonArray()) {
+            for (JsonElement name : entry.getAsJsonArray("fixed")) {
+                if (name.isJsonPrimitive()) {
+                    names.add(name.getAsString());
+                }
+            }
+        }
+        return names;
     }
 
     static JsonObject writeTheme(AlbumTheme theme) {
