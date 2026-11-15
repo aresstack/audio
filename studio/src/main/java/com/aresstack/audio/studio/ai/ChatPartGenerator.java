@@ -78,7 +78,7 @@ public final class ChatPartGenerator implements PartGenerator {
                 frame.sectionId());
     }
 
-    private static String rules(String role) {
+    static String rules(String role) {
         return switch (role) {
             case "melody" -> "Role melody: a singable line or counter-melody that answers the existing melody instead "
                     + "of doubling it, with rests where the other melody is busy.";
