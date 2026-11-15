@@ -106,7 +106,9 @@ public final class RecompositionOffer {
     /**
      * Takes the proposal: the piece becomes the proposed one (an undoable step and a revision),
      * the stem rendered for the preview becomes the stem of the piece, and the answer of the AI
-     * for this track replaces the one kept so far, which goes to the folder "earlier".
+     * for this track replaces the one kept so far, which goes to the folder "earlier". Both are
+     * noted on the {@link AnswerShelf} with the notes they belong to, so that undo, redo and a
+     * revision brought back find the answer of their state.
      *
      * @return which parts sound different now
      */
@@ -114,6 +116,8 @@ public final class RecompositionOffer {
         requireProposed();
         Path piece = session.folder();
         PreviewStems.carry(preview, piece); // before the preview goes: what was heard need not be rendered again
+        // The answers this track was written from stay with its notes: undo brings both back together.
+        AnswerShelf.keep(piece, proposal.base(), trackId);
         ChangeSet changes = session.accept(proposal);
         Pattern answers = answersOf(trackId);
         List<Path> fresh = new ArrayList<Path>();
@@ -139,6 +143,7 @@ public final class RecompositionOffer {
                 Files.copy(file, piece.resolve(file.getFileName()), StandardCopyOption.REPLACE_EXISTING);
             }
         }
+        AnswerShelf.keep(piece, proposal.result(), trackId);
         deleteTree(staging);
         return changes;
     }
