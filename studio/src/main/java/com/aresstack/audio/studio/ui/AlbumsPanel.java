@@ -469,12 +469,8 @@ final class AlbumsPanel extends JPanel {
         tracks.fireTableDataChanged();
         say(chosen == null ? "Noch kein Album. „Neues Album“ legt eines an." : summary());
         keys();
-        if (chosen != null && suggestions.of(Field.STYLE).isEmpty() && !AlbumMembership.isUntitled(chosen)) {
-            // The title stands: first directions for the style, and ideas for the other fields.
-            propose(Field.STYLE);
-            propose(Field.DESCRIPTION);
-            propose(Field.TITLE);
-        }
+        // Showing an album asks the AI nothing: proposals come when the user asks for them (opening
+        // a list, typing) or for an album just made, not when a title is produced or the page opened.
     }
 
     /**
@@ -794,6 +790,12 @@ final class AlbumsPanel extends JPanel {
             Album made = files.create(name.isBlank() ? AlbumMembership.UNTITLED : name.trim(),
                     AlbumConcept.standard("", "", 12));
             reload(made.id());
+            if (album != null && !AlbumMembership.isUntitled(album)) {
+                // The title stands: first directions for the style, and ideas for the other fields.
+                propose(Field.STYLE);
+                propose(Field.DESCRIPTION);
+                propose(Field.TITLE);
+            }
             host.albumChosen(made.id()); // the album chosen above follows the new one
             description.requestFocusInWindow();
         } catch (IOException failed) {

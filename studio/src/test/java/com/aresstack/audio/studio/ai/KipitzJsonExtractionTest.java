@@ -50,4 +50,10 @@ public class KipitzJsonExtractionTest {
         assertEquals("length", cut.finishReason);
         assertNull(KipitzChatClient.wholeAnswer("<html>gateway</html>"));
     }
+
+    /** An answer asked for without a place to keep it (the album's field proposals) is not kept, not an error. */
+    @Test
+    public void anAnswerWithoutCacheIsNotKept() throws Exception {
+        AnswerCache.store(null, null, "{}");
+    }
 }
