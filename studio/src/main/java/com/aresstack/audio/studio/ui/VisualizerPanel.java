@@ -228,7 +228,11 @@ final class VisualizerPanel extends JPanel {
                         () -> SwingUtilities.invokeLater(this::gpuClosed));
                 SwingUtilities.invokeLater(() -> {
                     gpuOpening = false;
-                    if (screen.open()) {
+                    if (!com.aresstack.audio.studio.visual.GpuFill.drawsOnGpu(shown)) {
+                        // Another effect was chosen while the card opened, one it does not draw.
+                        screen.close();
+                        openFullScreen();
+                    } else if (screen.open()) {
                         gpu = screen;
                         notice("Vollbild auf der Grafikkarte: " + screen.description());
                     }

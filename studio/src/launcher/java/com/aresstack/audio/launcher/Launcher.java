@@ -68,7 +68,7 @@ public final class Launcher {
                         + "AUDIO_STUDIO_JAVA\n(oder -Daudio.java=...).", false);
             }
             // Errors of the second JVM are reported by that JVM; only its exit code is passed on.
-            System.exit(relaunch(sameKind(found), args));
+            System.exit(relaunch(sameKind(found), args, false));
         }
         if (java == REQUIRED_JAVA && !previewEnabled() && !Boolean.getBoolean(RELAUNCHED_PROPERTY)
                 && !"false".equalsIgnoreCase(System.getProperty(GPU_PROPERTY))) {
@@ -77,7 +77,7 @@ public final class Launcher {
             File own = new File(new File(System.getProperty("java.home"), "bin"), "java");
             File executable = own.isFile() ? own : new File(own.getPath() + ".exe");
             if (executable.isFile()) {
-                System.exit(relaunch(sameKind(executable), args));
+                System.exit(relaunch(sameKind(executable), args, true));
             }
         }
         Class<?> mainClass = Class.forName(MAIN, true, Launcher.class.getClassLoader());
@@ -112,13 +112,19 @@ public final class Launcher {
         return ManagementFactory.getRuntimeMXBean().getInputArguments().contains("--enable-preview");
     }
 
-    /** Starts the found Java with this JAR and waits for it to finish. */
-    private static int relaunch(String executable, String[] args) throws Exception {
+    /**
+     * Starts a Java with this JAR and waits for it to finish.
+     *
+     * @param sameJava whether it is the Java that runs now (started again for the graphics card), which keeps all options
+     */
+    private static int relaunch(String executable, String[] args, boolean sameJava) throws Exception {
         List<String> command = new ArrayList<String>();
         command.add(executable);
         for (String jvmArg : ManagementFactory.getRuntimeMXBean().getInputArguments()) {
-            // Another Java may not know this one's options; system properties it always takes.
-            if (jvmArg.startsWith("-D")) {
+            // The same Java takes all of this one's options (heap, collector, agents); another Java
+            // may not know them, but system properties it always takes.
+            if (sameJava ? !jvmArg.equals("--enable-preview") && !jvmArg.startsWith("--enable-native-access")
+                    : jvmArg.startsWith("-D")) {
                 command.add(jvmArg);
             }
         }
