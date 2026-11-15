@@ -30,6 +30,7 @@ public final class StageMixService {
 
     private final SpatialSceneStore store = new SpatialSceneStore();
     private final SpatialStemMixer mixer = new SpatialStemMixer();
+    private com.aresstack.audio.studio.mix.MixOutcome outcome;
 
     /** The stage of a piece: the saved one, or the usual seating; always for exactly the tracks of the arrangement. */
     public SpatialScene scene(Path arrangement, Path directory) throws IOException {
@@ -61,12 +62,30 @@ public final class StageMixService {
     /**
      * Writes the mix on the stage to a file with this level strategy: in {@code FIXED} with the
      * limiter and, if chosen, a peak or loudness normalization of the file. Without a strategy
-     * ({@code null}) the piece is mixed in the compatibility mode with the master level of its
-     * stage, as every piece is until the user switches it.
+     * ({@code null}) the piece is mixed as its stage says ({@link #level}): in the compatibility
+     * mode, as every piece is until the user switches it, or with the fixed level it was switched to.
      */
     public Path export(Path arrangement, Path directory, SpatialScene scene, Path target, int bits, MixLevel level)
             throws Exception {
         return mix(arrangement, directory, scene, null, target, bits, level, message -> { });
+    }
+
+    /**
+     * The level strategy the stage of a piece asks for: the compatibility mode, or the fixed level
+     * with the usual limiter once the piece was switched. A normalization applies to an exported
+     * file of a switched piece only; the compatibility mode already brings the mix to its peak.
+     */
+    public static MixLevel level(SpatialScene scene, com.aresstack.audio.core.mix.ExportNormalization normalization) {
+        if (!scene.fixedLevel()) {
+            return MixLevel.legacy(scene.masterDb());
+        }
+        return MixLevel.fixed(scene.masterDb(), com.aresstack.audio.core.dsp.LookaheadLimiter.Settings.DEFAULT,
+                normalization == null ? com.aresstack.audio.core.mix.ExportNormalization.NONE : normalization);
+    }
+
+    /** What the last mix of this service found out about its level, or {@code null} before the first. */
+    public com.aresstack.audio.studio.mix.MixOutcome outcome() {
+        return outcome;
     }
 
     private Path mix(Path arrangement, Path directory, SpatialScene scene, String only, Path target, int bits,
@@ -95,8 +114,8 @@ public final class StageMixService {
                 + (heard ? "" : " · alle Spuren sind stumm") + " ...");
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
-            MixLevel chosen = level != null ? level : MixLevel.legacy(fitting.masterDb());
-            mixer.mix(files, placements, fitting.room(), 4 * 60.0 / tempo(arrangement), chosen, fresh, bits);
+            MixLevel chosen = level != null ? level : level(fitting, null);
+            outcome = mixer.mix(files, placements, fitting.room(), 4 * 60.0 / tempo(arrangement), chosen, fresh, bits);
             Files.move(fresh, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(fresh);
