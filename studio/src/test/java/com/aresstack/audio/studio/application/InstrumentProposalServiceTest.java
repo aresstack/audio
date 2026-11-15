@@ -28,7 +28,8 @@ public final class InstrumentProposalServiceTest {
         Files.write(song.resolve("instrument-proposal.json"),
                 proposal.toString().getBytes(StandardCharsets.UTF_8));
         KipitzChatClient offline = new KipitzChatClient(
-                "http://127.0.0.1:1/v1/chat/completions", "", "local", "", 8080);
+                "http://127.0.0.1:1/v1/chat/completions", "", "local", "", 8080)
+                .legacyModel("local"); // the kept answers below were written for this model
 
         TrackArrangement proposalOnly = new InstrumentProposalService(offline, 4096)
                 .propose("Mysterious forest at dusk", song, message -> { });
