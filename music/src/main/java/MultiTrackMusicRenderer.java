@@ -1,3 +1,4 @@
+import com.aresstack.audio.music.arrangement.ArrangementFile;
 import javax.sound.midi.InvalidMidiDataException;
 import javax.sound.midi.MetaMessage;
 import javax.sound.midi.MidiEvent;
@@ -41,39 +42,37 @@ public final class MultiTrackMusicRenderer {
         System.out.println("Rendered " + arrangement.parts.size() + " tracks to " + output.toAbsolutePath());
     }
 
+    /**
+     * Reads the arrangement with the shared reader and refuses anything it cannot play: an
+     * unknown line, a track or note with the wrong number of columns, a bad or repeated track ID,
+     * a note of a track not named before it, or a note outside the eight bars.
+     */
     private static Arrangement parseArrangement(Path input) throws IOException {
         Arrangement arrangement = new Arrangement();
-        List<String> lines = Files.readAllLines(input, StandardCharsets.UTF_8);
-        for (String line : lines) {
-            line = line.replace("\uFEFF", "");
-            if (line.trim().isEmpty() || line.startsWith("#")) {
-                continue;
-            }
-            String[] fields = line.split("\\t");
-            if (fields.length == 2 && "tempo".equals(fields[0])) {
-                arrangement.tempo = Integer.parseInt(fields[1]);
-            } else if ((fields.length == 4 || fields.length == 5) && "track".equals(fields[0])) {
-                if (!fields[1].matches("[a-z][a-z0-9_-]{0,28}")
-                        || arrangement.parts.containsKey(fields[1])) {
-                    throw new IllegalArgumentException("Invalid or duplicate track ID: " + fields[1]);
+        for (ArrangementFile.Entry entry : ArrangementFile.read(input).entries()) {
+            if (entry instanceof ArrangementFile.Tempo tempo) {
+                arrangement.tempo = Integer.parseInt(tempo.value().trim());
+            } else if (entry instanceof ArrangementFile.Track track && track.columns() <= 5) {
+                if (!track.id().matches("[a-z][a-z0-9_-]{0,28}")
+                        || arrangement.parts.containsKey(track.id())) {
+                    throw new IllegalArgumentException("Invalid or duplicate track ID: " + track.id());
                 }
-                String role = fields.length == 5 ? fields[4] : fields[1];
-                arrangement.parts.put(fields[1], new Part(fields[1], Integer.parseInt(fields[2]),
-                        Integer.parseInt(fields[3]), role));
-            } else if (fields.length == 6 && "note".equals(fields[0])) {
-                Part part = arrangement.parts.get(fields[1]);
+                String role = track.role() != null ? track.role() : track.id();
+                arrangement.parts.put(track.id(), new Part(track.id(), Integer.parseInt(track.program().trim()),
+                        Integer.parseInt(track.channel().trim()), role));
+            } else if (entry instanceof ArrangementFile.Note line && line.columns() == 6) {
+                Part part = arrangement.parts.get(line.trackId());
                 if (part == null) {
-                    throw new IllegalArgumentException("Unknown part: " + fields[1]);
+                    throw new IllegalArgumentException("Unknown part: " + line.trackId());
                 }
-                Note note = new Note(Integer.parseInt(fields[2]), Integer.parseInt(fields[3]),
-                        Integer.parseInt(fields[4]), Integer.parseInt(fields[5]));
-                if (note.tick < 0 || note.length < 1 || note.pitch < 0 || note.pitch > 127
-                        || note.velocity < 1 || note.velocity > 127 || note.tick + note.length > PPQ * 4 * 8) {
-                    throw new IllegalArgumentException("Invalid note: " + line);
+                if (line.tick() < 0 || line.length() < 1 || line.pitch() < 0 || line.pitch() > 127
+                        || line.velocity() < 1 || line.velocity() > 127
+                        || line.tick() + line.length() > PPQ * 4 * 8) {
+                    throw new IllegalArgumentException("Invalid note: " + line.text());
                 }
-                part.notes.add(note);
+                part.notes.add(new Note((int) line.tick(), (int) line.length(), line.pitch(), line.velocity()));
             } else {
-                throw new IllegalArgumentException("Invalid input line: " + line);
+                throw new IllegalArgumentException("Invalid input line: " + entry.text());
             }
         }
         if (arrangement.tempo < 60 || arrangement.tempo > 180

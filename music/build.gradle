@@ -6,6 +6,10 @@ application {
     mainClass = 'MultiTrackMusicRenderer'
 }
 
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}
+
 tasks.named('jar') {
     archiveFileName = 'music-renderer.jar'
     manifest {

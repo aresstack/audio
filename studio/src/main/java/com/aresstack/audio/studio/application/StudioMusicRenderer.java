@@ -1,6 +1,7 @@
 package com.aresstack.audio.studio.application;
 
 import com.aresstack.audio.instruments.InstrumentLibrary;
+import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.instruments.InstrumentRegistry;
 import com.aresstack.audio.studio.render.ExternalProcessRunner;
 import com.aresstack.audio.studio.render.InstrumentSampleRenderer;
@@ -9,7 +10,6 @@ import com.aresstack.audio.studio.render.MidiStemExporter;
 import com.aresstack.audio.studio.render.SamplerUnavailableException;
 import java.io.File;
 import java.nio.file.Files;
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.nio.file.Path;
@@ -167,13 +167,7 @@ public final class StudioMusicRenderer {
 
     /** Trust the written TSV arrangement as the source of truth for output track order. */
     private static List<String> readTrackIds(Path arrangement) throws Exception {
-        List<String> tracks = new ArrayList<String>();
-        for (String line : Files.readAllLines(arrangement, StandardCharsets.UTF_8)) {
-            String[] fields = line.split("\\t");
-            if (fields.length >= 4 && "track".equals(fields[0])) {
-                tracks.add(fields[1]);
-            }
-        }
+        List<String> tracks = ArrangementFile.read(arrangement).trackIds();
         if (tracks.isEmpty()) {
             throw new IllegalArgumentException("Arrangement must contain at least one track.");
         }

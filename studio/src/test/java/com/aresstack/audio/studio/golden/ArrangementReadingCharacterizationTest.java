@@ -64,6 +64,18 @@ public final class ArrangementReadingCharacterizationTest {
         Assert.assertEquals(108, StageMixService.tempo(write("tempo\tfast", "track\ta\t0\t0")));
     }
 
+    /**
+     * Changed on purpose in F0: before, only the reference renderer ignored a byte order mark;
+     * the stage, the score and the lanes did not see a tempo on the first line behind one and
+     * fell back to 108. Now every reader sees the same tempo.
+     */
+    @Test
+    public void everyReaderIgnoresAByteOrderMark() throws Exception {
+        Path file = write("\uFEFFtempo\t96", "track\ta\t0\t0", "note\ta\t0\t480\t60\t90");
+        Assert.assertEquals(96, StageMixService.tempo(file));
+        Assert.assertEquals(96, com.aresstack.audio.studio.score.Score.read(file).tempo());
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void anArrangementWithoutTracksHasNoStage() throws Exception {
         StageMixService.tracks(write("tempo\t108"));

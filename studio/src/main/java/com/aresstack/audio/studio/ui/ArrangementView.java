@@ -1,5 +1,6 @@
 package com.aresstack.audio.studio.ui;
 
+import com.aresstack.audio.music.arrangement.ArrangementFile;
 import javax.swing.JComponent;
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -13,7 +14,6 @@ import java.awt.event.MouseEvent;
 import java.awt.geom.Line2D;
 import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -69,34 +69,23 @@ final class ArrangementView extends JComponent {
         }
 
         /** Reads an arrangement file; {@code null} if there is none or it cannot be read. */
-        static Arrangement read(Path file) {
-            if (file == null || !Files.isRegularFile(file)) {
+        static Arrangement read(Path path) {
+            if (path == null || !Files.isRegularFile(path)) {
                 return null;
             }
             try {
-                int tempo = 108;
-                List<String[]> rows = new ArrayList<String[]>();
-                for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
-                    String[] fields = line.split("\\t");
-                    if (fields.length == 2 && "tempo".equals(fields[0])) {
-                        tempo = Integer.parseInt(fields[1].trim());
-                    } else {
-                        rows.add(fields);
-                    }
+                ArrangementFile file = ArrangementFile.read(path);
+                Arrangement arrangement = new Arrangement(file.tempoOrDefault());
+                for (ArrangementFile.Track track : file.tracks()) {
+                    arrangement.lanes.put(track.id(), new ArrayList<Note>());
                 }
-                Arrangement arrangement = new Arrangement(Math.max(20, Math.min(400, tempo)));
                 long end = 0;
-                for (String[] fields : rows) {
-                    if (fields.length >= 2 && "track".equals(fields[0])) {
-                        arrangement.lanes.put(fields[1], new ArrayList<Note>());
-                    } else if (fields.length >= 6 && "note".equals(fields[0])) {
-                        List<Note> lane = arrangement.lanes.get(fields[1]);
-                        if (lane != null) {
-                            Note note = new Note(Long.parseLong(fields[2].trim()), Long.parseLong(fields[3].trim()),
-                                    Integer.parseInt(fields[4].trim()));
-                            lane.add(note);
-                            end = Math.max(end, note.start + note.length);
-                        }
+                for (ArrangementFile.Note line : file.notes()) {
+                    List<Note> lane = arrangement.lanes.get(line.trackId());
+                    if (lane != null) {
+                        Note note = new Note(line.tick(), line.length(), line.pitch());
+                        lane.add(note);
+                        end = Math.max(end, note.start + note.length);
                     }
                 }
                 long bar = TICKS_PER_BEAT * 4L;
