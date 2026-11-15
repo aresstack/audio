@@ -24,9 +24,9 @@ public final class StageMovements {
     public record Point(double bar, double value) {
     }
 
-    /** What moves here, in the order of the page: side, depth, share of the room. */
+    /** What moves here, in the order of the page: side, depth, share of the room, height (work package D4). */
     public static final List<String> PARAMETERS = List.of(AutomationLane.X, AutomationLane.DEPTH,
-            AutomationLane.REVERB);
+            AutomationLane.REVERB, AutomationLane.HEIGHT);
 
     /** A piece without a mix document: nothing moves, and nothing can be drawn. */
     public static final StageMovements NONE = new StageMovements(null, Map.of());

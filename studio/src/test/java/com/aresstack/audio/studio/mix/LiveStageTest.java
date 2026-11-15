@@ -207,6 +207,57 @@ public final class LiveStageTest {
     }
 
     /** The violin wanders from the left to the right and into the depth, and its room share rises. */
+    /**
+     * Work package D4 with D3: on headphones and with a convolved room a source that rises and
+     * crosses the stage is heard live as in the file, and a standing source at a height as well.
+     */
+    @Test
+    public void onHeadphonesASourceThatRisesIsHeardLiveAsInTheFile() throws Exception {
+        float[] sine = tone(4 * RATE, 220, RATE);
+        List<SpatialStemMixer.Signal> signals = List.of(new SpatialStemMixer.Signal(sine, sine, RATE),
+                new SpatialStemMixer.Signal(noise(4 * RATE, 5), noise(4 * RATE, 6), RATE));
+        List<SoundSourcePlacement> placements = List.of(
+                new SoundSourcePlacement("violin", -0.5, 0.2, 0, 1, 0.3, false, false, null),
+                new SoundSourcePlacement("pad", 0.3, 0.6, -6, 0.8, 0.5, false, false, null).atHeight(0.5));
+        StageAutomation movements = rising("violin", "c1");
+        StageSound[] sounds = {StageSound.binaural(), StageSound.binaural().withConvolution(true)};
+        for (StageSound sound : sounds) {
+            SpatialStemMixer.Mix file = new SpatialStemMixer().withAutomation(movements).withSound(sound)
+                    .render(signals, placements, AcousticRoom.HALL, 2);
+            float[][] live;
+            try (LiveStage stage = LiveStage.of(signals, placements, AcousticRoom.HALL, 2, movements, sound)) {
+                Assert.assertSame(sound, stage.sound());
+                live = drain(stage.graph(), SpatialStemMixer.BLOCK);
+            }
+            // The file looks at the direction every 64 frames, live once per block, and the filters
+            // of the head blend in between: the two differ by more than on loudspeakers (measured
+            // 6e-3 at a signal of 0.5), about 40 dB below the signal.
+            Assert.assertArrayEquals("left, convolution " + sound.convolution(), file.left, live[0], 1e-2f);
+            Assert.assertArrayEquals("right, convolution " + sound.convolution(), file.right, live[1], 1e-2f);
+        }
+
+        // It does cross the head: noise alone in a dry room is nearer the left ear at the start
+        // and nearer the right ear at the end.
+        float[] hiss = noise(4 * RATE, 3);
+        try (LiveStage stage = LiveStage.of(List.of(new SpatialStemMixer.Signal(hiss, hiss, RATE)),
+                List.of(placements.get(0)), AcousticRoom.STUDIO.withAmount(0), 2, movements, StageSound.binaural())) {
+            float[][] live = drain(stage.graph(), SpatialStemMixer.BLOCK);
+            Assert.assertTrue(rms(live[0], 0, RATE / 2) > 1.2 * rms(live[1], 0, RATE / 2));
+            Assert.assertTrue(rms(live[1], 3 * RATE, 7 * RATE / 2) > 1.2 * rms(live[0], 3 * RATE, 7 * RATE / 2));
+        }
+    }
+
+    /** A track that crosses the stage from left to right and rises from the ears to the top. */
+    private static StageAutomation rising(String track, String channel) {
+        long bar = 1920;
+        return StageAutomation.of(mix(track, channel,
+                new AutomationLane("l1", channel, AutomationLane.X,
+                        List.of(new AutomationLane.Point(0, -0.9), new AutomationLane.Point(2 * bar, 0.9))),
+                new AutomationLane("l2", channel, AutomationLane.HEIGHT,
+                        List.of(new AutomationLane.Point(0, 0), new AutomationLane.Point(2 * bar, 1)))),
+                TimeMap.of(120));
+    }
+
     private static StageAutomation movements(String track, String channel) {
         long bar = 1920;
         return StageAutomation.of(mix(track, channel,

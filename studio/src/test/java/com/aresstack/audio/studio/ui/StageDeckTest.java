@@ -143,6 +143,52 @@ public final class StageDeckTest {
         Assert.assertEquals(0, Card.OPEN.get());
     }
 
+    /**
+     * Work package D4: the way of hearing belongs to the live stage. Switched to headphones, the
+     * stage that plays for loudspeakers no longer fits and a new one goes on where playback stands.
+     */
+    @Test
+    public void switchedToHeadphonesTheLiveStageIsMadeAnewAndGoesOn() throws Exception {
+        Path song = piece();
+        Path arrangement = song.resolve("arrangement.tsv");
+        SpatialScene scene = new StageMixService().scene(arrangement, song).withFixedLevel(true);
+        Card.OPEN.set(0);
+        StageDeck deck = new StageDeck(Card::new);
+        AtomicReference<Exception> problem = new AtomicReference<Exception>();
+        CountDownLatch first = new CountDownLatch(1);
+        SwingUtilities.invokeAndWait(() -> deck.openLive(arrangement, song, scene, null, Float.NaN, 0, true, said -> {
+            problem.set(said);
+            first.countDown();
+        }));
+        Assert.assertTrue(first.await(20, TimeUnit.SECONDS));
+        Assert.assertNull(problem.get());
+        awaitPlaying(deck);
+
+        com.aresstack.audio.studio.mix.StageSound headphones = com.aresstack.audio.studio.mix.StageSound.binaural();
+        CountDownLatch second = new CountDownLatch(1);
+        SwingUtilities.invokeAndWait(() -> {
+            Assert.assertTrue(deck.stage(scene, null));
+            deck.sound(headphones);
+            Assert.assertFalse("a stage for loudspeakers does not play for headphones", deck.stage(scene, null));
+            deck.openLive(arrangement, song, scene, null, Float.NaN, Double.NaN, false, said -> {
+                problem.set(said);
+                second.countDown();
+            });
+            Assert.assertTrue("the old stage plays on until the new one is ready", deck.playing());
+        });
+        Assert.assertTrue(second.await(20, TimeUnit.SECONDS));
+        Assert.assertNull(problem.get());
+        awaitPlaying(deck);
+        SwingUtilities.invokeAndWait(() -> {
+            Assert.assertTrue(deck.stage(scene, null));
+            // A track lifted above the ears is taken live, like any other move.
+            Assert.assertTrue(deck.stage(scene.with(scene.placement("melody").atHeight(0.8)), null));
+            Assert.assertEquals("the old live stage gave its sound card back", 1, Card.OPEN.get());
+            deck.close();
+        });
+        Assert.assertEquals(0, Card.OPEN.get());
+    }
+
     /** Review: Stop pressed while the tracks are still read must hold when the stage is ready. */
     @Test
     public void stopAndAJumpWhileTheStageIsReadCountWhenItIsReady() throws Exception {

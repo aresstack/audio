@@ -41,6 +41,18 @@ final class StageDeck {
     /** Whether the live stage that is being read plays as soon as it is ready; Stop and Play change it meanwhile. */
     private boolean autoplay;
 
+    /** How the stage is heard (work package D4); a live stage is made with it and plays only it. */
+    private volatile com.aresstack.audio.studio.mix.StageSound sound =
+            com.aresstack.audio.studio.mix.StageSound.LOUDSPEAKERS;
+
+    /**
+     * The way of hearing from now on: loudspeakers or headphones, which room. A live stage that
+     * plays another way no longer fits ({@link #stage} then says so) and is made anew.
+     */
+    void sound(com.aresstack.audio.studio.mix.StageSound wanted) {
+        sound = wanted == null ? com.aresstack.audio.studio.mix.StageSound.LOUDSPEAKERS : wanted;
+    }
+
     StageDeck() {
         this(LiveDeck.SOUND_CARD);
     }
@@ -99,11 +111,12 @@ final class StageDeck {
         loading = true;
         pending = live == null ? at : Double.NaN;
         autoplay = play;
+        final com.aresstack.audio.studio.mix.StageSound heardAs = sound;
         loader.submit(() -> {
             LiveDeck made = null;
             Exception problem = null;
             try {
-                made = LiveDeck.open(arrangement, directory, scene, only, legacyFactor, sinks);
+                made = LiveDeck.open(arrangement, directory, scene, only, legacyFactor, sinks, heardAs);
             } catch (Exception failed) {
                 problem = failed;
             } catch (Error failed) {
@@ -163,7 +176,7 @@ final class StageDeck {
      *         the level) and has to be made anew
      */
     boolean stage(SpatialScene scene, String only) {
-        return live == null || live.stage(scene, only);
+        return live == null || (live.sound() == sound && live.stage(scene, only));
     }
 
     /**

@@ -143,6 +143,51 @@ public final class StagePanelCourseTest {
         });
     }
 
+    /** Work package D4: a track has a height, set with its slider, and a curve of it over the bars. */
+    @Test
+    public void theHeightOfATrackIsSetWithItsSliderAndDrawnOverTheBars() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            if (javax.swing.UIManager.getFont("defaultFont") == null) {
+                javax.swing.UIManager.put("defaultFont", new java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.PLAIN, 12));
+            }
+            Told told = new Told();
+            StagePanel panel = new StagePanel(told);
+            List<MusicTrack> tracks = Arrays.asList(new MusicTrack("melody", MusicTrack.MELODY, "melody", 73, "builtin"),
+                    new MusicTrack("bass", MusicTrack.BASS, "bass", 32, "builtin"));
+            SpatialScene scene = SpatialScene.standard(tracks);
+            panel.setScene(scene.with(scene.placement("bass").atHeight(0.25)), tracks);
+            panel.setBars(8);
+            panel.select("bass");
+            Assert.assertEquals("the slider shows where the track stands", 25, panel.heightSlider().getValue());
+            panel.select("melody");
+            Assert.assertEquals(0, panel.heightSlider().getValue());
+
+            // Moved: the scene has the height, and nothing else of the track changed.
+            panel.heightSlider().setValue(50);
+            SpatialScene changed = told.scenes.get(told.scenes.size() - 1);
+            Assert.assertEquals(0.5, changed.placement("melody").height(), 1e-9);
+            Assert.assertEquals(scene.placement("melody").x(), changed.placement("melody").x(), 0);
+            Assert.assertEquals(0.25, changed.placement("bass").height(), 1e-9);
+
+            // The curve of the height is drawn like the others and goes to the mix document.
+            MixScene mix = new MixScene(new Room("hall", 2, 0.4), 0, LevelMode.LEGACY_PEAK,
+                    List.of(new MixChannel("c1", MixChannel.Owner.part("melody"), 0, 0.2, 0, 1, 0.3, false, false)),
+                    List.of());
+            panel.setMovements(StageMovements.of(mix, TimeMap.of(120)));
+            JComponent field = panel.courseField();
+            field.setSize(WIDTH, HEIGHT);
+            panel.showCourse(AutomationLane.HEIGHT);
+            click(field, bar(2), 5);
+            click(field, bar(6), HEIGHT - 5);
+            Assert.assertEquals(List.of(new StageMovements.Point(2, 1), new StageMovements.Point(6, 0)),
+                    panel.movements().of("melody", AutomationLane.HEIGHT));
+            Assert.assertEquals("melody height settled", told.movements.get(told.movements.size() - 1));
+        });
+        Assert.assertEquals("Ohrhöhe", StagePanel.words(AutomationLane.HEIGHT, 0));
+        Assert.assertEquals("+3,0 m", StagePanel.words(AutomationLane.HEIGHT, 0.5));
+        Assert.assertTrue(StageMovements.PARAMETERS.contains(AutomationLane.HEIGHT));
+    }
+
     @Test
     public void valuesAreSaidInTheWordsOfTheirSliders() {
         Assert.assertEquals("Mitte", StagePanel.words(AutomationLane.X, 0));

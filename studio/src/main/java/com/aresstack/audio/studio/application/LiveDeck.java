@@ -8,6 +8,7 @@ import com.aresstack.audio.studio.mix.LiveStage;
 import com.aresstack.audio.studio.mix.MixLevel;
 import com.aresstack.audio.studio.mix.MixOutcome;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
+import com.aresstack.audio.studio.mix.StageSound;
 import com.aresstack.audio.studio.stage.AcousticRoom;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
@@ -83,6 +84,16 @@ public final class LiveDeck implements AutoCloseable {
      */
     public static LiveDeck open(Path arrangement, Path directory, SpatialScene scene, String only,
                                 float legacyFactor, Sinks sinks) throws Exception {
+        return open(arrangement, directory, scene, only, legacyFactor, sinks, StageSound.LOUDSPEAKERS);
+    }
+
+    /**
+     * As above, heard as {@code sound} says: on headphones, with a convolved room (work package
+     * D4). The way of hearing belongs to the deck; another one needs a new deck ({@link #sound()}).
+     */
+    public static LiveDeck open(Path arrangement, Path directory, SpatialScene scene, String only,
+                                float legacyFactor, Sinks sinks, StageSound sound) throws Exception {
+        StageSound heardAs = sound == null ? StageSound.LOUDSPEAKERS : sound;
         List<MusicTrack> tracks = StageMixService.tracks(arrangement);
         SpatialScene fitting = scene.fitting(tracks);
         List<Path> files = new ArrayList<Path>();
@@ -105,12 +116,12 @@ public final class LiveDeck implements AutoCloseable {
         }
         float factor = legacyFactor;
         if (!fitting.fixedLevel() && !(factor > 0 && Float.isFinite(factor))) {
-            factor = measuredFactor(arrangement, directory, fitting, only);
+            factor = measuredFactor(arrangement, directory, fitting, only, heardAs);
         }
         // How the tracks move with the piece (place and room share) comes from its mix document, as for the file.
         int tempo = StageMixService.tempo(arrangement);
         LiveStage stage = LiveStage.load(files, placements, fitting.room(), 4 * 60.0 / tempo,
-                StageMixService.movements(directory, tempo, message -> { }));
+                StageMixService.movements(directory, tempo, message -> { }), heardAs);
         try {
             LivePlayback playback = stage.playback(master(fitting, factor, fitting.masterDb()), sinks.open());
             return new LiveDeck(stage, playback, fitting, factor, directory, tempo);
@@ -127,7 +138,8 @@ public final class LiveDeck implements AutoCloseable {
      * the window, which may have mixed a newer stage by now. Not a number if it cannot be mixed;
      * the piece then plays at its master level alone.
      */
-    static float measuredFactor(Path arrangement, Path directory, SpatialScene fitting, String only) {
+    static float measuredFactor(Path arrangement, Path directory, SpatialScene fitting, String only,
+                                StageSound sound) {
         SpatialScene measured = fitting;
         for (SoundSourcePlacement placement : fitting.placements()) {
             measured = measured.with(heard(placement, only));
@@ -136,6 +148,7 @@ public final class LiveDeck implements AutoCloseable {
         try {
             scratch = Files.createTempFile(directory, "live-level-", ".part");
             StageMixService mixing = new StageMixService();
+            mixing.setSound(sound);
             mixing.export(arrangement, directory, measured, scratch, 16, null);
             return mixing.outcome().legacyFactor();
         } catch (Exception unmixed) {
@@ -231,6 +244,7 @@ public final class LiveDeck implements AutoCloseable {
     static double far(SoundSourcePlacement from, SoundSourcePlacement to) {
         double far = Math.abs(to.x() - from.x()) / 2;
         far = Math.max(far, Math.abs(to.depth() - from.depth()));
+        far = Math.max(far, Math.abs(to.height() - from.height()));
         far = Math.max(far, Math.abs(to.levelDb() - from.levelDb()) / 24);
         far = Math.max(far, Math.abs(to.width() - from.width()));
         return Math.max(far, Math.abs(to.reverb() - from.reverb()));
@@ -272,6 +286,11 @@ public final class LiveDeck implements AutoCloseable {
         float moved = factor > 0 && Float.isFinite(factor)
                 ? (float) (factor * Math.pow(10, (wanted.masterDb() - legacyMasterDb) / 20)) : Float.NaN;
         return LiveStage.master(MixLevel.legacy(wanted.masterDb()), moved);
+    }
+
+    /** How this deck is heard: loudspeakers or headphones, which room. */
+    public StageSound sound() {
+        return stage.sound();
     }
 
     public LiveStage liveStage() {

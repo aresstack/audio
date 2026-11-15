@@ -267,8 +267,8 @@ public final class LiveDeckTest {
         StageMixService service = new StageMixService();
         SpatialScene scene = service.scene(arrangement, song);
         SpatialStemMixer.Signal file = SpatialStemMixer.read(service.solo(arrangement, song, scene, "bass"));
-        float whole = LiveDeck.measuredFactor(arrangement, song, scene, null);
-        float alone = LiveDeck.measuredFactor(arrangement, song, scene, "bass");
+        float whole = LiveDeck.measuredFactor(arrangement, song, scene, null, com.aresstack.audio.studio.mix.StageSound.LOUDSPEAKERS);
+        float alone = LiveDeck.measuredFactor(arrangement, song, scene, "bass", com.aresstack.audio.studio.mix.StageSound.LOUDSPEAKERS);
         Assert.assertEquals(service.outcome().legacyFactor(), alone, 0f);
         Assert.assertTrue("alone the bass is raised further than within the mix", alone > 1.2f * whole);
         Tape tape = new Tape();

@@ -82,6 +82,16 @@ public final class AudioStudioFrame extends JFrame {
     private Map<String, DeckPlayer.Envelope> stemEnvelopes = new HashMap<String, DeckPlayer.Envelope>();
     private boolean loadingTracks;
     private final StudioSettingsStore settingsStore = StudioSettingsStore.standard();
+    /** How the stage is heard (work package D4): the choice kept in the settings, and what was read for it. */
+    private com.aresstack.audio.studio.application.StageListening listening =
+            com.aresstack.audio.studio.application.StageListening.USUAL;
+    private volatile com.aresstack.audio.studio.mix.StageSound stageSound =
+            com.aresstack.audio.studio.mix.StageSound.LOUDSPEAKERS;
+    private final com.aresstack.audio.studio.hrtf.HrtfLibrary hrtfLibrary =
+            new com.aresstack.audio.studio.hrtf.HrtfLibrary(com.aresstack.audio.studio.hrtf.HrtfLibrary.standardRoot());
+    private ListeningPanel listeningPanel;
+    private int listeningAsked;
+    private boolean hrtfLoading;
     private final JTextField endpoint = new JTextField(38);
     private final JPasswordField apiKey = new JPasswordField(38);
     private final JTextField model = new JTextField("google/gemma-4-31B-it", 23);
@@ -611,10 +621,131 @@ public final class AudioStudioFrame extends JFrame {
                 AudioStudioFrame.this.askDirector();
             }
         });
-        JPanel page = new JPanel(new BorderLayout());
+        listeningPanel = new ListeningPanel(new ListeningPanel.Host() {
+            @Override
+            public void listeningChanged(com.aresstack.audio.studio.application.StageListening wanted) {
+                listening = wanted;
+                saveSettings(false);
+                applyListening(true);
+            }
+
+            @Override
+            public String chooseImpulseResponse() {
+                JFileChooser chooser = new JFileChooser();
+                chooser.setDialogTitle("Impulsantwort (WAV) wählen");
+                chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("WAV-Dateien", "wav"));
+                return chooser.showOpenDialog(AudioStudioFrame.this) == JFileChooser.APPROVE_OPTION
+                        ? chooser.getSelectedFile().getAbsolutePath() : null;
+            }
+
+            @Override
+            public String chooseHrtfFolder() {
+                JFileChooser chooser = new JFileChooser();
+                chooser.setDialogTitle("Ordner mit Kopfdaten (Format MIT KEMAR) wählen");
+                chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+                return chooser.showOpenDialog(AudioStudioFrame.this) == JFileChooser.APPROVE_OPTION
+                        ? chooser.getSelectedFile().getAbsolutePath() : null;
+            }
+
+            @Override
+            public void downloadHrtf(com.aresstack.audio.studio.hrtf.HrtfDataset dataset) {
+                AudioStudioFrame.this.downloadHrtf(dataset);
+            }
+        });
+        JPanel page = new JPanel(new BorderLayout(0, 10));
         page.setOpaque(false);
         page.add(stagePanel, BorderLayout.CENTER);
+        page.add(new DeckWidgets.Module("Hören · Lautsprecher oder Kopfhörer, Raum", listeningPanel),
+                BorderLayout.SOUTH);
+        applyListening(false); // what the settings said, read from the disk in the background
         return page;
+    }
+
+    /** The stage mixer of the window: it mixes the way the stage is heard (work package D4). */
+    private com.aresstack.audio.studio.application.StageMixService stageMixing() {
+        com.aresstack.audio.studio.application.StageMixService mixing =
+                new com.aresstack.audio.studio.application.StageMixService();
+        mixing.setSound(stageSound);
+        return mixing;
+    }
+
+    /**
+     * Makes the way of hearing the user chose the one of the stage: the files it names are read in
+     * the background (from the disk only, never from the network), then the live stage and the
+     * mixed file follow. A live stage that plays another way is made anew where playback stands.
+     *
+     * @param hear whether the stage is to be mixed and played anew now (not at the start, when
+     *             nothing has been heard yet)
+     */
+    private void applyListening(boolean hear) {
+        final com.aresstack.audio.studio.application.StageListening wanted = listening;
+        final int ticket = ++listeningAsked;
+        if (listeningPanel != null) {
+            listeningPanel.show(wanted, null, hrtfLibrary.isInstalled(
+                    com.aresstack.audio.studio.hrtf.HrtfDataset.MIT_KEMAR), hrtfLoading);
+        }
+        Thread reader = new Thread(() -> {
+            com.aresstack.audio.studio.application.StageListening.Loaded loaded = wanted.load(hrtfLibrary);
+            boolean installed = hrtfLibrary.isInstalled(com.aresstack.audio.studio.hrtf.HrtfDataset.MIT_KEMAR);
+            SwingUtilities.invokeLater(() -> {
+                if (ticket != listeningAsked) {
+                    return; // chosen again in the meantime
+                }
+                for (String problem : loaded.problems()) {
+                    append("WARN: " + problem);
+                }
+                boolean changed = !loaded.sound().equals(stageSound);
+                stageSound = loaded.sound();
+                player.sound(stageSound);
+                if (listeningPanel != null) {
+                    listeningPanel.show(wanted, loaded, installed, hrtfLoading);
+                }
+                if (hear && changed) {
+                    append("Hören: " + (wanted.headphones() ? "Kopfhörer (3D), " + loaded.head() : "Lautsprecher")
+                            + " · " + loaded.room());
+                    hearStage(true);
+                    remixTimer.restart();
+                }
+            });
+        }, "stage-listening");
+        reader.setDaemon(true);
+        reader.start();
+    }
+
+    /**
+     * Downloads a set of head responses. Only ever called after the user has seen its source, its
+     * terms and its citation and confirmed: the studio asks the network for it at no other time.
+     */
+    private void downloadHrtf(com.aresstack.audio.studio.hrtf.HrtfDataset dataset) {
+        final AudioProxyRoutes routes;
+        try {
+            routes = configureNetworkRoutes();
+        } catch (RuntimeException error) {
+            message(error.getMessage());
+            applyListening(false);
+            return;
+        }
+        hrtfLoading = true;
+        applyListening(false);
+        Thread loader = new Thread(() -> {
+            String problem = null;
+            try {
+                hrtfLibrary.download(dataset, routes::proxyFor,
+                        line -> SwingUtilities.invokeLater(() -> append(line)));
+            } catch (Exception failed) {
+                problem = String.valueOf(failed.getMessage());
+            }
+            final String said = problem;
+            SwingUtilities.invokeLater(() -> {
+                hrtfLoading = false;
+                if (said != null) {
+                    message(dataset.title() + " ließ sich nicht laden: " + said);
+                }
+                applyListening(true);
+            });
+        }, "hrtf-download");
+        loader.setDaemon(true);
+        loader.start();
     }
 
     /**
@@ -763,8 +894,7 @@ public final class AudioStudioFrame extends JFrame {
             }
             final long began = System.nanoTime();
             String problem = null;
-            com.aresstack.audio.studio.application.StageMixService mixing =
-                    new com.aresstack.audio.studio.application.StageMixService();
+            com.aresstack.audio.studio.application.StageMixService mixing = stageMixing();
             try {
                 mixing.mix(arrangement, folder, mixed, message -> { });
             } catch (Exception failed) {
@@ -862,8 +992,7 @@ public final class AudioStudioFrame extends JFrame {
             exportNormalization = wanted;
         }
         try {
-            com.aresstack.audio.studio.application.StageMixService mixing =
-                    new com.aresstack.audio.studio.application.StageMixService();
+            com.aresstack.audio.studio.application.StageMixService mixing = stageMixing();
             mixing.export(arrangement, Paths.get(directory.getText().trim()), scene, target, 24,
                     com.aresstack.audio.studio.application.StageMixService.level(scene, wanted));
             append("Mischung gespeichert (24 Bit, 44,1 kHz): " + target);
@@ -1842,6 +1971,7 @@ public final class AudioStudioFrame extends JFrame {
                 description.setText(keptDescription);
             }
             ownTracks.setSelected("own".equals(saved.getProperty("instrumentMode")));
+            listening = com.aresstack.audio.studio.application.StageListening.from(saved);
             loadArrangementForCurrentDirectory(saved);
             refreshSongs();
             append("Einstellungen geladen: " + settingsStore.location());
@@ -1880,6 +2010,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("description", description.getText());
             saved.setProperty("parallel", parallelRequests.getValue().toString());
             saved.setProperty("instrumentMode", ownTracks.isSelected() ? "own" : "ai");
+            listening.into(saved);
             if (trackTable != null && !loadingTracks && trackTable.arrangement() != null) {
                 trackStore.save(Paths.get(directory.getText().trim()), trackTable.currentArrangement());
             }
@@ -2114,8 +2245,7 @@ public final class AudioStudioFrame extends JFrame {
         Path raw = com.aresstack.audio.studio.application.StageMixService.stem(folder, selected);
         if (arrangement != null && Files.isRegularFile(raw)) {
             try {
-                com.aresstack.audio.studio.application.StageMixService mixing =
-                        new com.aresstack.audio.studio.application.StageMixService();
+                com.aresstack.audio.studio.application.StageMixService mixing = stageMixing();
                 Path alone = mixing.solo(arrangement, folder, scene, selected);
                 if (mixing.outcome() != null) {
                     // A track alone is brought to its own peak: live playback of it follows that factor.

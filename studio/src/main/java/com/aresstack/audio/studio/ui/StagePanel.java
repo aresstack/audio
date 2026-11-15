@@ -128,6 +128,7 @@ final class StagePanel extends JPanel {
     private final Row level;
     private final Row width;
     private final Row share;
+    private final Row high;
     private final JToggleButton mute = new JToggleButton("Stumm");
     private final JToggleButton lock = new JToggleButton("Vor KI schützen");
     private final JLabel course = new JLabel(" ");
@@ -290,6 +291,21 @@ final class StagePanel extends JPanel {
                 }
             }
         };
+        high = new Row(source, 5, "Höhe", 0, 100,
+                "Wie hoch das Instrument über den Ohren steht (0 bis 6 m); auf Kopfhörern (3D) am deutlichsten") {
+            @Override
+            String words(int shown) {
+                return StagePanel.words(AutomationLane.HEIGHT, shown / 100.0);
+            }
+
+            @Override
+            void moved(int shown, boolean settled) {
+                SoundSourcePlacement placement = placement();
+                if (placement != null) {
+                    put(placement.atHeight(shown / 100.0), settled);
+                }
+            }
+        };
         mute.setToolTipText("Die Spur aus der Mischung nehmen, ohne sie zu löschen");
         lock.setToolTipText("Diese Spur bleibt, wo und wie sie ist, wenn die KI eine Abmischung vorschlägt");
         mute.addActionListener(event -> {
@@ -314,14 +330,15 @@ final class StagePanel extends JPanel {
         flat.setMargin(new Insets(3, 8, 3, 8));
         flat.addActionListener(event -> curve.set(new ArrayList<StageMovements.Point>(), true));
         // Which curve the field shows: the level, or how the instrument moves on the stage.
-        JPanel kinds = new JPanel(new GridLayout(1, 4, 4, 0));
+        JPanel kinds = new JPanel(new GridLayout(1, 5, 4, 0));
         kinds.setOpaque(false);
         javax.swing.ButtonGroup oneKind = new javax.swing.ButtonGroup();
         String[][] named = {
                 {AutomationLane.LEVEL, "Pegel", "Wie laut die Spur über die Takte ist"},
                 {AutomationLane.X, "Seite", "Wie die Spur über die Takte von links nach rechts wandert"},
                 {AutomationLane.DEPTH, "Tiefe", "Wie die Spur über die Takte nach vorn und hinten wandert"},
-                {AutomationLane.REVERB, "Hall", "Wie viel von der Spur über die Takte in den Raum geht"}};
+                {AutomationLane.REVERB, "Hall", "Wie viel von der Spur über die Takte in den Raum geht"},
+                {AutomationLane.HEIGHT, "Höhe", "Wie die Spur über die Takte steigt und sinkt"}};
         for (String[] kind : named) {
             final String chosenKind = kind[0];
             JToggleButton key = new JToggleButton(kind[1], chosenKind.equals(parameter));
@@ -609,7 +626,8 @@ final class StagePanel extends JPanel {
         /** Where the track stands in the shown parameter when nothing moves. */
         private double still() {
             return level() || shown == null ? 0 : AutomationLane.X.equals(parameter) ? shown.x()
-                    : AutomationLane.DEPTH.equals(parameter) ? shown.depth() : shown.reverb();
+                    : AutomationLane.DEPTH.equals(parameter) ? shown.depth()
+                    : AutomationLane.HEIGHT.equals(parameter) ? shown.height() : shown.reverb();
         }
 
         private float x(double bar) {
@@ -719,13 +737,18 @@ final class StagePanel extends JPanel {
         if (AutomationLane.DEPTH.equals(parameter)) {
             return String.format(java.util.Locale.GERMANY, "%.1f m", 3 + value * 9);
         }
+        if (AutomationLane.HEIGHT.equals(parameter)) {
+            // 0 is the height of the ears, 1 is six metres above them.
+            return value == 0 ? "Ohrhöhe" : String.format(java.util.Locale.GERMANY, "+%.1f m", value * 6);
+        }
         return Math.round(value * 100) + " %";
     }
 
     /** What a curve is called on the page. */
     private static String name(String parameter) {
         return AutomationLane.LEVEL.equals(parameter) ? "Pegel" : AutomationLane.X.equals(parameter) ? "Seite"
-                : AutomationLane.DEPTH.equals(parameter) ? "Tiefe" : "Hall";
+                : AutomationLane.DEPTH.equals(parameter) ? "Tiefe"
+                : AutomationLane.HEIGHT.equals(parameter) ? "Höhe" : "Hall";
     }
 
     /**
@@ -750,6 +773,11 @@ final class StagePanel extends JPanel {
     }
 
     /** The field the curves are drawn in. */
+    /** The slider of the height of the chosen track (for a test). */
+    JSlider heightSlider() {
+        return high.slider;
+    }
+
     javax.swing.JComponent courseField() {
         return curve;
     }
@@ -855,7 +883,7 @@ final class StagePanel extends JPanel {
         filling = true;
         try {
             boolean there = placement != null;
-            for (Row row : new Row[]{side, depth, level, width, share}) {
+            for (Row row : new Row[]{side, depth, level, width, share, high}) {
                 row.slider.setEnabled(there);
             }
             mute.setEnabled(there);
@@ -880,6 +908,7 @@ final class StagePanel extends JPanel {
             level.show((int) Math.round(placement.levelDb()));
             width.show((int) Math.round(placement.width() * 100));
             share.show((int) Math.round(placement.reverb() * 100));
+            high.show((int) Math.round(placement.height() * 100));
             mute.setSelected(placement.muted());
             lock.setSelected(placement.locked());
             curve.show(placement);
