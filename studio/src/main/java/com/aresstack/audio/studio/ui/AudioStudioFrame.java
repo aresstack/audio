@@ -341,7 +341,10 @@ public final class AudioStudioFrame extends JFrame {
         // At the left the albums of the project as a tree, beside it the page of what was clicked there.
         JPanel work = new JPanel(new BorderLayout(14, 0));
         work.setOpaque(false);
-        work.add(new DeckWidgets.Module("Alben", albumTree()), BorderLayout.WEST);
+        DeckWidgets.Module albumsModule = new DeckWidgets.Module("Alben", albumTree());
+        albumsModule.setHeadStart(albumTree.newAlbumKey());
+        albumsModule.setHeadEnd(albumTree.newPieceKey());
+        work.add(albumsModule, BorderLayout.WEST);
         work.add(pageHolder, BorderLayout.CENTER);
         desk.add(work, BorderLayout.CENTER);
         statusLine.setFont(statusLine.getFont().deriveFont(12f));
