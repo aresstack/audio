@@ -5,8 +5,11 @@ import com.aresstack.audio.composition.Composition;
 import com.aresstack.audio.composition.Ids;
 import com.aresstack.audio.composition.MidiClip;
 import com.aresstack.audio.composition.Part;
+import com.aresstack.audio.composition.Section;
 import com.aresstack.audio.composition.Track;
 import com.aresstack.audio.composition.edit.ChangeSet;
+import com.aresstack.audio.composition.edit.EditOp;
+import com.aresstack.audio.composition.edit.EditScope;
 import com.aresstack.audio.composition.edit.Patch;
 import com.aresstack.audio.composition.edit.Proposal;
 import com.aresstack.audio.composition.edit.Revision;
@@ -45,17 +48,21 @@ public final class RegionRework {
     private final RegionComposer composer;
     private final RegionRequest request;
     private final Supplier<String> ids;
+    /** The form the piece gets with the passage (a gap becomes a transition), or {@code null} to keep it. */
+    private final List<Section> form;
     private int attempt;
     private RewrittenRegion region;
     private List<String> corrections = List.of();
     private Proposal proposal;
     private boolean accepted;
 
-    private RegionRework(ProjectSession session, RegionComposer composer, RegionRequest request, Supplier<String> ids) {
+    private RegionRework(ProjectSession session, RegionComposer composer, RegionRequest request, Supplier<String> ids,
+                         List<Section> form) {
         this.session = session;
         this.composer = composer;
         this.request = request;
         this.ids = ids;
+        this.form = form == null ? null : List.copyOf(form);
     }
 
     /**
@@ -72,7 +79,20 @@ public final class RegionRework {
     /** As {@link #start(ProjectSession, RegionComposer, RegionRequest, Progress)}, with a source of ids. */
     public static RegionRework start(ProjectSession session, RegionComposer composer, RegionRequest request,
                                      Supplier<String> ids, Progress progress) throws IOException, EditRefusedException {
-        RegionRework rework = new RegionRework(session, composer, request, ids);
+        return start(session, composer, request, null, ids, progress);
+    }
+
+    /**
+     * As {@link #start(ProjectSession, RegionComposer, RegionRequest, Progress)}, and the form of the
+     * piece becomes {@code form} in the same step: a gap the AI fills becomes a section of its own
+     * (see {@link SectionEdits#filledForm}). Nothing else of the form may differ.
+     *
+     * @param form the sections of the piece with the passage, or {@code null} to keep them
+     */
+    public static RegionRework start(ProjectSession session, RegionComposer composer, RegionRequest request,
+                                     List<Section> form, Supplier<String> ids, Progress progress)
+            throws IOException, EditRefusedException {
+        RegionRework rework = new RegionRework(session, composer, request, ids, form);
         rework.generate(progress);
         return rework;
     }
@@ -163,9 +183,18 @@ public final class RegionRework {
         RewrittenRegion written = composer.compose(base, request, next, session.folder().resolve(CACHE), progress);
         List<String> log = new ArrayList<>(written.corrections());
         Patch patch = RegionEdit.patch(base, written, ids, log);
-        Proposal made = session.propose(patch, RegionEdit.scope(request.selection()), Revision.Author.AI,
-                written.runId());
-        List<String> differences = RegionEdit.outsideChanges(base, made.result(), request.selection());
+        EditScope scope = RegionEdit.scope(request.selection());
+        Composition expected = base;
+        if (form != null) {
+            List<EditOp> operations = new ArrayList<>(patch.operations());
+            operations.add(new EditOp.SetSections(form));
+            patch = new Patch(patch.description(), operations);
+            scope = scope.allowing(EditOp.Kind.SET_SECTIONS);
+            expected = new Composition(base.meta(), base.timeMap(), form, base.parts(), base.tracks(), base.assets(),
+                    base.dynamics());
+        }
+        Proposal made = session.propose(patch, scope, Revision.Author.AI, written.runId());
+        List<String> differences = RegionEdit.outsideChanges(expected, made.result(), request.selection());
         if (!differences.isEmpty()) {
             session.discard(made);
             throw new IllegalStateException("Die Passage hätte außerhalb der Auswahl etwas verändert: " + differences);

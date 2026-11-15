@@ -444,7 +444,22 @@ final class ArrangementView extends JComponent {
             marked = range;
             listener.marked(range);
             repaint();
+            if (companion != null) {
+                companion.repaint();
+            }
         }
+    }
+
+    /**
+     * Marks bars across every MIDI lane, as the section bar above does (bars counted from 1, both
+     * ends included); bars the lanes do not show are left out.
+     */
+    void markBars(int firstBar, int lastBar) {
+        int bars = bars();
+        int first = Math.max(1, Math.min(firstBar, lastBar));
+        int last = Math.min(bars, Math.max(firstBar, lastBar));
+        List<String> tracks = noteLanes();
+        mark(tracks.isEmpty() || last < first ? null : new Range(tracks, first, last));
     }
 
     /** The bar under a place across the view, counted from 1. */
