@@ -214,13 +214,41 @@ public final class Score {
     }
 
     /**
-     * The notes of a track as one voice or two.
+     * The voice the score writes each note of one track in, as the heuristic of this class
+     * decides it: 0 for the upper (or only) voice, 1 for the lower one. The model of a piece
+     * keeps this once, when an old piece is imported, as the voice of each note.
      *
-     * @param struck whether the track is struck, not held (drums): a hit ends when the next one comes
+     * @param notes  tick, length and pitch of each note, in the order of the file
+     * @param struck whether the track is struck, not held (drums); struck tracks have one voice
+     * @return the voice of each note, in the order given
      */
-    private static List<List<List<Event>>> voices(TreeMap<Integer, List<int[]>> track, int bars, boolean struck) {
+    public static int[] voicesOf(List<long[]> notes, boolean struck) {
+        TreeMap<Integer, List<int[]>> track = new TreeMap<Integer, List<int[]>>();
+        int end = 0;
+        for (int index = 0; index < notes.size(); index++) {
+            long[] note = notes.get(index);
+            int start = (int) Math.round(note[0] / (double) TICKS_PER_SIXTEENTH);
+            int stop = Math.max(start + 1, (int) Math.round((note[0] + note[1]) / (double) TICKS_PER_SIXTEENTH));
+            track.computeIfAbsent(start, at -> new ArrayList<int[]>()).add(new int[]{(int) note[2], stop, index});
+            end = Math.max(end, stop);
+        }
+        int[] voices = new int[notes.size()];
+        List<List<int[]>> parts = struck ? null : separate(sounding(track, Math.max(1, (end + BAR - 1) / BAR), false));
+        if (parts != null) {
+            for (int[] note : parts.get(1)) {
+                voices[note[3]] = 1;
+            }
+        }
+        return voices;
+    }
+
+    /**
+     * The notes of a track as pitch, start, stop (in sixteenths) and their place among the notes
+     * given, cut at the end of the last bar; a struck note ends when the next one comes.
+     */
+    private static List<int[]> sounding(TreeMap<Integer, List<int[]>> track, int bars, boolean struck) {
         int end = bars * BAR;
-        List<int[]> notes = new ArrayList<int[]>(); // pitch, start, stop
+        List<int[]> notes = new ArrayList<int[]>(); // pitch, start, stop, index
         for (Map.Entry<Integer, List<int[]>> together : track.entrySet()) {
             for (int[] note : together.getValue()) {
                 int start = Math.min(end, together.getKey());
@@ -230,10 +258,20 @@ public final class Score {
                     stop = Math.min(stop, following);
                 }
                 if (start < stop) {
-                    notes.add(new int[]{note[0], start, stop});
+                    notes.add(new int[]{note[0], start, stop, note.length > 2 ? note[2] : -1});
                 }
             }
         }
+        return notes;
+    }
+
+    /**
+     * The notes of a track as one voice or two.
+     *
+     * @param struck whether the track is struck, not held (drums): a hit ends when the next one comes
+     */
+    private static List<List<List<Event>>> voices(TreeMap<Integer, List<int[]>> track, int bars, boolean struck) {
+        List<int[]> notes = sounding(track, bars, struck);
         List<List<List<Event>>> written = new ArrayList<List<List<Event>>>();
         List<List<int[]>> parts = struck ? null : separate(notes);
         if (parts == null) {
