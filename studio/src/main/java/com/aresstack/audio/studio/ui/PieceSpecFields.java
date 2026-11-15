@@ -28,6 +28,8 @@ final class PieceSpecFields extends JPanel {
     private final JSpinner numerator = new JSpinner(new SpinnerNumberModel(4, 1, 32, 1));
     private final JComboBox<Integer> denominator = new JComboBox<Integer>(new Integer[]{1, 2, 4, 8, 16});
     private final JCheckBox snap = new JCheckBox("auf Harmonie ziehen", true);
+    private static final String SNAP_HINT = "An: Töne außerhalb von Tonart und Akkord des Takts werden auf die Harmonie"
+            + " gezogen. Aus: Sie bleiben stehen und werden nur gemeldet.";
     private final JLabel planned = new JLabel(" ");
     private boolean locked;
 
@@ -45,8 +47,7 @@ final class PieceSpecFields extends JPanel {
         });
         key.setMaximumRowCount(12);
         snap.setOpaque(false);
-        snap.setToolTipText("An: Töne außerhalb von Tonart und Akkord des Takts werden auf die Harmonie gezogen."
-                + " Aus: Sie bleiben stehen und werden nur gemeldet.");
+        snap.setToolTipText(SNAP_HINT);
         bars.setToolTipText("Länge des Stücks, 1 bis " + CompositionSpec.MAX_BARS + " Takte");
         bpm.setToolTipText("Viertel pro Minute, " + CompositionSpec.MIN_BPM + " bis " + CompositionSpec.MAX_BPM);
         planned.setForeground(AudioStudioTheme.TEXT_DIM);
@@ -123,11 +124,13 @@ final class PieceSpecFields extends JPanel {
         for (Component field : new Component[]{bars, bpm, key, numerator, denominator, snap}) {
             field.setEnabled(!locked);
         }
-        planned.setText(locked ? "so geplant" : " ");
+        planned.setText(locked ? "Gesperrt: Das Stück ist mit diesen Vorgaben geplant" : " ");
         String why = locked ? "Dieses Stück ist mit diesen Vorgaben geplant. Für andere Vorgaben ein neues Stück beginnen"
                 + " oder beim Komponieren „Neues Stück“ oder „Dieses ersetzen“ wählen." : null;
         planned.setToolTipText(why);
         setToolTipText(why);
+        // The switch says what it does, and for a planned piece also why it cannot be changed.
+        snap.setToolTipText(locked ? SNAP_HINT + " " + why : SNAP_HINT);
     }
 
     /** Whether the fields show a planned piece and cannot be changed. */
