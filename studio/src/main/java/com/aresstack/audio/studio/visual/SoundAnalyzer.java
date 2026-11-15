@@ -17,6 +17,9 @@ public final class SoundAnalyzer {
     private final FourierTransform fft;
     private final double[] real;
     private final double[] imag;
+    /** The right side's transform; the left one goes into {@link #real} and {@link #imag}. */
+    private final double[] realRight;
+    private final double[] imagRight;
     private final double[] hann;
     /** For each band its first and last FFT bin; a band narrower than a bin reads between two bins. */
     private final double[] bandLow;
@@ -34,6 +37,8 @@ public final class SoundAnalyzer {
         fft = new RadixTwoFourierTransform(n);
         real = new double[n];
         imag = new double[n];
+        realRight = new double[n];
+        imagRight = new double[n];
         hann = new double[n];
         for (int i = 0; i < n; i++) {
             hann[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1));
@@ -94,14 +99,18 @@ public final class SoundAnalyzer {
             peakR = Math.max(peakR, Math.abs(r));
             sumL += l * l;
             sumR += r * r;
-            real[i] = (l + r) * 0.5 * hann[i];
+            // Each side on its own: a sum would cancel what the two sides play in opposite phase.
+            real[i] = l * hann[i];
             imag[i] = 0;
+            realRight[i] = r * hann[i];
+            imagRight[i] = 0;
         }
         picture.peakLeft = Math.min(1f, peakL);
         picture.peakRight = Math.min(1f, peakR);
         picture.rmsLeft = (float) Math.min(1, Math.sqrt(sumL / n));
         picture.rmsRight = (float) Math.min(1, Math.sqrt(sumR / n));
         fft.forward(real, imag);
+        fft.forward(realRight, imagRight);
         // A full-scale sine under a Hann window peaks at n/4 in its bin: that is 0 dB.
         double fullScale = n / 4.0;
         double floor = settings.floorDb();
@@ -163,14 +172,21 @@ public final class SoundAnalyzer {
         int last = (int) Math.floor(high);
         double best = 0;
         for (int k = Math.max(1, first); k <= Math.min(half - 1, last); k++) {
-            best = Math.max(best, Math.hypot(real[k], imag[k]));
+            best = Math.max(best, magnitude(k));
         }
         if (first > last) {
             double centre = (low + high) / 2;
             int below = Math.max(1, Math.min(half - 2, (int) Math.floor(centre)));
             double t = Math.max(0, Math.min(1, centre - below));
-            best = Math.hypot(real[below], imag[below]) * (1 - t) + Math.hypot(real[below + 1], imag[below + 1]) * t;
+            best = magnitude(below) * (1 - t) + magnitude(below + 1) * t;
         }
         return best;
+    }
+
+    /** The magnitude of a bin over both sides: the root of their mean power, so a mono signal reads as one side. */
+    private double magnitude(int k) {
+        double left = real[k] * real[k] + imag[k] * imag[k];
+        double right = realRight[k] * realRight[k] + imagRight[k] * imagRight[k];
+        return Math.sqrt((left + right) * 0.5);
     }
 }

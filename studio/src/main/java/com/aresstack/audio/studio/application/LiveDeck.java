@@ -397,7 +397,8 @@ public final class LiveDeck implements AutoCloseable {
             double x = lanes.x() != null ? lanes.x().valueAt(frame) : placement.x();
             double depth = lanes.depth() != null ? lanes.depth().valueAt(frame) : placement.depth();
             double height = lanes.height() != null ? lanes.height().valueAt(frame) : placement.height();
-            float level = placement.muted() ? 0f : stage.graph().channel(i).peakAt(frame);
+            // The peak of the channel already holds what is heard: muted, or soloed although muted.
+            float level = stage.graph().channel(i).peakAt(frame);
             lights.add(new TrackLight(id, i, x, depth, height, level));
         }
         return lights;

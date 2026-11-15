@@ -55,6 +55,24 @@ public final class SoundAnalyzerTest {
     }
 
     @Test
+    public void sidesInOppositePhaseDoNotCancel() {
+        SoundAnalyzer analyzer = new SoundAnalyzer(VisualSettings.DEFAULTS, RATE);
+        SoundPicture picture = analyzer.picture();
+        picture.sounding = true;
+        for (int i = 0; i < picture.left.length; i++) {
+            float v = (float) Math.sin(2 * Math.PI * 1000 * i / RATE);
+            picture.left[i] = v;
+            picture.right[i] = -v;
+        }
+        analyzer.analyzeWindow(0);
+        float loudest = 0;
+        for (float band : picture.rawBands) {
+            loudest = Math.max(loudest, band);
+        }
+        assertEquals(1f, loudest, 0.05f);
+    }
+
+    @Test
     public void silenceGivesNothing() {
         SoundAnalyzer analyzer = new SoundAnalyzer(VisualSettings.DEFAULTS, RATE);
         SoundPicture picture = analyzer.analyze(SoundFeed.SILENT);

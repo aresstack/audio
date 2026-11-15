@@ -20,6 +20,11 @@ public final class SoundTap {
     private final int mask;
     /** Frames written in all, published after the copy: the release a reader acquires. */
     private volatile long written;
+    /**
+     * Frames written in all once the copy that runs now is done, published before it: a reader
+     * whose frames lie within one ring of this may have seen them half overwritten.
+     */
+    private volatile long claimed;
 
     /** @param capacityFrames how many of the latest frames are kept, rounded up to a power of two */
     public SoundTap(int capacityFrames) {
@@ -48,6 +53,7 @@ public final class SoundTap {
     /** Writer only: the first {@code count} frames of two float channels. */
     public void write(float[] fromLeft, float[] fromRight, int count) {
         long at = written;
+        claim(at + count);
         int done = 0;
         while (done < count) {
             int slot = (int) ((at + done) & mask);
@@ -72,6 +78,7 @@ public final class SoundTap {
         int frameBytes = 2 * channels;
         int frames = bytes / frameBytes;
         long at = written;
+        claim(at + frames);
         float scale = gain / 32768f;
         for (int i = 0; i < frames; i++) {
             int index = offset + i * frameBytes;
@@ -111,7 +118,15 @@ public final class SoundTap {
                 toRight[i] = right[slot];
             }
         }
-        // The writer may have gone round meanwhile: the oldest frame copied must still be in the ring.
-        return from >= written - left.length;
+        // The writer may have gone round meanwhile, or be overwriting now: the oldest frame copied
+        // must lie within one ring of everything written or being written.
+        java.lang.invoke.VarHandle.loadLoadFence();
+        return from >= claimed - left.length;
+    }
+
+    /** Announces the frames about to be copied, before the first of them lands in the ring. */
+    private void claim(long end) {
+        claimed = end;
+        java.lang.invoke.VarHandle.storeStoreFence(); // no slot is overwritten before the claim is seen
     }
 }
