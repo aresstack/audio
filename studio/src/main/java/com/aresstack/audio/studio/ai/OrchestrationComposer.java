@@ -52,6 +52,15 @@ public final class OrchestrationComposer {
         this.threads = threads;
     }
 
+    /**
+     * A composer whose plan comes from the arranging role (follows planning) and whose notes come
+     * from the rework role (follows composition), four parts at a time.
+     */
+    public static OrchestrationComposer with(ModelLineup models) {
+        return new OrchestrationComposer(new ChatOrchestrationPlanner(models.model(ModelRoles.ARRANGING), 4096),
+                new ChatOrchestrationGenerator(models.model(ModelRoles.REWORK), 16384), 4);
+    }
+
     /** A composer that asks a model for plan and notes, four parts at a time. */
     public static OrchestrationComposer with(ChatModel model) {
         return new OrchestrationComposer(new ChatOrchestrationPlanner(model, 4096),
