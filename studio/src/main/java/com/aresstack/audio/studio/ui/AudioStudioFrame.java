@@ -121,13 +121,8 @@ public final class AudioStudioFrame extends JFrame {
     private final JCheckBox fitArrangement = new JCheckBox("Ganzes Stück in die Fensterbreite einpassen", true);
     /** The same switch in the head of the arrangement: on fits the piece, off gives each bar its width and a scroll bar. */
     private final JCheckBox fitArrangementHead = new JCheckBox("Einpassen", true);
-    /** How wide a bar of the arrangement is when the piece is not fitted into the window, in pixels. */
-    private final JSpinner arrangementBarWidth = new JSpinner(new SpinnerNumberModel(ArrangementView.BAR_WIDTH,
-            ArrangementView.MIN_BAR_WIDTH, ArrangementView.MAX_BAR_WIDTH, 8));
     private final JComboBox<AppIcon> appIconChoice = new JComboBox<>(AppIcon.values());
     private boolean showingSavedIcon;
-    /** True while the saved bar width is put into its field, so that showing it does not save again. */
-    private boolean showingSavedBarWidth;
     private final JTextField proxyCredentialRef = new JTextField(22);
     private final JComboBox<KeePassEntry> keePassEntries = new JComboBox<KeePassEntry>();
     private final JTextField directory = new JTextField(Paths.get(System.getProperty("user.home"),
@@ -700,8 +695,8 @@ public final class AudioStudioFrame extends JFrame {
         fitArrangementHead.setOpaque(false);
         fitArrangementHead.setFocusable(false);
         fitArrangementHead.setForeground(AudioStudioTheme.TEXT_DIM);
-        fitArrangementHead.setToolTipText("An: das ganze Stück passt ins Fenster. Aus: jeder Takt hat seine feste Breite"
-                + " (Einstellungen › Taktbreite), unten ein Rollbalken; Umschalt + Mausrad rollt seitwärts.");
+        fitArrangementHead.setToolTipText("An: das ganze Stück passt ins Fenster. Aus: Strg + Mausrad zoomt,"
+                + " unten ein Rollbalken; Umschalt + Mausrad rollt seitwärts.");
         fitArrangementHead.addActionListener(event -> {
             trackTable.setFit(fitArrangement.isSelected());
             saveSettings(false);
@@ -1826,22 +1821,14 @@ public final class AudioStudioFrame extends JFrame {
         column.add(new DeckWidgets.Module("Klangerzeugung", sound));
         JPanel looks = form();
         fitArrangement.setOpaque(false);
-        fitArrangement.setToolTipText("An: das ganze Stück ist immer zu sehen. Aus: jeder Takt hat seine feste Breite, "
+        fitArrangement.setToolTipText("An: das ganze Stück ist immer zu sehen. Aus: Strg + Mausrad zoomt, "
                 + "unten erscheint ein Rollbalken; Umschalt und Mausrad rollen seitwärts.");
         fitArrangement.addActionListener(event -> {
             trackTable.setFit(fitArrangement.isSelected());
             saveSettings(false);
         });
         addRow(looks, 0, "Arrangement", fitArrangement);
-        addRow(looks, 1, "", note("Aus: lange Stücke bleiben lesbar; unten ein Rollbalken, Umschalt + Mausrad rollt seitwärts."));
-        arrangementBarWidth.setToolTipText("Breite eines Takts im Arrangement in Pixeln, wenn nicht eingepasst wird");
-        arrangementBarWidth.addChangeListener(event -> {
-            trackTable.setBarWidth((Integer) arrangementBarWidth.getValue());
-            if (!showingSavedBarWidth) {
-                saveSettings(false);
-            }
-        });
-        addRow(looks, 3, "Taktbreite (px)", line(arrangementBarWidth));
+        addRow(looks, 1, "", note("Aus: Strg + Mausrad zoomt; unten ein Rollbalken, Umschalt + Mausrad rollt seitwärts."));
         appIconChoice.setRenderer(new javax.swing.DefaultListCellRenderer() {
             @Override
             public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list, Object value,
@@ -4150,21 +4137,9 @@ public final class AudioStudioFrame extends JFrame {
             proxyCredentialRef.setText(saved.getProperty("proxyCredentialRef", ""));
             fitArrangement.setSelected(!"false".equalsIgnoreCase(saved.getProperty("arrangementFit", "true")));
             trackTable.setFit(fitArrangement.isSelected());
-            int barWidth = ArrangementView.BAR_WIDTH;
-            try {
-                barWidth = Integer.parseInt(saved.getProperty("arrangementBarWidth",
-                        Integer.toString(ArrangementView.BAR_WIDTH)).trim());
-            } catch (NumberFormatException unreadable) {
-                // the usual width
-            }
-            barWidth = Math.max(ArrangementView.MIN_BAR_WIDTH, Math.min(ArrangementView.MAX_BAR_WIDTH, barWidth));
-            showingSavedBarWidth = true;
-            try {
-                arrangementBarWidth.setValue(barWidth);
-            } finally {
-                showingSavedBarWidth = false;
-            }
-            trackTable.setBarWidth(barWidth);
+            // Zoom of the arrangement when it is not fitted (Strg + Mausrad): step per notch and the most.
+            trackTable.setZoomLimits(number(saved, "arrangementZoomStep", ArrangementView.ZOOM_STEP),
+                    number(saved, "arrangementZoomMost", ArrangementView.ZOOM_MOST));
             AppIcon savedIcon = AppIcon.fromKey(saved.getProperty(AppIcon.SETTING));
             showingSavedIcon = true;
             try {
@@ -4249,7 +4224,6 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("proxyAuthMode", proxyBasic.isSelected() ? "BASIC" : "");
             saved.setProperty("proxyCredentialRef", proxyCredentialRef.getText().trim());
             saved.setProperty("arrangementFit", String.valueOf(fitArrangement.isSelected()));
-            saved.setProperty("arrangementBarWidth", String.valueOf(arrangementBarWidth.getValue()));
             saved.setProperty(AppIcon.SETTING, ((AppIcon) appIconChoice.getSelectedItem()).key());
             saved.setProperty("outputDirectory", directory.getText().trim());
             try {
@@ -5346,6 +5320,15 @@ public final class AudioStudioFrame extends JFrame {
         String said = line.startsWith("WARN") || line.startsWith("ERROR") ? line : "WARN: " + line;
         append(said);
         setStatus(said); // also while tracks are at work: the notice answers what the user just did
+    }
+
+    /** A number from the settings, or the default if it is missing or not a number. */
+    private static double number(Properties saved, String key, double fallback) {
+        try {
+            return Double.parseDouble(saved.getProperty(key, Double.toString(fallback)).trim());
+        } catch (NumberFormatException unreadable) {
+            return fallback;
+        }
     }
 
     private int parseParallel(String configured) {
