@@ -1514,11 +1514,8 @@ public final class AudioStudioFrame extends JFrame {
         addRow(ai, row++, "Completions-URL", endpoint);
         addRow(ai, row++, "API-Key", apiKey);
         showAccess();
-        JPanel modelControls = new JPanel(new BorderLayout(8, 0));
-        modelControls.setOpaque(false);
-        modelControls.add(model, BorderLayout.CENTER);
-        JButton listModels = new JButton("Modelle laden");
-        listModels.addActionListener(event -> loadModelNames(true));
+        // The base model has no field any more: every task has its model on the pages of the
+        // album and of the composition. The value is kept as what a task without one falls back to.
         model.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             private void follow() {
                 modelChoices.setBase(model.getText());
@@ -1540,8 +1537,6 @@ public final class AudioStudioFrame extends JFrame {
                 follow();
             }
         });
-        modelControls.add(listModels, BorderLayout.EAST);
-        addRow(ai, row++, "Basismodell", modelControls);
         tokenLimit.setPreferredSize(new Dimension(110, 30));
         parallelRequests.setPreferredSize(new Dimension(110, 30));
         addRow(ai, row++, "Antwortlänge",

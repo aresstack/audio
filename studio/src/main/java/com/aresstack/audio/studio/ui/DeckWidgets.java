@@ -264,6 +264,54 @@ final class DeckWidgets {
     }
 
     /**
+     * A small sign beside a heading that fetches something anew: two arrows that turn in a
+     * circle. No frame and no words; it lights up under the pointer.
+     */
+    static final class RefreshKey extends javax.swing.JButton {
+        RefreshKey(String tip) {
+            setToolTipText(tip);
+            getAccessibleContext().setAccessibleName(tip);
+            setContentAreaFilled(false);
+            setBorderPainted(false);
+            setFocusPainted(false);
+            setOpaque(false);
+            setFocusable(false);
+            setPreferredSize(new Dimension(18, 18));
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            setRolloverEnabled(true);
+        }
+
+        @Override
+        protected void paintComponent(java.awt.Graphics graphics) {
+            java.awt.Graphics2D g = (java.awt.Graphics2D) graphics.create();
+            g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setRenderingHint(java.awt.RenderingHints.KEY_STROKE_CONTROL, java.awt.RenderingHints.VALUE_STROKE_PURE);
+            double cx = getWidth() / 2.0;
+            double cy = getHeight() / 2.0 + (getModel().isPressed() ? 1 : 0);
+            double r = Math.min(getWidth(), getHeight()) / 2.0 - 3.5;
+            g.setColor(getModel().isRollover() ? AudioStudioTheme.TEXT : AudioStudioTheme.TEXT_DIM);
+            g.setStroke(new java.awt.BasicStroke(1.6f, java.awt.BasicStroke.CAP_BUTT, java.awt.BasicStroke.JOIN_MITER));
+            for (int half = 0; half < 2; half++) {
+                // An arc of 130 degrees, clockwise, with a head at its end; the second is the first turned half round.
+                double from = Math.toRadians(half * 180 + 200);
+                double to = from + Math.toRadians(130);
+                g.draw(new java.awt.geom.Arc2D.Double(cx - r, cy - r, 2 * r, 2 * r,
+                        -Math.toDegrees(from), -130, java.awt.geom.Arc2D.OPEN));
+                double x = cx + r * Math.cos(to);
+                double y = cy + r * Math.sin(to);
+                double along = to + Math.PI / 2; // the way the arc runs at its end
+                java.awt.geom.Path2D head = new java.awt.geom.Path2D.Double();
+                head.moveTo(x + 3.2 * Math.cos(along), y + 3.2 * Math.sin(along));
+                head.lineTo(x + 2.6 * Math.cos(to), y + 2.6 * Math.sin(to));
+                head.lineTo(x - 2.6 * Math.cos(to), y - 2.6 * Math.sin(to));
+                head.closePath();
+                g.fill(head);
+            }
+            g.dispose();
+        }
+    }
+
+    /**
      * A small round key in the upper corner of the desk for a page that is needed now and then
      * (the settings behind a gear, the sound banks behind a stack of discs). Not a page key: the
      * keys under the display belong to the work on the piece. Each has its own colour while its
