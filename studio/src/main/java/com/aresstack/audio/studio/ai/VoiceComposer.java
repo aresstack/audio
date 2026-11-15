@@ -81,7 +81,9 @@ public final class VoiceComposer {
         VoicePlan plan;
         if (request.plan()) {
             progress.update("Plane die neue Stimme " + request.name() + " ...");
-            plan = planner.plan(task, cacheDirectory);
+            try (Listening.Scope planning = EditSketch.preparing(progress, "Die KI plant die neue Stimme")) {
+                plan = planner.plan(task, cacheDirectory);
+            }
         } else {
             plan = VoicePlan.everywhere(task.frames(), task.range(), request.instruction());
         }
@@ -90,6 +92,7 @@ public final class VoiceComposer {
         List<VoiceFrame> played = new ArrayList<>();
         List<List<ShapedNote>> playedNotes = new ArrayList<>();
         String connection = "";
+        final EditSketch sketch = EditSketch.of(piece, progress);
         for (VoiceFrame frame : task.frames()) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new IOException("Hinzukomponieren abgebrochen.");
@@ -101,7 +104,14 @@ public final class VoiceComposer {
                 continue;
             }
             progress.update("Komponiere " + request.name() + " für " + frame.name() + " ...");
-            GeneratedNotes generated = generator.generate(task, plan, frame, connection, cacheDirectory);
+            GeneratedNotes generated;
+            try (Listening.Scope watching = Listening.to(sketch == null ? null
+                    : sketch.hearing(ids.partId(), request.program(), request.role(), frame))) {
+                generated = generator.generate(task, plan, frame, connection, cacheDirectory);
+            }
+            if (sketch != null) {
+                sketch.written(ids.partId(), request.program(), request.role(), frame, generated);
+            }
             List<ShapedNote> shaped = normalizer.shape(frame, generated);
             if (shaped.isEmpty()) {
                 progress.update("WARN: keine spielbaren Noten für " + frame.name() + ".");

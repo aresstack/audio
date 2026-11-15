@@ -579,6 +579,12 @@ public final class AudioStudioFrame extends JFrame {
                 this::reworkRegion));
         pieceActions.add(pieceAction("Umorchestrieren …",
                 "Die KI verteilt das Material markierter Takte neu auf die Stimmen", this::reorchestrate));
+        pieceActions.add(javax.swing.Box.createHorizontalStrut(12));
+        pieceActions.add(undoKey);
+        undoKey.setToolTipText("Nimmt die letzte Änderung am Stück zurück (Strg+Z)");
+        undoKey.setFocusable(false);
+        undoKey.setEnabled(false);
+        undoKey.addActionListener(event -> undoPiece(false));
         JPanel arrangementBody = new JPanel(new BorderLayout());
         arrangementBody.setOpaque(false);
         // A proposal of the AI waits here, under the keys that ask for one: part of the page, no dialog.
@@ -2433,8 +2439,7 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         final String runId = "ki-" + Long.toString(System.currentTimeMillis(), 36);
-        append("Spur " + trackId + " wird als Vorschlag neu komponiert; das Stück bleibt, wie es ist, bis der "
-                + "Vorschlag übernommen wird.");
+        append("Spur " + trackId + " wird neu komponiert.");
         activeModels = models;
         start(new Operation() {
             @Override
@@ -2444,14 +2449,9 @@ public final class AudioStudioFrame extends JFrame {
                     offer = com.aresstack.audio.studio.application.RecompositionOffer.stage(piece, trackId, runId);
                     composeAside(new GemmaMusicComposer(models, tokens, parallel).sectionBars(sections), prompt, offer.staging(), chosen,
                             progress);
-                    Path preview = offer.propose(runId);
-                    progress.update("Der Vorschlag wird zum Anhören gerendert ...");
-                    final Path heard = new com.aresstack.audio.studio.application.PieceRendering(registry).withSound(stageSound).render(
-                            preview, offer.proposal().result(), librariesOf(settings), settings.sf2Engine,
-                            settings.fluidSynthExecutable, settings.sfizzExecutable, settings.programs, progress)
-                            .mix();
+                    offer.propose(runId);
                     final com.aresstack.audio.studio.application.RecompositionOffer ready = offer;
-                    afterWork = () -> decide(ready, heard);
+                    afterWork = () -> takeRecomposition(ready);
                     return null;
                 } catch (com.aresstack.audio.studio.application.EditRefusedException refused) {
                     offer.discard();
@@ -2476,6 +2476,21 @@ public final class AudioStudioFrame extends JFrame {
     private Path composeAside(GemmaMusicComposer composer, String prompt, Path staging, TrackArrangement tracks,
                               Progress progress) throws Exception {
         return composer.compose(prompt, staging, tracks, progress);
+    }
+
+    /** The track the AI wrote anew is taken at once; "Rückgängig" brings the old one back. */
+    private void takeRecomposition(com.aresstack.audio.studio.application.RecompositionOffer offer) {
+        try {
+            if (!offer.changesSomething()) {
+                offer.discard();
+                append("Die KI hat die Spur " + offer.trackId() + " so geschrieben, wie sie schon ist.");
+                return;
+            }
+            pieceChanged("Spur " + offer.trackId() + " neu komponiert. Zurücknehmen mit „Rückgängig“ (Strg+Z).",
+                    offer.accept());
+        } catch (Exception failed) {
+            message("Die neue Spur ließ sich nicht übernehmen: " + failed.getMessage());
+        }
     }
 
     /** The proposal is ready: the user hears it and takes it or throws it away. */
@@ -2540,8 +2555,7 @@ public final class AudioStudioFrame extends JFrame {
         if (request == null) {
             return;
         }
-        offerFromAi(piece.get(), "Die Stimme „" + request.name() + "“ wird als Vorschlag hinzukomponiert; das Stück"
-                + " bleibt, wie es ist, bis der Vorschlag übernommen wird.", (session, models, progress) ->
+        offerFromAi(piece.get(), "Die Stimme „" + request.name() + "“ wird hinzukomponiert.", (session, models, progress) ->
                 com.aresstack.audio.studio.application.VoiceOffer.start(session,
                         com.aresstack.audio.studio.ai.VoiceComposer.with(models), request, progress));
     }
@@ -2562,14 +2576,16 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         offerFromAi(piece.get(), (asked.firstBar() == asked.lastBar() ? "Takt " + asked.firstBar()
-                : "Takt " + asked.firstBar() + " bis " + asked.lastBar()) + " wird als Vorschlag neu geschrieben; das"
-                + " Stück bleibt, wie es ist, bis der Vorschlag übernommen wird.", (session, model, progress) ->
+                : "Takt " + asked.firstBar() + " bis " + asked.lastBar()) + " wird neu geschrieben.", (session, model, progress) ->
                 com.aresstack.audio.studio.application.RegionOffer.start(session,
                         com.aresstack.audio.studio.ai.RegionComposer.with(model), asked.request(), asked.partIds(),
                         asked.firstBar(), asked.lastBar(), progress));
     }
 
     /** A key above the tracks for something the AI does with the piece; every such change is a proposal first. */
+    /** Takes the last change of the piece back, in sight beside the keys of the AI. */
+    private final JButton undoKey = new JButton("↶ Rückgängig");
+
     private static JButton pieceAction(String label, String hint, Runnable action) {
         JButton key = new JButton(label);
         key.setToolTipText(hint);
@@ -2593,9 +2609,9 @@ public final class AudioStudioFrame extends JFrame {
         if (request == null) {
             return;
         }
-        offerFromAi(piece.get(), "Das Stück wird als Vorschlag um " + request.bars()
+        offerFromAi(piece.get(), "Das Stück wird um " + request.bars()
                 + (request.bars() == 1 ? " Takt" : " Takte") + " verlängert ("
-                + request.preset().label() + "); es bleibt, wie es ist, bis der Vorschlag übernommen wird.",
+                + request.preset().label() + ").",
                 (session, model, progress) -> com.aresstack.audio.studio.application.ExtensionOffer.start(session,
                         com.aresstack.audio.studio.ai.ContinuationComposer.with(model), request, progress));
     }
@@ -2616,9 +2632,8 @@ public final class AudioStudioFrame extends JFrame {
         if (request == null) {
             return;
         }
-        offerFromAi(piece.get(), "Vor Takt " + request.insertBeforeBar() + " werden als Vorschlag " + request.bars()
-                + (request.bars() == 1 ? " Takt" : " Takte") + " eingefügt; das Stück bleibt, wie es ist, bis der"
-                + " Vorschlag übernommen wird.",
+        offerFromAi(piece.get(), "Vor Takt " + request.insertBeforeBar() + " werden " + request.bars()
+                + (request.bars() == 1 ? " Takt" : " Takte") + " eingefügt.",
                 (session, model, progress) -> com.aresstack.audio.studio.application.ExtensionOffer.start(session,
                         com.aresstack.audio.studio.ai.ContinuationComposer.with(model), request, progress));
     }
@@ -2639,8 +2654,8 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         offerFromAi(piece.get(), (request.firstBar() == request.lastBar() ? "Takt " + request.firstBar()
-                : "Takt " + request.firstBar() + " bis " + request.lastBar()) + " wird als Vorschlag umorchestriert ("
-                + request.preset().label() + "); das Stück bleibt, wie es ist, bis der Vorschlag übernommen wird.",
+                : "Takt " + request.firstBar() + " bis " + request.lastBar()) + " wird umorchestriert ("
+                + request.preset().label() + ").",
                 (session, model, progress) -> com.aresstack.audio.studio.application.ReorchestrationOffer.start(
                         session, com.aresstack.audio.studio.ai.OrchestrationComposer.with(model), request, progress));
     }
@@ -2706,6 +2721,10 @@ public final class AudioStudioFrame extends JFrame {
         List<SectionMark> marks = SectionMark.of(piece.isPresent() ? piece.get().composition() : null);
         sectionBar.setSections(marks);
         scoreView.setSections(marks);
+        undoKey.setEnabled(piece.isPresent() && piece.get().canUndo());
+        undoKey.setToolTipText(piece.isPresent() && piece.get().canUndo()
+                ? "Rückgängig: " + piece.get().undoDescription() + " (Strg+Z)"
+                : "Nimmt die letzte Änderung am Stück zurück (Strg+Z)");
     }
 
     /** Has the AI make a proposal for the saved piece; what was asked for decides how. */
@@ -2743,7 +2762,10 @@ public final class AudioStudioFrame extends JFrame {
                 try {
                     recordModels(piece.folder(), "KI-Vorschlag", models);
                     offer = starter.start(piece, models, progress);
-                    hearOffer(offer, models, settings, progress);
+                    // What the AI wrote is taken at once (PO 2026-11-15): no box to decide in, the
+                    // step can be taken back with "Rückgängig".
+                    final com.aresstack.audio.studio.application.AiOffer ready = offer;
+                    afterWork = () -> takeOffer(ready);
                     return null;
                 } catch (com.aresstack.audio.studio.application.EditRefusedException refused) {
                     throw new IOException("Der Vorschlag wurde nicht angenommen, weil er mehr geändert hätte als"
@@ -2758,6 +2780,28 @@ public final class AudioStudioFrame extends JFrame {
                 }
             }
         });
+    }
+
+    /** Takes what the AI wrote into the piece: one step that "Rückgängig" takes back, the plan goes to the protocol. */
+    private void takeOffer(com.aresstack.audio.studio.application.AiOffer offer) {
+        try {
+            String what = offer.what();
+            for (String note : offer.notes()) {
+                append("  " + note);
+            }
+            for (String lost : offer.toConfirm()) {
+                append("  Das Original verliert dabei: " + lost);
+            }
+            offer.confirm();
+            pieceChanged(what + " Zurücknehmen mit „Rückgängig“ (Strg+Z).", offer.accept());
+        } catch (Exception failed) {
+            try {
+                offer.discard();
+            } catch (Exception left) {
+                // the piece is as it was either way
+            }
+            message("Das Ergebnis der KI ließ sich nicht übernehmen: " + failed.getMessage());
+        }
     }
 
     /** Renders the preview of an offer (only what is new; the rest comes from the stems of the piece) and then asks. */
@@ -2901,6 +2945,7 @@ public final class AudioStudioFrame extends JFrame {
      */
     private void pieceChanged(String said, com.aresstack.audio.composition.edit.ChangeSet changes) {
         append(said);
+        setStatus(said);
         java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
         if (!piece.isPresent()) {
             return;
@@ -4327,6 +4372,11 @@ public final class AudioStudioFrame extends JFrame {
             sketchNotes = notes;
             scoreView.setScore(com.aresstack.audio.studio.score.Score.of(arrangement), ids,
                     "Die KI schreibt · die ersten Noten erscheinen gleich");
+            // The lanes of the arrangement grow as well: there the user asked for most of it.
+            ArrangementView.Arrangement lanes = ArrangementView.Arrangement.of(arrangement);
+            if (lanes != null) {
+                arrangementView.setArrangement(lanes, withAudioLanes(ids), "");
+            }
         } catch (RuntimeException unreadable) {
             // a picture on the way that cannot be drawn is left out; the next one comes at once
         }

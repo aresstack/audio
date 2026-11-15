@@ -557,4 +557,55 @@ public final class PieceExtensionTest {
             }
         }
     }
+
+    @Test
+    public void theNewBarsAreShownWhileTheyAreWrittenBehindThePieceAsItIs() throws Exception {
+        final List<String> steps = java.util.Collections.synchronizedList(new java.util.ArrayList<String>());
+        final List<List<String>> sketches = java.util.Collections.synchronizedList(
+                new java.util.ArrayList<List<String>>());
+        com.aresstack.audio.studio.progress.SketchProgress watcher =
+                new com.aresstack.audio.studio.progress.SketchProgress() {
+                    @Override
+                    public void sketch(List<String> arrangement) {
+                        sketches.add(new java.util.ArrayList<String>(arrangement));
+                    }
+
+                    @Override
+                    public void preparing(String what, long characters) {
+                        steps.add(what);
+                    }
+
+                    @Override
+                    public void track(String trackId, com.aresstack.audio.studio.progress.TrackProgress.Stage stage,
+                                      com.aresstack.audio.studio.progress.TrackProgress.State state, String detail) {
+                    }
+
+                    @Override
+                    public void update(String message) {
+                    }
+                };
+        Composition before = session.composition();
+        List<String> original = com.aresstack.audio.studio.project.TsvExport.lines(before);
+        ContinuationRequest request = ContinuationRequest.of(16, ContinuationPreset.STANDALONE, ContinuationEnding.CLOSED);
+
+        PieceExtension.start(session, composerWith(composer()), request, Ids.seeded(3), watcher);
+
+        assertEquals("Die KI plant die Fortsetzung", steps.get(0));
+        assertTrue("the piece was shown on its way", sketches.size() > 1);
+        long had = original.stream().filter(line -> line.startsWith("note\t")).count();
+        for (List<String> sketch : sketches) {
+            assertTrue("the piece as it is stays in the picture", sketch.containsAll(
+                    original.stream().filter(line -> line.startsWith("note\t")).toList()));
+            assertEquals("the paper has the new length from the first note on", 24,
+                    com.aresstack.audio.studio.score.Score.of(sketch).bars());
+        }
+        List<String> last = sketches.get(sketches.size() - 1);
+        long first = sketches.get(0).stream().filter(line -> line.startsWith("note\t")).count();
+        long all = last.stream().filter(line -> line.startsWith("note\t")).count();
+        assertTrue("notes come in", first > had && all > first);
+        assertTrue("and they lie behind the original", last.stream().filter(line -> line.startsWith("note\t"))
+                .filter(line -> !original.contains(line))
+                .allMatch(line -> Long.parseLong(line.split("\t")[2]) >= ORIGINAL_END));
+        assertEquals("watching changes nothing of the piece", before, session.composition());
+    }
 }

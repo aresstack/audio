@@ -169,7 +169,23 @@ final class ArrangementView extends JComponent {
                 return null;
             }
             try {
-                ArrangementFile file = ArrangementFile.read(path);
+                return of(ArrangementFile.read(path));
+            } catch (Exception unreadable) {
+                return null;
+            }
+        }
+
+        /** The lines of an arrangement, e.g. of a piece the AI is still writing; {@code null} if they cannot be read. */
+        static Arrangement of(List<String> lines) {
+            try {
+                return of(ArrangementFile.parse(lines));
+            } catch (Exception unreadable) {
+                return null;
+            }
+        }
+
+        private static Arrangement of(ArrangementFile file) {
+            {
                 Arrangement arrangement = new Arrangement(file.tempoOrDefault());
                 for (ArrangementFile.Track track : file.tracks()) {
                     arrangement.lanes.put(track.id(), new ArrayList<Note>());
@@ -192,8 +208,6 @@ final class ArrangementView extends JComponent {
                 arrangement.ticks = arrangement.barTicks
                         * file.bars().orElse(ArrangementFile.defaultBars(covering, asEver));
                 return arrangement;
-            } catch (Exception unreadable) {
-                return null;
             }
         }
     }

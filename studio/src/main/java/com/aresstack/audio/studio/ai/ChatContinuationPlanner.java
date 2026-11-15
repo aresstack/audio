@@ -112,7 +112,7 @@ public final class ChatContinuationPlanner implements ContinuationPlanner {
     public ContinuationPlan plan(ContinuationTask task, Composition piece, Path cacheDirectory) throws IOException {
         String prompt = prompt(task);
         Path cache = cacheDirectory.resolve("plan-" + ContextBuilder.sha256(prompt).substring(0, 12) + ".json");
-        return read(model.generate(INSTRUCTION, prompt, maxTokens, cache), task, piece);
+        return read(model.generate(INSTRUCTION, prompt, maxTokens, cache, Listening.current()), task, piece);
     }
 
     /** Reads and completes a planning answer; see the class comment. */

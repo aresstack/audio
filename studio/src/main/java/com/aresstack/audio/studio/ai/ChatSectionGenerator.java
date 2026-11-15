@@ -127,6 +127,6 @@ public final class ChatSectionGenerator implements SectionGenerator {
         String prompt = prompt(task, plan, voice, frame, connection);
         Path cache = cacheDirectory.resolve(voice.key() + "-" + frame.sectionId() + "-"
                 + ContextBuilder.sha256(prompt).substring(0, 12) + ".json");
-        return GeneratedNotes.read(model.generate(INSTRUCTION, prompt, maxTokens, cache), voice.key(), frame.sectionId());
+        return GeneratedNotes.read(model.generate(INSTRUCTION, prompt, maxTokens, cache, Listening.current()), voice.key(), frame.sectionId());
     }
 }

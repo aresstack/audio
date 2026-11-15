@@ -52,7 +52,7 @@ public final class ChatVoicePlanner implements VoicePlanner {
         String prompt = prompt(task);
         Path cache = cacheDirectory.resolve(task.partId() + "-plan-" + ContextBuilder.sha256(prompt).substring(0, 12)
                 + ".json");
-        return read(model.generate(INSTRUCTION, prompt, maxTokens, cache), task);
+        return read(model.generate(INSTRUCTION, prompt, maxTokens, cache, Listening.current()), task);
     }
 
     /** Reads and completes a plan; see the class comment. */
