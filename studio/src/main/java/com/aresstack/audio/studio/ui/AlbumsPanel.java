@@ -190,6 +190,8 @@ final class AlbumsPanel extends JPanel {
     private final JButton open = new DeckWidgets.HeadKey("Öffnen");
     private final JButton export = new DeckWidgets.HeadKey("Exportieren");
     private final JButton scores = new DeckWidgets.HeadKey("Noten vorgeben …");
+    /** "Original nachbilden": the album rebuilds an existing work its wish names, it does not invent one. */
+    private final javax.swing.JCheckBox original = new javax.swing.JCheckBox("Original nachbilden");
     private final JButton noScore = new DeckWidgets.HeadKey("Ohne Vorlage");
     /** The name of the template file of each title that has one, for the album shown. */
     private final Map<String, String> templateNames = new HashMap<String, String>();
@@ -337,6 +339,20 @@ final class AlbumsPanel extends JPanel {
         range.add(minutesTo);
         concept.add(range, c);
         c.gridx = 4;
+        original.setOpaque(false);
+        original.setForeground(AudioStudioTheme.TEXT_DIM);
+        original.setToolTipText("Der Text nennt ein bestehendes Werk oder Quellen (z. B. Vivaldis Vier Jahreszeiten):"
+                + " die KI plant die echten Sätze mit Titeln, Tonarten, Tempi und üblicher Länge (die Minuten oben"
+                + " gelten dann nicht) und gibt die bekannten Themen so getreu wie möglich wieder. Genau wird es mit"
+                + " „Noten vorgeben …“.");
+        original.addActionListener(event -> {
+            if (!showing) {
+                keepConcept();
+                keys();
+            }
+        });
+        concept.add(original, c);
+        c.gridx = 5;
         c.weightx = 1;
         concept.add(javax.swing.Box.createHorizontalGlue(), c);
 
@@ -501,6 +517,10 @@ final class AlbumsPanel extends JPanel {
         trackCount.setValue(chosen == null ? 12 : chosen.concept().trackCount());
         minutes.setValue(chosen == null ? AlbumConcept.DEFAULT_MIN_SECONDS / 60.0 : chosen.concept().minSeconds() / 60.0);
         minutesTo.setValue(chosen == null ? AlbumConcept.DEFAULT_MAX_SECONDS / 60.0 : chosen.concept().maxSeconds() / 60.0);
+        boolean wasShowing = showing;
+        showing = true;
+        original.setSelected(chosen != null && chosen.concept().original());
+        showing = wasShowing;
         readTemplates();
         tracks.fireTableDataChanged();
         say(chosen == null ? "Noch kein Album. „Neues Album“ legt eines an." : summary());
@@ -558,7 +578,8 @@ final class AlbumsPanel extends JPanel {
         AlbumTrack selected = there && row >= 0 && row < album.tracks().size() ? album.tracks().get(row) : null;
         create.setEnabled(!running && !busy);
         delete.setEnabled(free);
-        for (Component field : new Component[]{titleBox, descriptionBox, styleBox, trackCount, minutes, minutesTo}) {
+        for (Component field : new Component[]{titleBox, descriptionBox, styleBox, trackCount, minutes, minutesTo,
+                original}) {
             field.setEnabled(free);
         }
         plan.setEnabled(free);
@@ -763,7 +784,8 @@ final class AlbumsPanel extends JPanel {
             AlbumConcept concept = new AlbumConcept(description.getText(), style.getText(),
                     (Integer) trackCount.getValue(),
                     (int) Math.round(((Number) minutes.getValue()).doubleValue() * 60),
-                    (int) Math.round(((Number) minutesTo.getValue()).doubleValue() * 60));
+                    (int) Math.round(((Number) minutesTo.getValue()).doubleValue() * 60))
+                    .withOriginal(original.isSelected());
             // The titles as the file has them: the window may have put a piece into the album meanwhile.
             Album changed = files.album(album.id()).orElse(album).withTitle(title.getText()).withConcept(concept);
             if (!changed.equals(album)) {

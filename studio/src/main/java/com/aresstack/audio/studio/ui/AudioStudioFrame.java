@@ -112,6 +112,8 @@ public final class AudioStudioFrame extends JFrame {
     private final JLabel templateShown = new JLabel(" ");
     private final JButton chooseTemplate = new DeckWidgets.HeadKey("Noten vorgeben …");
     private final JButton dropTemplate = new DeckWidgets.HeadKey("Ohne Vorlage");
+    /** "Original nachbilden": the wish names an existing work, which the AI rebuilds instead of inventing one. */
+    private final javax.swing.JCheckBox originalWork = new javax.swing.JCheckBox("Original nachbilden");
     private final JPanel whoRowShown = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
     private final JSpinner growBars = new JSpinner(new SpinnerNumberModel(PieceAutopilot.GROW_BARS,
             PieceAutopilot.MIN_GROW_BARS, PieceAutopilot.MAX_GROW_BARS, 1));
@@ -962,6 +964,13 @@ public final class AudioStudioFrame extends JFrame {
         templateRow.add(templateShown);
         templateRow.add(chooseTemplate);
         templateRow.add(dropTemplate);
+        originalWork.setOpaque(false);
+        originalWork.setToolTipText("Die Beschreibung nennt ein bestehendes Werk oder Quellen: die KI gibt es mit Titel,"
+                + " Tonart, Takt, Tempo und seinen bekannten Themen so getreu wie möglich wieder, statt etwas Neues"
+                + " darüber zu erfinden. Genau wird es mit „Noten vorgeben …“.");
+        originalWork.addActionListener(event -> saveSettings(false));
+        templateRow.add(javax.swing.Box.createHorizontalStrut(12));
+        templateRow.add(originalWork);
         whoRowShown.setOpaque(false);
         whoRowShown.setLayout(new BorderLayout());
         whoRowShown.add(whoRow, BorderLayout.NORTH);
@@ -4101,7 +4110,8 @@ public final class AudioStudioFrame extends JFrame {
      * album what it is told about that album. The description itself shows only the piece's own words.
      */
     private String wishForAi() {
-        String own = description.getText().trim();
+        String own = com.aresstack.audio.studio.application.OriginalWork.wish(description.getText().trim(),
+                originalWork.isSelected());
         String context = albumMembers.albumContext(Paths.get(directory.getText().trim()));
         return context.isEmpty() ? own : own + "\n" + context;
     }
@@ -4285,6 +4295,7 @@ public final class AudioStudioFrame extends JFrame {
             detailedLog.setSelected(Boolean.parseBoolean(saved.getProperty("detailedLog", "false")));
             growBars.setValue(AiDefaults.growBars(saved));
             templateLines.setValue(AiDefaults.templateLines(saved));
+            originalWork.setSelected(Boolean.parseBoolean(saved.getProperty("originalWork", "false")));
             longerAnswers = AiDefaults.longerAnswers(saved);
             longerAnswerFactor = AiDefaults.longerAnswerFactor(saved);
             specFields.suggestBars((Integer) growBars.getValue());
@@ -4375,6 +4386,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("detailedLog", Boolean.toString(detailedLog.isSelected()));
             saved.setProperty("portionBars", growBars.getValue().toString());
             saved.setProperty("templateLines", templateLines.getValue().toString());
+            saved.setProperty("originalWork", Boolean.toString(originalWork.isSelected()));
             saved.setProperty("longerAnswers", Integer.toString(longerAnswers));
             saved.remove("albumPiecesAtOnce"); // no more: the parallel requests alone set how much runs at once
             saved.setProperty("longerAnswerFactor", Integer.toString(longerAnswerFactor));

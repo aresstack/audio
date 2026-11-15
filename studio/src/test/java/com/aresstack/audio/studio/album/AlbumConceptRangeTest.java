@@ -34,4 +34,24 @@ public final class AlbumConceptRangeTest {
         assertTrue(prompt, prompt.contains("\"secondsMin\":240") && prompt.contains("\"secondsMax\":360")
                 && prompt.contains("between 240 and 360"));
     }
+
+    /** "Original nachbilden": the real movements with their lengths, not the album's range, and kept in the file. */
+    @Test
+    public void anAlbumThatRebuildsAWorkAsksForTheRealMovementsAndKeepsTheirLengths() throws Exception {
+        AlbumConcept concept = AlbumConcept.standard("Vivaldi, Die vier Jahreszeiten", "", 12).withOriginal(true);
+        Album album = new Album("a1", "Die vier Jahreszeiten", concept, java.util.List.of());
+        assertEquals(concept, AlbumFiles.read("a1", AlbumFiles.write(album)).concept());
+        String prompt = ChatAlbumPlanner.prompt(album, java.util.List.of(), 12);
+        assertTrue(prompt, prompt.contains("rebuilds an existing work") && prompt.contains("real title of the movement")
+                && !prompt.contains("between 240 and 360"));
+
+        com.aresstack.audio.studio.ai.ChatModel model = (instruction, asked, tokens, cache) -> JsonParser.parseString(
+                "{\"tracks\":[{\"title\":\"Frühling – I. Allegro\",\"key\":\"E major\",\"tempoBpm\":100,"
+                        + "\"targetSeconds\":200}]}").getAsJsonObject();
+        Album planned = new ChatAlbumPlanner(model, 1024).plan(album.withConcept(concept), null, line -> { });
+        assertEquals("Frühling – I. Allegro", planned.tracks().get(0).title());
+        assertEquals("the original's length, below the album's four minutes", 200,
+                planned.tracks().get(0).targetSeconds());
+        assertTrue(planned.brief(planned.tracks().get(0)).contains("REBUILD THE ORIGINAL"));
+    }
 }

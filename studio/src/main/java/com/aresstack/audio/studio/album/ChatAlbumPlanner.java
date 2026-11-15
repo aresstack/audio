@@ -150,7 +150,8 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
     static String prompt(Album album, List<AlbumTrack> kept, int wanted) {
         AlbumConcept concept = album.concept();
         StringBuilder prompt = new StringBuilder();
-        prompt.append("Plan an ORIGINAL instrumental album.\n");
+        prompt.append(concept.original() ? "Plan an instrumental album that rebuilds an existing work.\n"
+                : "Plan an ORIGINAL instrumental album.\n");
         prompt.append("{\"album\":\"").append(escape(album.title())).append("\",\"wish\":\"")
                 .append(escape(concept.description())).append("\",\"style\":\"").append(escape(concept.style()))
                 .append("\",\"tracksWanted\":").append(wanted).append(",\"secondsPerTrack\":")
@@ -163,16 +164,23 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
                         .append(track.bpm()).append(" BPM, ").append(track.key()).append('\n');
             }
         }
-        prompt.append("Plan the album as a whole, with a dramaturgy from the first track to the last: an opening, "
-                + "calm and lively tracks in turn, a finale. The tracks must differ in mood, tempo, key, meter and "
-                + "players, and still belong together.\n");
+        if (concept.original()) {
+            prompt.append(com.aresstack.audio.studio.application.OriginalWork.ALBUM_GUIDANCE).append('\n');
+        } else {
+            prompt.append("Plan the album as a whole, with a dramaturgy from the first track to the last: an opening, "
+                    + "calm and lively tracks in turn, a finale. The tracks must differ in mood, tempo, key, meter and "
+                    + "players, and still belong together.\n");
+        }
         prompt.append("Return one JSON object with an array 'tracks' of exactly ").append(wanted)
-                .append(" objects in the order of the album. Each has: title (original, no existing work), "
+                .append(" objects in the order of the album. Each has: title (")
+                .append(concept.original() ? "the real title of the movement" : "original, no existing work")
+                .append("), "
                         + "mood (a few words), tempoBpm (40-200), key (like \"D major\" or \"B minor\"), "
                         + "meter (like \"4/4\", \"3/4\", \"6/8\"), instrumentation (the players in words), "
                         + "form (the sections in order, enough to fill the length without repeating one short idea, "
                         + "e.g. \"").append(DEFAULT_FORM).append("\"), targetSeconds (")
-                .append(concept.minSeconds() == concept.maxSeconds() ? "about " + concept.secondsPerTrack()
+                .append(concept.original() ? "the length of a usual performance of the movement"
+                        : concept.minSeconds() == concept.maxSeconds() ? "about " + concept.secondsPerTrack()
                         : "between " + concept.minSeconds() + " and " + concept.maxSeconds()
                         + "; let the lengths differ from track to track, as the music needs").append(").");
         return prompt.toString();
@@ -184,10 +192,15 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         int seconds = AlbumFiles.number(entry, "targetSeconds", concept.secondsPerTrack());
         // The user said how long a piece may be: a length far off is replaced by the middle, one a
         // little off is brought into the range.
-        if (seconds < concept.minSeconds() / 2 || seconds > concept.maxSeconds() * 2) {
-            seconds = concept.secondsPerTrack();
+        if (concept.original()) {
+            // The original decides how long a movement is, not the range of the album.
+            seconds = Math.max(10, Math.min(AlbumConcept.MAX_SECONDS, seconds));
+        } else {
+            if (seconds < concept.minSeconds() / 2 || seconds > concept.maxSeconds() * 2) {
+                seconds = concept.secondsPerTrack();
+            }
+            seconds = Math.max(concept.minSeconds(), Math.min(concept.maxSeconds(), seconds));
         }
-        seconds = Math.max(concept.minSeconds(), Math.min(concept.maxSeconds(), seconds));
         int bpm = AlbumFiles.number(entry, "tempoBpm", 100);
         return new AlbumTrack(id, title.isBlank() ? "Titel " + number : title, AlbumFiles.text(entry, "mood"),
                 bpm < 40 || bpm > 200 ? 100 : bpm, AlbumFiles.text(entry, "key"), AlbumFiles.text(entry, "meter"),
