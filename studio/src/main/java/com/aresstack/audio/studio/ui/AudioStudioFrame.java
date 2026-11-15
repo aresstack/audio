@@ -960,8 +960,7 @@ public final class AudioStudioFrame extends JFrame {
         AlbumsPanel albums = new AlbumsPanel(new AlbumsPanel.Host() {
             @Override
             public com.aresstack.audio.studio.ai.ModelLineup models() {
-                // The one place the page gets its models from; the model settings replace this line.
-                return com.aresstack.audio.studio.ai.ModelLineup.of(createAiClient());
+                return startModels(); // the models of the settings, one per role
             }
 
             @Override
