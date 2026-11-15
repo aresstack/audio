@@ -174,6 +174,12 @@ public final class AudioStudioFrame extends JFrame {
             "Einstellungen", AudioStudioTheme.ACCENT_SOFT);
     private final DeckWidgets.CornerKey libraryKey = new DeckWidgets.CornerKey(DeckWidgets.CornerKey.Sign.BANK,
             "Soundbänke", AudioStudioTheme.AMBER);
+    private final javax.swing.JRadioButton accessKeePass = new javax.swing.JRadioButton("KeePass", true);
+    private final javax.swing.JRadioButton accessManual = new javax.swing.JRadioButton("Manuell");
+    private final javax.swing.JRadioButton accessOllama = new javax.swing.JRadioButton("Ollama");
+    private final JLabel accessNote = new JLabel();
+    private JPanel keePassRow;
+    private JLabel keePassLabel;
     private final Map<String, javax.swing.JToggleButton> pageKeys = new java.util.LinkedHashMap<String, javax.swing.JToggleButton>();
     /** Beside the choice of the piece under the name of the studio: new, open, and what is seldom needed. */
     private final JButton songMenuKey = new JButton("▾");
@@ -1481,7 +1487,21 @@ public final class AudioStudioFrame extends JFrame {
     private JPanel settingsPanel() {
         JPanel ai = form();
         int row = 0;
-        addRow(ai, row++, "Completions-URL", endpoint);
+        // Where the access comes from, as in 3D4J: KeePass first, typed in by hand, or Ollama.
+        javax.swing.ButtonGroup accessKinds = new javax.swing.ButtonGroup();
+        for (javax.swing.JRadioButton kind : new javax.swing.JRadioButton[] {accessKeePass, accessManual, accessOllama}) {
+            kind.setOpaque(false);
+            accessKinds.add(kind);
+            kind.addActionListener(event -> showAccess());
+        }
+        accessKeePass.setToolTipText("Adresse und API-Key kommen aus einem Eintrag in KeePass");
+        accessManual.setToolTipText("OpenAI-kompatibler Dienst: Adresse und API-Key von Hand eintragen");
+        accessNote.setForeground(AudioStudioTheme.TEXT_FAINT);
+        accessNote.setFont(accessNote.getFont().deriveFont(12f));
+        accessOllama.setEnabled(false);
+        accessOllama.setToolTipText("Ollama wird noch nicht unterstützt und kommt später");
+        showAccess(); // the note has its words before the row is laid out
+        addRow(ai, row++, "Zugang", line(accessKeePass, accessManual, accessOllama, accessNote));
         JButton keepassList = new JButton("KeePass verbinden");
         keepassList.setToolTipText("Mit KeePassRPC verbinden und die Einträge laden");
         keepassList.addActionListener(event -> loadKeePassEntries());
@@ -1489,8 +1509,11 @@ public final class AudioStudioFrame extends JFrame {
         JButton keepassUse = new JButton("Eintrag übernehmen");
         keepassUse.addActionListener(event -> useKeePassEntry());
         JPanel credentialButtons = line(keepassList, keePassEntries, keepassUse);
+        keePassRow = credentialButtons;
+        keePassLabel = addRow(ai, row++, "KeePass", credentialButtons);
+        addRow(ai, row++, "Completions-URL", endpoint);
         addRow(ai, row++, "API-Key", apiKey);
-        addRow(ai, row++, "KeePass", credentialButtons);
+        showAccess();
         JPanel modelControls = new JPanel(new BorderLayout(8, 0));
         modelControls.setOpaque(false);
         modelControls.add(model, BorderLayout.CENTER);
@@ -1559,7 +1582,7 @@ public final class AudioStudioFrame extends JFrame {
         JPanel column = new JPanel();
         column.setOpaque(false);
         column.setLayout(new javax.swing.BoxLayout(column, javax.swing.BoxLayout.Y_AXIS));
-        DeckWidgets.Module aiModule = new DeckWidgets.Module("KI-Zugang · OpenAI-kompatible KIPITZ-API", ai);
+        DeckWidgets.Module aiModule = new DeckWidgets.Module("KI-Zugang", ai);
         JButton save = new JButton("Einstellungen speichern");
         save.addActionListener(event -> saveSettings(true));
         aiModule.setHeadEnd(save);
@@ -1615,7 +1638,24 @@ public final class AudioStudioFrame extends JFrame {
         return label;
     }
 
-    private void addRow(JPanel panel, int row, String name, java.awt.Component component) {
+    /**
+     * Shows what the chosen kind of access needs: with KeePass the row to connect and to take an
+     * entry, whose address and key are then shown but not typed; by hand the two fields alone.
+     */
+    private void showAccess() {
+        boolean keePass = accessKeePass.isSelected();
+        if (keePassRow != null) {
+            keePassRow.setVisible(keePass);
+            keePassLabel.setVisible(keePass);
+        }
+        endpoint.setEditable(!keePass);
+        apiKey.setEditable(!keePass);
+        accessNote.setText(keePass ? "Adresse und API-Key kommen aus dem KeePass-Eintrag "
+                : "OpenAI-kompatibler Dienst, Adresse und API-Key von Hand ");
+        accessNote.revalidate();
+    }
+
+    private JLabel addRow(JPanel panel, int row, String name, java.awt.Component component) {
         GridBagConstraints label = new GridBagConstraints();
         label.gridx = 0;
         label.gridy = row;
@@ -1632,6 +1672,7 @@ public final class AudioStudioFrame extends JFrame {
         field.anchor = GridBagConstraints.WEST;
         field.insets = new Insets(4, 0, 4, 0);
         panel.add(component, field);
+        return lettering;
     }
 
     /**
@@ -3113,6 +3154,11 @@ public final class AudioStudioFrame extends JFrame {
             preferredKeePassEntry = saved.getProperty("keepassEntry", "");
             endpoint.setText(saved.getProperty("endpoint", ""));
             apiKey.setText(saved.getProperty("apiKey", ""));
+            // Settings from before the choice: a key that was saved keeps being typed by hand.
+            String access = saved.getProperty("access",
+                    saved.getProperty("apiKey", "").isEmpty() ? "keepass" : "manual");
+            (("manual".equals(access)) ? accessManual : accessKeePass).setSelected(true);
+            showAccess();
             model.setText(saved.getProperty("model", model.getText()));
             modelChoices.setAssignment(com.aresstack.audio.studio.settings.ModelSettings.read(saved));
             albumModelChoices.setAssignment(modelChoices.assignment());
@@ -3162,6 +3208,7 @@ public final class AudioStudioFrame extends JFrame {
         try {
             Properties saved = new Properties();
             saved.setProperty("endpoint", endpoint.getText().trim());
+            saved.setProperty("access", accessManual.isSelected() ? "manual" : "keepass");
             saved.setProperty("keepassEntry", preferredKeePassEntry);
             char[] password = apiKey.getPassword();
             try {
