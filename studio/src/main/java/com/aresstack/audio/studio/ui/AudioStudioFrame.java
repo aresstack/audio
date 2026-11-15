@@ -463,6 +463,10 @@ public final class AudioStudioFrame extends JFrame {
         javax.swing.JMenuItem saveScore = new javax.swing.JMenuItem("Partitur als Bild speichern (PNG) …");
         saveScore.addActionListener(event -> exportScore());
         moreMenu.add(saveScore);
+        javax.swing.JMenuItem print = new javax.swing.JMenuItem("Partitur drucken oder als PDF …");
+        print.setToolTipText("Öffnet den Druckdialog; mit einem PDF-Drucker des Systems entsteht eine PDF-Datei");
+        print.addActionListener(event -> printScore());
+        moreMenu.add(print);
         moreMenu.addSeparator();
         javax.swing.JMenuItem demo = new javax.swing.JMenuItem("Demo laden");
         demo.setToolTipText("Das mitgelieferte Stück laden, ohne die KI zu fragen");
@@ -674,16 +678,9 @@ public final class AudioStudioFrame extends JFrame {
         }
         // What plays goes on at the same place with the new mix; a track that plays alone is mixed anew too.
         Path file = playbackFile(selected);
-        boolean playing = player.playing();
-        double at = player.seconds();
         if (player.ready()) {
             try {
-                player.open(file);
-                double length = player.length();
-                player.seek(length <= 0 ? 0 : Math.min(1, at / length));
-                if (playing) {
-                    player.play();
-                }
+                player.swap(file); // goes on at the same place, without a gap
             } catch (Exception noSound) {
                 player.show(file);
             }
@@ -717,6 +714,28 @@ public final class AudioStudioFrame extends JFrame {
             append("Mischung gespeichert (24 Bit, 44,1 kHz): " + target);
         } catch (Exception failed) {
             message("Die Mischung ließ sich nicht speichern: " + failed.getMessage());
+        }
+    }
+
+    /** Prints the score, or saves it as a PDF where the system offers a printer that writes PDF. */
+    private void printScore() {
+        java.awt.print.Printable sheets = scoreView.printable();
+        if (sheets == null) {
+            message("Es gibt noch keine Noten: erst komponieren.");
+            return;
+        }
+        try {
+            java.awt.print.PrinterJob job = java.awt.print.PrinterJob.getPrinterJob();
+            job.setJobName(songs.name(Paths.get(directory.getText().trim())) + " - Partitur");
+            java.awt.print.PageFormat page = job.defaultPage();
+            page.setOrientation(java.awt.print.PageFormat.LANDSCAPE);
+            job.setPrintable(sheets, page);
+            if (job.printDialog()) {
+                job.print();
+                append("Partitur an den Drucker gegeben.");
+            }
+        } catch (Exception failed) {
+            message("Die Partitur ließ sich nicht drucken: " + failed.getMessage());
         }
     }
 

@@ -542,11 +542,15 @@ final class TrackLanes extends JPanel {
             field.setAlignmentX(0f);
             field.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
             final boolean[] done = {false};
+            // A click anywhere else ends the renaming and takes the name, also on what cannot take
+            // the keyboard (a lane, an empty place): there the field would never hear that it was left.
+            final java.awt.event.AWTEventListener[] outside = new java.awt.event.AWTEventListener[1];
             final Runnable finish = () -> {
                 if (done[0]) {
                     return;
                 }
                 done[0] = true;
+                java.awt.Toolkit.getDefaultToolkit().removeAWTEventListener(outside[0]);
                 renaming = null;
                 String typed = field.getText().trim();
                 words.remove(field);
@@ -557,6 +561,12 @@ final class TrackLanes extends JPanel {
                     change(typed, track.role(), track.instrument(), track.program(), track.libraryId());
                 }
             };
+            outside[0] = event -> {
+                if (event.getID() == MouseEvent.MOUSE_PRESSED && event.getSource() != field) {
+                    finish.run();
+                }
+            };
+            java.awt.Toolkit.getDefaultToolkit().addAWTEventListener(outside[0], java.awt.AWTEvent.MOUSE_EVENT_MASK);
             field.addActionListener(event -> finish.run());
             field.addFocusListener(new java.awt.event.FocusAdapter() {
                 @Override

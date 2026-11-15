@@ -23,7 +23,8 @@ import javax.sound.sampled.AudioSystem;
  */
 public final class SpatialStemMixer {
     public static final int RATE = 44100;
-    private static final int MAX_SECONDS = 180;
+    /** The longest piece that is mixed: ten minutes. Longer ones would need more memory than is sensible. */
+    public static final int MAX_SECONDS = 600;
     /** The stage as the listener sees it: 12 m wide, 9 m deep, its front edge 3 m away. */
     private static final double HALF_WIDTH = 6;
     private static final double DEPTH = 9;
@@ -88,12 +89,29 @@ public final class SpatialStemMixer {
         if (files.isEmpty() || files.size() != placements.size()) {
             throw new IllegalArgumentException("Every audio stem needs its placement.");
         }
-        List<Signal> signals = new ArrayList<Signal>();
+        // The tracks are read one after the other and each is let go once it is in the mix, so that
+        // a long piece with many tracks needs the memory of one track, not of all. How long the mix
+        // gets is taken from the heads of the files first. A muted track is not even read.
+        int length = 0;
         for (int i = 0; i < files.size(); i++) {
-            // A muted track is not even read.
-            signals.add(placements.get(i).muted() ? new Signal(new float[0], new float[0], RATE) : read(files.get(i)));
+            if (!placements.get(i).muted()) {
+                javax.sound.sampled.AudioFileFormat head = AudioSystem.getAudioFileFormat(files.get(i).toFile());
+                long frames = head.getFrameLength();
+                float rate = head.getFormat().getSampleRate();
+                if (frames < 0 || rate <= 0) {
+                    frames = resample(read(files.get(i))).left.length; // a file that does not say: read it
+                    rate = RATE;
+                }
+                length = (int) Math.max(length, Math.min(Integer.MAX_VALUE, (long) Math.ceil(frames * (double) RATE / rate)));
+            }
         }
-        write(master(render(signals, placements, room, secondsPerBar), masterDb), output, bits);
+        write(master(render(files.size(), length, index -> resample(read(files.get(index))), placements, room,
+                secondsPerBar), masterDb), output, bits);
+    }
+
+    /** Gives the sound of the track at a place of the list, at the rate of the mix. */
+    private interface Loader {
+        Signal load(int index) throws Exception;
     }
 
     /**
@@ -103,14 +121,25 @@ public final class SpatialStemMixer {
     public Mix render(List<Signal> signals, List<SoundSourcePlacement> placements, AcousticRoom room,
                       double secondsPerBar) throws IOException {
         int length = 0;
-        List<Signal> sources = new ArrayList<Signal>();
+        final List<Signal> sources = new ArrayList<Signal>();
         for (Signal signal : signals) {
             Signal resampled = resample(signal);
             sources.add(resampled);
             length = Math.max(length, resampled.left.length);
         }
+        try {
+            return render(sources.size(), length, sources::get, placements, room, secondsPerBar);
+        } catch (IOException failed) {
+            throw failed;
+        } catch (Exception impossible) {
+            throw new IOException(impossible);
+        }
+    }
+
+    private Mix render(int count, int length, Loader loader, List<SoundSourcePlacement> placements,
+                       AcousticRoom room, double secondsPerBar) throws Exception {
         if (length > RATE * MAX_SECONDS) {
-            throw new IOException("Audio mix exceeds three minutes.");
+            throw new IOException("Das Stück ist länger als zehn Minuten; so lange Stücke werden nicht gemischt.");
         }
         boolean rings = room.amount() > 0.001;
         int tail = length == 0 ? 0 : (int) (RATE * (rings ? Math.min(8, room.reverbSeconds() + 0.4) : 0.3));
@@ -119,10 +148,14 @@ public final class SpatialStemMixer {
         float[] right = new float[frames];
         float[] sendLeft = new float[rings ? length : 0];
         float[] sendRight = new float[rings ? length : 0];
-        for (int i = 0; i < sources.size(); i++) {
+        for (int i = 0; i < count; i++) {
             SoundSourcePlacement placement = placements.get(i);
-            if (!placement.muted() && sources.get(i).left.length > 0) {
-                place(sources.get(i), placement, room, secondsPerBar, left, right, sendLeft, sendRight);
+            if (placement.muted()) {
+                continue;
+            }
+            Signal source = loader.load(i);
+            if (source.left.length > 0) {
+                place(source, placement, room, secondsPerBar, length, left, right, sendLeft, sendRight);
             }
         }
         if (rings) {
@@ -158,8 +191,8 @@ public final class SpatialStemMixer {
     }
 
     private static void place(Signal signal, SoundSourcePlacement placement, AcousticRoom room, double secondsPerBar,
-                              float[] outLeft, float[] outRight, float[] sendLeft, float[] sendRight) {
-        int frames = signal.left.length;
+                              int length, float[] outLeft, float[] outRight, float[] sendLeft, float[] sendRight) {
+        int frames = Math.min(length, signal.left.length);
         float[] left = new float[frames];
         float[] right = new float[frames];
         // Level, also over time, and width: the middle stays, the difference of the sides is scaled.

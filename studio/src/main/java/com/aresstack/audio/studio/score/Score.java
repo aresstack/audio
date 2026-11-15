@@ -16,8 +16,9 @@ import java.util.TreeMap;
  * clef, and in every bar the notes and rests with their written lengths. The
  * arrangement gives each note a start and a length in ticks; here that becomes
  * sixteenths, chords, rests for the gaps, and ties where a note is longer than a
- * bar or than one written value can say. One voice is written per staff: notes
- * that begin together are a chord, and a chord ends when the next one begins.
+ * bar or than one written value can say. One voice is written per staff, and it
+ * says truly how long every note sounds: when a note is still held while others
+ * begin, it is written again in the new chord and tied to itself.
  * The score knows nothing of how it is drawn.
  */
 public final class Score {
@@ -35,13 +36,13 @@ public final class Score {
         private final int start;
         private final int length;
         private final int[] pitches;
-        private final boolean tied;
+        private final boolean[] ties;
 
-        Event(int start, int length, int[] pitches, boolean tied) {
+        Event(int start, int length, int[] pitches, boolean[] ties) {
             this.start = start;
             this.length = length;
             this.pitches = pitches;
-            this.tied = tied;
+            this.ties = ties;
         }
 
         /** Where in its bar the event begins, in sixteenths from 0. */
@@ -51,8 +52,18 @@ public final class Score {
         /** The MIDI pitches from low to high; none for a rest. */
         public int[] pitches() { return pitches.clone(); }
         public boolean rest() { return pitches.length == 0; }
-        /** Whether the event is tied to the one that follows it. */
-        public boolean tied() { return tied; }
+        /** Whether any note of the event is tied to the event that follows it. */
+        public boolean tied() {
+            for (boolean tie : ties) {
+                if (tie) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /** Whether the note at this place of {@link #pitches()} is tied to the event that follows. */
+        public boolean tied(int index) { return ties[index]; }
         public boolean dotted() { return length == 12 || length == 6 || length == 3; }
     }
 
@@ -164,7 +175,7 @@ public final class Score {
         for (Map.Entry<String, TreeMap<Integer, List<int[]>>> track : sounding.entrySet()) {
             boolean kit = drums.get(track.getKey());
             staves.add(new Staff(track.getKey(), kit ? Clef.PERCUSSION : clef(track.getValue()),
-                    write(track.getValue(), bars)));
+                    write(track.getValue(), bars, kit)));
         }
         return new Score(tempo, bars, staves);
     }
@@ -182,45 +193,68 @@ public final class Score {
         return count > 0 && sum / (double) count < 57 ? Clef.BASS : Clef.TREBLE;
     }
 
-    private static List<List<Event>> write(TreeMap<Integer, List<int[]>> track, int bars) {
+    /**
+     * @param struck whether the track is struck, not held (drums): a hit ends when the next one comes
+     */
+    private static List<List<Event>> write(TreeMap<Integer, List<int[]>> track, int bars, boolean struck) {
         List<List<Event>> written = new ArrayList<List<Event>>();
         for (int bar = 0; bar < bars; bar++) {
             written.add(new ArrayList<Event>());
         }
-        int at = 0;
-        List<Integer> onsets = new ArrayList<Integer>(track.keySet());
-        for (int index = 0; index < onsets.size(); index++) {
-            int onset = onsets.get(index);
-            List<int[]> together = track.get(onset);
-            int stop = 0;
-            TreeMap<Integer, Boolean> pitches = new TreeMap<Integer, Boolean>();
-            for (int[] note : together) {
-                stop = Math.max(stop, note[1]);
-                pitches.put(note[0], Boolean.TRUE);
+        // Every beginning and every end of a note is a place where what sounds changes.
+        int end = bars * BAR;
+        List<int[]> notes = new ArrayList<int[]>(); // pitch, start, stop
+        TreeMap<Integer, Boolean> changes = new TreeMap<Integer, Boolean>();
+        changes.put(0, Boolean.TRUE);
+        changes.put(end, Boolean.TRUE);
+        for (Map.Entry<Integer, List<int[]>> together : track.entrySet()) {
+            for (int[] note : together.getValue()) {
+                int start = Math.min(end, together.getKey());
+                int stop = Math.min(end, note[1]);
+                Integer following = track.higherKey(together.getKey());
+                if (struck && following != null) {
+                    stop = Math.min(stop, following);
+                }
+                if (start < stop) {
+                    notes.add(new int[]{note[0], start, stop});
+                    changes.put(start, Boolean.TRUE);
+                    changes.put(stop, Boolean.TRUE);
+                }
             }
-            if (index + 1 < onsets.size()) {
-                stop = Math.min(stop, onsets.get(index + 1)); // one voice: the next chord ends this one
-            }
-            stop = Math.min(stop, bars * BAR);
-            if (onset >= stop) {
-                continue;
-            }
-            fill(written, at, onset, new int[0]);
-            int[] chord = new int[pitches.size()];
-            int place = 0;
-            for (Integer pitch : pitches.keySet()) {
-                chord[place++] = pitch;
-            }
-            fill(written, onset, stop, chord);
-            at = stop;
         }
-        fill(written, at, bars * BAR, new int[0]);
+        Integer from = null;
+        for (Integer to : changes.keySet()) {
+            if (from != null) {
+                TreeMap<Integer, Boolean> sounding = new TreeMap<Integer, Boolean>(); // pitch -> held beyond
+                for (int[] note : notes) {
+                    if (note[1] <= from && note[2] > from) {
+                        boolean held = note[2] > to;
+                        Boolean before = sounding.get(note[0]);
+                        sounding.put(note[0], held || Boolean.TRUE.equals(before));
+                    }
+                }
+                int[] pitches = new int[sounding.size()];
+                boolean[] held = new boolean[sounding.size()];
+                int place = 0;
+                for (Map.Entry<Integer, Boolean> pitch : sounding.entrySet()) {
+                    pitches[place] = pitch.getKey();
+                    held[place++] = pitch.getValue();
+                }
+                fill(written, from, to, pitches, held);
+            }
+            from = to;
+        }
         return written;
     }
 
-    /** Writes one sound (or silence, for no pitches) from a sixteenth to another as notes of written lengths. */
-    private static void fill(List<List<Event>> written, int from, int to, int[] pitches) {
+    /**
+     * Writes one sound (or silence, for no pitches) from a sixteenth to another as notes of written
+     * lengths, tied to one another; the last of them is tied on for the notes that are held beyond.
+     */
+    private static void fill(List<List<Event>> written, int from, int to, int[] pitches, boolean[] held) {
         boolean rest = pitches.length == 0;
+        boolean[] all = new boolean[pitches.length];
+        java.util.Arrays.fill(all, true);
         int at = from;
         while (at < to) {
             int bar = at / BAR;
@@ -233,7 +267,7 @@ public final class Score {
                     break;
                 }
             }
-            written.get(bar).add(new Event(inBar, value, pitches, !rest && at + value < to));
+            written.get(bar).add(new Event(inBar, value, pitches, at + value < to ? all : held));
             at += value;
         }
     }

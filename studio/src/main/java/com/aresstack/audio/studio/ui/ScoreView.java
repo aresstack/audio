@@ -146,6 +146,44 @@ final class ScoreView extends JComponent implements Scrollable {
         return image;
     }
 
+    /**
+     * The score for the printer, dark on white: as many lines of the sheet on a page as fit,
+     * never a line cut in two. {@code null} when there are no notes yet.
+     */
+    java.awt.print.Printable printable() {
+        if (score == null || staves().isEmpty()) {
+            return null;
+        }
+        final ScoreView sheet = new ScoreView();
+        sheet.paper = Color.WHITE;
+        sheet.ink = new Color(0x111111);
+        sheet.faint = new Color(0x666666);
+        sheet.lines = new Color(0x333333);
+        sheet.setSize(1500, 100);
+        sheet.setScore(score, order, "");
+        sheet.setSize(1500, sheet.getPreferredSize().height + 20);
+        return (graphics, format, page) -> {
+            double scale = format.getImageableWidth() / sheet.getWidth();
+            int high = sheet.systemHeight();
+            int systems = (sheet.score.bars() + sheet.barsPerSystem() - 1) / sheet.barsPerSystem();
+            int perPage = Math.max(1, (int) ((format.getImageableHeight() / scale - TOP) / high));
+            int first = page * perPage;
+            if (first >= systems) {
+                return java.awt.print.Printable.NO_SUCH_PAGE;
+            }
+            int from = first == 0 ? 0 : TOP + first * high - 40;
+            int to = TOP + Math.min(systems, first + perPage) * high - 40;
+            Graphics2D g = (Graphics2D) graphics.create();
+            g.translate(format.getImageableX(), format.getImageableY());
+            g.scale(scale, scale);
+            g.translate(0, -from);
+            g.clipRect(0, from, sheet.getWidth(), to - from);
+            sheet.paint(g);
+            g.dispose();
+            return java.awt.print.Printable.PAGE_EXISTS;
+        };
+    }
+
     /** Where the playback is, in seconds; negative when nothing plays. */
     void setSecond(double played) {
         if (Math.abs(played - second) < 0.01) {
@@ -595,7 +633,12 @@ final class ScoreView extends JComponent implements Scrollable {
     private void tie(Graphics2D g, Placed place, float to, Score.Clef clef) {
         g.setColor(ink);
         g.setStroke(new BasicStroke(1.3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-        for (int pitch : place.event.pitches()) {
+        int[] pitches = place.event.pitches();
+        for (int i = 0; i < pitches.length; i++) {
+            if (!place.event.tied(i)) {
+                continue;
+            }
+            int pitch = pitches[i];
             float y = y(place.staffTop, Score.position(pitch, clef)) + (place.stemUp ? 0.75f : -0.75f) * SPACE;
             float from = place.x + 1.25f * SPACE;
             float end = Math.max(from + 6, to - 2);

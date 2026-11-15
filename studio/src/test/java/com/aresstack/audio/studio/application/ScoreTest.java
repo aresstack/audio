@@ -66,16 +66,25 @@ public final class ScoreTest {
     }
 
     @Test
-    public void anEmptyBarHoldsOneWholeRestAndOneVoiceEndsAChordWhenTheNextBegins() {
+    public void aHeldNoteIsWrittenAgainAndTiedWhenOthersBeginAndAnEmptyBarHoldsOneWholeRest() {
         Score score = Score.of(Arrays.asList("tempo\t108", "track\tpiano\t0\t0\tharmony",
-                "note\tpiano\t0\t1920\t60\t80",       // would ring through the bar ...
-                "note\tpiano\t480\t480\t64\t80",      // ... but the next note begins after a quarter
+                "note\tpiano\t0\t1920\t60\t80",       // rings through the whole bar ...
+                "note\tpiano\t480\t480\t64\t80",      // ... while another note sounds on the second beat
                 "note\tpiano\t3840\t120\t61\t80"));   // a sixteenth in the third bar
 
         Score.Staff staff = score.staves().get(0);
         Assert.assertEquals(3, score.bars());
-        Assert.assertEquals(4, staff.bar(0).get(0).length());
-        Assert.assertFalse(staff.bar(0).get(0).tied());
+        List<Score.Event> first = staff.bar(0);
+        Assert.assertEquals("quarter, quarter chord, half: the C is tied through", 3, first.size());
+        Assert.assertArrayEquals(new int[]{60}, first.get(0).pitches());
+        Assert.assertEquals(4, first.get(0).length());
+        Assert.assertTrue(first.get(0).tied(0));
+        Assert.assertArrayEquals(new int[]{60, 64}, first.get(1).pitches());
+        Assert.assertTrue("the held C goes on", first.get(1).tied(0));
+        Assert.assertFalse("the E ends here", first.get(1).tied(1));
+        Assert.assertArrayEquals(new int[]{60}, first.get(2).pitches());
+        Assert.assertEquals(8, first.get(2).length());
+        Assert.assertFalse(first.get(2).tied());
         Assert.assertEquals(1, staff.bar(1).size());
         Assert.assertTrue(staff.bar(1).get(0).rest());
         Assert.assertEquals(16, staff.bar(1).get(0).length());
