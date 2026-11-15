@@ -90,13 +90,14 @@ public final class MixDirector {
     }
 
     /** {@code "4/4"} for a piece from before F2; since then also the key, as {@code "3/4, D minor"}. */
-    private static String meterAndKey(Path arrangement) throws IOException {
+    static String meterAndKey(Path arrangement) throws IOException {
         ArrangementFile file = ArrangementFile.read(arrangement);
         String meter = file.meter().map(m -> m.numerator() + "/" + m.denominator()).orElse("4/4");
         return file.key().map(key -> meter + ", " + key.name()).orElse(meter);
     }
 
-    private static Map<String, Summary> summaries(Path arrangement) throws IOException {
+    /** What each track plays, by track id; also told to the AI that proposes movements. */
+    static Map<String, Summary> summaries(Path arrangement) throws IOException {
         Map<String, Summary> played = new LinkedHashMap<String, Summary>();
         ArrangementFile file = ArrangementFile.read(arrangement);
         long barTicks = file.barTicks();
@@ -117,14 +118,14 @@ public final class MixDirector {
         return played;
     }
 
-    private static final class Summary {
-        private int notes;
-        private int lowest = 127;
-        private int highest;
-        private int velocity;
-        private final TreeMap<Integer, Integer> bars = new TreeMap<Integer, Integer>();
+    static final class Summary {
+        int notes;
+        int lowest = 127;
+        int highest;
+        int velocity;
+        final TreeMap<Integer, Integer> bars = new TreeMap<Integer, Integer>();
 
-        private String perBar() {
+        String perBar() {
             List<String> counts = new ArrayList<String>();
             int last = Math.min(63, bars.isEmpty() ? 0 : bars.lastKey());
             for (int bar = 0; bar <= last; bar++) {

@@ -3,6 +3,8 @@ package com.aresstack.audio.studio.application;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -129,6 +131,36 @@ public final class PieceModel {
             log.accept("WARN: Der Verlauf lässt sich nicht speichern: " + said(failed));
             return false;
         }
+    }
+
+    /**
+     * The user took the movements the AI proposed: each proposed curve is kept in the mix document
+     * as if drawn by hand, replacing the curve of that parameter; curves the AI did not propose stay.
+     * A track the user protected in the meantime is left as it is. Only {@code mix.json} is written.
+     *
+     * @param stage the stage as it stands after the mix proposal was taken
+     * @return how many curves were kept; a curve that could not be kept was said as a warning
+     */
+    public synchronized int takeMovements(MovementDirector.Proposal proposal, com.aresstack.audio.studio.stage.SpatialScene stage) {
+        if (proposal == null || proposal.empty()) {
+            return 0;
+        }
+        StageMovements movements = movements();
+        int kept = 0;
+        for (Map.Entry<String, Map<String, List<StageMovements.Point>>> track : proposal.curves().entrySet()) {
+            com.aresstack.audio.studio.stage.SoundSourcePlacement placement =
+                    stage == null ? null : stage.placement(track.getKey());
+            if (placement != null && placement.locked()) {
+                continue;
+            }
+            for (Map.Entry<String, List<StageMovements.Point>> curve : track.getValue().entrySet()) {
+                movements = movements.with(track.getKey(), curve.getKey(), curve.getValue());
+                if (movements.editable(track.getKey()) && move(movements, track.getKey(), curve.getKey())) {
+                    kept++;
+                }
+            }
+        }
+        return kept;
     }
 
     /**

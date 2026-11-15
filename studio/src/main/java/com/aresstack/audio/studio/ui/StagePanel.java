@@ -1,6 +1,7 @@
 package com.aresstack.audio.studio.ui;
 
 import com.aresstack.audio.composition.mix.AutomationLane;
+import com.aresstack.audio.studio.application.MovementDirector;
 import com.aresstack.audio.studio.application.MusicTrack;
 import com.aresstack.audio.studio.application.StageMovements;
 import com.aresstack.audio.studio.stage.AcousticRoom;
@@ -59,6 +60,19 @@ final class StagePanel extends JPanel {
 
         /** The AI shall propose a mix. */
         void askDirector();
+
+        /** The user switched whether the AI also proposes movements with the mix; kept in the settings. */
+        default void movementWishChanged(boolean wanted) {
+        }
+
+        /**
+         * The user took a proposal that came with movements: the stage itself is already changed
+         * ({@link #sceneChanged}); these curves are to be kept in the mix document of the piece.
+         *
+         * @param stage the stage as it stands now, after the proposal was taken
+         */
+        default void movementsTaken(MovementDirector.Proposal proposal, SpatialScene stage) {
+        }
     }
 
     /** One slider with its name on the left and its value in words on the right. */
@@ -114,6 +128,10 @@ final class StagePanel extends JPanel {
     private final StageView view;
     private SpatialScene scene = SpatialScene.standard(new ArrayList<MusicTrack>());
     private SpatialScene proposal;
+    /** The movements the AI proposed with {@link #proposal}; none unless the user asked for them. */
+    private MovementDirector.Proposal motions = MovementDirector.Proposal.NONE;
+    /** Whether "KI mischt ab" also asks for movements; off by default (Angelo, 2026-11-15). */
+    private final javax.swing.JCheckBox withMovements = new javax.swing.JCheckBox("Mit Bewegungen");
     private List<String> order = new ArrayList<String>();
     private boolean filling;
 
@@ -367,6 +385,11 @@ final class StagePanel extends JPanel {
         director.setToolTipText("Die KI bekommt gesagt, was jede Spur spielt, und schlägt Lautstärken, deren Verlauf, "
                 + "Plätze und den Raum vor");
         director.addActionListener(event -> this.host.askDirector());
+        withMovements.setOpaque(false);
+        withMovements.setToolTipText("<html>Aus: die KI stellt jede Spur fest auf ihren Platz und schlägt nur den Pegelverlauf vor.<br>"
+                + "An: danach fragt eine eigene Anfrage, ob sich einzelne Spuren über die Takte bewegen sollen<br>"
+                + "(Seite, Tiefe, Hall, Höhe). Geschützte Spuren bewegen sich nicht. Auch das ist nur ein Vorschlag.</html>");
+        withMovements.addActionListener(event -> this.host.movementWishChanged(withMovements.isSelected()));
         usual.setToolTipText("Alle Instrumente, die nicht geschützt sind, auf den üblichen Platz ihrer Rolle setzen");
         usual.addActionListener(event -> {
             List<MusicTrack> tracks = new ArrayList<MusicTrack>();
@@ -375,13 +398,17 @@ final class StagePanel extends JPanel {
             }
             change(scene.taking(new SpatialScene(scene.room(), null).fitting(tracks)), true);
         });
-        take.setToolTipText("Den Vorschlag der KI übernehmen; geschützte Instrumente bleiben");
+        take.setToolTipText("Den Vorschlag der KI übernehmen, mit seinen Bewegungen; geschützte Instrumente bleiben");
         drop.setToolTipText("Den Vorschlag fallen lassen; die Bühne bleibt, wie sie ist");
         take.addActionListener(event -> {
             if (proposal != null) {
                 SpatialScene taken = scene.taking(proposal);
+                MovementDirector.Proposal moves = motions;
                 setProposal(null);
                 change(taken, true);
+                if (!moves.empty()) {
+                    host.movementsTaken(moves, taken);
+                }
             }
         });
         drop.addActionListener(event -> setProposal(null));
@@ -409,7 +436,7 @@ final class StagePanel extends JPanel {
                 + "An: der Master-Pegel gilt fest, ein Limiter hält die Spitzen bei −1 dBFS;<br>"
                 + "beim Speichern als WAV lässt sich dann auf Spitze oder Lautheit normalisieren.</html>");
         fixed.addActionListener(event -> switchLevel(fixed.isSelected()));
-        JPanel mixing = column(masterForm, Box.createVerticalStrut(6), fixed, Box.createVerticalStrut(8), director, Box.createVerticalStrut(8), verdict,
+        JPanel mixing = column(masterForm, Box.createVerticalStrut(6), fixed, Box.createVerticalStrut(8), director, Box.createVerticalStrut(4), withMovements, Box.createVerticalStrut(8), verdict,
                 Box.createVerticalStrut(8), usual, Box.createVerticalStrut(10), status);
 
         JPanel modules = new JPanel();
@@ -697,6 +724,21 @@ final class StagePanel extends JPanel {
                 return;
             }
             java.awt.Color color = AudioStudioTheme.channel(Math.max(0, order.indexOf(shown.trackId())));
+            List<StageMovements.Point> proposed = proposal == null || level() ? List.of()
+                    : motions.of(shown.trackId(), parameter);
+            if (!proposed.isEmpty()) {
+                // What the AI proposes, dashed as the proposal on the stage, under the curve as it is.
+                java.awt.geom.Path2D dashed = new java.awt.geom.Path2D.Float();
+                dashed.moveTo(6, y(proposed.get(0).value()));
+                for (StageMovements.Point point : proposed) {
+                    dashed.lineTo(x(point.bar()), y(point.value()));
+                }
+                dashed.lineTo(getWidth() - 6, y(proposed.get(proposed.size() - 1).value()));
+                g.setStroke(new java.awt.BasicStroke(1.6f, java.awt.BasicStroke.CAP_BUTT,
+                        java.awt.BasicStroke.JOIN_ROUND, 1f, new float[]{6f, 4f}, 0f));
+                g.setColor(AudioStudioTheme.withAlpha(color, 200));
+                g.draw(dashed);
+            }
             List<StageMovements.Point> points = points();
             java.awt.geom.Path2D line = new java.awt.geom.Path2D.Float();
             if (points.isEmpty()) {
@@ -804,15 +846,47 @@ final class StagePanel extends JPanel {
 
     /** Shows what the AI proposes over the stage, with the keys to take or drop it; {@code null} ends that. */
     void setProposal(SpatialScene proposed) {
+        setProposal(proposed, MovementDirector.Proposal.NONE);
+    }
+
+    /**
+     * Shows what the AI proposes over the stage and, if it proposed any, how tracks move: those
+     * curves are drawn dashed in the field under the sliders. {@code null} ends the proposal.
+     */
+    void setProposal(SpatialScene proposed, MovementDirector.Proposal moves) {
         proposal = proposed;
+        motions = proposed == null || moves == null ? MovementDirector.Proposal.NONE : moves;
         view.setProposal(proposed);
         verdict.setVisible(proposed != null);
         if (proposed != null) {
-            setStatus("Vorschlag der KI: gestrichelt auf der Bühne · " + proposed.room().name());
+            setStatus("Vorschlag der KI: gestrichelt auf der Bühne · " + proposed.room().name()
+                    + (motions.empty() ? "" : " · Bewegungen für " + motions.tracks()
+                    + (motions.tracks() == 1 ? " Spur" : " Spuren")));
         } else {
             setStatus(" ");
         }
+        showChosen();
         revalidate();
+    }
+
+    /** The movements proposed with the mix (for a test). */
+    MovementDirector.Proposal proposedMovements() {
+        return motions;
+    }
+
+    /** Whether "KI mischt ab" also asks for movements. */
+    boolean movementsWanted() {
+        return withMovements.isSelected();
+    }
+
+    /** Sets the switch as the settings keep it, without telling the host. */
+    void setMovementsWanted(boolean wanted) {
+        withMovements.setSelected(wanted);
+    }
+
+    /** The switch itself (for a test). */
+    javax.swing.JCheckBox movementSwitch() {
+        return withMovements;
     }
 
     void setStatus(String text) {
@@ -917,12 +991,16 @@ final class StagePanel extends JPanel {
                 boolean moving = AutomationLane.LEVEL.equals(key.getKey()) ? !placement.dynamics().isEmpty()
                         : !movements.of(placement.trackId(), key.getKey()).isEmpty();
                 key.getValue().setEnabled(true);
-                key.getValue().setText(name(key.getKey()) + (moving ? " •" : ""));
+                boolean proposed = proposal != null && motions.has(placement.trackId(), key.getKey());
+                key.getValue().setText(name(key.getKey()) + (moving ? " •" : "") + (proposed ? " ◌" : ""));
                 key.getValue().setSelected(key.getKey().equals(parameter));
             }
             List<StageMovements.Point> points = curve.points();
             String named = name(parameter);
-            if (!curve.editable()) {
+            if (proposal != null && !AutomationLane.LEVEL.equals(parameter)
+                    && motions.has(placement.trackId(), parameter)) {
+                course.setText(named + ": Vorschlag der KI gestrichelt");
+            } else if (!curve.editable()) {
                 course.setText(named + ": erst komponieren, dann lässt sich die Bewegung zeichnen");
             } else if (points.isEmpty()) {
                 course.setText(named + ": gleichbleibend · ins Feld klicken setzt Punkte");

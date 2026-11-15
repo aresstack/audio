@@ -33,10 +33,20 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         }
         // Beside these, the stage page shows the movements the model holds and keeps a curve the user
         // drew there (work package D3): an edit of the mix on purpose, which takes over no old file.
+        // Likewise movements the AI proposed and the user took with "Übernehmen" (askDirector only
+        // reads which tracks have a channel; the proposal itself changes nothing until it is taken).
         assertEquals("opening loads the model, composing and renaming bring it in step, a drawn movement is kept, the switch of the level is noted;"
                         + " nothing else reaches it",
-                new java.util.TreeSet<String>(List.of("composeIntoPiece", "levelSwitched",
-                        "loadArrangementForCurrentDirectory", "movementChanged", "renamed", "showMovements")), users);
+                new java.util.TreeSet<String>(List.of("askDirector", "composeIntoPiece", "levelSwitched",
+                        "loadArrangementForCurrentDirectory", "movementChanged", "movementsTaken", "renamed",
+                        "showMovements")), users);
+        assertTrue("asking the AI for a mix only reads the model",
+                bodyOf(source, "private void askDirector()").replace("pieceModel.movements()", "")
+                        .indexOf("pieceModel") < 0);
+        assertEquals("movements of the AI are written only when the user took them", List.of("movementsTaken"),
+                callers(source, "pieceModel\\.takeMovements\\("));
+        assertTrue("taking movements brings no old files into the model",
+                bodyOf(source, "private void movementsTaken(").indexOf("synchronize") < 0);
         assertEquals("only a curve the user drew is written into the mix of the model", List.of("movementChanged"),
                 callers(source, "pieceModel\\.move\\("));
         assertTrue("showing the movements only reads the model",
