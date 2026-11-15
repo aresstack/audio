@@ -553,9 +553,37 @@ final class ArrangementView extends JComponent {
         return Math.max(audioSeconds, arrangement == null ? 0 : arrangement.seconds());
     }
 
+    /** How wide a bar is when the piece is not fitted into the window. */
+    static final int BAR_WIDTH = 96;
+    /** Whether the whole piece is fitted into the width there is; otherwise every bar has its width and the view scrolls. */
+    private boolean fit = true;
+
+    /** Fits the piece into the width of the window, or gives every bar its own width so that a long piece scrolls. */
+    void setFit(boolean fitted) {
+        if (fit != fitted) {
+            fit = fitted;
+            revalidate();
+            repaint();
+            if (companion != null) {
+                companion.revalidate();
+                companion.repaint();
+            }
+        }
+    }
+
+    boolean fit() {
+        return fit;
+    }
+
     @Override
     public Dimension getPreferredSize() {
-        return new Dimension(400, RULER + order.size() * lane + MIX);
+        int width = 400;
+        if (!fit && arrangement != null && arrangement.bars() > 0) {
+            // Sound that plays on after the music gets its width too, at the scale of the bars.
+            double longer = arrangement.seconds() <= 0 ? 1 : Math.max(1, totalSeconds() / arrangement.seconds());
+            width = Math.max(width, GUTTER + 10 + (int) Math.round(arrangement.bars() * BAR_WIDTH * longer));
+        }
+        return new Dimension(width, RULER + order.size() * lane + MIX);
     }
 
     @Override

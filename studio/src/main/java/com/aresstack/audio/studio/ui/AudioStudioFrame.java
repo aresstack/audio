@@ -116,6 +116,8 @@ public final class AudioStudioFrame extends JFrame {
     private final JTextField proxyPacUrl = new JTextField(34);
     private final JTextField proxyNonProxyHosts = new JTextField(24);
     private final JCheckBox proxyBasic = new JCheckBox("Proxy-BASIC via KeePass");
+    /** Whether the arrangement is fitted into the window; off, every bar has its width and the lanes scroll. */
+    private final JCheckBox fitArrangement = new JCheckBox("Ganzes Stück in die Fensterbreite einpassen", true);
     private final JTextField proxyCredentialRef = new JTextField(22);
     private final JComboBox<KeePassEntry> keePassEntries = new JComboBox<KeePassEntry>();
     private final JTextField directory = new JTextField(Paths.get(System.getProperty("user.home"),
@@ -1735,6 +1737,18 @@ public final class AudioStudioFrame extends JFrame {
         column.add(new DeckWidgets.Module("Netzwerk · Proxy", network));
         column.add(javax.swing.Box.createVerticalStrut(14));
         column.add(new DeckWidgets.Module("Klangerzeugung", sound));
+        JPanel looks = form();
+        fitArrangement.setOpaque(false);
+        fitArrangement.setToolTipText("An: das ganze Stück ist immer zu sehen. Aus: jeder Takt hat seine feste Breite, "
+                + "unten erscheint ein Rollbalken; Umschalt und Mausrad rollen seitwärts.");
+        fitArrangement.addActionListener(event -> {
+            trackTable.setFit(fitArrangement.isSelected());
+            saveSettings(false);
+        });
+        addRow(looks, 0, "Arrangement", fitArrangement);
+        addRow(looks, 1, "", note("Aus: lange Stücke bleiben lesbar; unten ein Rollbalken, Umschalt + Mausrad rollt seitwärts."));
+        column.add(javax.swing.Box.createVerticalStrut(14));
+        column.add(new DeckWidgets.Module("Ansicht", looks));
         JPanel top = new JPanel(new BorderLayout());
         top.setOpaque(false);
         top.add(column, BorderLayout.NORTH);
@@ -3951,6 +3965,8 @@ public final class AudioStudioFrame extends JFrame {
             proxyNonProxyHosts.setText(saved.getProperty("proxyNonProxyHosts", ""));
             proxyBasic.setSelected("BASIC".equalsIgnoreCase(saved.getProperty("proxyAuthMode", "")));
             proxyCredentialRef.setText(saved.getProperty("proxyCredentialRef", ""));
+            fitArrangement.setSelected(!"false".equalsIgnoreCase(saved.getProperty("arrangementFit", "true")));
+            trackTable.setFit(fitArrangement.isSelected());
             String savedMode = saved.getProperty("proxyMode", "");
             if (!savedMode.isEmpty()) {
                 proxyMode.setSelectedItem(savedMode);
@@ -4023,6 +4039,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("proxyNonProxyHosts", proxyNonProxyHosts.getText().trim());
             saved.setProperty("proxyAuthMode", proxyBasic.isSelected() ? "BASIC" : "");
             saved.setProperty("proxyCredentialRef", proxyCredentialRef.getText().trim());
+            saved.setProperty("arrangementFit", String.valueOf(fitArrangement.isSelected()));
             saved.setProperty("outputDirectory", directory.getText().trim());
             try {
                 projects.lastPiece(songs.root(), Paths.get(directory.getText().trim()));
