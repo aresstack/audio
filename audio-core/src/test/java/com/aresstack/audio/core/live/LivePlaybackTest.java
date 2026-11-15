@@ -196,6 +196,36 @@ public final class LivePlaybackTest {
     }
 
     @Test
+    public void nothingFromBeforeAJumpLeaksOutOfTheLimiterAfterIt() throws Exception {
+        // loud enough for the limiter to act, then silence
+        int loud = 2 * RATE;
+        int frames = 3 * RATE;
+        float[] sound = new float[frames];
+        float[] sine = TestSignals.sine(loud, 330, RATE, 0.99);
+        System.arraycopy(sine, 0, sound, 0, loud);
+        LiveGraph graph = new LiveGraph(List.of(new LiveChannel(new ArraySource(sound, sound.clone(), RATE), frames,
+                ChannelParameters.builder().build(), 0, null)), null, 0, frames);
+        MasterBus master = new MasterBus(MasterBus.Settings.fixed(0));
+        Recorder sink = new Recorder(4 * frames, true);
+        try (LivePlayback playback = new LivePlayback(graph, master, sink, RATE, BLOCK).start()) {
+            playback.play();
+            waitFor(() -> sink.written > RATE / 2, 10);
+            playback.pause();
+            waitFor(() -> playback.state() == LivePlayback.State.PAUSED, 10);
+            Assert.assertTrue("the limiter acted on the loud part", master.limiter().lowestGain() < 0.95f);
+            int first = sink.written;
+            playback.seek(loud + RATE / 2);
+            playback.play();
+            waitFor(() -> playback.state() == LivePlayback.State.ENDED, 10);
+            Assert.assertTrue(sink.written > first);
+            for (int i = first; i < sink.written; i++) {
+                Assert.assertEquals("frame " + (i - first) + " after the jump", 0f, sink.left[i], 0f);
+                Assert.assertEquals("frame " + (i - first) + " after the jump", 0f, sink.right[i], 0f);
+            }
+        }
+    }
+
+    @Test
     public void aLookAheadLongerThanABlockIsPushedOutWhole() throws Exception {
         int frames = 1000;
         float[] impulse = new float[frames];
