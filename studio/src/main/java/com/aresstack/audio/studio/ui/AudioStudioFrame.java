@@ -125,7 +125,11 @@ public final class AudioStudioFrame extends JFrame {
     private volatile KipitzChatClient activeClient;
     private String preferredKeePassEntry = "";
     // The desk: display, transport, waveform, master meters, and the pages behind the keys under the display.
-    private final DeckPlayer player = new DeckPlayer();
+    private final StageDeck player = new StageDeck();
+    /** The factor the last file mix of the stage found (compatibility mode), for which piece and master level. */
+    private float mixFactor = Float.NaN;
+    private double mixFactorMasterDb;
+    private Path mixFactorFolder;
     private final DeckDisplays.Lcd lcd = new DeckDisplays.Lcd();
     /** The line at the lower edge of the window: what the studio is doing or did last. */
     private final JLabel statusLine = new JLabel("Bereit");
@@ -616,6 +620,7 @@ public final class AudioStudioFrame extends JFrame {
         } else {
             trackTable.refreshStage();
         }
+        hearStage(settled);
         if (settled) {
             saveScene();
             remixTimer.restart();
@@ -626,6 +631,47 @@ public final class AudioStudioFrame extends JFrame {
         if (stagePanel != null && trackTable != null) {
             stagePanel.setScene(scene, trackTable.tracks());
         }
+        hearStage(true); // a whole scene from elsewhere: a proposal taken, a step undone
+    }
+
+    /**
+     * The stage as it stands is heard at once where it is played live, also in the middle of a
+     * drag. Another room (or another way of setting the level) needs a new live stage: that is
+     * made in the background once the change has settled, and goes on where playback stands.
+     */
+    private void hearStage(boolean settled) {
+        if (!player.stage(scene, soloTrack()) && settled) {
+            openLive(Double.NaN, false);
+        }
+    }
+
+    /** Whether a choice of the playback is heard on the stage, and so can be played live. */
+    private boolean onStage(String selected) {
+        return StageDeck.LIVE_WANTED && selected != null && !"Java reference mix".equals(selected)
+                && writtenArrangement() != null;
+    }
+
+    /**
+     * Plays the stage live from now on: the tracks are read in the background, then playback goes
+     * on at a second ({@code at}), or where it stands by then if {@code at} is not a number. If the
+     * stage cannot be played live (no sound card for it, a track not rendered), the file is played
+     * as before.
+     */
+    private void openLive(final double at, final boolean play) {
+        final String selected = (String) playbackSelection.getSelectedItem();
+        final Path folder = Paths.get(directory.getText().trim());
+        float factor = folder.equals(mixFactorFolder) && mixFactorMasterDb == scene.masterDb() ? mixFactor : Float.NaN;
+        player.openLive(writtenArrangement(), folder, scene, soloTrack(), factor, at, play, problem -> {
+            if (problem == null) {
+                hearStage(true); // what moved while the tracks were read
+                return;
+            }
+            append("WARN: Die Bühne lässt sich nicht live spielen, es spielt die gemischte Datei: "
+                    + problem.getMessage());
+            if (!Double.isNaN(at) && selected != null && selected.equals(playbackSelection.getSelectedItem())) {
+                playFile(selected, at, play);
+            }
+        });
     }
 
     private void saveScene() {
@@ -671,10 +717,30 @@ public final class AudioStudioFrame extends JFrame {
                 problem = String.valueOf(failed.getMessage());
             }
             final String said = problem;
+            final com.aresstack.audio.studio.mix.MixOutcome outcome = mixing.outcome();
+            if (problem == null && outcome != null) {
+                final float factor = outcome.legacyFactor();
+                SwingUtilities.invokeLater(() -> mixFactorFound(folder, ticket, factor, mixed.masterDb()));
+            }
             final String limiter = com.aresstack.audio.studio.application.MixReport.limiterShort(mixing.outcome());
             final double seconds = (System.nanoTime() - began) / 1e9;
             SwingUtilities.invokeLater(() -> mixedAgain(folder, ticket, said, seconds, limiter));
         });
+    }
+
+    /**
+     * The file mix of the stage found the factor it brought the mix to its peak with (not a
+     * number for a piece with the fixed level). Live playback takes it, so that it is as loud as
+     * the file; kept for the next time the stage is played live.
+     */
+    private void mixFactorFound(Path folder, int ticket, float factor, double masterDb) {
+        if (ticket != mixWanted || !folder.equals(Paths.get(directory.getText().trim()))) {
+            return;
+        }
+        mixFactor = factor;
+        mixFactorMasterDb = masterDb;
+        mixFactorFolder = folder;
+        player.legacyFactor(factor, masterDb);
     }
 
     /** @param limiter what the limiter did in this mix, or {@code null} for a piece that is mixed to its peak */
@@ -2167,11 +2233,33 @@ public final class AudioStudioFrame extends JFrame {
                     + "\nErst „Demo laden“ oder komponieren, dann „Rendern“.");
             return;
         }
+        if (onStage(selected)) {
+            // The stage is played live: what is moved on it is heard while it plays.
+            if (!output.equals(player.file())) {
+                player.show(output);
+                arrangementView.setMix(player.envelope(), soloTrack() == null ? "Mix" : "Solo", soloTrack(),
+                        player.length());
+            }
+            lcd.setSource(playbackName(selected), true);
+            openLive(player.seconds(), true);
+            return;
+        }
+        playFile(selected, 0, true);
+    }
+
+    /** Plays the file behind a choice of the playback, as before the stage could be played live. */
+    private void playFile(String selected, double at, boolean play) {
+        Path output = playbackFile(selected);
         try {
             player.open(output);
             arrangementView.setMix(player.envelope(), soloTrack() == null ? "Mix" : "Solo", soloTrack(), player.length());
             lcd.setSource(playbackName(selected), true);
-            player.play();
+            if (at > 0 && player.length() > 0) {
+                player.seek(at / player.length());
+            }
+            if (play) {
+                player.play();
+            }
         } catch (Exception error) {
             message("Cannot play " + output + ": " + error.getMessage());
         }
@@ -2184,6 +2272,15 @@ public final class AudioStudioFrame extends JFrame {
 
     private void seek(double share) {
         if (!player.ready() && player.file() != null) {
+            String selected = (String) playbackSelection.getSelectedItem();
+            if (onStage(selected)) {
+                // A jump before anything played: the stage is got ready live, paused at that place.
+                DeckPlayer.Envelope shown = player.envelope();
+                if (shown != null) {
+                    openLive(Math.max(0, Math.min(1, share)) * shown.seconds, false);
+                }
+                return;
+            }
             try {
                 Path file = player.file();
                 player.open(file);
@@ -2204,9 +2301,8 @@ public final class AudioStudioFrame extends JFrame {
         lcd.tick();
         arrangementView.setSecond(second);
         scoreView.setSecond(playing || second > 0 ? second : -1);
-        DeckPlayer.Envelope envelope = player.envelope();
-        masterLeft.setLevel(playing && envelope != null ? envelope.at(second, false) : 0f);
-        masterRight.setLevel(playing && envelope != null ? envelope.at(second, true) : 0f);
+        masterLeft.setLevel(player.level(false));
+        masterRight.setLevel(player.level(true));
         if (trackTable != null) {
             trackTable.pulse();
         }

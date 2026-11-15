@@ -154,7 +154,8 @@ public final class StageMixServiceTest {
         Assert.assertEquals("brought to full level as always", 0.92, usualPeak, 0.01);
 
         // Switched: kept through a change of the stage, saved, read again, and heard in every mix.
-        SpatialScene fixed = scene.withFixedLevel(true).withMaster(-6).with(scene.placement("bass").withLevel(-3));
+        // Master at -24 dB: the fixed level adds +12 dB make-up (D1b), so only well below that the mix stays clear of full level.
+        SpatialScene fixed = scene.withFixedLevel(true).withMaster(-24).with(scene.placement("bass").withLevel(-3));
         store.save(song, fixed);
         Assert.assertTrue(store.load(song).fixedLevel());
         Assert.assertTrue(service.scene(arrangement, song).fixedLevel());
