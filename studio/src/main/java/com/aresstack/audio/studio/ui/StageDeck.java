@@ -145,9 +145,55 @@ final class StageDeck {
         @Override
         public java.util.List<com.aresstack.audio.studio.visual.TrackLight> lights() {
             LiveDeck deck = live;
-            return deck != null ? deck.feed().lights() : java.util.List.of();
+            if (deck != null) {
+                return deck.feed().lights();
+            }
+            FileLights known = fileLights;
+            Path playing = file.file();
+            if (known == null || playing == null || !file.ready()
+                    || !playing.toAbsolutePath().normalize().startsWith(known.directory)) {
+                return java.util.List.of();
+            }
+            return known.lights.at(file.seconds());
         }
     };
+
+    /** The tracks of the piece whose file plays, for the stage lights; {@code null} until they are read. */
+    private volatile FileLights fileLights;
+
+    private record FileLights(Path directory, com.aresstack.audio.studio.application.StageLights lights) {
+    }
+
+    /**
+     * Reads in the background what the stage lights need while a file of this piece plays: places,
+     * movements, and the level of every track from its rendered file or from its notes. The lights
+     * belong to the folder of the piece; a file from elsewhere shows none of them.
+     *
+     * @param model the model of the piece, for tracks that are not rendered; {@code null} if it has none
+     * @param only  the track heard alone, or {@code null}
+     */
+    void lightsOf(com.aresstack.audio.studio.application.StageMixService.Piece piece,
+                  com.aresstack.audio.composition.Composition model, Path directory, SpatialScene scene, String only) {
+        if (piece == null || directory == null || scene == null) {
+            return;
+        }
+        final Path folder = directory.toAbsolutePath().normalize();
+        final int ticket = ++lightsAsked;
+        loader.submit(() -> {
+            com.aresstack.audio.studio.application.StageLights read;
+            try {
+                read = com.aresstack.audio.studio.application.StageLights.read(piece, model, folder, scene, only);
+            } catch (RuntimeException unreadable) {
+                return; // the stage picture then shows the sound itself
+            }
+            if (ticket == lightsAsked) {
+                fileLights = new FileLights(folder, read);
+            }
+        });
+    }
+
+    /** Counts what was asked for: lights read after another piece was asked for are dropped. */
+    private volatile int lightsAsked;
 
     // ---- the overlap of two titles of an album ----
 

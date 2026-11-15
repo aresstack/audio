@@ -6026,6 +6026,7 @@ public final class AudioStudioFrame extends JFrame {
         }
         try {
             player.open(mix);
+            lightsOfFile(null);
             arrangementView.setMix(player.envelope(), "Mix", null, player.length());
             lcd.setSource(playbackName("Mixed sampled arrangement"), true);
             if (fadeIn > 0) {
@@ -6036,6 +6037,14 @@ public final class AudioStudioFrame extends JFrame {
             player.dropOutgoing();
             message("Cannot play " + mix + ": " + error.getMessage());
         }
+    }
+
+    /**
+     * While the mix of the open piece plays as one file, the stage lights of the visualizer still
+     * know its tracks: places and movements from its stage, levels from its rendered tracks or notes.
+     */
+    private void lightsOfFile(String only) {
+        player.lightsOf(pieceToMix(), modelToMix(), Paths.get(directory.getText().trim()), scene, only);
     }
 
     /** Counts what is heard of the title that plays; once enough is heard it is no longer new. */
@@ -6147,6 +6156,7 @@ public final class AudioStudioFrame extends JFrame {
         Path output = playbackFile(selected);
         try {
             player.open(output);
+            lightsOfFile(soloTrack());
             arrangementView.setMix(player.envelope(), soloTrack() == null ? "Mix" : "Solo", soloTrack(), player.length());
             lcd.setSource(playbackName(selected), true);
             if (at > 0 && player.length() > 0) {
