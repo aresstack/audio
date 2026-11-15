@@ -169,8 +169,8 @@ public final class ProjectSession {
     }
 
     /**
-     * Whether the model says only what {@code arrangement.tsv} can say: one tempo in four
-     * quarters, one clip per track over its default part. Only then is the file a full view of
+     * Whether the model says only what {@code arrangement.tsv} can say: one tempo, one meter
+     * and one key, one clip per track over its default part. Only then is the file a full view of
      * the model, and only then may a new version of it be taken over without losing anything.
      */
     public boolean withinTsv() {
@@ -255,7 +255,7 @@ public final class ProjectSession {
 
     /**
      * Writes the model and {@code arrangement.tsv} from it, without a revision. A piece that says
-     * more than the TSV can (tempo or meter changes, another meter than 4/4) gets
+     * more than the TSV can (changes of tempo, meter or key) gets
      * {@code arrangement.mid}, written from the model, as its exchange file. A TSV lying there is
      * left as it is (work package F1): {@link #synchronize()} never takes it over such a model.
      */
@@ -556,7 +556,10 @@ public final class ProjectSession {
         Meta meta = new Meta(or(a.title(), b.title()), or(a.genre(), b.genre()), or(a.mood(), b.mood()),
                 or(a.brief(), b.brief()), or(a.plannedFrom(), b.plannedFrom()), or(a.remarks(), b.remarks()));
         List<Section> sections = keepingSections(imported, model);
-        TimeMap time = imported.timeMap().tempoAt(0) == model.timeMap().tempoAt(0) ? model.timeMap() : imported.timeMap();
+        // The model's own time map stays unless the file says another tempo, meter or key.
+        TimeMap time = imported.timeMap().tempoAt(0) == model.timeMap().tempoAt(0)
+                && imported.timeMap().meterAt(0).equals(model.timeMap().meterAt(0))
+                && imported.timeMap().keyAt(0).equals(model.timeMap().keyAt(0)) ? model.timeMap() : imported.timeMap();
         return new Composition(meta, time, sections, parts, tracks, model.assets());
     }
 

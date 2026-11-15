@@ -259,13 +259,30 @@ public final class ProjectSessionEditTest {
     @Test
     public void aPieceBeyondTheTsvGetsItsMidiWrittenFromTheModel() throws Exception {
         ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        // Since F2 the TSV says one meter and one key; a change of tempo it still cannot say.
+        double bpm = session.composition().timeMap().tempoAt(0);
+        com.aresstack.audio.composition.TimeMap faster = new com.aresstack.audio.composition.TimeMap(
+                List.of(new com.aresstack.audio.composition.TimeMap.Tempo(0, bpm),
+                        new com.aresstack.audio.composition.TimeMap.Tempo(4 * 1920, bpm + 20)),
+                session.composition().timeMap().meters(),
+                session.composition().timeMap().keys());
+        session.apply(Patch.of("Schneller", new EditOp.SetTimeMap(faster)), EditScope.everything());
+        assertArrayEquals(com.aresstack.audio.studio.project.MidiExport.bytes(session.composition()),
+                Files.readAllBytes(piece.resolve(ProjectFolder.MIDI)));
+        assertFalse(session.externalChanges());
+        assertEquals(session.composition(), ProjectSession.open(piece).orElseThrow().composition());
+    }
+
+    @Test
+    public void aWaltzStaysInTheTsvWithItsMeterLine() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
         com.aresstack.audio.composition.TimeMap waltz = new com.aresstack.audio.composition.TimeMap(
                 session.composition().timeMap().tempos(),
                 List.of(new com.aresstack.audio.composition.TimeMap.Meter(0, 3, 4)),
                 session.composition().timeMap().keys());
         session.apply(Patch.of("Walzer", new EditOp.SetTimeMap(waltz)), EditScope.everything());
-        assertArrayEquals(com.aresstack.audio.studio.project.MidiExport.bytes(session.composition()),
-                Files.readAllBytes(piece.resolve(ProjectFolder.MIDI)));
+        assertTrue(session.withinTsv());
+        assertTrue(Files.readAllLines(piece.resolve(ProjectFolder.ARRANGEMENT)).contains("meter\t3\t4"));
         assertFalse(session.externalChanges());
         assertEquals(session.composition(), ProjectSession.open(piece).orElseThrow().composition());
     }
