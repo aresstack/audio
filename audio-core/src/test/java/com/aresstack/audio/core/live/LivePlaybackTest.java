@@ -177,4 +177,39 @@ public final class LivePlaybackTest {
             Assert.assertTrue(bytes + " B over 950 blocks", bytes < 1024);
         }
     }
+
+    @Test
+    public void aSeekAfterTheEndIsKeptByPlay() throws Exception {
+        int frames = 1000;
+        LiveGraph graph = new LiveGraph(List.of(tone(frames, 0)), null, 0, frames);
+        Recorder sink = new Recorder(10 * frames, false);
+        MasterBus master = new MasterBus(MasterBus.Settings.fixed(0));
+        try (LivePlayback playback = new LivePlayback(graph, master, sink, RATE, BLOCK).start()) {
+            playback.play();
+            waitFor(() -> playback.state() == LivePlayback.State.ENDED, 10);
+            int first = sink.written;
+            playback.seek(750);
+            playback.play();
+            waitFor(() -> sink.written > first && playback.state() == LivePlayback.State.ENDED, 10);
+            Assert.assertEquals(250 + master.latencyFrames(), sink.written - first);
+        }
+    }
+
+    @Test
+    public void aLookAheadLongerThanABlockIsPushedOutWhole() throws Exception {
+        int frames = 1000;
+        float[] impulse = new float[frames];
+        impulse[frames - 1] = 0.5f;
+        LiveGraph graph = new LiveGraph(List.of(new LiveChannel(new ArraySource(impulse, impulse.clone(), RATE), frames,
+                ChannelParameters.builder().build(), 0, null)), null, 0, frames);
+        MasterBus master = new MasterBus(50, MasterBus.Settings.fixed(0));
+        Recorder sink = new Recorder(10 * frames, false);
+        try (LivePlayback playback = new LivePlayback(graph, master, sink, RATE, BLOCK).start()) {
+            playback.play();
+            waitFor(() -> playback.state() == LivePlayback.State.ENDED, 10);
+            Assert.assertTrue(master.latencyFrames() > BLOCK);
+            Assert.assertEquals(frames + master.latencyFrames(), sink.written);
+            Assert.assertEquals(0.5f, sink.left[frames - 1 + master.latencyFrames()], 1e-6f);
+        }
+    }
 }

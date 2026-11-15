@@ -110,7 +110,7 @@ public final class LivePlayback implements AutoCloseable {
         if (state == State.CLOSED || state == State.FAILED) {
             return;
         }
-        if (graph.position() >= graph.frames()) {
+        if (!graph.seekPending() && graph.position() >= graph.frames()) {
             graph.seek(0);
         }
         wantPlaying = true;
@@ -273,9 +273,8 @@ public final class LivePlayback implements AutoCloseable {
 
     /** The piece has ended: the limiter's look-ahead is pushed out with silence, the sink played out. */
     private void finish() {
-        int rest = Math.min(blockFrames, master.latencyFrames());
-        if (rest > 0) {
-            block.setFrames(rest);
+        for (int rest = master.latencyFrames(); rest > 0; rest -= blockFrames) {
+            block.setFrames(Math.min(blockFrames, rest));
             block.clear();
             master.process(block);
             meter.process(block);
