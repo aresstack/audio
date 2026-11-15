@@ -472,6 +472,13 @@ final class AlbumsPanel extends JPanel {
         up.setEnabled(free && selected != null && row > 0);
         down.setEnabled(free && selected != null && row < album.tracks().size() - 1);
         produce.setEnabled(free && !album.tracks().isEmpty());
+        // A run that left titles undone (failed, cancelled) is taken up: only what is missing is made.
+        int done = there ? state.count(album, Status.DONE) : 0;
+        boolean partly = there && done < album.tracks().size()
+                && (done > 0 || state.count(album, Status.FAILED) > 0);
+        produce.setText(partly ? "Fehlende Titel produzieren" : "Album produzieren");
+        produce.setToolTipText(partly ? "Macht nur die Titel, die noch nicht fertig sind; fertige bleiben, wie sie sind"
+                : null);
         cancel.setEnabled(running);
         again.setEnabled(free && selected != null && selected.hasPiece());
         open.setEnabled(there && selected != null && selected.hasPiece());
@@ -868,8 +875,8 @@ final class AlbumsPanel extends JPanel {
                     reload(id);
                     int failed = state.count(album, Status.FAILED);
                     int waiting = state.count(album, Status.QUEUED);
-                    say((failed > 0 ? failed + " Titel fehlgeschlagen; „Album produzieren“ versucht sie erneut. "
-                            : waiting > 0 ? "Angehalten; „Album produzieren“ setzt fort. " : "Das Album ist fertig. ")
+                    say((failed > 0 ? failed + " Titel fehlgeschlagen; „Fehlende Titel produzieren“ versucht sie erneut. "
+                            : waiting > 0 ? "Angehalten; der Knopf unten rechts setzt fort. " : "Das Album ist fertig. ")
                             + summary());
                 }
                 keys();
