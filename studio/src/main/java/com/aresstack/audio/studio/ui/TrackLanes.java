@@ -273,6 +273,19 @@ final class TrackLanes extends JPanel {
         }
     }
 
+    /**
+     * Fits the piece into the width there is, or gives every bar its width: then a bar at the
+     * bottom scrolls along the piece, and so does the wheel with Shift held.
+     */
+    void setFit(boolean fitted) {
+        view.setFit(fitted);
+        scroll.setHorizontalScrollBarPolicy(fitted ? ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+                : ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scroll.getHorizontalScrollBar().setUnitIncrement(ArrangementView.BAR_WIDTH / 2);
+        scroll.revalidate();
+        fitHeights();
+    }
+
     /** Puts a component above the lanes, over the same width: the form of the piece. */
     void setHeader(javax.swing.JComponent header) {
         scroll.setColumnHeaderView(header);
@@ -349,7 +362,8 @@ final class TrackLanes extends JPanel {
 
     /** The lanes share the height there is: few tracks get high lanes, many get low ones and the list scrolls. */
     private void fitHeights() {
-        int free = scroll.getHeight() - ArrangementView.RULER - ArrangementView.MIX - 4;
+        int bar = scroll.getHorizontalScrollBar().isVisible() ? scroll.getHorizontalScrollBar().getHeight() : 0;
+        int free = scroll.getHeight() - ArrangementView.RULER - ArrangementView.MIX - 4 - bar;
         int rows = heads.size() + audioHeads.size();
         int height = rows == 0 ? 60 : Math.max(54, Math.min(150, free / rows));
         for (Head head : heads) {
