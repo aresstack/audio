@@ -112,6 +112,12 @@ public final class PieceModel {
      * @return whether the curve is kept; if not, the reason was said as a warning
      */
     public synchronized boolean move(StageMovements movements, String trackId, String parameter) {
+        if (!StageMovements.PARAMETERS.contains(parameter)) {
+            // The level curve has one source: the stage (dynamics), which the model takes over as its level lane.
+            log.accept("WARN: Der Verlauf lässt sich nicht speichern: \"" + parameter
+                    + "\" wird nicht hier gezeichnet (der Pegelverlauf gehört zur Bühne).");
+            return false;
+        }
         if (session == null) {
             log.accept("WARN: Der Verlauf lässt sich nicht speichern: das Stück hat noch kein Werkmodell.");
             return false;
