@@ -180,6 +180,9 @@ public final class AudioStudioFrame extends JFrame {
     private final JLabel accessNote = new JLabel();
     private JPanel keePassRow;
     private JLabel keePassLabel;
+    /** How many characters of the answers of the AI have arrived while composing, and how many notes are shown. */
+    private long arrived;
+    private int sketchNotes;
     private final Map<String, javax.swing.JToggleButton> pageKeys = new java.util.LinkedHashMap<String, javax.swing.JToggleButton>();
     /** Beside the choice of the piece under the name of the studio: new, open, and what is seldom needed. */
     private final JButton songMenuKey = new JButton("▾");
@@ -3271,6 +3274,8 @@ public final class AudioStudioFrame extends JFrame {
         lcd.setBusy(true);
         trackStates.clear();
         trackTable.clearWork();
+        arrived = 0;
+        sketchNotes = 0;
         worker = new SwingWorker<Path, String>() {
             @Override
             protected Path doInBackground() throws Exception {
@@ -3278,6 +3283,17 @@ public final class AudioStudioFrame extends JFrame {
                     @Override
                     public void sketch(final List<String> arrangement) {
                         SwingUtilities.invokeLater(() -> showSketch(arrangement));
+                    }
+
+                    @Override
+                    public void arriving(final long characters) {
+                        SwingUtilities.invokeLater(() -> {
+                            if (worker == null || worker.isDone()) {
+                                return; // a late word after the work ended
+                            }
+                            arrived = characters;
+                            showTrackWork();
+                        });
                     }
 
 
@@ -3726,6 +3742,13 @@ public final class AudioStudioFrame extends JFrame {
                     ids.add(cells[1]);
                 }
             }
+            int notes = 0;
+            for (String line : arrangement) {
+                if (line.startsWith("note\t")) {
+                    notes++;
+                }
+            }
+            sketchNotes = notes;
             scoreView.setScore(com.aresstack.audio.studio.score.Score.of(arrangement), ids,
                     "Die KI schreibt · die ersten Noten erscheinen gleich");
         } catch (RuntimeException unreadable) {
@@ -3763,7 +3786,11 @@ public final class AudioStudioFrame extends JFrame {
         setStatus((trackStage == TrackProgress.Stage.COMPOSE ? "KI komponiert" : "Rendern") + ": "
                 + working + " gleichzeitig · " + done + " von " + trackStates.size() + " fertig"
                 + (waiting > 0 ? " · " + waiting + " warten" : "") + (failed > 0 ? " · " + failed + " Fehler" : "")
-                + " · " + seconds + " s");
+                + " · " + seconds + " s"
+                // Whether the service answers at all: nothing arrives while it lets the requests wait.
+                + (trackStage != TrackProgress.Stage.COMPOSE ? ""
+                : arrived == 0 ? (done == 0 ? " · noch kein Text von der KI angekommen" : "")
+                : " · " + arrived + " Zeichen von der KI" + (sketchNotes > 0 ? ", " + sketchNotes + " Noten" : "")));
     }
 
     private void listenAlone(String trackId) {

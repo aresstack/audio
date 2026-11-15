@@ -210,6 +210,7 @@ public final class GemmaMusicComposer {
         List<String> chords = chords(plan, spec);
         final Sketch sketch = progress instanceof SketchProgress
                 ? new Sketch(tracks, spec, chords, (SketchProgress) progress) : null;
+        final Arriving arriving = new Arriving(progress);
         ExecutorService executor = Executors.newFixedThreadPool(threads);
         CompletionService<TrackResponse> completion =
                 new ExecutorCompletionService<TrackResponse>(executor);
@@ -247,10 +248,13 @@ public final class GemmaMusicComposer {
                                 String instruction = "Compose original instrumental music. Return valid JSON only.";
                                 allKnown &= client.hasAnswer(instruction, prompt, maxTokens, cached);
                                 final int at = s;
-                                JsonObject answer = sketch == null
-                                        ? client.generate(instruction, prompt, maxTokens, cached)
-                                        : client.generate(instruction, prompt, maxTokens, cached,
-                                        text -> sketch.heard(target.id(), at, text));
+                                JsonObject answer = client.generate(instruction, prompt, maxTokens, cached,
+                                        text -> {
+                                            arriving.heard(target.id() + "/" + at, text.length());
+                                            if (sketch != null) {
+                                                sketch.heard(target.id(), at, text);
+                                            }
+                                        });
                                 validateResponse(target, answer);
                                 answers.add(answer);
                                 if (sketch != null) {
@@ -573,6 +577,41 @@ public final class GemmaMusicComposer {
                 spec.headerLines(ArrangementFile.barsCovering(end, spec.barTicks())));
         arrangement.addAll(body);
         return arrangement;
+    }
+
+    /**
+     * How much text of the answers has arrived, so that waiting for a service that lets requests
+     * queue can be told from work that stands still. A listener that watches the piece is told
+     * every time; any other one reads a line about it now and then.
+     */
+    private static final class Arriving {
+        /** The time between two lines for a listener that only reads messages, in milliseconds. */
+        private static final long EVERY = 15000;
+        private final Progress progress;
+        private final Map<String, Integer> lengths = new HashMap<String, Integer>();
+        private long last = System.currentTimeMillis();
+
+        private Arriving(Progress progress) {
+            this.progress = progress;
+        }
+
+        /** The answer to one request has this many characters by now. */
+        synchronized void heard(String request, int characters) {
+            lengths.put(request, characters);
+            long sum = 0;
+            for (int length : lengths.values()) {
+                sum += length;
+            }
+            if (progress instanceof SketchProgress) {
+                ((SketchProgress) progress).arriving(sum);
+                return;
+            }
+            long time = System.currentTimeMillis();
+            if (time - last >= EVERY) {
+                last = time;
+                progress.update("Die KI schreibt: " + sum + " Zeichen bisher");
+            }
+        }
     }
 
     /**
