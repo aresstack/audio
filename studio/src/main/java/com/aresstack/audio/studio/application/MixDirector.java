@@ -2,6 +2,7 @@ package com.aresstack.audio.studio.application;
 
 import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.ai.KipitzChatClient;
+import com.aresstack.audio.studio.progress.Progress;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
 import com.aresstack.audio.studio.stage.SpatialSceneStore;
@@ -38,7 +39,7 @@ public final class MixDirector {
      * @return the proposed stage for exactly the tracks of the arrangement
      */
     public SpatialScene direct(String description, Path arrangement, SpatialScene current, Path directory,
-                               GemmaMusicComposer.Progress progress) throws IOException {
+                               Progress progress) throws IOException {
         progress.update("KI hört sich die Spuren an und schlägt eine Abmischung vor ...");
         List<MusicTrack> tracks = StageMixService.tracks(arrangement);
         Files.deleteIfExists(directory.resolve(FILE_NAME)); // asked anew each time; the answer is kept to be read
