@@ -38,6 +38,8 @@ final class StageDeck {
     private boolean loading;
     /** Where the live stage that is being read will start: shown as the place until it is ready. */
     private double pending = Double.NaN;
+    /** Whether the live stage that is being read plays as soon as it is ready; Stop and Play change it meanwhile. */
+    private boolean autoplay;
 
     StageDeck() {
         this(LiveDeck.SOUND_CARD);
@@ -96,6 +98,7 @@ final class StageDeck {
         final int ticket = ++asked;
         loading = true;
         pending = live == null ? at : Double.NaN;
+        autoplay = play;
         loader.submit(() -> {
             LiveDeck made = null;
             Exception problem = null;
@@ -116,10 +119,15 @@ final class StageDeck {
                     return;
                 }
                 loading = false;
-                pending = Double.NaN;
+                if (deck == null) {
+                    pending = Double.NaN;
+                }
                 if (deck != null) {
-                    boolean goOn = Double.isNaN(at) ? playing() : play;
-                    double from = Double.isNaN(at) ? seconds() : at;
+                    // What the transport was told while the tracks were read counts, not what was asked first.
+                    boolean first = live == null && !file.ready();
+                    boolean goOn = first ? autoplay : playing();
+                    double from = first && !Double.isNaN(pending) ? pending : seconds();
+                    pending = Double.NaN;
                     Path shown = file.file();
                     closeLive();
                     if (shown != null) {
@@ -179,6 +187,8 @@ final class StageDeck {
     void play() {
         if (live != null) {
             live.play();
+        } else if (awaited()) {
+            autoplay = true;
         } else {
             file.play();
         }
@@ -187,9 +197,16 @@ final class StageDeck {
     void pause() {
         if (live != null) {
             live.pause();
+        } else if (awaited()) {
+            autoplay = false; // Stop while the tracks are read: the stage is ready, but silent
         } else {
             file.pause();
         }
+    }
+
+    /** Whether nothing plays yet because the first live stage is still being read. */
+    private boolean awaited() {
+        return loading && live == null && !file.ready();
     }
 
     double seconds() {
@@ -204,6 +221,9 @@ final class StageDeck {
     void seek(double share) {
         if (live != null) {
             live.seek(Math.max(0, Math.min(1, share)) * live.length());
+        } else if (awaited()) {
+            DeckPlayer.Envelope shown = file.envelope();
+            pending = shown == null ? 0 : Math.max(0, Math.min(1, share)) * shown.seconds;
         } else {
             file.seek(share);
         }

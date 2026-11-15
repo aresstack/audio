@@ -68,9 +68,9 @@ public final class LiveDeck implements AutoCloseable {
      *
      * @param only         the track that is heard alone, or {@code null} for the whole mix
      * @param legacyFactor in the compatibility mode the factor the last file mix of this stage
-     *                     found ({@link MixOutcome#legacyFactor()}); if it is not known (not a
-     *                     number), the piece is mixed to its file once to find it, so that live
-     *                     playback is as loud as the file
+     *                     found ({@link MixOutcome#legacyFactor()}), of the whole mix or of the
+     *                     track alone, as {@code only} says; if it is not known (not a number),
+     *                     it is measured here, so that live playback is as loud as the file
      */
     public static LiveDeck open(Path arrangement, Path directory, SpatialScene scene, String only,
                                 float legacyFactor, Sinks sinks) throws Exception {
@@ -96,14 +96,7 @@ public final class LiveDeck implements AutoCloseable {
         }
         float factor = legacyFactor;
         if (!fitting.fixedLevel() && !(factor > 0 && Float.isFinite(factor))) {
-            factor = Float.NaN;
-            try {
-                StageMixService mixing = new StageMixService();
-                mixing.mix(arrangement, directory, fitting, message -> { });
-                factor = mixing.outcome().legacyFactor();
-            } catch (Exception unmixed) {
-                // then the piece plays at its master level alone
-            }
+            factor = measuredFactor(arrangement, directory, fitting, only);
         }
         LiveStage stage = LiveStage.load(files, placements, fitting.room(),
                 4 * 60.0 / StageMixService.tempo(arrangement));
@@ -113,6 +106,37 @@ public final class LiveDeck implements AutoCloseable {
         } catch (Exception noSound) {
             stage.close();
             throw noSound;
+        }
+    }
+
+    /**
+     * The factor a file mix of this stage is brought to its peak with (compatibility mode), for
+     * the whole mix or for the track that is heard alone, as the file of each is. The mix is
+     * measured into a file of its own that is thrown away: the mixed file of the piece belongs to
+     * the window, which may have mixed a newer stage by now. Not a number if it cannot be mixed;
+     * the piece then plays at its master level alone.
+     */
+    static float measuredFactor(Path arrangement, Path directory, SpatialScene fitting, String only) {
+        SpatialScene measured = fitting;
+        for (SoundSourcePlacement placement : fitting.placements()) {
+            measured = measured.with(heard(placement, only));
+        }
+        Path scratch = null;
+        try {
+            scratch = Files.createTempFile(directory, "live-level-", ".part");
+            StageMixService mixing = new StageMixService();
+            mixing.export(arrangement, directory, measured, scratch, 16, null);
+            return mixing.outcome().legacyFactor();
+        } catch (Exception unmixed) {
+            return Float.NaN;
+        } finally {
+            if (scratch != null) {
+                try {
+                    Files.deleteIfExists(scratch);
+                } catch (IOException kept) {
+                    // a file of a few seconds that is in nobody's way
+                }
+            }
         }
     }
 

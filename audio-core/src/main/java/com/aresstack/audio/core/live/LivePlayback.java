@@ -105,12 +105,15 @@ public final class LivePlayback implements AutoCloseable {
         return blockFrames;
     }
 
-    /** Plays from where playback stands; from the start if it had played to the end. */
+    /**
+     * Plays from where playback stands; from the start if it had played to the end, unless a jump
+     * was asked for since: then from there.
+     */
     public void play() {
         if (state == State.CLOSED || state == State.FAILED) {
             return;
         }
-        if (graph.position() >= graph.frames()) {
+        if (!graph.seekPending() && graph.position() >= graph.frames()) {
             graph.seek(0);
         }
         wantPlaying = true;

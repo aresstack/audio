@@ -143,6 +143,52 @@ public final class StageDeckTest {
         Assert.assertEquals(0, Card.OPEN.get());
     }
 
+    /** Review: Stop pressed while the tracks are still read must hold when the stage is ready. */
+    @Test
+    public void stopAndAJumpWhileTheStageIsReadCountWhenItIsReady() throws Exception {
+        Path song = piece();
+        Path arrangement = song.resolve("arrangement.tsv");
+        StageMixService service = new StageMixService();
+        SpatialScene scene = service.scene(arrangement, song).withFixedLevel(true);
+        Path mixed = service.mix(arrangement, song, scene, message -> { });
+        CountDownLatch mayOpen = new CountDownLatch(1);
+        StageDeck deck = new StageDeck(() -> {
+            mayOpen.await(20, TimeUnit.SECONDS); // the sound card takes its time: the stage is still loading
+            return new Card();
+        });
+        CountDownLatch ready = new CountDownLatch(1);
+        SwingUtilities.invokeAndWait(() -> {
+            deck.show(mixed);
+            deck.openLive(arrangement, song, scene, null, Float.NaN, 0, true, said -> ready.countDown());
+            // Stop: pause and back to the start, as the window does it; then a jump to the middle.
+            deck.pause();
+            deck.seek(0);
+            Assert.assertEquals(0, deck.seconds(), 0);
+            deck.seek(0.5);
+            Assert.assertEquals(0.5 * deck.envelope().seconds, deck.seconds(), 1e-9);
+        });
+        mayOpen.countDown();
+        Assert.assertTrue(ready.await(20, TimeUnit.SECONDS));
+        Thread.sleep(100);
+        SwingUtilities.invokeAndWait(() -> {
+            Assert.assertTrue(deck.live());
+            Assert.assertFalse("Stop was pressed while the tracks were read", deck.playing());
+            Assert.assertEquals(0.5 * deck.envelope().seconds, deck.seconds(), 0.01);
+            deck.close();
+        });
+        // And Play pressed while a paused stage is read plays it when it is ready.
+        StageDeck other = new StageDeck(Card::new);
+        CountDownLatch again = new CountDownLatch(1);
+        SwingUtilities.invokeAndWait(() -> {
+            other.show(mixed);
+            other.openLive(arrangement, song, scene, null, Float.NaN, 1, false, said -> again.countDown());
+            other.play();
+        });
+        Assert.assertTrue(again.await(20, TimeUnit.SECONDS));
+        awaitPlaying(other);
+        SwingUtilities.invokeAndWait(other::close);
+    }
+
     @Test
     public void aStageThatCannotBePlayedLiveSaysWhyAndLeavesTheFile() throws Exception {
         Path song = piece();

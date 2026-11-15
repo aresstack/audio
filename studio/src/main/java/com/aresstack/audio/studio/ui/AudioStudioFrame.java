@@ -660,7 +660,9 @@ public final class AudioStudioFrame extends JFrame {
     private void openLive(final double at, final boolean play) {
         final String selected = (String) playbackSelection.getSelectedItem();
         final Path folder = Paths.get(directory.getText().trim());
-        float factor = folder.equals(mixFactorFolder) && mixFactorMasterDb == scene.masterDb() ? mixFactor : Float.NaN;
+        // The factor of the whole mix is not that of a track alone: that one the live stage measures itself.
+        float factor = soloTrack() == null && folder.equals(mixFactorFolder)
+                && mixFactorMasterDb == scene.masterDb() ? mixFactor : Float.NaN;
         player.openLive(writtenArrangement(), folder, scene, soloTrack(), factor, at, play, problem -> {
             if (problem == null) {
                 hearStage(true); // what moved while the tracks were read
@@ -668,7 +670,14 @@ public final class AudioStudioFrame extends JFrame {
             }
             append("WARN: Die Bühne lässt sich nicht live spielen, es spielt die gemischte Datei: "
                     + problem.getMessage());
-            if (!Double.isNaN(at) && selected != null && selected.equals(playbackSelection.getSelectedItem())) {
+            if (selected == null || !selected.equals(playbackSelection.getSelectedItem())) {
+                return;
+            }
+            if (Double.isNaN(at)) {
+                // A live stage made anew (another room) failed: the old one must not go on in the old
+                // room. The file takes over where playback stands; the mix that follows is swapped in.
+                playFile(selected, player.seconds(), player.playing());
+            } else {
                 playFile(selected, at, play);
             }
         });
@@ -740,7 +749,9 @@ public final class AudioStudioFrame extends JFrame {
         mixFactor = factor;
         mixFactorMasterDb = masterDb;
         mixFactorFolder = folder;
-        player.legacyFactor(factor, masterDb);
+        if (soloTrack() == null) {
+            player.legacyFactor(factor, masterDb);
+        }
     }
 
     /** @param limiter what the limiter did in this mix, or {@code null} for a piece that is mixed to its peak */
@@ -2053,8 +2064,14 @@ public final class AudioStudioFrame extends JFrame {
         Path raw = com.aresstack.audio.studio.application.StageMixService.stem(folder, selected);
         if (arrangement != null && Files.isRegularFile(raw)) {
             try {
-                return new com.aresstack.audio.studio.application.StageMixService().solo(arrangement, folder, scene,
-                        selected);
+                com.aresstack.audio.studio.application.StageMixService mixing =
+                        new com.aresstack.audio.studio.application.StageMixService();
+                Path alone = mixing.solo(arrangement, folder, scene, selected);
+                if (mixing.outcome() != null) {
+                    // A track alone is brought to its own peak: live playback of it follows that factor.
+                    player.legacyFactor(mixing.outcome().legacyFactor(), scene.masterDb());
+                }
+                return alone;
             } catch (Exception failed) {
                 return raw; // then the track as it was rendered
             }

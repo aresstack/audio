@@ -193,6 +193,86 @@ public final class LiveDeckTest {
         }
     }
 
+    /** Review of the window's link to the live stage: measuring the level must not publish a mix behind the window's back. */
+    @Test
+    public void findingTheLevelOfAPieceMixedToItsPeakLeavesItsMixedFileAlone() throws Exception {
+        Path song = piece();
+        Path arrangement = song.resolve("arrangement.tsv");
+        StageMixService service = new StageMixService();
+        SpatialScene scene = service.scene(arrangement, song);
+        // The window has mixed a newer stage (everything muted) while the live stage is read for the older one.
+        SpatialScene newer = scene.with(scene.placement("melody").withMuted(true))
+                .with(scene.placement("bass").withMuted(true));
+        byte[] published = Files.readAllBytes(service.mix(arrangement, song, newer, message -> { }));
+        Tape tape = new Tape();
+        LiveDeck.open(arrangement, song, scene, null, Float.NaN, () -> tape).close();
+        Assert.assertArrayEquals(published, Files.readAllBytes(song.resolve(StageMixService.MIX_FILE)));
+        try (java.util.stream.Stream<Path> files = Files.list(song)) {
+            Assert.assertEquals("nothing is left behind: arrangement, two tracks, the mix", 4, files.count());
+        }
+    }
+
+    /** A track alone is brought to its own peak in its file; live it is as loud as that file, not as in the mix. */
+    @Test
+    public void aTrackAloneIsAsLoudLiveAsItsOwnFileInAPieceMixedToItsPeak() throws Exception {
+        Path song = piece();
+        Path arrangement = song.resolve("arrangement.tsv");
+        StageMixService service = new StageMixService();
+        SpatialScene scene = service.scene(arrangement, song);
+        SpatialStemMixer.Signal file = SpatialStemMixer.read(service.solo(arrangement, song, scene, "bass"));
+        float whole = LiveDeck.measuredFactor(arrangement, song, scene, null);
+        float alone = LiveDeck.measuredFactor(arrangement, song, scene, "bass");
+        Assert.assertEquals(service.outcome().legacyFactor(), alone, 0f);
+        Assert.assertTrue("alone the bass is raised further than within the mix", alone > 1.2f * whole);
+        Tape tape = new Tape();
+        tape.allow(Integer.MAX_VALUE);
+        try (LiveDeck deck = LiveDeck.open(arrangement, song, scene, "bass", Float.NaN, () -> tape)) {
+            deck.play();
+            awaitEnd(deck);
+            int late = deck.playback().master().latencyFrames();
+            for (int i = 0; i < file.left.length; i += 7) {
+                Assert.assertEquals("left at " + i, file.left[i], tape.left[i + late], 2e-4f);
+            }
+        }
+    }
+
+    @Test
+    public void aJumpAfterThePieceEndedIsWherePlayGoesOn() throws Exception {
+        Path song = piece();
+        Path arrangement = song.resolve("arrangement.tsv");
+        SpatialScene scene = new StageMixService().scene(arrangement, song).withFixedLevel(true);
+        Tape tape = new Tape();
+        tape.allow(Integer.MAX_VALUE);
+        try (LiveDeck deck = LiveDeck.open(arrangement, song, scene, null, Float.NaN, () -> tape)) {
+            deck.seek(deck.length() - 0.2);
+            deck.play();
+            awaitEnd(deck);
+            int first = tape.frames;
+            // Ended. A jump to four seconds, then Play: from there, not from the start.
+            deck.seek(4);
+            Assert.assertEquals(4, deck.seconds(), 1e-9);
+            deck.play();
+            awaitPlayedAgain(deck);
+            int heard = (int) ((deck.length() - 4) * RATE);
+            Assert.assertEquals(heard, tape.frames - first, 2 * BLOCK + 4096);
+            // Without a jump, Play after the end starts from the beginning, as before.
+            int second = tape.frames;
+            deck.play();
+            awaitPlayedAgain(deck);
+            Assert.assertEquals((int) (deck.length() * RATE), tape.frames - second, 2 * BLOCK + 4096);
+        }
+    }
+
+    /** Waits until playback, started again after its end, has ended again. */
+    private static void awaitPlayedAgain(LiveDeck deck) throws InterruptedException {
+        long until = System.nanoTime() + 20_000_000_000L;
+        while (deck.playback().state() == LivePlayback.State.ENDED) {
+            Assert.assertTrue("playback does not start again", System.nanoTime() < until);
+            Thread.sleep(1);
+        }
+        awaitEnd(deck);
+    }
+
     @Test
     public void aTrackThatIsNotRenderedIsNamedUnlessItIsMuted() throws Exception {
         Path song = piece();
