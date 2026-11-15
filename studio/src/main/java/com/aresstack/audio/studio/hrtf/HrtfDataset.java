@@ -40,7 +40,8 @@ public record HrtfDataset(String id, String title, URI uri, URI page, String ver
     }
 
     /**
-     * The compact MIT KEMAR set: 128-tap responses of a KEMAR dummy head at 44.1 kHz, measured
+     * The compact MIT KEMAR set (231 461 bytes, 368 stereo WAV files, checked 2026-11-15 against
+     * the original source): 128-tap responses of a KEMAR dummy head at 44.1 kHz, measured
      * on the right side and mirrored for the left, from 40° below to 90° above the ears. The
      * MIT Media Lab grants its use without restriction, asking that the authors be cited; this
      * is a permission for the data, not the MIT software licence.
@@ -49,8 +50,8 @@ public record HrtfDataset(String id, String title, URI uri, URI page, String ver
             "MIT KEMAR (kompakt)",
             URI.create("https://sound.media.mit.edu/resources/KEMAR/compact.zip"),
             URI.create("https://sound.media.mit.edu/resources/KEMAR.html"),
-            "compact set, MIT Media Lab Perceptual Computing, 1994", 4_000_000L,
-            "0000000000000000000000000000000000000000000000000000000000000000",
+            "compact set, MIT Media Lab Perceptual Computing, 1994", 1_000_000L,
+            "0bcd69f8e8760cf8eacff4a89594ceca7d44fb94f28ecf0bf19970003bbfb3e0",
             "This data is Copyright 1994 by the MIT Media Laboratory. It is provided free with no "
                     + "restrictions on use, provided the authors are cited when the data is used in any research "
                     + "or commercial application.",

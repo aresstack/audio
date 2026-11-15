@@ -91,6 +91,41 @@ public class HrirMeasurementsTest {
         }
     }
 
+    /** The zip archives of MIT KEMAR hold the same responses as 16-bit stereo WAV files. */
+    @Test
+    public void readsTheCompactMitKemarSetAsWaveFilesTheWayTheZipArchiveHoldsIt() throws Exception {
+        Path folder = Files.createTempDirectory("kemar-wav");
+        try {
+            for (int elevation : new int[] {-10, 0, 10}) {
+                Path ring = Files.createDirectories(folder.resolve("elev" + elevation));
+                for (int az = 0; az <= 180; az += 45) {
+                    ByteBuffer wav = ByteBuffer.allocate(44 + 128 * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                    wav.putInt(0x46464952).putInt(36 + 128 * 4).putInt(0x45564157);
+                    wav.putInt(0x20746d66).putInt(16).putShort((short) 1).putShort((short) 2).putInt(44100)
+                            .putInt(44100 * 4).putShort((short) 4).putShort((short) 16);
+                    wav.putInt(0x61746164).putInt(128 * 4);
+                    for (int i = 0; i < 128; i++) {
+                        wav.putShort((short) (i == 5 + az / 45 ? 20000 : 0));
+                        wav.putShort((short) (i == 5 ? 30000 : 0));
+                    }
+                    Files.write(ring.resolve(String.format("H%de%03da.wav", elevation, az)), wav.array());
+                }
+            }
+            HrirSet set = HrirMeasurements.readMitKemar(folder, 64);
+            float[] l = new float[64];
+            float[] r = new float[64];
+            float[] d = new float[2];
+            set.lookup(90, 0, l, r, d);
+            assertEquals("the first channel is the left ear", 2, d[0] - d[1], 0.1);
+            set.lookup(270, 0, l, r, d);
+            assertEquals(2, d[1] - d[0], 0.1);
+        } finally {
+            try (var files = Files.walk(folder)) {
+                files.sorted(java.util.Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+            }
+        }
+    }
+
     private static float[] click(int at, float height) {
         float[] response = new float[64];
         response[at] = height;

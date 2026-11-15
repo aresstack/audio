@@ -21,18 +21,21 @@ import java.util.stream.Stream;
  *
  * <p><b>Data sets and licences</b> (checked 2026-11-15; none is bundled with the core):
  * <ul>
- *   <li>MIT KEMAR (Gardner and Martin, MIT Media Lab, 1994): "provided without any usage
- *       restrictions", with the request to cite the authors in research or commercial use.
+ *   <li>MIT KEMAR (Gardner and Martin, MIT Media Lab, 1994): "provided free with no
+ *       restrictions on use, provided the authors are cited when the data is used in any research
+ *       or commercial application".
  *       {@link #readMitKemar} reads the compact and the full set as published
- *       ({@code elevEE/HEEeAAAa.dat}, or {@code LEEeAAAa.dat} plus {@code REEeAAAa.dat}, 16-bit
- *       big-endian, 44.1 kHz).</li>
+ *       ({@code elevEE/HEEeAAAa}, or {@code LEEeAAAa} plus {@code REEeAAAa}, 44.1 kHz, 16 bit):
+ *       the {@code .zip} archives hold WAV files, the {@code .tar.Z} archives raw big-endian
+ *       {@code .dat} files.</li>
  *   <li>SADIE II (University of York, 2018): Apache License 2.0, attribution required; WAV and
  *       SOFA. Its WAV files can be read with {@link com.aresstack.audio.core.wav.WavFileSource}
  *       and handed to {@link #toGrid}; mind that SADIE counts the azimuth anticlockwise.</li>
  * </ul>
  */
 public final class HrirMeasurements {
-    private static final Pattern KEMAR = Pattern.compile("([HLR])(-?\\d+)e(\\d{3})a\\.dat", Pattern.CASE_INSENSITIVE);
+    private static final Pattern KEMAR = Pattern.compile("([HLR])(-?\\d+)e(\\d{3})a\\.(dat|wav)",
+            Pattern.CASE_INSENSITIVE);
 
     /** One measured direction: azimuth clockwise from ahead (90 = right), elevation up, both ears. */
     public record Measurement(double azimuth, double elevation, float[] left, float[] right) {
@@ -144,7 +147,8 @@ public final class HrirMeasurements {
                     continue;
                 }
                 String key = Integer.parseInt(name.group(2)) + "/" + Integer.parseInt(name.group(3));
-                short[] samples = bigEndian(Files.readAllBytes(file));
+                byte[] bytes = Files.readAllBytes(file);
+                short[] samples = name.group(4).equalsIgnoreCase("wav") ? wave(bytes, file) : bigEndian(bytes);
                 float[][] ears = found.computeIfAbsent(key, k -> new float[2][]);
                 char kind = Character.toUpperCase(name.group(1).charAt(0));
                 if (kind == 'H') {
@@ -176,10 +180,48 @@ public final class HrirMeasurements {
                     ears[1]));
         }
         if (measurements.isEmpty()) {
-            throw new IOException("Im Ordner " + directory + " liegen keine MIT-KEMAR-Antworten (.dat).");
+            throw new IOException("Im Ordner " + directory + " liegen keine MIT-KEMAR-Antworten (.wav oder .dat).");
         }
         return toGrid(measurements, 44100, taps,
-                "MIT KEMAR, Gardner & Martin, MIT Media Lab 1994 (ohne Nutzungsbeschränkung, Zitat erbeten)");
+                "MIT KEMAR, Bill Gardner und Keith Martin, MIT Media Lab 1994 (frei nutzbar bei Nennung der Autoren)");
+    }
+
+    /** The samples of a 16-bit PCM WAV file at 44.1 kHz, interleaved as stored. */
+    private static short[] wave(byte[] bytes, Path file) throws IOException {
+        ByteBuffer buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+        if (bytes.length < 12 || buffer.getInt(0) != 0x46464952 || buffer.getInt(8) != 0x45564157) {
+            throw new IOException("Keine WAV-Datei: " + file);
+        }
+        boolean format = false;
+        int at = 12;
+        while (at + 8 <= bytes.length) {
+            int id = buffer.getInt(at);
+            int size = buffer.getInt(at + 4);
+            int body = at + 8;
+            if (size < 0 || body + size > bytes.length) {
+                size = bytes.length - body; // a data chunk that claims more than is there
+            }
+            if (id == 0x20746d66) { // "fmt "
+                int code = buffer.getShort(body) & 0xffff;
+                int rate = buffer.getInt(body + 4);
+                int bits = buffer.getShort(body + 14) & 0xffff;
+                if (code != 1 || bits != 16 || rate != 44100) {
+                    throw new IOException("Erwartet 16-bit-PCM mit 44,1 kHz: " + file);
+                }
+                format = true;
+            } else if (id == 0x61746164) { // "data"
+                if (!format) {
+                    throw new IOException("WAV ohne Formatangabe vor den Daten: " + file);
+                }
+                short[] samples = new short[size / 2];
+                for (int i = 0; i < samples.length; i++) {
+                    samples[i] = buffer.getShort(body + 2 * i);
+                }
+                return samples;
+            }
+            at = body + size + (size & 1);
+        }
+        throw new IOException("WAV ohne Daten: " + file);
     }
 
     private static short[] bigEndian(byte[] bytes) {

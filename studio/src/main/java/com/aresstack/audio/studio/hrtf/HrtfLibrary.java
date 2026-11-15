@@ -49,7 +49,7 @@ public final class HrtfLibrary {
     /** The file next to the data that says where it comes from and on which terms. */
     public static final String SOURCE_FILE = "QUELLE.txt";
 
-    private static final Pattern DATA = Pattern.compile("[HLR]-?\\d+e\\d{3}a\\.dat", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DATA = Pattern.compile("[HLR]-?\\d+e\\d{3}a\\.(dat|wav)", Pattern.CASE_INSENSITIVE);
     private static final long MAX_ENTRY = 64 * 1024;
     private static final int MAX_ENTRIES = 4096;
     private static final int TAPS = 128;
@@ -119,7 +119,7 @@ public final class HrtfLibrary {
         try {
             int count = unzip(archive, unpacked);
             if (count == 0) {
-                throw new IOException("Im Archiv liegen keine Antworten (.dat).");
+                throw new IOException("Im Archiv liegen keine Antworten (.wav oder .dat).");
             }
             HrirMeasurements.readMitKemar(unpacked, TAPS); // can it be read at all?
             Files.writeString(unpacked.resolve(SOURCE_FILE), source(dataset, actual), StandardCharsets.UTF_8);

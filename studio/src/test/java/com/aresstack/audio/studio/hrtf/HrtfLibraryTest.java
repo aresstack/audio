@@ -33,14 +33,14 @@ public final class HrtfLibraryTest {
 
     private static final List<String> NOTHING = new ArrayList<String>();
 
-    /** A small set in the layout of the compact MIT KEMAR archive, right side only. */
+    /** A small set in the layout of the compact MIT KEMAR zip archive (WAV files), right side only. */
     private Path archive(String... extra) throws IOException {
         Path zip = folder.newFile("compact.zip").toPath();
         try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(zip))) {
             for (int elevation = -40; elevation <= 90; elevation += 10) {
                 for (int azimuth = 0; azimuth <= 180; azimuth += 30) {
                     out.putNextEntry(new ZipEntry("compact/elev" + elevation + "/H" + elevation + "e"
-                            + String.format("%03d", azimuth) + "a.dat"));
+                            + String.format("%03d", azimuth) + "a.wav"));
                     out.write(response(azimuth));
                     out.closeEntry();
                 }
@@ -57,9 +57,13 @@ public final class HrtfLibraryTest {
         return zip;
     }
 
-    /** 128 stereo frames, big-endian: a click in each ear, the far ear later and softer. */
+    /** A WAV file of 128 stereo frames as in the archive: a click in each ear, the far ear later and softer. */
     private static byte[] response(int azimuth) {
-        ByteBuffer buffer = ByteBuffer.allocate(128 * 4);
+        ByteBuffer buffer = ByteBuffer.allocate(44 + 128 * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        buffer.putInt(0x46464952).putInt(36 + 128 * 4).putInt(0x45564157);
+        buffer.putInt(0x20746d66).putInt(16).putShort((short) 1).putShort((short) 2).putInt(44100)
+                .putInt(44100 * 4).putShort((short) 4).putShort((short) 16);
+        buffer.putInt(0x61746164).putInt(128 * 4);
         int lag = 2 + azimuth / 30;
         for (int i = 0; i < 128; i++) {
             buffer.putShort((short) (i == 2 + lag ? 8000 : 0)); // left, the far ear
@@ -109,7 +113,7 @@ public final class HrtfLibraryTest {
 
     @Test
     public void namesThatLeadOutOfTheFolderStayInsideIt() throws Exception {
-        Path zip = archive("../../H0e000a.dat", "/etc/H10e030a.dat");
+        Path zip = archive("../../H0e000a.wav", "/etc/H10e030a.wav");
         HrtfDataset set = dataset(HrtfLibrary.sha256(zip));
         Path root = folder.getRoot().toPath().resolve("deep").resolve("hrtf");
         new HrtfLibrary(root).install(set, zip, NOTHING::add);
