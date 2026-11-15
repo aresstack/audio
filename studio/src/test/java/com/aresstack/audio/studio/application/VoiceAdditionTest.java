@@ -321,6 +321,70 @@ public final class VoiceAdditionTest {
         assertEquals(List.of(), AddVoice.untouched(before, after, partId));
     }
 
+    /** A piano that answers with hands, or without any voice when {@code hands} is false. */
+    private static FakeChatModel pianist(boolean hands) {
+        return new FakeChatModel((instruction, prompt) -> {
+            String part = FakeChatModel.quoted(prompt, "part");
+            String section = FakeChatModel.quoted(prompt, "section");
+            String rh = hands ? ",\"voice\":\"rh\"" : "";
+            String lh = hands ? ",\"voice\":\"left hand\"" : "";
+            return "{\"part\":\"" + part + "\",\"section\":\"" + section + "\",\"notes\":["
+                    + "{\"bar\":1,\"beat\":0,\"duration\":2,\"pitch\":72,\"velocity\":80" + rh + "},"
+                    + "{\"bar\":1,\"beat\":0,\"duration\":2,\"pitch\":64,\"velocity\":80" + rh + "},"
+                    + "{\"bar\":1,\"beat\":0,\"duration\":4,\"pitch\":48,\"velocity\":80" + lh + "},"
+                    + "{\"bar\":2,\"beat\":0,\"duration\":4,\"pitch\":43,\"velocity\":80" + lh + "}]}";
+        });
+    }
+
+    @Test
+    public void aPianoIsWrittenOnAGrandStaffWithTheHandsTheAiNames() throws Exception {
+        FakeChatModel model = pianist(true);
+        AddVoiceRequest piano = new AddVoiceRequest("Klavier", "Piano", 0, "harmony", null, List.of(), "", null,
+                AddVoiceRequest.MotifUse.FREE, false);
+        VoiceAddition addition = VoiceAddition.start(session, VoiceComposer.with(model), piano, Ids.seeded(23), QUIET);
+        assertTrue(model.prompts().get(0).contains("grand staff"));
+        assertTrue(model.prompts().get(0).contains("\"rh\""));
+        Part part = addition.proposal().result().part(addition.voice().part().id());
+        assertEquals(Part.StaffLayout.GRAND, part.staffLayout());
+        assertEquals(2, part.voices().size());
+        com.aresstack.audio.composition.Voice right = part.voices().get(0);
+        com.aresstack.audio.composition.Voice left = part.voices().get(1);
+        assertEquals(com.aresstack.audio.composition.Voice.Staff.UPPER, right.staff());
+        assertEquals(com.aresstack.audio.composition.Voice.Staff.LOWER, left.staff());
+        assertEquals(addition.voice().part().voices().get(0).id(), right.id());
+        for (var placed : addition.proposal().result().notesOf(part.id())) {
+            assertEquals(placed.note().pitch() >= 60 ? right.id() : left.id(), placed.note().voiceId());
+        }
+        assertEquals(List.of(), AddVoice.untouched(session.composition(), addition.proposal().result(), part.id()));
+    }
+
+    @Test
+    public void handsNamedByNobodyAreSplitAtMiddleC() throws Exception {
+        AddVoiceRequest organ = new AddVoiceRequest("Orgel", "Organ", 19, "harmony", null, List.of(), "", null,
+                AddVoiceRequest.MotifUse.FREE, false);
+        VoiceAddition addition = VoiceAddition.start(session, VoiceComposer.with(pianist(false)), organ, Ids.seeded(29),
+                QUIET);
+        Part part = addition.proposal().result().part(addition.voice().part().id());
+        assertEquals(Part.StaffLayout.GRAND, part.staffLayout());
+        java.util.Map<String, com.aresstack.audio.composition.Voice.Staff> staffOf = new java.util.HashMap<>();
+        part.voices().forEach(v -> staffOf.put(v.id(), v.staff()));
+        for (var placed : addition.proposal().result().notesOf(part.id())) {
+            assertEquals(placed.note().pitch() >= 60 ? com.aresstack.audio.composition.Voice.Staff.UPPER
+                    : com.aresstack.audio.composition.Voice.Staff.LOWER, staffOf.get(placed.note().voiceId()));
+        }
+    }
+
+    @Test
+    public void aTrumpetStaysOnASingleStaffAndIsNotAskedForHands() throws Exception {
+        FakeChatModel model = trumpetPlayer();
+        VoiceAddition addition = VoiceAddition.start(session, VoiceComposer.with(model), trumpet(List.of(), false),
+                Ids.seeded(31), QUIET);
+        assertFalse(model.prompts().get(0).contains("grand staff"));
+        Part part = addition.proposal().result().part(addition.voice().part().id());
+        assertEquals(Part.StaffLayout.SINGLE, part.staffLayout());
+        assertEquals(1, part.voices().size());
+    }
+
     @Test
     public void anAnswerForAnotherPartIsRefusedAndNothingIsProposed() throws Exception {
         FakeChatModel liar = new FakeChatModel((instruction, prompt) ->
