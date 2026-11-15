@@ -151,7 +151,8 @@ public final class AudioStudioFrame extends JFrame {
     /** The line at the lower edge of the window: what the studio is doing or did last. */
     private final JLabel statusLine = new JLabel("Bereit");
     /** The keys under the display that choose the page, by the name of the page. */
-    private final Map<String, DeckWidgets.PageKey> pageKeys = new java.util.LinkedHashMap<String, DeckWidgets.PageKey>();
+    private final DeckWidgets.GearKey settingsKey = new DeckWidgets.GearKey("Einstellungen");
+    private final Map<String, javax.swing.JToggleButton> pageKeys = new java.util.LinkedHashMap<String, javax.swing.JToggleButton>();
     /** Beside the choice of the piece under the name of the studio: new, open, and what is seldom needed. */
     private final JButton songMenuKey = new JButton("▾");
     private final ArrangementView arrangementView = new ArrangementView(new ArrangementView.Listener() {
@@ -383,6 +384,11 @@ public final class AudioStudioFrame extends JFrame {
         right.setOpaque(false);
         right.add(keysWithNames);
         right.add(master);
+        // In the corner, away from the pages of the piece: the settings, behind a gear.
+        JPanel corner = new JPanel(new BorderLayout());
+        corner.setOpaque(false);
+        corner.add(settingsKey, BorderLayout.NORTH);
+        right.add(corner);
 
         JPanel inner = new JPanel(new BorderLayout(18, 0));
         inner.setOpaque(false);
@@ -390,14 +396,14 @@ public final class AudioStudioFrame extends JFrame {
         JPanel display = new JPanel(new BorderLayout(0, 7));
         display.setOpaque(false);
         display.add(lcd, BorderLayout.CENTER);
-        // Under the display, as on a player: one key per page of the desk.
+        // Under the display, as on a player: one key per page of the work on the piece. The
+        // settings are not among them; they sit behind the gear in the corner.
         JPanel keysOfPages = new JPanel(new java.awt.GridLayout(1, 6, 6, 0));
         keysOfPages.setOpaque(false);
         javax.swing.ButtonGroup onePage = new javax.swing.ButtonGroup();
         // The album is the frame of its pieces, so it comes first; the studio still opens on the piece.
         String[][] entries = {{"albums", "Alben"}, {"song", "Komposition"}, {"deck", "Arrangement"},
                 {"stage", "Bühne"},
-                // Only the pages of the work itself; the log says what the studio is doing and ends the row.
                 {"library", "Soundbänke"}, {"console", "Protokoll"}};
         for (final String[] entry : entries) {
             DeckWidgets.PageKey key = new DeckWidgets.PageKey(entry[1]);
@@ -406,15 +412,10 @@ public final class AudioStudioFrame extends JFrame {
             pageKeys.put(entry[0], key);
             keysOfPages.add(key);
         }
-        pageKeys.get("song").setSelected(true);
-        // The settings are no page of the work: their key stands apart, in the right corner of the desk.
-        DeckWidgets.PageKey settingsKey = new DeckWidgets.PageKey("Einstellungen");
-        settingsKey.setToolTipText("KI-Dienst, Modelle, Sampler und Netz einrichten");
         settingsKey.addActionListener(event -> pages.show(pageHolder, "settings"));
-        onePage.add(settingsKey);
+        onePage.add(settingsKey); // one page at a time: the gear lights instead of a page key
         pageKeys.put("settings", settingsKey);
-        settingsKey.setPreferredSize(new Dimension(120, 30));
-        right.add(settingsKey);
+        pageKeys.get("song").setSelected(true);
 
         display.add(keysOfPages, BorderLayout.SOUTH);
         inner.add(display, BorderLayout.CENTER);
@@ -3790,7 +3791,7 @@ public final class AudioStudioFrame extends JFrame {
 
     private void showPage(String page) {
         pages.show(pageHolder, page);
-        DeckWidgets.PageKey key = pageKeys.get(page);
+        javax.swing.JToggleButton key = pageKeys.get(page);
         if (key != null) {
             key.setSelected(true);
         }
