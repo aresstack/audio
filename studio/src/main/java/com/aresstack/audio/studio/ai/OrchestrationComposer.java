@@ -57,8 +57,13 @@ public final class OrchestrationComposer {
      * from the rework role (follows composition), four parts at a time.
      */
     public static OrchestrationComposer with(ModelLineup models) {
+        return with(models, 4);
+    }
+
+    /** As {@link #with(ModelLineup)}, with as many parts at a time as the user allows requests at once. */
+    public static OrchestrationComposer with(ModelLineup models, int partsAtOnce) {
         return new OrchestrationComposer(new ChatOrchestrationPlanner(models.model(ModelRoles.ARRANGING), 4096),
-                new ChatOrchestrationGenerator(models.model(ModelRoles.REWORK), 16384), 4);
+                new ChatOrchestrationGenerator(models.model(ModelRoles.REWORK), 16384), Math.max(1, partsAtOnce));
     }
 
     /** A composer that asks a model for plan and notes, four parts at a time. */
@@ -121,6 +126,9 @@ public final class OrchestrationComposer {
         });
         Map<String, Future<Written>> running = new LinkedHashMap<>();
         final EditSketch sketch = EditSketch.of(piece, progress);
+        int atOnce = Math.min(threads, Math.max(1, voices.size()));
+        progress.update(voices.size() + " Stimmen, " + atOnce + " davon gleichzeitig (Einstellung „Parallel“: höchstens "
+                + threads + "); jede Stimme schreibt ihre Abschnitte nacheinander.");
         try {
             for (ContinuationVoice voice : voices) {
                 running.put(voice.key(), pool.submit(() -> writePart(piece, task, plan, material, voice, cache,
@@ -161,7 +169,8 @@ public final class OrchestrationComposer {
                 connection = "";
                 continue;
             }
-            progress.update("Orchestriere " + voice.name() + " für " + frame.name() + " ...");
+            progress.update("Angefragt: " + voice.name() + " für " + frame.name() + " ...");
+            long asked = System.currentTimeMillis();
             GeneratedNotes generated;
             try (Listening.Scope watching = Listening.to(sketch == null ? null
                     : sketch.hearing(voice.key(), voice.program(), voice.role(), frame))) {
@@ -171,6 +180,8 @@ public final class OrchestrationComposer {
             if (sketch != null) {
                 sketch.written(voice.key(), voice.program(), voice.role(), frame, generated);
             }
+            progress.update("Orchestriert: " + voice.name() + " für " + frame.name() + " (" + generated.notes().size()
+                    + " Noten, " + (System.currentTimeMillis() - asked + 500) / 1000 + " s)");
             List<ShapedNote> shaped = normalizer.shape(frame, generated);
             List<String> thinned = new ArrayList<>();
             shaped = Dramaturgy.thin(frame, task.time(), frame.intensity(), voice.role(), shaped, thinned);
