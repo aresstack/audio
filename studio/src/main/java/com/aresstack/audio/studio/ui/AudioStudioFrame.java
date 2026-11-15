@@ -142,6 +142,10 @@ public final class AudioStudioFrame extends JFrame {
             AudioStudioFrame.this.seek(length <= 0 ? 0 : Math.min(1, second / length));
         }
 
+        @Override
+        public void edited(String said, boolean changed) {
+            notesEdited(said, changed);
+        }
     });
     /** The piece written out as a conductor's score, on the page of the composition. */
     private final ScoreView scoreView = new ScoreView();
@@ -150,6 +154,9 @@ public final class AudioStudioFrame extends JFrame {
     /** The model of the open piece; it follows what the studio still writes the old way. */
     private final com.aresstack.audio.studio.application.PieceModel pieceModel =
             new com.aresstack.audio.studio.application.PieceModel(this::append);
+    /** The note editor's way into the open piece: every change a patch through the edit core (B1). */
+    private final com.aresstack.audio.studio.application.PieceEditing pieceEditing =
+            new com.aresstack.audio.studio.application.PieceEditing(this::pieceToEdit);
     private final JComboBox<com.aresstack.audio.studio.application.SongLibrary.Song> songChoice =
             new JComboBox<com.aresstack.audio.studio.application.SongLibrary.Song>();
     private boolean fillingSongs;
@@ -436,6 +443,7 @@ public final class AudioStudioFrame extends JFrame {
                 }
             }
         }, arrangementView);
+        arrangementView.setEditing(pieceEditing);
         DeckWidgets.Module output = new DeckWidgets.Module("Arrangement", trackTable);
         output.setHeadEnd(sourceChoice);
 
@@ -475,8 +483,8 @@ public final class AudioStudioFrame extends JFrame {
         unmark.addActionListener(event -> arrangementView.mark(null));
         passageMenu.add(reworkMarked);
         passageMenu.add(unmark);
-        arrangementView.setComponentPopupMenu(passageMenu);
-        arrangementView.setToolTipText("Klick: dorthin springen · Umschalt und Ziehen: Passage markieren · rechte Maustaste: Menü");
+        arrangementView.setPassageMenu(passageMenu);
+        arrangementView.setToolTipText("Klick: dorthin springen · Umschalt und Ziehen im Taktlineal: Passage markieren · rechte Maustaste: Menü");
         moreMenu.addSeparator();
         moreMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
             @Override
@@ -2571,7 +2579,7 @@ public final class AudioStudioFrame extends JFrame {
         Path folder = Paths.get(directory.getText().trim());
         // A planned piece shows what it was planned with; only a new one can still be given its length, tempo and key.
         specFields.show(GemmaMusicComposer.specOf(folder));
-        arrangementView.setArrangement(ArrangementView.Arrangement.read(folder.resolve("arrangement.tsv")), ids,
+        arrangementView.setArrangement(shownArrangement(folder), ids,
                 there ? "" : "Noch nichts gerendert · Komponieren oder Demo laden");
         arrangementView.setMix(player.envelope(), soloTrack() == null ? "Mix" : "Solo", soloTrack(), player.length());
         trackTable.setAlone(soloTrack());
@@ -2584,6 +2592,43 @@ public final class AudioStudioFrame extends JFrame {
                 "Noch keine Noten: erst komponieren, dann steht hier die Partitur");
         lcd.setSource(selected == null ? "—" : playbackName(selected), there);
         lcd.setTime(0, player.length());
+    }
+
+    /**
+     * The lanes as the arrangement shows them: from the model if the piece has one, so that its
+     * notes can be edited, else from the arrangement file as before.
+     */
+    private ArrangementView.Arrangement shownArrangement(Path folder) {
+        java.util.Optional<com.aresstack.audio.composition.Composition> model = pieceEditing.composition();
+        return model.isPresent() ? ArrangementView.Arrangement.of(model.get())
+                : ArrangementView.Arrangement.read(folder.resolve("arrangement.tsv"));
+    }
+
+    /** The open piece's model for the note editor; reading only, the editor changes it through the edit core. */
+    private java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> pieceToEdit() {
+        return pieceModel.session();
+    }
+
+    /**
+     * The note editor changed the piece (or says why it did not). The model has saved the change
+     * and written {@code arrangement.tsv} from it; lanes and score show it now, and the next
+     * rendering renders the parts that sound different. The playback keeps playing what it plays.
+     */
+    private void notesEdited(String said, boolean changed) {
+        if (said != null && !said.isEmpty()) {
+            statusLine.setText(changed ? said + " · neu rendern, um es zu hören" : said);
+        }
+        if (!changed) {
+            return;
+        }
+        Path folder = Paths.get(directory.getText().trim());
+        List<String> ids = new ArrayList<String>();
+        for (MusicTrack track : trackTable.tracks()) {
+            ids.add(track.id());
+        }
+        arrangementView.setArrangement(shownArrangement(folder), ids, "");
+        scoreView.setScore(com.aresstack.audio.studio.score.Score.read(folder.resolve("arrangement.tsv")), ids,
+                "Noch keine Noten: erst komponieren, dann steht hier die Partitur");
     }
 
     /** What a choice of the playback is called in the list. */

@@ -1,5 +1,9 @@
 package com.aresstack.audio.studio.ui;
 
+import com.aresstack.audio.composition.Clip;
+import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.MidiClip;
+import com.aresstack.audio.composition.Track;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
 import javax.swing.JComponent;
 import java.awt.BasicStroke;
@@ -27,6 +31,10 @@ import java.util.Map;
  * waveform. A line marks where the playback is; a click in the lanes jumps there.
  * The names of the lanes and what can be set for a track stand in front of the
  * lanes, in {@link TrackLanes}; both use the same heights.
+ *
+ * <p>When the piece has a model, its notes can be edited right in the lanes ({@link LaneEditor},
+ * work package B1); a click into a lane then selects instead of only jumping, and the ruler is
+ * where the playback is moved.
  */
 final class ArrangementView extends JComponent {
     private static final int TICKS_PER_BEAT = 480;
@@ -36,16 +44,32 @@ final class ArrangementView extends JComponent {
     /** How high a lane is; the heads of the lanes are given the same height. */
     private int lane = 60;
 
-    /** A note of a lane: where it starts, how long it is, how high it sounds. */
-    private static final class Note {
+    /**
+     * A note of a lane: where it starts in the piece, how long it is, how high it sounds, and for
+     * a piece with a model the clip and id that name it.
+     */
+    static final class Note {
         final long start;
         final long length;
         final int pitch;
+        final String clipId;
+        final String id;
 
         Note(long start, long length, int pitch) {
+            this(start, length, pitch, null, null);
+        }
+
+        Note(long start, long length, int pitch, String clipId, String id) {
             this.start = start;
             this.length = length;
             this.pitch = pitch;
+            this.clipId = clipId;
+            this.id = id;
+        }
+
+        /** The note for the editor, or {@code null} if it comes from a file without ids. */
+        com.aresstack.audio.studio.application.NoteEdits.NoteRef ref() {
+            return id == null ? null : new com.aresstack.audio.studio.application.NoteEdits.NoteRef(clipId, id);
         }
     }
 
@@ -56,6 +80,8 @@ final class ArrangementView extends JComponent {
         long ticks;
         /** The length of a bar in ticks, as the meter of the piece says it; four quarters if it names none. */
         long barTicks = TICKS_PER_BEAT * 4L;
+        /** Whether the notes carry ids, so that they can be edited. */
+        boolean editable;
 
         Arrangement(int tempo) {
             this.tempo = tempo;
@@ -68,6 +94,31 @@ final class ArrangementView extends JComponent {
 
         int bars() {
             return (int) Math.max(1, (ticks + barTicks - 1) / barTicks);
+        }
+
+        /** The notes of the model, by track; they carry their ids and can be edited. */
+        static Arrangement of(Composition piece) {
+            Arrangement arrangement = new Arrangement((int) Math.round(piece.timeMap().tempoAt(0)));
+            arrangement.editable = true;
+            arrangement.barTicks = piece.timeMap().meterAt(0).barTicks();
+            long end = 0;
+            for (Track track : piece.tracks()) {
+                List<Note> lane = new ArrayList<Note>();
+                arrangement.lanes.put(track.id(), lane);
+                for (Clip clip : track.clips()) {
+                    if (clip instanceof MidiClip midi) {
+                        end = Math.max(end, midi.endTick());
+                        for (com.aresstack.audio.composition.Note note : midi.notes()) {
+                            lane.add(new Note(midi.startTick() + note.tick(), note.length(), note.pitch(), midi.id(),
+                                    note.id()));
+                        }
+                    }
+                }
+            }
+            end = Math.max(end, piece.endTick());
+            long bar = arrangement.barTicks;
+            arrangement.ticks = Math.max(bar, (end + bar - 1) / bar * bar);
+            return arrangement;
         }
 
         /** Reads an arrangement file; {@code null} if there is none or it cannot be read. */
@@ -113,6 +164,13 @@ final class ArrangementView extends JComponent {
         /** A passage was marked (or the mark was taken away: {@code null}). */
         default void marked(Range range) {
         }
+
+        /**
+         * The editor changed the piece, or tried to: what to tell the user, and whether the piece
+         * is different now (then the lanes, the score and the stems follow).
+         */
+        default void edited(String said, boolean changed) {
+        }
     }
 
     /**
@@ -139,6 +197,14 @@ final class ArrangementView extends JComponent {
     private Range marked;
     /** Where a mark began, in pixels; {@code null} while none is drawn. */
     private java.awt.Point markFrom;
+    /** Whether the mark began in the ruler: then it covers every track. */
+    private boolean markAllTracks;
+    /** The menu of the marked passage, shown where the note editor has none of its own. */
+    private javax.swing.JPopupMenu passageMenu;
+    /** The note editor, once the window hands over the way into the piece. */
+    private LaneEditor editor;
+    /** The pitch windows of the lanes while the editor drags, so that they stay where they were. */
+    private Map<String, int[]> frozenWindows;
 
     ArrangementView(Listener listener) {
         this.listener = listener;
@@ -147,26 +213,35 @@ final class ArrangementView extends JComponent {
             @Override
             public void mousePressed(MouseEvent event) {
                 if (javax.swing.SwingUtilities.isRightMouseButton(event) || event.isPopupTrigger()) {
-                    return; // the menu of the marked passage
+                    if (!editing(event) && passageMenu != null) {
+                        passageMenu.show(ArrangementView.this, event.getX(), event.getY());
+                    }
+                    return; // in the lanes of a piece that can be edited the note editor shows its menu
                 }
-                if (event.isShiftDown()) {
-                    // Shift and drag marks a passage: bars across, tracks down.
+                if (event.isShiftDown() && !editing(event)) {
+                    // Shift and drag marks a passage. Where notes can be edited, Shift in the lanes is
+                    // the editor's (it adds to the selection): there a passage is marked in the ruler,
+                    // across every track.
                     markFrom = event.getPoint();
-                    mark(markFrom.x, markFrom.y, event.getX(), event.getY());
+                    markAllTracks = event.getY() < RULER;
+                    markTo(event);
                     return;
                 }
                 markFrom = null;
-                if (marked != null) {
-                    mark(null);
+                if (!editing(event)) {
+                    if (marked != null) {
+                        mark(null);
+                    }
+                    jump(event);
                 }
-                jump(event);
             }
 
             @Override
             public void mouseDragged(MouseEvent event) {
                 if (markFrom != null) {
-                    mark(markFrom.x, markFrom.y, event.getX(), event.getY());
-                } else if (event.getX() >= GUTTER && !javax.swing.SwingUtilities.isRightMouseButton(event)) {
+                    markTo(event);
+                } else if (event.getX() >= GUTTER && !javax.swing.SwingUtilities.isRightMouseButton(event)
+                        && !editing(event)) {
                     jump(event);
                 }
             }
@@ -177,11 +252,11 @@ final class ArrangementView extends JComponent {
             }
 
             private void jump(MouseEvent event) {
-                double total = totalSeconds();
-                if (total > 0) {
-                    double share = (event.getX() - GUTTER) / (double) Math.max(1, getWidth() - GUTTER - 10);
-                    ArrangementView.this.listener.seek(Math.max(0, Math.min(1, share)) * total);
-                }
+                seekTo(event.getX());
+            }
+
+            private boolean editing(MouseEvent event) {
+                return editor != null && editor.owns(event.getY());
             }
         };
         addMouseListener(mouse);
@@ -211,9 +286,33 @@ final class ArrangementView extends JComponent {
         int bars = arrangement.bars();
         int firstBar = barAt(Math.min(x1, x2), bars);
         int lastBar = barAt(Math.max(x1, x2), bars);
-        int firstLane = laneAt(Math.min(y1, y2));
-        int lastLane = laneAt(Math.max(y1, y2));
+        int firstLane = laneNear(Math.min(y1, y2));
+        int lastLane = laneNear(Math.max(y1, y2));
         mark(new Range(order.subList(firstLane, lastLane + 1), firstBar, lastBar));
+    }
+
+    /** Draws the mark on to where the pointer is: from the ruler across every track, else across the lanes passed. */
+    private void markTo(MouseEvent event) {
+        if (markAllTracks) {
+            mark(markFrom.x, RULER, event.getX(), RULER + Math.max(1, order.size()) * lane - 1);
+        } else {
+            mark(markFrom.x, markFrom.y, event.getX(), event.getY());
+        }
+    }
+
+    /** The note editor of the lanes, or {@code null} before the window handed over the way into the piece. */
+    LaneEditor editor() {
+        return editor;
+    }
+
+    /** The menu of the marked passage; the view shows it where the note editor shows none. */
+    void setPassageMenu(javax.swing.JPopupMenu menu) {
+        passageMenu = menu;
+    }
+
+    /** Whether Shift and drag at this height marks a passage: not where the note editor takes Shift for its selection. */
+    boolean marksAt(int y) {
+        return editor == null || !editor.owns(y);
     }
 
     void mark(Range range) {
@@ -233,8 +332,31 @@ final class ArrangementView extends JComponent {
         return Math.max(0, Math.min(bars - 1, bar)) + 1;
     }
 
-    private int laneAt(int y) {
+    /** Where a bar begins across the view, bars counted from 0; the end of the last bar is the end of the music. */
+    float xOfBar(int bar) {
+        return arrangement == null ? GUTTER
+                : GUTTER + musicSpan() * Math.max(0, bar) / Math.max(1, arrangement.bars());
+    }
+
+    /** The lane at a height, or the nearest one for a place above or below the lanes. */
+    private int laneNear(int y) {
         return Math.max(0, Math.min(order.size() - 1, (y - RULER) / Math.max(1, lane)));
+    }
+
+    /** Lets the notes of a piece with a model be edited in the lanes. */
+    void setEditing(com.aresstack.audio.studio.application.PieceEditing editing) {
+        if (editor == null) {
+            editor = new LaneEditor(this, editing, listener);
+        }
+    }
+
+    /** Moves the playback to where a place across the view stands. */
+    void seekTo(int x) {
+        double total = totalSeconds();
+        if (total > 0) {
+            double share = (x - GUTTER) / (double) Math.max(1, getWidth() - GUTTER - 10);
+            listener.seek(Math.max(0, Math.min(1, share)) * total);
+        }
     }
 
     /** The lanes: the tracks of the mixer in their order, with the notes of the arrangement file if there is one. */
@@ -246,6 +368,9 @@ final class ArrangementView extends JComponent {
         arrangement = shown;
         order = new ArrayList<String>(trackIds);
         hint = emptyHint == null ? "" : emptyHint;
+        if (editor != null) {
+            editor.shown(shown);
+        }
         revalidate();
         repaint();
     }
@@ -299,8 +424,7 @@ final class ArrangementView extends JComponent {
         int left = GUTTER;
         int span = Math.max(1, width - GUTTER - 10);
         double total = totalSeconds();
-        double music = arrangement == null ? 0 : arrangement.seconds();
-        float musicSpan = total <= 0 ? span : (float) (span * music / total);
+        float musicSpan = musicSpan();
         final int LANE = lane;
         int lanesBottom = RULER + order.size() * LANE;
 
@@ -322,23 +446,18 @@ final class ArrangementView extends JComponent {
             if (notes == null || notes.isEmpty()) {
                 continue;
             }
-            int low = 127;
-            int high = 0;
+            Color shade = chosen ? color : AudioStudioTheme.withAlpha(color, 215);
             for (Note note : notes) {
-                low = Math.min(low, note.pitch);
-                high = Math.max(high, note.pitch);
-            }
-            int range = Math.max(6, high - low);
-            float usable = LANE - 14f;
-            float thick = Math.max(3.4f, Math.min(7f, usable / (range + 1f)));
-            g.setColor(chosen ? color : AudioStudioTheme.withAlpha(color, 215));
-            for (Note note : notes) {
-                float x = left + musicSpan * note.start / (float) arrangement.ticks;
-                float w = Math.max(2f, musicSpan * note.length / (float) arrangement.ticks - 1f);
-                float y = top + 5f + usable * (1f - (note.pitch - low) / (float) range);
-                g.fill(new RoundRectangle2D.Float(x, y, w, thick, 2.4f, 2.4f));
+                boolean picked = editor != null && editor.selected(note);
+                g.setColor(picked ? Color.WHITE : shade);
+                g.fill(noteBounds(index, note));
+                if (picked) {
+                    g.setColor(AudioStudioTheme.withAlpha(color, 230));
+                    g.draw(noteBounds(index, note));
+                }
             }
         }
+
 
         // The mix below the lanes, as a waveform.
         int mixTop = lanesBottom;
@@ -428,7 +547,142 @@ final class ArrangementView extends JComponent {
             g.setColor(AudioStudioTheme.withAlpha(Color.WHITE, 36));
             g.fill(new Rectangle2D.Float(at - 3, 2, 6, height - 4));
         }
+        if (editor != null) {
+            editor.paintOver(g); // over the ruler, so that the grid it names stands there
+        }
         g.dispose();
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Where things are, for painting and for the editor
+
+    Arrangement arrangement() {
+        return arrangement;
+    }
+
+    List<String> order() {
+        return order;
+    }
+
+    int laneHeight() {
+        return lane;
+    }
+
+    /** How wide the music is drawn: the share of the width its seconds take of all there is to show. */
+    float musicSpan() {
+        int span = Math.max(1, getWidth() - GUTTER - 10);
+        double total = totalSeconds();
+        double music = arrangement == null ? 0 : arrangement.seconds();
+        return total <= 0 ? span : (float) (span * music / total);
+    }
+
+    float xOf(long tick) {
+        return arrangement == null || arrangement.ticks <= 0 ? GUTTER
+                : GUTTER + musicSpan() * tick / (float) arrangement.ticks;
+    }
+
+    long tickAt(int x) {
+        float span = musicSpan();
+        if (arrangement == null || span <= 0) {
+            return 0;
+        }
+        return Math.max(0, Math.round((x - GUTTER) / (double) span * arrangement.ticks));
+    }
+
+    /** Ticks per pixel across the view. */
+    double ticksPerPixel() {
+        float span = musicSpan();
+        return arrangement == null || span <= 0 ? 1 : arrangement.ticks / (double) span;
+    }
+
+    /** The lane under a height, or -1 above or below the lanes. */
+    int laneAt(int y) {
+        if (y < RULER) {
+            return -1;
+        }
+        int index = (y - RULER) / lane;
+        return index < order.size() ? index : -1;
+    }
+
+    int laneTop(int index) {
+        return RULER + index * lane;
+    }
+
+    /**
+     * The pitches a lane shows: its lowest and how many semitones up from there. A lane that can be
+     * edited keeps room above and below its notes, so that a note can be moved or inserted there.
+     */
+    int[] pitchWindow(String laneId) {
+        if (frozenWindows != null && frozenWindows.containsKey(laneId)) {
+            return frozenWindows.get(laneId);
+        }
+        List<Note> notes = arrangement == null ? null : arrangement.lanes.get(laneId);
+        boolean editable = arrangement != null && arrangement.editable;
+        if (notes == null || notes.isEmpty()) {
+            return editable ? new int[]{54, 12} : new int[]{60, 6};
+        }
+        int low = 127;
+        int high = 0;
+        for (Note note : notes) {
+            low = Math.min(low, note.pitch);
+            high = Math.max(high, note.pitch);
+        }
+        if (!editable) {
+            return new int[]{low, Math.max(6, high - low)};
+        }
+        low = Math.max(0, low - 2);
+        high = Math.min(127, high + 2);
+        int range = Math.max(12, high - low);
+        if (low + range > 127) {
+            low = Math.max(0, 127 - range);
+        }
+        return new int[]{low, range};
+    }
+
+    /** Keeps the pitch windows as they are now while a note is dragged, or lets them follow the notes again. */
+    void freezeWindows(boolean freeze) {
+        if (!freeze) {
+            frozenWindows = null;
+            return;
+        }
+        frozenWindows = new LinkedHashMap<String, int[]>();
+        for (String id : order) {
+            frozenWindows.put(id, pitchWindow(id));
+        }
+    }
+
+    float yOf(int index, int pitch) {
+        int[] window = pitchWindow(order.get(index));
+        float usable = lane - 14f;
+        return laneTop(index) + 5f + usable * (1f - (pitch - window[0]) / (float) window[1]);
+    }
+
+    /** The pitch at a height within a lane. */
+    int pitchAt(int index, int y) {
+        int[] window = pitchWindow(order.get(index));
+        float usable = lane - 14f;
+        float share = 1f - (y - laneTop(index) - 5f - noteThickness(index) / 2f) / usable;
+        return Math.max(0, Math.min(127, Math.round(window[0] + share * window[1])));
+    }
+
+    /** How many pixels one semitone is in a lane. */
+    float semitone(int index) {
+        return (lane - 14f) / pitchWindow(order.get(index))[1];
+    }
+
+    float noteThickness(int index) {
+        int[] window = pitchWindow(order.get(index));
+        return Math.max(3.4f, Math.min(7f, (lane - 14f) / (window[1] + 1f)));
+    }
+
+    RoundRectangle2D.Float noteBounds(int index, Note note) {
+        return noteBounds(index, note.start, note.length, note.pitch);
+    }
+
+    RoundRectangle2D.Float noteBounds(int index, long start, long length, int pitch) {
+        float x = xOf(start);
+        float w = Math.max(2f, (float) (length / ticksPerPixel()) - 1f);
+        return new RoundRectangle2D.Float(x, yOf(index, pitch), w, noteThickness(index), 2.4f, 2.4f);
     }
 
     private static String fit(FontMetrics metrics, String text, int width) {

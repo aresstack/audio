@@ -30,11 +30,23 @@ public record ComposedContinuation(ContinuationTask task, ContinuationPlan plan,
     public record PlacedClip(String trackId, MidiClip clip) {
     }
 
-    /** Notes that leave and enter an existing clip within the revised bars of the original. */
-    public record TailChange(String clipId, List<String> removed, List<Note> added) {
+    /**
+     * Notes that leave and enter an existing clip within the revised bars of the original.
+     *
+     * @param lengthTicks the clip's new length, so that new notes can sound past its old end; 0
+     *                    when it keeps its length
+     */
+    public record TailChange(String clipId, List<String> removed, List<Note> added, long lengthTicks) {
         public TailChange {
             removed = List.copyOf(removed);
             added = List.copyOf(added);
+            if (lengthTicks < 0) {
+                throw new IllegalArgumentException("A clip length is not negative: " + lengthTicks);
+            }
+        }
+
+        public TailChange(String clipId, List<String> removed, List<Note> added) {
+            this(clipId, removed, added, 0);
         }
     }
 
