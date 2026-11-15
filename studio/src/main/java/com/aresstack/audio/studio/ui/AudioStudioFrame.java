@@ -118,6 +118,8 @@ public final class AudioStudioFrame extends JFrame {
     private final JCheckBox proxyBasic = new JCheckBox("Proxy-BASIC via KeePass");
     /** Whether the arrangement is fitted into the window; off, every bar has its width and the lanes scroll. */
     private final JCheckBox fitArrangement = new JCheckBox("Ganzes Stück in die Fensterbreite einpassen", true);
+    private final JComboBox<AppIcon> appIconChoice = new JComboBox<>(AppIcon.values());
+    private boolean showingSavedIcon;
     private final JTextField proxyCredentialRef = new JTextField(22);
     private final JComboBox<KeePassEntry> keePassEntries = new JComboBox<KeePassEntry>();
     private final JTextField directory = new JTextField(Paths.get(System.getProperty("user.home"),
@@ -283,6 +285,7 @@ public final class AudioStudioFrame extends JFrame {
     public AudioStudioFrame(InstrumentRegistry registry) {
         super("AresStack Audio Studio");
         this.registry = registry;
+        setIconImages(AppIcon.DEFAULT.images());
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setMinimumSize(new Dimension(1100, 700));
         setSize(1440, 900);
@@ -1753,6 +1756,29 @@ public final class AudioStudioFrame extends JFrame {
         });
         addRow(looks, 0, "Arrangement", fitArrangement);
         addRow(looks, 1, "", note("Aus: lange Stücke bleiben lesbar; unten ein Rollbalken, Umschalt + Mausrad rollt seitwärts."));
+        appIconChoice.setRenderer(new javax.swing.DefaultListCellRenderer() {
+            @Override
+            public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list, Object value,
+                    int index, boolean selected, boolean focused) {
+                super.getListCellRendererComponent(list, value, index, selected, focused);
+                if (value instanceof AppIcon) {
+                    AppIcon icon = (AppIcon) value;
+                    // the open list shows the icons large enough to tell them apart, the closed box small
+                    setIcon(icon.preview(index < 0 ? 24 : 48));
+                    setText(icon.label());
+                    setIconTextGap(10);
+                }
+                return this;
+            }
+        });
+        appIconChoice.setToolTipText("Das Icon von Fenster und Taskleiste; wirkt sofort");
+        appIconChoice.addActionListener(event -> {
+            ((AppIcon) appIconChoice.getSelectedItem()).applyToAllWindows();
+            if (!showingSavedIcon) {
+                saveSettings(false);
+            }
+        });
+        addRow(looks, 2, "App-Icon", line(appIconChoice));
         column.add(javax.swing.Box.createVerticalStrut(14));
         column.add(new DeckWidgets.Module("Ansicht", looks));
         JPanel top = new JPanel(new BorderLayout());
@@ -3975,6 +4001,14 @@ public final class AudioStudioFrame extends JFrame {
             proxyCredentialRef.setText(saved.getProperty("proxyCredentialRef", ""));
             fitArrangement.setSelected(!"false".equalsIgnoreCase(saved.getProperty("arrangementFit", "true")));
             trackTable.setFit(fitArrangement.isSelected());
+            AppIcon savedIcon = AppIcon.fromKey(saved.getProperty(AppIcon.SETTING));
+            showingSavedIcon = true;
+            try {
+                appIconChoice.setSelectedItem(savedIcon);
+            } finally {
+                showingSavedIcon = false;
+            }
+            savedIcon.applyToAllWindows();
             String savedMode = saved.getProperty("proxyMode", "");
             if (!savedMode.isEmpty()) {
                 proxyMode.setSelectedItem(savedMode);
@@ -4048,6 +4082,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("proxyAuthMode", proxyBasic.isSelected() ? "BASIC" : "");
             saved.setProperty("proxyCredentialRef", proxyCredentialRef.getText().trim());
             saved.setProperty("arrangementFit", String.valueOf(fitArrangement.isSelected()));
+            saved.setProperty(AppIcon.SETTING, ((AppIcon) appIconChoice.getSelectedItem()).key());
             saved.setProperty("outputDirectory", directory.getText().trim());
             try {
                 projects.lastPiece(songs.root(), Paths.get(directory.getText().trim()));
