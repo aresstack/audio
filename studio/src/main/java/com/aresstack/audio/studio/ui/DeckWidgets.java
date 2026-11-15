@@ -57,7 +57,6 @@ final class DeckWidgets {
             // Lamp and name stand in the middle of the head's height, so that a key at its right
             // end (see setHeadEnd) sits on the same line as the name.
             javax.swing.Box title = javax.swing.Box.createHorizontalBox();
-            lamp.setOn(true);
             lamp.setMaximumSize(lamp.getPreferredSize());
             title.add(javax.swing.Box.createHorizontalStrut(7));
             title.add(lamp);
@@ -69,6 +68,56 @@ final class DeckWidgets {
             if (contents != null) {
                 add(contents, BorderLayout.CENTER);
             }
+        }
+
+        /**
+         * The lamp in front of the name says where the pointer is: it glows while the mouse is
+         * over this module and is dark otherwise. The module hears the mouse of the whole
+         * window for that, since its own contents would swallow the movement.
+         */
+        private final java.awt.event.AWTEventListener pointer = event -> {
+            if (event instanceof java.awt.event.MouseEvent) {
+                java.awt.event.MouseEvent mouse = (java.awt.event.MouseEvent) event;
+                pointerAt(mouse.getComponent(), mouse.getPoint());
+            }
+        };
+
+        @Override
+        public void addNotify() {
+            super.addNotify();
+            try {
+                java.awt.Toolkit.getDefaultToolkit().addAWTEventListener(pointer,
+                        java.awt.AWTEvent.MOUSE_EVENT_MASK | java.awt.AWTEvent.MOUSE_MOTION_EVENT_MASK);
+            } catch (SecurityException | java.awt.HeadlessException unheard) {
+                lamp.setOn(true); // without the mouse of the window the lamp stays on, as it was
+            }
+        }
+
+        @Override
+        public void removeNotify() {
+            java.awt.Toolkit.getDefaultToolkit().removeAWTEventListener(pointer);
+            lamp.setOn(false);
+            super.removeNotify();
+        }
+
+        /** The pointer is at this point of a component: the lamp glows if that is over this module. */
+        void pointerAt(java.awt.Component source, java.awt.Point point) {
+            boolean over = false;
+            if (source != null && point != null && isShowing()
+                    && javax.swing.SwingUtilities.getWindowAncestor(this) == window(source)) {
+                over = contains(javax.swing.SwingUtilities.convertPoint(source, point, this));
+            }
+            lamp.setOn(over);
+        }
+
+        private static java.awt.Window window(java.awt.Component component) {
+            return component instanceof java.awt.Window ? (java.awt.Window) component
+                    : javax.swing.SwingUtilities.getWindowAncestor(component);
+        }
+
+        /** Whether the lamp glows, for tests. */
+        boolean lit() {
+            return lamp.on;
         }
 
         /** Something for the right end of the module's head: a key, a counter. */
@@ -127,12 +176,19 @@ final class DeckWidgets {
                     new Color[]{AudioStudioTheme.withAlpha(color, 110), AudioStudioTheme.withAlpha(color, 0)}));
             g.fill(new Ellipse2D.Float(x - radius * 2.2f, y - radius * 2.2f, radius * 4.4f, radius * 4.4f));
         }
-        g.setColor(on ? color : new Color(0x30333E));
+        // Off, the lamp is still there: its glass in a dark shade of its colour, with a rim and a
+        // faint gleam, so that it reads as a lamp that is switched off and not as a hole.
+        Color glass = on ? color : new Color((color.getRed() * 3 + 0x30 * 7) / 10,
+                (color.getGreen() * 3 + 0x33 * 7) / 10, (color.getBlue() * 3 + 0x3E * 7) / 10);
+        g.setColor(glass);
         g.fill(new Ellipse2D.Float(x - radius, y - radius, radius * 2, radius * 2));
-        if (on) {
-            g.setColor(new Color(255, 255, 255, 150));
-            g.fill(new Ellipse2D.Float(x - radius * 0.45f, y - radius * 0.6f, radius * 0.7f, radius * 0.5f));
+        if (!on) {
+            g.setColor(new Color(0x15161B));
+            g.setStroke(new java.awt.BasicStroke(1f));
+            g.draw(new Ellipse2D.Float(x - radius, y - radius, radius * 2, radius * 2));
         }
+        g.setColor(new Color(255, 255, 255, on ? 150 : 45));
+        g.fill(new Ellipse2D.Float(x - radius * 0.45f, y - radius * 0.6f, radius * 0.7f, radius * 0.5f));
     }
 
     /** What a transport key shows. */
