@@ -13,6 +13,7 @@ import com.aresstack.audio.composition.Ids;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.composition.edit.EditOp;
+import com.aresstack.audio.composition.edit.Revision;
 import com.aresstack.audio.studio.ai.ChatContinuationPlanner;
 import com.aresstack.audio.studio.ai.ContinuationComposer;
 import com.aresstack.audio.studio.ai.ContinuationEnding;
@@ -24,6 +25,7 @@ import com.aresstack.audio.studio.progress.Progress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -166,6 +168,35 @@ public final class NewBarsPerformanceTest {
         // mezzoforte at the join (the piece had no marks), forte reached at the end of the first new bar
         assertEquals(List.of(new Dynamics.Hairpin(8 * BAR, 9 * BAR, Dynamics.Level.F, null)), dynamics.hairpins());
         assertEquals(List.of(new Dynamics.Mark(9 * BAR, Dynamics.Level.F, null)), dynamics.marks());
+    }
+
+    @Test
+    public void aPieceLengthenedBeforeIsSmoothedAtItsSeamWithoutNewNotes() throws Exception {
+        Composition base = session.composition();
+        FakeChatModel model = model("\"dynamics\":[{\"bar\":9,\"level\":\"f\"}]");
+        PieceExtension extension = PieceExtension.start(session, ContinuationComposer.with(model),
+                ContinuationRequest.of(8, ContinuationPreset.STANDALONE, ContinuationEnding.OPEN), Ids.seeded(5), QUIET);
+        Composition lengthened = extension.proposal().result();
+        // as a piece lengthened before the smoothing: forte straight at the join
+        Dynamics jump = new Dynamics(List.of(new Dynamics.Mark(8 * BAR, Dynamics.Level.F, null)), List.of(),
+                lengthened.dynamics().scale(), lengthened.dynamics().articulations());
+        Composition old = lengthened.withDynamics(jump);
+        List<Revision> revisions = List.of(
+                new Revision("a", 1, null, Revision.Author.ORIGINAL, 0, "Originalfassung", null, base, null),
+                new Revision("b", 2, "a", Revision.Author.AI, 1, "Stück um 8 Takte verlängert (eigenständig)", null,
+                        old, null));
+
+        List<String> said = new ArrayList<>();
+        Dynamics smoothed = SeamRepair.smoothed(old, revisions, said);
+        assertEquals(List.of(new Dynamics.Hairpin(8 * BAR, 9 * BAR, Dynamics.Level.F, null)), smoothed.hairpins());
+        assertEquals(List.of(new Dynamics.Mark(9 * BAR, Dynamics.Level.F, null)), smoothed.marks());
+        assertEquals(1, said.size());
+        // done once: a second look changes nothing
+        assertEquals(smoothed, SeamRepair.smoothed(old.withDynamics(smoothed), revisions, new ArrayList<>()));
+        // a mark set later by hand at the seam is meant to jump and stays
+        Dynamics byHand = new Dynamics(List.of(new Dynamics.Mark(8 * BAR, Dynamics.Level.P, null)), List.of(),
+                jump.scale(), jump.articulations());
+        assertEquals(byHand, SeamRepair.smoothed(old.withDynamics(byHand), revisions, new ArrayList<>()));
     }
 
     @Test

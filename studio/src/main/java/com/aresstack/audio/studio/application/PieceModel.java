@@ -54,6 +54,8 @@ public final class PieceModel {
                             + " wurden außerhalb des Werkmodells geändert. Das gespeicherte Werkmodell bleibt"
                             + " unverändert; die Änderung wird erst nach dem nächsten Komponieren oder"
                             + " Umbenennen übernommen.");
+                } else {
+                    SeamRepair.repair(session, opened, log);
                 }
             } else {
                 log.accept("Stück ins Werkmodell übernommen (" + session.composition().tracks().size()
