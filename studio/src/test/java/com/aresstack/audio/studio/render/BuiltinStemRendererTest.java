@@ -48,6 +48,35 @@ public final class BuiltinStemRendererTest {
         }
     }
 
+    /** A note held across a change of tempo lasts from its start to its end in real time. */
+    @Test
+    public void aNoteHeldAcrossATempoChangeLastsItsRealTime() {
+        // 120 BPM for the first bar (2 s), then 60 BPM: a note from beat 3 to the end of bar 2
+        // lasts one second at 120 and four seconds at 60.
+        TimeMap time = new TimeMap(List.of(new TimeMap.Tempo(0, 120), new TimeMap.Tempo(1920, 60)),
+                List.of(new TimeMap.Meter(0, 4, 4)), List.of(new TimeMap.KeyChange(0,
+                com.aresstack.audio.composition.Key.C_MAJOR)));
+        assertEquals(5.0, BuiltinStemRenderer.heldSeconds(time, 960, 3840), 1e-12);
+        assertEquals(time.seconds(3840) - time.seconds(960), BuiltinStemRenderer.heldSeconds(time, 960, 3840), 0);
+        // Within one tempo nothing changes: half a bar at 60 BPM is two seconds.
+        assertEquals(2.0, BuiltinStemRenderer.heldSeconds(time, 1920, 2880), 1e-12);
+        // A note ending exactly where the tempo changes is held at its own tempo.
+        assertEquals(1.0, BuiltinStemRenderer.heldSeconds(time, 960, 1920), 1e-12);
+
+        // The sound follows: the note rings on until 1 s + 5 s, not until 1 s + 1.5 s.
+        Part part = new Part("pad", "Pad", "harmony", null, 0, "builtin", Part.StaffLayout.SINGLE,
+                List.of(new Voice("v1", null, null, null)), null);
+        Track track = new Track("t1", "Pad", Track.Kind.MIDI, "pad",
+                List.<Clip>of(new MidiClip("c1", 0, 3840, null, List.of(new Note("n1", 960, 2880, 57, 100, "v1")))));
+        Composition piece = new Composition(Meta.EMPTY, time, List.of(), List.of(part), List.of(track), List.of());
+        double[] samples = BuiltinStemRenderer.samples(piece, part, BuiltinSynthesis.frames(StemJob.pieceSeconds(piece)));
+        double late = 0;
+        for (int i = (int) (5.0 * BuiltinSynthesis.SAMPLE_RATE); i < (int) (5.5 * BuiltinSynthesis.SAMPLE_RATE); i++) {
+            late = Math.max(late, Math.abs(samples[i]));
+        }
+        assertTrue("still held four seconds after the tempo change", late > 0.01);
+    }
+
     /** A14: twelve minutes of music give a stem of twelve minutes, sounding in its last bar. */
     @Test
     public void rendersTwelveMinutesToTheLastBar() throws Exception {

@@ -22,7 +22,7 @@ public final class BuiltinSynthesis {
     /** What rings on after the end of a piece. */
     public static final double TAIL_SECONDS = 0.75;
     /** Changes whenever the sound changes for the same notes; the stem cache keys on it. */
-    public static final String VERSION = "builtin-1";
+    public static final String VERSION = "builtin-2";
     private static final double TWO_PI = Math.PI * 2.0;
 
     /**
