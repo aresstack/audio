@@ -16,9 +16,10 @@ import java.util.TreeMap;
  * clef, and in every bar the notes and rests with their written lengths. The
  * arrangement gives each note a start and a length in ticks; here that becomes
  * sixteenths, chords, rests for the gaps, and ties where a note is longer than a
- * bar or than one written value can say. One voice is written per staff, and it
- * says truly how long every note sounds: when a note is still held while others
- * begin, it is written again in the new chord and tied to itself.
+ * bar or than one written value can say. A track whose notes all move together is
+ * one voice. Where some notes are held while others move, the staff gets two
+ * voices, an upper and a lower one, as in printed music; only what even two voices
+ * cannot say is written with a held note repeated in the next chord and tied.
  * The score knows nothing of how it is drawn.
  */
 public final class Score {
@@ -71,18 +72,36 @@ public final class Score {
     public static final class Staff {
         private final String trackId;
         private final Clef clef;
-        private final List<List<Event>> bars;
+        private final List<List<List<Event>>> voices;
 
-        Staff(String trackId, Clef clef, List<List<Event>> bars) {
+        Staff(String trackId, Clef clef, List<List<List<Event>>> voices) {
             this.trackId = trackId;
             this.clef = clef;
-            this.bars = bars;
+            this.voices = voices;
         }
 
         public String trackId() { return trackId; }
         public Clef clef() { return clef; }
         /** The events of a bar, in the order they sound; a bar without notes holds one whole rest. */
-        public List<Event> bar(int index) { return Collections.unmodifiableList(bars.get(index)); }
+        public List<Event> bar(int index) { return bar(0, index); }
+
+        /** One voice or two: the first is the upper one, the second the lower one. */
+        public int voices() { return voices.size(); }
+
+        /** The events of a bar in one of the voices. */
+        public List<Event> bar(int voice, int index) {
+            return Collections.unmodifiableList(voices.get(voice).get(index));
+        }
+
+        /** Whether a voice has nothing but rests in a bar. */
+        public boolean silent(int voice, int index) {
+            for (Event event : voices.get(voice).get(index)) {
+                if (!event.rest()) {
+                    return false;
+                }
+            }
+            return true;
+        }
     }
 
     private final int tempo;
@@ -175,7 +194,7 @@ public final class Score {
         for (Map.Entry<String, TreeMap<Integer, List<int[]>>> track : sounding.entrySet()) {
             boolean kit = drums.get(track.getKey());
             staves.add(new Staff(track.getKey(), kit ? Clef.PERCUSSION : clef(track.getValue()),
-                    write(track.getValue(), bars, kit)));
+                    voices(track.getValue(), bars, kit)));
         }
         return new Score(tempo, bars, staves);
     }
@@ -194,19 +213,13 @@ public final class Score {
     }
 
     /**
+     * The notes of a track as one voice or two.
+     *
      * @param struck whether the track is struck, not held (drums): a hit ends when the next one comes
      */
-    private static List<List<Event>> write(TreeMap<Integer, List<int[]>> track, int bars, boolean struck) {
-        List<List<Event>> written = new ArrayList<List<Event>>();
-        for (int bar = 0; bar < bars; bar++) {
-            written.add(new ArrayList<Event>());
-        }
-        // Every beginning and every end of a note is a place where what sounds changes.
+    private static List<List<List<Event>>> voices(TreeMap<Integer, List<int[]>> track, int bars, boolean struck) {
         int end = bars * BAR;
         List<int[]> notes = new ArrayList<int[]>(); // pitch, start, stop
-        TreeMap<Integer, Boolean> changes = new TreeMap<Integer, Boolean>();
-        changes.put(0, Boolean.TRUE);
-        changes.put(end, Boolean.TRUE);
         for (Map.Entry<Integer, List<int[]>> together : track.entrySet()) {
             for (int[] note : together.getValue()) {
                 int start = Math.min(end, together.getKey());
@@ -217,10 +230,110 @@ public final class Score {
                 }
                 if (start < stop) {
                     notes.add(new int[]{note[0], start, stop});
-                    changes.put(start, Boolean.TRUE);
-                    changes.put(stop, Boolean.TRUE);
                 }
             }
+        }
+        List<List<List<Event>>> written = new ArrayList<List<List<Event>>>();
+        List<List<int[]>> parts = struck ? null : separate(notes);
+        if (parts == null) {
+            written.add(write(notes, bars));
+        } else {
+            written.add(write(parts.get(0), bars));
+            written.add(write(parts.get(1), bars));
+        }
+        return written;
+    }
+
+    /**
+     * Divides notes into an upper and a lower voice, if they need it: notes that begin and end
+     * together are a chord and stay together; a chord goes to the voice that is free when it
+     * begins, the higher of two that begin together to the upper voice. {@code null} when one
+     * voice says it all, that is when no note is held while another begins or ends.
+     */
+    private static List<List<int[]>> separate(List<int[]> notes) {
+        boolean needed = false;
+        for (int[] one : notes) {
+            for (int[] other : notes) {
+                if (one[1] < other[2] && other[1] < one[2] && (one[1] != other[1] || one[2] != other[2])) {
+                    needed = true;
+                }
+            }
+        }
+        if (!needed) {
+            return null;
+        }
+        List<int[]> sorted = new ArrayList<int[]>(notes);
+        Collections.sort(sorted, (first, second) -> first[1] != second[1] ? Integer.compare(first[1], second[1])
+                : Integer.compare(second[0], first[0]));
+        List<int[]> upper = new ArrayList<int[]>();
+        List<int[]> lower = new ArrayList<int[]>();
+        int upperBusy = 0;
+        int lowerBusy = 0;
+        int upperStart = -1;
+        int upperStop = -1;
+        int lowerStart = -1;
+        int lowerStop = -1;
+        for (int[] note : sorted) {
+            if (note[1] == upperStart && note[2] == upperStop) {
+                upper.add(note); // part of the chord the upper voice is playing
+            } else if (note[1] == lowerStart && note[2] == lowerStop) {
+                lower.add(note);
+            } else if (note[1] >= upperBusy) {
+                upper.add(note);
+                upperStart = note[1];
+                upperStop = note[2];
+                upperBusy = note[2];
+            } else if (note[1] >= lowerBusy) {
+                lower.add(note);
+                lowerStart = note[1];
+                lowerStop = note[2];
+                lowerBusy = note[2];
+            } else {
+                lower.add(note); // a third line: the lower voice takes it and ties what it holds
+                lowerBusy = Math.max(lowerBusy, note[2]);
+            }
+        }
+        if (lower.isEmpty()) {
+            return null;
+        }
+        // The voice that lies higher on the whole is the upper one.
+        if (mean(upper) < mean(lower)) {
+            List<int[]> swap = upper;
+            upper = lower;
+            lower = swap;
+        }
+        List<List<int[]>> parts = new ArrayList<List<int[]>>();
+        parts.add(upper);
+        parts.add(lower);
+        return parts;
+    }
+
+    private static double mean(List<int[]> notes) {
+        double sum = 0;
+        for (int[] note : notes) {
+            sum += note[0] * (double) (note[2] - note[1]);
+        }
+        double time = 0;
+        for (int[] note : notes) {
+            time += note[2] - note[1];
+        }
+        return time == 0 ? 0 : sum / time;
+    }
+
+    /** Writes the notes of one voice into bars. */
+    private static List<List<Event>> write(List<int[]> notes, int bars) {
+        List<List<Event>> written = new ArrayList<List<Event>>();
+        for (int bar = 0; bar < bars; bar++) {
+            written.add(new ArrayList<Event>());
+        }
+        // Every beginning and every end of a note is a place where what sounds changes.
+        int end = bars * BAR;
+        TreeMap<Integer, Boolean> changes = new TreeMap<Integer, Boolean>();
+        changes.put(0, Boolean.TRUE);
+        changes.put(end, Boolean.TRUE);
+        for (int[] note : notes) {
+            changes.put(note[1], Boolean.TRUE);
+            changes.put(note[2], Boolean.TRUE);
         }
         Integer from = null;
         for (Integer to : changes.keySet()) {

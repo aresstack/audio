@@ -66,29 +66,55 @@ public final class ScoreTest {
     }
 
     @Test
-    public void aHeldNoteIsWrittenAgainAndTiedWhenOthersBeginAndAnEmptyBarHoldsOneWholeRest() {
+    public void aHeldNoteAndMovingNotesAreTwoVoicesOnOneStaff() {
         Score score = Score.of(Arrays.asList("tempo\t108", "track\tpiano\t0\t0\tharmony",
-                "note\tpiano\t0\t1920\t60\t80",       // rings through the whole bar ...
-                "note\tpiano\t480\t480\t64\t80",      // ... while another note sounds on the second beat
-                "note\tpiano\t3840\t120\t61\t80"));   // a sixteenth in the third bar
+                "note\tpiano\t0\t1920\t48\t80",       // a low note rings through the whole bar ...
+                "note\tpiano\t0\t480\t72\t80",        // ... while a melody moves above it
+                "note\tpiano\t480\t480\t74\t80",
+                "note\tpiano\t960\t960\t76\t80",
+                "note\tpiano\t3840\t120\t61\t80"));   // a sixteenth alone in the third bar
 
         Score.Staff staff = score.staves().get(0);
         Assert.assertEquals(3, score.bars());
-        List<Score.Event> first = staff.bar(0);
-        Assert.assertEquals("quarter, quarter chord, half: the C is tied through", 3, first.size());
-        Assert.assertArrayEquals(new int[]{60}, first.get(0).pitches());
-        Assert.assertEquals(4, first.get(0).length());
-        Assert.assertTrue(first.get(0).tied(0));
-        Assert.assertArrayEquals(new int[]{60, 64}, first.get(1).pitches());
-        Assert.assertTrue("the held C goes on", first.get(1).tied(0));
-        Assert.assertFalse("the E ends here", first.get(1).tied(1));
-        Assert.assertArrayEquals(new int[]{60}, first.get(2).pitches());
-        Assert.assertEquals(8, first.get(2).length());
-        Assert.assertFalse(first.get(2).tied());
-        Assert.assertEquals(1, staff.bar(1).size());
-        Assert.assertTrue(staff.bar(1).get(0).rest());
-        Assert.assertEquals(16, staff.bar(1).get(0).length());
-        Assert.assertEquals(1, staff.bar(2).get(0).length());
+        Assert.assertEquals(2, staff.voices());
+        List<Score.Event> upper = staff.bar(0, 0);
+        Assert.assertEquals("the melody: quarter, quarter, half", 3, upper.size());
+        Assert.assertArrayEquals(new int[]{72}, upper.get(0).pitches());
+        Assert.assertArrayEquals(new int[]{76}, upper.get(2).pitches());
+        Assert.assertEquals(8, upper.get(2).length());
+        List<Score.Event> lower = staff.bar(1, 0);
+        Assert.assertEquals("the held note is one whole note, not cut and not tied", 1, lower.size());
+        Assert.assertArrayEquals(new int[]{48}, lower.get(0).pitches());
+        Assert.assertEquals(16, lower.get(0).length());
+        Assert.assertFalse(lower.get(0).tied());
+        Assert.assertTrue("an empty bar holds one whole rest", staff.silent(0, 1) && staff.silent(1, 1));
+        Assert.assertEquals(16, staff.bar(0, 1).get(0).length());
+        Assert.assertFalse(staff.silent(0, 2) && staff.silent(1, 2));
+    }
+
+    @Test
+    public void notesThatMoveTogetherStayOneVoiceAndAThirdLineIsTied() {
+        Score chords = Score.of(Arrays.asList("tempo\t108", "track\tpiano\t0\t0\tharmony",
+                "note\tpiano\t0\t960\t60\t80", "note\tpiano\t0\t960\t64\t80",
+                "note\tpiano\t960\t960\t62\t80", "note\tpiano\t960\t960\t65\t80"));
+        Assert.assertEquals("plain chords need one voice", 1, chords.staves().get(0).voices());
+
+        Score three = Score.of(Arrays.asList("tempo\t108", "track\torgan\t19\t0\tharmony",
+                "note\torgan\t0\t1920\t72\t80",       // upper voice: a whole note
+                "note\torgan\t0\t960\t48\t80",        // lower voice: a half note ...
+                "note\torgan\t480\t960\t55\t80"));    // ... and a third line that begins inside it
+        Score.Staff staff = three.staves().get(0);
+        Assert.assertEquals(2, staff.voices());
+        Assert.assertEquals(16, staff.bar(0, 0).get(0).length());
+        List<Score.Event> lower = staff.bar(1, 0);
+        Assert.assertArrayEquals(new int[]{48}, lower.get(0).pitches());
+        Assert.assertTrue("held into the chord that follows", lower.get(0).tied(0));
+        Assert.assertArrayEquals(new int[]{48, 55}, lower.get(1).pitches());
+        int sum = 0;
+        for (Score.Event event : lower) {
+            sum += event.length();
+        }
+        Assert.assertEquals("the lower voice still fills the bar", Score.BAR, sum);
     }
 
     @Test

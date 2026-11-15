@@ -93,6 +93,8 @@ final class ScoreView extends JComponent implements Scrollable {
         final boolean stemUp;
         float stemEnd;
         boolean beamed;
+        /** How far a rest is moved from the middle of the staff, in places: up for the upper of two voices. */
+        int shift;
 
         Placed(Score.Event event, float x, float staffTop, boolean stemUp) {
             this.event = event;
@@ -359,35 +361,52 @@ final class ScoreView extends JComponent implements Scrollable {
                     }
                 }
 
-                // The notes of this staff in this system.
-                List<Placed> placed = new ArrayList<Placed>();
-                for (int bar = firstBar; bar < lastBar; bar++) {
-                    float barLeft = left + LEAD + (bar - firstBar) * barWidth;
-                    float inner = barWidth - 30;
-                    List<Score.Event> events = staff.bar(bar);
-                    Map<Integer, Boolean> sharpened = new HashMap<Integer, Boolean>();
-                    List<Placed> inBar = new ArrayList<Placed>();
-                    for (Score.Event event : events) {
-                        float x = events.size() == 1 && event.rest() ? barLeft + barWidth / 2 - 6
-                                : barLeft + 18 + inner * event.start() / Score.BAR;
-                        Placed place = new Placed(event, x, top, stemUp(event, staff.clef()));
-                        inBar.add(place);
-                        if (!event.rest()) {
-                            accidentals(g, place, staff.clef(), sharpened);
+                // The notes of this staff in this system, one voice after the other.
+                Map<Integer, Map<Integer, Boolean>> sharps = new HashMap<Integer, Map<Integer, Boolean>>();
+                for (int voice = 0; voice < staff.voices(); voice++) {
+                    List<Placed> placed = new ArrayList<Placed>();
+                    for (int bar = firstBar; bar < lastBar; bar++) {
+                        float barLeft = left + LEAD + (bar - firstBar) * barWidth;
+                        float inner = barWidth - 30;
+                        // Where both voices play in a bar, the upper one has its stems up and the lower
+                        // one down, and their rests move apart; a voice that rests the whole bar is left out.
+                        boolean both = staff.voices() == 2 && !staff.silent(0, bar) && !staff.silent(1, bar);
+                        if (staff.voices() == 2 && staff.silent(voice, bar)
+                                && (voice == 1 || !staff.silent(1, bar))) {
+                            continue;
                         }
+                        Boolean forced = both ? Boolean.valueOf(voice == 0) : null;
+                        List<Score.Event> events = staff.bar(voice, bar);
+                        Map<Integer, Boolean> sharpened = sharps.get(bar);
+                        if (sharpened == null) {
+                            sharpened = new HashMap<Integer, Boolean>();
+                            sharps.put(bar, sharpened);
+                        }
+                        List<Placed> inBar = new ArrayList<Placed>();
+                        for (Score.Event event : events) {
+                            float x = events.size() == 1 && event.rest() ? barLeft + barWidth / 2 - 6
+                                    : barLeft + 18 + inner * event.start() / Score.BAR;
+                            Placed place = new Placed(event, x, top,
+                                    forced != null ? forced.booleanValue() : stemUp(event, staff.clef()));
+                            place.shift = !both ? 0 : voice == 0 ? 4 : -4;
+                            inBar.add(place);
+                            if (!event.rest()) {
+                                accidentals(g, place, staff.clef(), sharpened);
+                            }
+                        }
+                        beam(g, inBar, staff.clef(), forced);
+                        placed.addAll(inBar);
                     }
-                    beam(g, inBar, staff.clef());
-                    placed.addAll(inBar);
-                }
-                for (int index = 0; index < placed.size(); index++) {
-                    Placed place = placed.get(index);
-                    if (place.event.rest()) {
-                        rest(g, place);
-                    } else {
-                        note(g, place, staff.clef());
-                        if (place.event.tied()) {
-                            float to = index + 1 < placed.size() ? placed.get(index + 1).x : systemRight - 4;
-                            tie(g, place, to, staff.clef());
+                    for (int index = 0; index < placed.size(); index++) {
+                        Placed place = placed.get(index);
+                        if (place.event.rest()) {
+                            rest(g, place);
+                        } else {
+                            note(g, place, staff.clef());
+                            if (place.event.tied()) {
+                                float to = index + 1 < placed.size() ? placed.get(index + 1).x : systemRight - 4;
+                                tie(g, place, to, staff.clef());
+                            }
                         }
                     }
                 }
@@ -456,7 +475,7 @@ final class ScoreView extends JComponent implements Scrollable {
     }
 
     /** Joins eighths and sixteenths of one beat with a beam; the stems of a group all go the same way. */
-    private void beam(Graphics2D g, List<Placed> bar, Score.Clef clef) {
+    private void beam(Graphics2D g, List<Placed> bar, Score.Clef clef, Boolean forced) {
         int index = 0;
         while (index < bar.size()) {
             Placed first = bar.get(index);
@@ -483,7 +502,7 @@ final class ScoreView extends JComponent implements Scrollable {
                 highest = Math.max(highest, high);
                 lowest = Math.min(lowest, low);
             }
-            boolean up = clef == Score.Clef.PERCUSSION || sum / group.size() < 4;
+            boolean up = forced != null ? forced.booleanValue() : clef == Score.Clef.PERCUSSION || sum / group.size() < 4;
             float top = group.get(0).staffTop;
             // The beam leans the way the notes go, but only a little, and every stem keeps a fair length.
             float[] reach = new float[group.size()];
@@ -516,6 +535,7 @@ final class ScoreView extends JComponent implements Scrollable {
             for (int i = 0; i < group.size(); i++) {
                 Placed place = group.get(i);
                 Placed stemmed = new Placed(place.event, place.x, place.staffTop, up);
+                stemmed.shift = place.shift;
                 stemmed.beamed = true;
                 stemmed.stemEnd = start + slope * (xs[i] - firstX);
                 bar.set(bar.indexOf(place), stemmed);
@@ -617,15 +637,15 @@ final class ScoreView extends JComponent implements Scrollable {
         g.setColor(ink);
         float top = place.staffTop;
         if (length == 16) {
-            glyph(g, "restWhole", place.x, y(top, 6));
+            glyph(g, "restWhole", place.x, y(top, 6 + place.shift));
         } else if (length >= 8) {
-            glyph(g, "restHalf", place.x, y(top, 4));
+            glyph(g, "restHalf", place.x, y(top, 4 + place.shift));
         } else if (length >= 4) {
-            glyph(g, "restQuarter", place.x, y(top, 4));
+            glyph(g, "restQuarter", place.x, y(top, 4 + place.shift));
         } else if (length >= 2) {
-            glyph(g, "rest8", place.x, y(top, 4));
+            glyph(g, "rest8", place.x, y(top, 4 + place.shift));
         } else {
-            glyph(g, "rest16", place.x, y(top, 4));
+            glyph(g, "rest16", place.x, y(top, 4 + place.shift));
         }
     }
 
