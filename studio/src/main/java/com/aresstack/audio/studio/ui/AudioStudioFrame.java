@@ -5158,11 +5158,87 @@ public final class AudioStudioFrame extends JFrame {
     private void togglePlayback() {
         if (player.playing()) {
             player.pause();
-        } else if (player.ready()) {
-            player.play();
+            albumPlay = false; // paused by the user: no next title
         } else {
-            play();
+            if (player.ready()) {
+                player.play();
+            } else {
+                play();
+            }
+            armAlbumPlay();
         }
+    }
+
+    /**
+     * Play pressed: if the album page is open, the next title of the album follows when this one
+     * has played to its end. Only while the album page stays open; pause or stop ends it.
+     */
+    private boolean albumPlay;
+
+    /** Whether the title armed for the album has been heard playing: only then its silence is its end. */
+    private boolean albumPlaySounded;
+
+    private void armAlbumPlay() {
+        albumPlay = "albums".equals(shownPage);
+        albumPlaySounded = false;
+    }
+
+    /** Called thirty times a second: a title that played to its end on the album page is followed by the next one. */
+    private void followAlbumPlay(boolean playing) {
+        if (!albumPlay) {
+            return;
+        }
+        if (playing) {
+            albumPlaySounded = true;
+            return;
+        }
+        if (!albumPlaySounded) {
+            return; // still getting ready to play
+        }
+        albumPlay = false;
+        if (!"albums".equals(shownPage) || albumsPanel == null || albumsPanel.album() == null
+                || (worker != null && !worker.isDone())) {
+            return; // the album page was closed meanwhile: the playback ends with this title
+        }
+        Path next = nextAlbumPiece(albumsPanel.album().id(), Paths.get(directory.getText().trim()));
+        if (next == null) {
+            return; // the last title of the album
+        }
+        String albumId = albumsPanel.album().id();
+        currentAlbum = albumId;
+        openSong(next);
+        if (!next.equals(Paths.get(directory.getText().trim()))) {
+            return; // the piece could not be opened (said)
+        }
+        SwingUtilities.invokeLater(() -> {
+            if (!"albums".equals(shownPage)) {
+                return;
+            }
+            play();
+            armAlbumPlay();
+        });
+    }
+
+    /** The title after this piece in the album that has a mix to play; {@code null} if none follows. */
+    private Path nextAlbumPiece(String albumId, Path current) {
+        Album album = albumMembers.albums().album(albumId).orElse(null);
+        if (album == null) {
+            return null;
+        }
+        java.util.List<com.aresstack.audio.studio.application.SongLibrary.Song> pieces = albumMembers.pieces(album);
+        int at = -1;
+        for (int i = 0; i < pieces.size(); i++) {
+            if (pieces.get(i).folder().toAbsolutePath().normalize().equals(current.toAbsolutePath().normalize())) {
+                at = i;
+            }
+        }
+        for (int i = at + 1; i < pieces.size(); i++) {
+            Path folder = pieces.get(i).folder();
+            if (Files.isRegularFile(folder.resolve("arrangement-instruments.wav"))) {
+                return folder;
+            }
+        }
+        return null;
     }
 
     private void play() {
@@ -5206,6 +5282,7 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     private void stopPlayback() {
+        albumPlay = false;
         player.pause();
         player.seek(0);
     }
@@ -5237,6 +5314,7 @@ public final class AudioStudioFrame extends JFrame {
 
     private void tick() {
         boolean playing = player.playing();
+        followAlbumPlay(playing);
         double second = player.seconds();
         double length = player.length();
         lcd.setPlaying(playing);
