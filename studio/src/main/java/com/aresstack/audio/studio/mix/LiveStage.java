@@ -373,8 +373,12 @@ public final class LiveStage implements AutoCloseable {
 
     /** Live playback of this stage on the default sound card, paused at the start. */
     public LivePlayback playOnLine(MasterBus.Settings master) throws LineUnavailableException {
-        return playback(master, LineSink.open(SpatialStemMixer.RATE, SpatialStemMixer.BLOCK,
-                LineSink.DEFAULT_BUFFER_FRAMES));
+        return playOnLine(master, LineSink.DEFAULT_BUFFER_FRAMES);
+    }
+
+    /** Live playback on the default sound card with a line buffer of this many frames. */
+    public LivePlayback playOnLine(MasterBus.Settings master, int bufferFrames) throws LineUnavailableException {
+        return playback(master, LineSink.open(SpatialStemMixer.RATE, SpatialStemMixer.BLOCK, bufferFrames));
     }
 
     @Override
