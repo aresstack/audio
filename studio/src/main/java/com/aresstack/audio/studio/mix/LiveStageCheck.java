@@ -18,8 +18,10 @@ import java.util.stream.Stream;
  * thread needed and whether a block came late.
  *
  * <pre>
- * java -cp audio-studio.jar com.aresstack.audio.studio.mix.LiveStageCheck &lt;folder or WAV files&gt; [seconds]
+ * java -cp audio-studio.jar com.aresstack.audio.studio.mix.LiveStageCheck &lt;folder or WAV files&gt; [seconds] [room]
  * </pre>
+ *
+ * The room is one of {@code studio}, {@code chamber} (default), {@code hall}, {@code cathedral}.
  */
 public final class LiveStageCheck {
     private LiveStageCheck() {
@@ -27,11 +29,12 @@ public final class LiveStageCheck {
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
-            System.err.println("Aufruf: LiveStageCheck <Ordner mit WAV-Stems oder WAV-Dateien> [Sekunden]");
+            System.err.println("Aufruf: LiveStageCheck <Ordner mit WAV-Stems oder WAV-Dateien> [Sekunden] [studio|chamber|hall|cathedral]");
             System.exit(2);
         }
         List<Path> files = new ArrayList<Path>();
         double seconds = 20;
+        AcousticRoom room = AcousticRoom.CHAMBER;
         for (String arg : args) {
             Path path = Paths.get(arg);
             if (Files.isDirectory(path)) {
@@ -41,6 +44,8 @@ public final class LiveStageCheck {
                 }
             } else if (Files.isRegularFile(path)) {
                 files.add(path);
+            } else if (AcousticRoom.known(arg)) {
+                room = AcousticRoom.of(arg);
             } else {
                 seconds = Double.parseDouble(arg);
             }
@@ -54,8 +59,8 @@ public final class LiveStageCheck {
             double x = files.size() == 1 ? 0 : -0.8 + 1.6 * i / (files.size() - 1);
             placements.add(new SoundSourcePlacement("spur-" + i, x, 0.3));
         }
-        System.out.println("Lade " + files.size() + " Spuren ...");
-        try (LiveStage stage = LiveStage.load(files, placements, AcousticRoom.CHAMBER, 2);
+        System.out.println("Lade " + files.size() + " Spuren, Raum: " + room.name() + " ...");
+        try (LiveStage stage = LiveStage.load(files, placements, room, 2);
              LivePlayback playback = stage.playOnLine(LiveStage.master(MixLevel.fixed(0), Float.NaN))) {
             playback.play();
             System.out.println("Spielt. Die erste Spur wandert über die Bühne: links vorn, rechts vorn, rechts hinten, links hinten.");
