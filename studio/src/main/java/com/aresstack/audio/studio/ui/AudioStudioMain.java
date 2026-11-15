@@ -66,6 +66,7 @@ public final class AudioStudioMain {
             verifyDirectoryImport(registry, sandbox);
             Path tsv = copyBundledComposition(sandbox);
             verifyPieceModel(sandbox, tsv);
+            verifyModelRendering(registry, sandbox);
             Map<String, InstrumentLibrary> assignments =
                     new HashMap<String, InstrumentLibrary>();
             if (optionalSoundFont != null) {
@@ -98,7 +99,7 @@ public final class AudioStudioMain {
                     throw new IllegalStateException("The mixed WAV is unexpectedly short.");
                 }
             }
-            System.out.println("Studio smoke test passed: SFZ directory import, piece model, "
+            System.out.println("Studio smoke test passed: SFZ directory import, piece model, model rendering, "
                     + (optionalSoundFont == null ? "Java fallback" : "GeneralUser sampled melody")
                     + ", MIDI export and WAV mix.");
         } finally {
@@ -147,6 +148,34 @@ public final class AudioStudioMain {
         }
         System.out.println("Piece model: " + session.get().composition().tracks().size() + " tracks, "
                 + session.get().composition().parts().size() + " parts taken over; old files kept.");
+    }
+
+    /**
+     * The bundled piece is rendered from its model and mixed on its stage; rendering it again
+     * renders nothing, because every stem is in the cache.
+     */
+    private static void verifyModelRendering(InstrumentRegistry registry, Path folder) throws Exception {
+        com.aresstack.audio.studio.application.ProjectSession session =
+                com.aresstack.audio.studio.application.ProjectSession.open(folder).get();
+        com.aresstack.audio.studio.application.PieceRendering rendering =
+                new com.aresstack.audio.studio.application.PieceRendering(registry);
+        java.util.Map<String, Integer> programs = new HashMap<String, Integer>();
+        com.aresstack.audio.studio.application.PieceRendering.Outcome first = rendering.render(session, null,
+                com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine.GERVILL, "fluidsynth",
+                "sfizz_render", programs, message -> { });
+        if (!Files.isRegularFile(first.mix()) || Files.size(first.mix()) < 1000
+                || first.stems().rendered().size() != session.composition().parts().size()
+                || !Files.isRegularFile(folder.resolve("arrangement.mid"))) {
+            throw new IllegalStateException("The piece was not rendered from its model.");
+        }
+        com.aresstack.audio.studio.application.PieceRendering.Outcome second = rendering.render(session, null,
+                com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine.GERVILL, "fluidsynth",
+                "sfizz_render", programs, message -> { });
+        if (!second.stems().rendered().isEmpty()) {
+            throw new IllegalStateException("An unchanged piece was rendered again: " + second.stems().rendered());
+        }
+        System.out.println("Model rendering: " + first.stems().rendered().size() + " stems rendered, then "
+                + second.stems().reused().size() + " taken from the cache.");
     }
 
     private static Path copyBundledComposition(Path directory) throws Exception {

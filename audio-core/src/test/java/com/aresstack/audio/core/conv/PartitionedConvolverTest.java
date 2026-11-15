@@ -24,6 +24,23 @@ public class PartitionedConvolverTest {
     }
 
     @Test
+    public void aResponseShorterThanTheHeadIsConvolvedToo() {
+        // Codex #54: a one-tap response read past its end.
+        float[] left = TestSignals.noise(3000, 3, 0.8);
+        float[] right = TestSignals.noise(3000, 4, 0.8);
+        float[][] out = run(new PartitionedConvolver(new float[] {0.5f}, new float[] {0.5f}), left, right, 512);
+        for (int i = 0; i < left.length; i++) {
+            assertEquals(left[i] * 0.5f, out[0][i], 1e-6);
+            assertEquals(right[i] * 0.5f, out[1][i], 1e-6);
+        }
+        float[] three = {1, -0.5f, 0.25f};
+        float[][] short3 = run(new PartitionedConvolver(three, three), left, right, 37);
+        for (int i = 2; i < left.length; i++) {
+            assertEquals(left[i] - 0.5f * left[i - 1] + 0.25f * left[i - 2], short3[0][i], 1e-6);
+        }
+    }
+
+    @Test
     public void aDelayedDiracDelaysWithoutLatencyOfItsOwn() {
         for (int delay : new int[] {0, 5, 63, 64, 65, 300, 1024, 5000, 17000}) {
             float[] ir = new float[20000];

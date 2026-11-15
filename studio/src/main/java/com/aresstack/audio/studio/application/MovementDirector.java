@@ -103,7 +103,8 @@ public final class MovementDirector {
     /**
      * What the AI is told of the piece: tempo, meter and key, length, and for each track its role
      * and how many notes it plays in each bar. Made from the written arrangement ({@link #of(Path)});
-     * the model of the piece can make it as well, so that the request does not depend on the file.
+     * or from the model of the piece ({@link #of(com.aresstack.audio.composition.Composition)}), so
+     * that the request does not depend on the file.
      *
      * @param meterAndKey as {@code "4/4"} or {@code "3/4, D minor"}
      */
@@ -133,6 +134,24 @@ public final class MovementDirector {
         }
         return new Piece(StageMixService.tempo(arrangement), MixDirector.meterAndKey(arrangement),
                 bars(arrangement), tracks);
+    }
+
+    /**
+     * The piece as its model says, with its time map; no written arrangement is needed. Tempo,
+     * meter and key are those at its start, as the mix proposal tells them.
+     */
+    public static Piece of(com.aresstack.audio.composition.Composition model) {
+        List<MusicTrack> parts = StageMixService.Piece.of(model).tracks();
+        Map<String, MixDirector.Summary> played = MixDirector.summaries(parts, model);
+        List<Track> tracks = new ArrayList<>();
+        for (MusicTrack track : parts) {
+            MixDirector.Summary summary = played.get(track.id());
+            tracks.add(new Track(track.id(), track.role(),
+                    summary == null || summary.notes == 0 ? null : summary.perBar()));
+        }
+        com.aresstack.audio.composition.TimeMap time = model.timeMap();
+        return new Piece((int) Math.round(time.tempoAt(0)), MixDirector.meterAndKey(model),
+                time.barsCovering(model.endTick()), tracks);
     }
 
     /**

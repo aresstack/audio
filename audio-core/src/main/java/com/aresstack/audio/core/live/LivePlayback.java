@@ -184,6 +184,16 @@ public final class LivePlayback implements AutoCloseable {
         return overruns;
     }
 
+    /** How often the sink ran empty while playing (see {@link LiveSink#underruns()}). */
+    public long underruns() {
+        return sink.underruns();
+    }
+
+    /** The fewest frames that waited in the sink before a write; -1 if the sink cannot tell. */
+    public int lowestBufferedFrames() {
+        return sink.lowestBufferedFrames();
+    }
+
     /** Stops the audio thread and closes the sink and the graph's sources. */
     @Override
     public void close() {

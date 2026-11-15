@@ -229,11 +229,10 @@ public final class LiveStageTest {
                 Assert.assertSame(sound, stage.sound());
                 live = drain(stage.graph(), SpatialStemMixer.BLOCK);
             }
-            // The file looks at the direction every 64 frames, live once per block, and the filters
-            // of the head blend in between: the two differ by more than on loudspeakers (measured
-            // 6e-3 at a signal of 0.5), about 40 dB below the signal.
-            Assert.assertArrayEquals("left, convolution " + sound.convolution(), file.left, live[0], 1e-2f);
-            Assert.assertArrayEquals("right, convolution " + sound.convolution(), file.right, live[1], 1e-2f);
+            // Live asks the motion on the grid of the file (every 64 frames), so both take the same
+            // course (see the broadband test below for what is left).
+            Assert.assertArrayEquals("left, convolution " + sound.convolution(), file.left, live[0], 1e-3f);
+            Assert.assertArrayEquals("right, convolution " + sound.convolution(), file.right, live[1], 1e-3f);
         }
 
         // It does cross the head: noise alone in a dry room is nearer the left ear at the start
@@ -245,6 +244,50 @@ public final class LiveStageTest {
             Assert.assertTrue(rms(live[0], 0, RATE / 2) > 1.2 * rms(live[1], 0, RATE / 2));
             Assert.assertTrue(rms(live[1], 3 * RATE, 7 * RATE / 2) > 1.2 * rms(live[0], 3 * RATE, 7 * RATE / 2));
         }
+    }
+
+    /**
+     * PO finding on the D4 stage: the same course with a broadband source that ends while another
+     * track goes on, so that its echoes, the room and the filters of the head ring out. Live asks
+     * the motion on the grid of the file, so both take the same course.
+     */
+    @Test
+    public void aMovingBroadbandSourceAndItsTailAreHeardLiveAsInTheFile() throws Exception {
+        float[] pad = tone(6 * RATE + RATE / 2, 220, RATE);
+        List<SpatialStemMixer.Signal> signals = List.of(
+                new SpatialStemMixer.Signal(noise(4 * RATE, 5), noise(4 * RATE, 6), RATE),
+                new SpatialStemMixer.Signal(pad, pad, RATE));
+        List<SoundSourcePlacement> placements = List.of(
+                new SoundSourcePlacement("violin", -0.5, 0.2, 0, 1, 0.3, false, false, null),
+                new SoundSourcePlacement("pad", 0.3, 0.6, -6, 0.8, 0.5, false, false, null).atHeight(0.5));
+        StageAutomation movements = rising("violin", "c1");
+        StageSound[] sounds = {StageSound.LOUDSPEAKERS, StageSound.binaural(),
+                StageSound.binaural().withConvolution(true)};
+        for (StageSound sound : sounds) {
+            SpatialStemMixer.Mix file = new SpatialStemMixer().withAutomation(movements).withSound(sound)
+                    .render(signals, placements, AcousticRoom.HALL, 2);
+            float[][] live;
+            try (LiveStage stage = LiveStage.of(signals, placements, AcousticRoom.HALL, 2, movements, sound)) {
+                live = drain(stage.graph(), SpatialStemMixer.BLOCK);
+            }
+            String how = "headphones " + sound.headphones() + ", convolution " + sound.convolution();
+            int end = 4 * RATE;
+            // The moving source, from its first echoes on: measured 5e-4 at a signal of 0.16 (rms),
+            // 50 dB below it. Where the rest comes from was not followed up further.
+            Assert.assertEquals(how + ", moving", 0, worst(file, live, 0, end), 1e-3);
+            // After the source has ended: its echoes, the room and the filters of the head ring out.
+            Assert.assertEquals(how + ", tail", 0, worst(file, live, end, file.left.length), 2e-4);
+            Assert.assertTrue(how + ": the tail is heard", rms(file.left, end, end + RATE / 2) > 1e-3);
+        }
+    }
+
+    /** The largest difference of one sample between file and live in the frames {@code from..to}. */
+    private static double worst(SpatialStemMixer.Mix file, float[][] live, int from, int to) {
+        double worst = 0;
+        for (int i = from; i < to; i++) {
+            worst = Math.max(worst, Math.max(Math.abs(file.left[i] - live[0][i]), Math.abs(file.right[i] - live[1][i])));
+        }
+        return worst;
     }
 
     /** A track that crosses the stage from left to right and rises from the ears to the top. */

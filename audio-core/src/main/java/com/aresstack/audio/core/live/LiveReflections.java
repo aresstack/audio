@@ -178,31 +178,41 @@ final class LiveReflections {
      * its sound, and adds the echoes that fall into them to the bus.
      */
     void process(AudioBlock channel, int heard, int count, AudioBlock bus) {
+        process(channel, 0, heard, count, bus);
+    }
+
+    /**
+     * Takes the frames {@code from..to} of the block, of which those before {@code heardEnd} carry
+     * the sound of the channel, and adds the echoes that fall into them to the same frames of the
+     * bus. A channel that follows a motion hands over its block in pieces this way.
+     */
+    void process(AudioBlock channel, int from, int heardEnd, int to, AudioBlock bus) {
         int size = history.length;
         float[] left = channel.left;
         float[] right = channel.right;
-        for (int i = 0; i < heard; i++) {
+        int heard = Math.max(from, Math.min(heardEnd, to));
+        for (int i = from; i < heard; i++) {
             mono[i] = (left[i] + right[i]) * 0.5f;
         }
-        lowPass.process(mono, 0, heard);
+        lowPass.process(mono, from, heard - from);
         int at = (int) (written % size);
-        for (int i = 0; i < count; i++) {
+        for (int i = from; i < to; i++) {
             history[at] = i < heard ? mono[i] : 0f;
             at = at + 1 == size ? 0 : at + 1;
         }
         float[] busLeft = bus.left;
         float[] busRight = bus.right;
-        int base = (int) (written % size);
+        int base = (int) (written % size) - from;
         for (int wall = 0; wall < walls; wall++) {
             Ramp gainLeft = toLeft[wall];
             Ramp gainRight = toRight[wall];
             if (fadeLeft[wall] == 0 && glideLeft[wall] == 0 && delay[wall] == target[wall]
                     && gainLeft.settled() && gainRight.settled()) {
                 // Nothing moves: a whole delay, exactly as EarlyReflections reads it.
-                int read = wrap(base - target[wall], size);
+                int read = wrap(base + from - target[wall], size);
                 float gl = gainLeft.value();
                 float gr = gainRight.value();
-                for (int i = 0; i < count; i++) {
+                for (int i = from; i < to; i++) {
                     float echo = history[read];
                     busLeft[i] += echo * gl;
                     busRight[i] += echo * gr;
@@ -211,7 +221,7 @@ final class LiveReflections {
                 continue;
             }
             float share = 1f / glideFrames;
-            for (int i = 0; i < count; i++) {
+            for (int i = from; i < to; i++) {
                 int now = base + i;
                 if (glideLeft[wall] > 0) {
                     if (--glideLeft[wall] == 0) {
@@ -237,7 +247,7 @@ final class LiveReflections {
                 busRight[i] += echo * gainRight.next();
             }
         }
-        written += count;
+        written += to - from;
     }
 
     /** The history {@code delay} frames before frame {@code now} of the ring, between two samples if need be. */

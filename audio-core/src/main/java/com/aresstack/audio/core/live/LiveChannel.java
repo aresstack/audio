@@ -28,11 +28,12 @@ import com.aresstack.audio.core.spatial.HrirSet;
  * channel computes exactly what {@code StemChannel} computes, sample for sample.
  *
  * <p>A source that moves with the piece ({@link ChannelParameters#motion()}, work packages D3
- * and D4) is asked once per block where it will be at the end of that block, and everything that
- * follows it glides there over the block: panner gains, sends, distance shelf, wall echoes and,
- * on headphones, the direction. It is the same course as in the file, looked at once per block
- * instead of every {@link SpatialMotion#RAMP} frames. Other parameters handed over meanwhile,
- * and a changed motion, are reached within that block, without a jump.
+ * and D4) is asked every {@link SpatialMotion#RAMP} frames of the mix where it will be one ramp
+ * later, and everything that follows it glides there over that ramp: panner gains, sends,
+ * distance shelf, wall echoes and, on headphones, the direction. That is the grid of the file
+ * ({@code SpatialChannel}), whatever the size of the blocks, so that live and file take the same
+ * course. Other parameters handed over meanwhile, and a changed motion, are reached by the next
+ * such frame, without a jump.
  *
  * <p>Made with a {@link HrirSet}, the channel is heard on headphones (work package D4): the
  * direct sound goes through a {@link BinauralPanner} that glides to the direction of the
@@ -66,6 +67,9 @@ public final class LiveChannel {
     private boolean replace = true;
     /** Where a moving source goes, written by its motion on the audio thread. */
     private final Seat moved;
+    /** The frame of the mix the glides of a moving source aim at; -1 before the first look. */
+    private long aimed = -1;
+    private SpatialMotion aimedMotion;
 
     /**
      * @param source       the sound of the channel at the rate of the mix
@@ -210,35 +214,25 @@ public final class LiveChannel {
             }
         }
         SpatialMotion motion = now.motion();
-        if (motion != null) {
-            if (replace) {
-                // At the start and after a jump the source stands where it is at that frame.
-                motion.seatAt(position, moved);
-                toLeft.reset(moved.toLeft);
-                toRight.reset(moved.toRight);
-                sendLeft.reset(moved.sendLeft);
-                sendRight.reset(moved.sendRight);
-                shelf.jumpTo(moved.shelf);
-                if (binaural != null) {
-                    binaural.jumpTo(moved.azimuth, moved.elevation);
-                }
-                if (reflections != null) {
-                    reflections.jumpTo(moved);
-                }
-            }
-            // Where it will be when this block ends: everything glides there over the block.
-            motion.seatAt(position + count, moved);
-            toLeft.glideTo(moved.toLeft, count);
-            toRight.glideTo(moved.toRight, count);
-            sendLeft.glideTo(moved.sendLeft, count);
-            sendRight.glideTo(moved.sendRight, count);
-            shelf.glideTo(moved.shelf, count);
+        if (motion != aimedMotion) {
+            aimedMotion = motion;
+            aimed = -1;
+        }
+        if (motion != null && replace) {
+            // At the start and after a jump the source stands where it is at that frame.
+            motion.seatAt(position, moved);
+            toLeft.reset(moved.toLeft);
+            toRight.reset(moved.toRight);
+            sendLeft.reset(moved.sendLeft);
+            sendRight.reset(moved.sendRight);
+            shelf.jumpTo(moved.shelf);
             if (binaural != null) {
-                binaural.aimAt(moved.azimuth, moved.elevation, count);
+                binaural.jumpTo(moved.azimuth, moved.elevation);
             }
             if (reflections != null) {
-                reflections.glideTo(moved, count);
+                reflections.jumpTo(moved);
             }
+            aimed = -1;
         }
         replace = false;
         int heard = 0;
@@ -252,6 +246,18 @@ public final class LiveChannel {
             if (now.curve() != null) {
                 alignCurve(now.curve(), position);
             }
+        }
+        if (motion != null) {
+            if (heard > 0) {
+                strip(now.curve(), position, heard);
+            } else {
+                for (int i = 0; i < count; i++) {
+                    level.next();
+                    width.next();
+                }
+            }
+            follow(motion, position, heard, count, master, send);
+            return;
         }
         if (heard > 0) {
             strip(now.curve(), position, heard);
@@ -275,6 +281,85 @@ public final class LiveChannel {
         }
         if (reflections != null) {
             reflections.process(block, heard, count, master);
+        }
+    }
+
+    /**
+     * The block of a source that moves with the piece, in the same pieces as the file renders it:
+     * at every {@link SpatialMotion#RAMP}th frame of the mix the motion says where the source is
+     * one ramp later, and gains, sends, shelf, echoes and direction glide there over that ramp.
+     * A block that starts between two such frames (after a jump, or with a new motion) glides to
+     * the next one from where it is.
+     */
+    private void follow(SpatialMotion motion, long position, int heard, int count, AudioBlock master,
+                        AudioBlock send) {
+        int i = 0;
+        while (i < count) {
+            long at = position + i;
+            int ahead = SpatialMotion.RAMP - (int) (at & (SpatialMotion.RAMP - 1));
+            if (at + ahead != aimed) {
+                aimed = at + ahead;
+                motion.seatAt(aimed, moved);
+                toLeft.glideTo(moved.toLeft, ahead);
+                toRight.glideTo(moved.toRight, ahead);
+                sendLeft.glideTo(moved.sendLeft, ahead);
+                sendRight.glideTo(moved.sendRight, ahead);
+                shelf.glideTo(moved.shelf, ahead);
+                if (binaural != null) {
+                    binaural.aimAt(moved.azimuth, moved.elevation, ahead);
+                }
+                if (reflections != null) {
+                    reflections.glideTo(moved, ahead);
+                }
+            }
+            int end = Math.min(count, i + ahead);
+            int heardEnd = Math.max(i, Math.min(end, heard));
+            float[] left = block.left;
+            float[] right = block.right;
+            if (send != null) {
+                float[] busLeft = send.left;
+                float[] busRight = send.right;
+                for (int j = i; j < heardEnd; j++) {
+                    busLeft[j] += left[j] * sendLeft.next();
+                    busRight[j] += right[j] * sendRight.next();
+                }
+            } else {
+                for (int j = i; j < heardEnd; j++) {
+                    sendLeft.next();
+                    sendRight.next();
+                }
+            }
+            for (int j = heardEnd; j < end; j++) {
+                sendLeft.next();
+                sendRight.next();
+            }
+            if (heardEnd > i) {
+                shelf.process(block, i, heardEnd - i);
+            }
+            if (binaural == null) {
+                float[] busLeft = master.left;
+                float[] busRight = master.right;
+                for (int j = i; j < heardEnd; j++) {
+                    busLeft[j] += left[j] * toLeft.next();
+                    busRight[j] += right[j] * toRight.next();
+                }
+                for (int j = heardEnd; j < end; j++) {
+                    toLeft.next();
+                    toRight.next();
+                }
+            } else {
+                for (int j = i; j < end; j++) {
+                    float gl = toLeft.next();
+                    float gr = toRight.next();
+                    mono[j] = j < heardEnd ? (left[j] * gl + right[j] * gr) * 0.5f : 0f;
+                }
+                // The filters and delays of the head ring out after the source has ended.
+                binaural.process(mono, i, end - i, master);
+            }
+            if (reflections != null) {
+                reflections.process(block, i, heardEnd, end, master);
+            }
+            i = end;
         }
     }
 

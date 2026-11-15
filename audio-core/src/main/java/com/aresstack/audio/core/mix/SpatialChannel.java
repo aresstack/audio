@@ -258,8 +258,9 @@ public final class SpatialChannel extends MixChannel {
             for (int j = from; j < to; j++, frame++) {
                 double back = frame - (double) delay;
                 long whole = (long) Math.floor(back);
-                if (whole >= 0 && whole < heardTotal) {
-                    float echo = history[(int) (whole % size)];
+                if (whole >= -1 && whole < heardTotal) {
+                    // between two samples; before the first one of the source there is silence, as live
+                    float echo = whole >= 0 ? history[(int) (whole % size)] : 0f;
                     float f = (float) (back - whole);
                     if (f != 0) {
                         float later = whole + 1 < heardTotal ? history[(int) ((whole + 1) % size)] : 0f;

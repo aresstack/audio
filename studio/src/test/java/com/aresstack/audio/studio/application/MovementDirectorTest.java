@@ -214,6 +214,26 @@ public final class MovementDirectorTest {
     }
 
     @Test
+    public void aPieceWithAModelIsToldFromTheModelNotFromTheFile() throws Exception {
+        PieceModel model = new PieceModel(line -> { });
+        model.open(piece);
+        com.aresstack.audio.composition.Composition composition = model.session().orElseThrow().composition();
+        MovementDirector.Piece fromModel = MovementDirector.of(composition);
+        MovementDirector.Piece fromFile = MovementDirector.of(piece.resolve("arrangement.tsv"));
+        assertEquals(108, fromModel.tempo());
+        assertEquals("the same parts and the same notes per bar", fromFile.tracks(), fromModel.tracks());
+        assertEquals(fromFile.bars(), fromModel.bars());
+        assertTrue(fromModel.meterAndKey().startsWith("4/4"));
+
+        // The file gone: the request still knows the piece.
+        Files.delete(piece.resolve("arrangement.tsv"));
+        Answering ai = new Answering("{\"movements\":[]}");
+        new MovementDirector(ai, 4096).propose("x", MovementDirector.of(composition), null, Set.of("harmony"),
+                piece, message -> { });
+        assertTrue(ai.prompts.get(0).contains("- harmony (harmony): notes per bar"));
+    }
+
+    @Test
     public void theMixRequestStaysAsItWas() throws Exception {
         Path arrangement = piece.resolve("arrangement.tsv");
         String prompt = MixDirector.prompt("A quiet morning", StageMixService.tracks(arrangement), arrangement, null);

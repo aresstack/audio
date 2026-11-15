@@ -45,9 +45,9 @@ public final class LiveDeck implements AutoCloseable {
     private final LiveStage stage;
     private final LivePlayback playback;
     private final boolean fixedLevel;
-    /** Where the mix document of the piece lies, and the tempo its stems were rendered at. */
+    /** Where the mix document of the piece lies, and the piece its movements are read along. */
     private final Path directory;
-    private final int tempo;
+    private final StageMixService.Piece piece;
     /** In the compatibility mode: the factor of the last file mix, and the master level it was found with. */
     private volatile float legacyFactor;
     private volatile double legacyMasterDb;
@@ -57,9 +57,9 @@ public final class LiveDeck implements AutoCloseable {
     private volatile long soughtAtBlock;
 
     private LiveDeck(LiveStage stage, LivePlayback playback, SpatialScene scene, float legacyFactor,
-                     Path directory, int tempo) {
+                     Path directory, StageMixService.Piece piece) {
         this.directory = directory;
-        this.tempo = tempo;
+        this.piece = piece;
         this.stage = stage;
         this.playback = playback;
         this.scene = scene;
@@ -87,14 +87,23 @@ public final class LiveDeck implements AutoCloseable {
         return open(arrangement, directory, scene, only, legacyFactor, sinks, StageSound.LOUDSPEAKERS);
     }
 
-    /**
-     * As above, heard as {@code sound} says: on headphones, with a convolved room (work package
-     * D4). The way of hearing belongs to the deck; another one needs a new deck ({@link #sound()}).
-     */
+    /** As below, for a written arrangement: a piece without a model, or an arrangement from elsewhere. */
     public static LiveDeck open(Path arrangement, Path directory, SpatialScene scene, String only,
                                 float legacyFactor, Sinks sinks, StageSound sound) throws Exception {
+        return open(StageMixService.Piece.written(arrangement), directory, scene, only, legacyFactor, sinks, sound);
+    }
+
+    /**
+     * As above, for the piece as the file mix takes it ({@link StageMixService.Piece}): a piece
+     * with a model plays its parts and moves along its time map, with all its changes of tempo
+     * and meter, and no written arrangement is read. Heard as {@code sound} says: on headphones,
+     * with a convolved room (work package D4). The way of hearing belongs to the deck; another
+     * one needs a new deck ({@link #sound()}).
+     */
+    public static LiveDeck open(StageMixService.Piece piece, Path directory, SpatialScene scene, String only,
+                                float legacyFactor, Sinks sinks, StageSound sound) throws Exception {
         StageSound heardAs = sound == null ? StageSound.LOUDSPEAKERS : sound;
-        List<MusicTrack> tracks = StageMixService.tracks(arrangement);
+        List<MusicTrack> tracks = piece.tracks();
         SpatialScene fitting = scene.fitting(tracks);
         List<Path> files = new ArrayList<Path>();
         List<SoundSourcePlacement> placements = new ArrayList<SoundSourcePlacement>();
@@ -116,15 +125,14 @@ public final class LiveDeck implements AutoCloseable {
         }
         float factor = legacyFactor;
         if (!fitting.fixedLevel() && !(factor > 0 && Float.isFinite(factor))) {
-            factor = measuredFactor(arrangement, directory, fitting, only, heardAs);
+            factor = measuredFactor(piece, directory, fitting, only, heardAs);
         }
         // How the tracks move with the piece (place and room share) comes from its mix document, as for the file.
-        int tempo = StageMixService.tempo(arrangement);
-        LiveStage stage = LiveStage.load(files, placements, fitting.room(), 4 * 60.0 / tempo,
-                StageMixService.movements(directory, tempo, message -> { }), heardAs);
+        LiveStage stage = LiveStage.load(files, placements, fitting.room(), piece.secondsPerBar(),
+                piece.movements(directory, message -> { }), heardAs);
         try {
             LivePlayback playback = stage.playback(master(fitting, factor, fitting.masterDb()), sinks.open());
-            return new LiveDeck(stage, playback, fitting, factor, directory, tempo);
+            return new LiveDeck(stage, playback, fitting, factor, directory, piece);
         } catch (Exception noSound) {
             stage.close();
             throw noSound;
@@ -138,7 +146,7 @@ public final class LiveDeck implements AutoCloseable {
      * the window, which may have mixed a newer stage by now. Not a number if it cannot be mixed;
      * the piece then plays at its master level alone.
      */
-    static float measuredFactor(Path arrangement, Path directory, SpatialScene fitting, String only,
+    static float measuredFactor(StageMixService.Piece piece, Path directory, SpatialScene fitting, String only,
                                 StageSound sound) {
         SpatialScene measured = fitting;
         for (SoundSourcePlacement placement : fitting.placements()) {
@@ -149,7 +157,7 @@ public final class LiveDeck implements AutoCloseable {
             scratch = Files.createTempFile(directory, "live-level-", ".part");
             StageMixService mixing = new StageMixService();
             mixing.setSound(sound);
-            mixing.export(arrangement, directory, measured, scratch, 16, null);
+            mixing.export(piece, directory, measured, scratch, 16, null);
             return mixing.outcome().legacyFactor();
         } catch (Exception unmixed) {
             return Float.NaN;
@@ -256,7 +264,7 @@ public final class LiveDeck implements AutoCloseable {
      * files, so it belongs off the event thread.
      */
     public void reloadMovements() {
-        stage.moving(StageMixService.movements(directory, tempo, message -> { }));
+        stage.moving(piece.movements(directory, message -> { }));
     }
 
     /**

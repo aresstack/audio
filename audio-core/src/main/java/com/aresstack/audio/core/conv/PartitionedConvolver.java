@@ -180,6 +180,7 @@ public final class PartitionedConvolver {
         float[] l = left;
         float[] r = right;
         int h = head;
+        int taps = Math.min(h, l.length); // a response shorter than the head
         for (int i = 0; i < count; i++) {
             float xl = inLeft[i];
             float xr = inRight[i];
@@ -191,7 +192,7 @@ public final class PartitionedConvolver {
             int newest = headAt + h;
             double sl = 0;
             double sr = 0;
-            for (int k = 0; k < h; k++) {
+            for (int k = 0; k < taps; k++) {
                 sl += l[k] * hl[newest - k];
                 sr += r[k] * hr[newest - k];
             }
