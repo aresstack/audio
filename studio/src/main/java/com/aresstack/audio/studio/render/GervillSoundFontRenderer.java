@@ -6,7 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Run Gervill inside the current Java installation without any native sampler executable. */
-public final class GervillSoundFontRenderer {
+public final class GervillSoundFontRenderer extends SamplerStemRenderer {
     private final ExternalProcessRunner processRunner;
 
     public GervillSoundFontRenderer(ExternalProcessRunner processRunner) {
@@ -14,6 +14,23 @@ public final class GervillSoundFontRenderer {
     }
 
     public void render(Path soundFont, Path midi, Path output) throws Exception {
+        renderFile(soundFont, midi, output, RenderLimits.STANDARD);
+    }
+
+    @Override
+    public String engine() {
+        return "gervill";
+    }
+
+    @Override
+    protected String settings() {
+        // Gervill is part of the JDK; another Java may sound different.
+        return "gervill\t44100 Hz stereo\ttail 2.5 s\tjava " + System.getProperty("java.specification.version");
+    }
+
+    @Override
+    protected void run(Path soundFont, Path midi, Path output, RenderLimits limits, double seconds)
+            throws Exception {
         List<String> command = new ArrayList<String>();
         command.add(javaExecutable());
         if (!System.getProperty("java.specification.version", "1.8").startsWith("1.")) {
@@ -26,7 +43,8 @@ public final class GervillSoundFontRenderer {
         command.add(midi.toAbsolutePath().toString());
         command.add(soundFont.toAbsolutePath().toString());
         command.add(output.toAbsolutePath().toString());
-        processRunner.execute(command, output);
+        command.add(Long.toString(limits.maxPiece().toSeconds()));
+        processRunner.execute(command, output, limits.processTimeout(seconds));
     }
 
     private static String javaExecutable() {
