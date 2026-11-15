@@ -89,10 +89,6 @@ final class AlbumsPanel extends JPanel {
             return com.aresstack.audio.studio.application.CompositionSpec.SECTION_BARS;
         }
 
-        /** How many titles of an album are made at the same time (studio.properties: albumPiecesAtOnce). */
-        default int piecesAtOnce() {
-            return PIECES_AT_ONCE;
-        }
 
         /** How many bars a long piece begins with and grows by (setting "Takte je Wachstumsschritt"). */
         default int growBars() {
@@ -142,9 +138,6 @@ final class AlbumsPanel extends JPanel {
         default void albumChanged() {
         }
     }
-
-    /** How many pieces of an album are made at the same time. */
-    static final int PIECES_AT_ONCE = 2;
 
     private final Host host;
     /** The list of the albums at the left of the page; hidden when the window has a tree of them. */
@@ -1014,7 +1007,9 @@ final class AlbumsPanel extends JPanel {
                         models.through(model -> new LimitedChatModel(model, permits)), tokens, requests, rendering)
                         .sectionBars(sectionBars).growBars(growBars).voices(voices[0], voices[1]),
                         songs);
-            }, Math.max(1, host.piecesAtOnce()));
+            // As many titles at once as there are requests allowed: every title gets its turn at the
+            // shared permits, so the setting "Parallel" alone limits the connections.
+            }, requests);
         } catch (RuntimeException invalid) {
             say(invalid.getMessage());
             return null;
@@ -1081,7 +1076,8 @@ final class AlbumsPanel extends JPanel {
             return;
         }
         say(onlyTrack != null ? "Der Titel wird neu produziert."
-                : "Das Album wird produziert: " + Math.max(1, host.piecesAtOnce()) + " Stücke gleichzeitig.");
+                : "Das Album wird produziert: bis zu " + Math.max(1, host.parallelRequests())
+                + " KI-Anfragen gleichzeitig, verteilt auf die Titel.");
         keys();
         final AlbumProductionCoordinator.Production running = production;
         Thread waiter = new Thread(() -> {
