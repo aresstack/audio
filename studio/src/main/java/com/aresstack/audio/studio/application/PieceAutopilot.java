@@ -60,9 +60,9 @@ public final class PieceAutopilot {
      * far in view. One plan for minutes of music would need an answer of the model longer than any
      * limit of tokens. The number is the setting "Takte je Stück und Schritt"; this is its default.
      */
-    public static final int GROW_BARS = 40;
+    public static final int GROW_BARS = com.aresstack.audio.studio.settings.AiDefaults.PIECE_BARS;
     public static final int MIN_GROW_BARS = 4;
-    public static final int MAX_GROW_BARS = 256;
+    public static final int MAX_GROW_BARS = 512;
 
     private final InstrumentRegistry registry;
     private final ModelLineup models;

@@ -11,7 +11,7 @@ import java.util.Properties;
  */
 public final class AiDefaults {
     public static final String MODEL = "google/gemma-4-31B-it";
-    public static final int MAX_TOKENS = 16384;
+    public static final int MAX_TOKENS = 32768;
 
     private AiDefaults() {
     }
@@ -48,18 +48,18 @@ public final class AiDefaults {
     }
 
     /** The bars of a piece and of each step that makes it longer, unless the user says otherwise. */
-    public static final int PIECE_BARS = 40;
+    public static final int PIECE_BARS = 240;
 
     /**
-     * The bars a new piece has, an extension adds and a long piece grows by per step: 4 to 256,
-     * {@link #PIECE_BARS} when missing or malformed. Kept as {@code pieceBars}; the older
-     * {@code growBars} (16 by default, saved with every setting) is no longer read, so that the
-     * new default reaches everyone.
+     * The bars a new piece has, an extension adds and a long piece grows by per step: 4 to 512,
+     * {@link #PIECE_BARS} when missing or malformed. Kept as {@code portionBars}; the older
+     * {@code pieceBars} (40 by default, saved with every setting) and {@code growBars} are no
+     * longer read, so that the new default reaches everyone.
      */
     public static int growBars(Properties settings) {
         try {
-            return Math.max(4, Math.min(256,
-                    Integer.parseInt(settings.getProperty("pieceBars", Integer.toString(PIECE_BARS)).trim())));
+            return Math.max(4, Math.min(512,
+                    Integer.parseInt(settings.getProperty("portionBars", Integer.toString(PIECE_BARS)).trim())));
         } catch (NumberFormatException invalid) {
             return PIECE_BARS;
         }
