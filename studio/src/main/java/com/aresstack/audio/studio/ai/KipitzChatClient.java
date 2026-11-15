@@ -57,22 +57,19 @@ public final class KipitzChatClient implements ChatModel {
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("AI request was cancelled.");
         }
-        if (Files.isRegularFile(cache)) {
-            try {
-                return new JsonParser().parse(new String(Files.readAllBytes(cache), StandardCharsets.UTF_8))
-                        .getAsJsonObject();
-            } catch (RuntimeException invalidCache) {
-                throw new IOException("Cached JSON is invalid: " + cache, invalidCache);
-            }
+        AnswerOrigin origin = origin(instruction, prompt, maxTokens);
+        JsonObject kept = AnswerCache.reuse(cache, origin, legacyModel);
+        if (kept != null) {
+            return kept;
         }
         if (apiKey == null || apiKey.trim().isEmpty()) {
             throw new IOException("Enter an API key to generate the missing composition part.");
         }
         JsonObject request = new JsonObject();
         request.addProperty("model", model);
-        request.addProperty("temperature", 0.55);
-        request.addProperty("top_p", 0.9);
-        request.addProperty("top_k", 40);
+        request.addProperty("temperature", TEMPERATURE);
+        request.addProperty("top_p", TOP_P);
+        request.addProperty("top_k", TOP_K);
         request.addProperty("max_tokens", maxTokens);
         request.addProperty("user", "audio-swing-studio");
         JsonArray messages = new JsonArray();
@@ -122,12 +119,46 @@ public final class KipitzChatClient implements ChatModel {
                 throw new IOException("The model returned no JSON object.");
             }
             JsonObject parsed = new JsonParser().parse(content.substring(start, end + 1)).getAsJsonObject();
-            Files.createDirectories(cache.getParent());
-            Files.write(cache, gson.toJson(parsed).getBytes(StandardCharsets.UTF_8));
+            AnswerCache.store(cache, origin, gson.toJson(parsed));
             return parsed;
         } catch (RuntimeException malformed) {
             throw new IOException("Could not parse the KIPITZ model response.", malformed);
         }
+    }
+
+    /** The sampling of every request; part of the identity of a kept answer. */
+    static final double TEMPERATURE = 0.55;
+    static final double TOP_P = 0.9;
+    static final int TOP_K = 40;
+
+    /**
+     * The model an answer kept before origins were written down is taken to come from: the
+     * studio's single model of before. Until told otherwise the studio's default.
+     */
+    private volatile String legacyModel = com.aresstack.audio.studio.settings.AiDefaults.MODEL;
+
+    /**
+     * Says which model the answers kept without an origin came from, normally the {@code model}
+     * of the settings. Such an answer is given again only when this client asks that model.
+     */
+    public KipitzChatClient legacyModel(String model) {
+        this.legacyModel = model == null || model.isBlank() ? com.aresstack.audio.studio.settings.AiDefaults.MODEL
+                : model.trim();
+        return this;
+    }
+
+    @Override
+    public String name() {
+        return model == null ? "" : model.trim();
+    }
+
+    @Override
+    public boolean hasAnswer(String instruction, String prompt, int maxTokens, Path cache) {
+        return AnswerCache.reusable(cache, origin(instruction, prompt, maxTokens), legacyModel);
+    }
+
+    private AnswerOrigin origin(String instruction, String prompt, int maxTokens) {
+        return new AnswerOrigin(name(), instruction, prompt, maxTokens, TEMPERATURE, TOP_P, TOP_K);
     }
 
     /** How often a request is sent again when the connection fails or breaks off, before the failure counts. */
