@@ -145,4 +145,98 @@ public final class AlbumEndToEndTest {
                 said.stream().anyMatch(line -> line.contains("unverändert übernommen")));
         assertEquals("and the model is not asked again", asked, model.piece.prompts.size());
     }
+
+    /**
+     * PO findings on PR #41 and #44: a production that is cancelled while a piece is being rendered
+     * (composed, one stem made, the other not) goes on with the same producer in the same studio.
+     * The run after the cancel gets models of its own (the lineup of the first run is stopped for
+     * good), the piece is finished in the same folder, the stem that was made is not synthesized a
+     * second time, and the title is DONE only then.
+     */
+    @Test
+    public void aProductionCancelledWhileRenderingGoesOnAndKeepsTheStemsItHas() throws Exception {
+        Path library = temporary.newFolder("interrupted").toPath();
+        SongLibrary songs = new SongLibrary(library);
+        AlbumFiles files = new AlbumFiles(library);
+        Model model = new Model();
+        Semaphore permits = new Semaphore(2, true);
+        Album album = files.create("One Piece", new AlbumConcept("A Christmas album", "orchestral", 1, 16));
+        album = new ChatAlbumPlanner(model, 4096).plan(album, files.folder(album.id()), line -> { });
+        files.save(album);
+        AlbumTrack title = album.tracks().get(0);
+
+        java.util.List<ModelLineup> lineups = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        InstrumentRegistry registry = new InstrumentRegistry(library.resolve("none.properties"));
+        // As the page does: every start makes its autopilot with a lineup of its own; the permits are shared.
+        AlbumProducer producer = new AlbumProducer(files, songs, () -> {
+            ModelLineup lineup = ModelLineup.of(model).through(each -> new LimitedChatModel(each, permits));
+            lineups.add(lineup);
+            return new AutopilotPieceProduction(
+                    new PieceAutopilot(registry, lineup, 4096, 8, PieceAutopilot.Rendering.BUILT_IN), songs);
+        }, 2);
+
+        java.util.List<String> firstRun = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        java.util.List<Status> seen = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        com.aresstack.audio.studio.album.AlbumProductionCoordinator.Production[] running =
+                new com.aresstack.audio.studio.album.AlbumProductionCoordinator.Production[1];
+        java.util.concurrent.CountDownLatch started = new java.util.concurrent.CountDownLatch(1);
+        running[0] = producer.start(album.id(), new com.aresstack.audio.studio.album.AlbumProductionCoordinator.Listener() {
+            @Override
+            public void changed(Album now, AlbumProductionState at) {
+                seen.add(at.status(title.id()));
+            }
+
+            @Override
+            public void progress(AlbumTrack track, String message) {
+                firstRun.add(message);
+                if (message.startsWith("Rendere low mit ")) {
+                    // The user presses "Abbrechen" while the second stem is being made.
+                    try {
+                        started.await();
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                    running[0].cancel();
+                    throw new java.util.concurrent.CancellationException("cancelled while rendering");
+                }
+            }
+        });
+        started.countDown();
+        AlbumProductionState stopped = running[0].await();
+        assertEquals("cancelled, not failed, and not finished: " + stopped.of(title.id()).reason(), Status.QUEUED,
+                stopped.status(title.id()));
+        assertTrue("never DONE before it was finished: " + seen, !seen.contains(Status.DONE));
+        assertTrue(firstRun.toString(), firstRun.stream().anyMatch(line -> line.startsWith("Rendere lead mit ")));
+        Path folder = library.resolve(files.album(album.id()).orElseThrow().tracks().get(0).piece());
+        assertTrue("composed before the cancel", Files.isRegularFile(folder.resolve("arrangement.tsv")));
+        int asked = model.piece.prompts.size();
+
+        // start -> cancel -> await -> start with the same producer.
+        java.util.List<String> secondRun = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        AlbumProductionState done = producer.start(album.id(),
+                new com.aresstack.audio.studio.album.AlbumProductionCoordinator.Listener() {
+                    @Override
+                    public void changed(Album now, AlbumProductionState at) {
+                    }
+
+                    @Override
+                    public void progress(AlbumTrack track, String message) {
+                        secondRun.add(message);
+                    }
+                }).await();
+        assertEquals(done.of(title.id()).reason(), Status.DONE, done.status(title.id()));
+        assertEquals("a lineup per run", 2, lineups.size());
+        assertEquals("finished in the same folder", folder,
+                library.resolve(files.album(album.id()).orElseThrow().tracks().get(0).piece()));
+        assertEquals(1, songs.songs().size());
+        assertTrue("the stem that was made is not synthesized again: " + secondRun,
+                secondRun.stream().noneMatch(line -> line.startsWith("Rendere lead mit ")));
+        assertTrue("only the missing stem is made: " + secondRun,
+                secondRun.stream().anyMatch(line -> line.startsWith("Rendere low mit "))
+                        && secondRun.stream().anyMatch(line -> line.startsWith("Rendere 1 von 2 Spuren"))
+                        && secondRun.stream().anyMatch(line -> line.contains("1 Spuren neu gerendert, 1 unverändert")));
+        assertEquals("the answers of the models are there from the first run", asked, model.piece.prompts.size());
+        assertTrue(Files.isRegularFile(folder.resolve(StageMixService.MIX_FILE)));
+        assertTrue(Files.isRegularFile(folder.resolve(PieceRendering.MIDI_FILE)));
+    }
 }
