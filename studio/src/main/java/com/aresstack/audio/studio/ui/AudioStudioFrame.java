@@ -1601,6 +1601,16 @@ public final class AudioStudioFrame extends JFrame {
             public void piecesChanged() {
                 refreshSongs();
             }
+
+            @Override
+            public com.aresstack.audio.studio.progress.SketchProgress pieceWatch(Path piece) {
+                return albumPieceWatch(piece);
+            }
+
+            @Override
+            public void pieceProduced(Path piece) {
+                albumPieceProduced(piece);
+            }
         }, songs, registry);
         albumsPanel = albums;
         albums.listInTree(); // the albums are chosen in the tree at the left
@@ -4646,10 +4656,99 @@ public final class AudioStudioFrame extends JFrame {
     private TrackProgress.Stage trackStage;
     private long trackStageBegan;
 
+    /**
+     * The open piece is made by the production of its album: what the AI streams for it is shown
+     * as while the window composes it itself. {@code null} while no such piece is open.
+     */
+    private Path albumLive;
+
+    /** Whether pictures of a piece on its way are shown: the window composes, or the album makes the open piece. */
+    private boolean livePicture() {
+        return (worker != null && !worker.isDone())
+                || (albumLive != null && albumLive.equals(Paths.get(directory.getText().trim())));
+    }
+
+    /**
+     * What the album production streams for a piece, shown in the score, the arrangement, the
+     * track strips and the sections, if that piece is open (now or once the user opens it).
+     */
+    private com.aresstack.audio.studio.progress.SketchProgress albumPieceWatch(Path piece) {
+        java.util.function.Consumer<Runnable> onOpen = shown -> SwingUtilities.invokeLater(() -> {
+            if (!piece.equals(Paths.get(directory.getText().trim()))
+                    || (worker != null && !worker.isDone())) {
+                return; // another piece is open, or the window works on its own
+            }
+            albumLive = piece;
+            shown.run();
+        });
+        return new com.aresstack.audio.studio.progress.SketchProgress() {
+            @Override
+            public void update(String message) {
+            }
+
+            @Override
+            public void track(String trackId, TrackProgress.Stage stage, TrackProgress.State state, String detail) {
+                onOpen.accept(() -> trackWork(trackId, stage, state, detail));
+            }
+
+            @Override
+            public void sketch(List<String> arrangement) {
+                onOpen.accept(() -> showSketch(arrangement));
+            }
+
+            @Override
+            public void arriving(long characters) {
+                onOpen.accept(() -> {
+                    arrived = characters;
+                    showTrackWork();
+                });
+            }
+
+            @Override
+            public void preparing(String what, long characters) {
+                onOpen.accept(() -> showPreparing(what, characters));
+            }
+
+            @Override
+            public void planned(List<String> chords) {
+                onOpen.accept(() -> showPlanned(chords));
+            }
+
+            @Override
+            public void form(List<com.aresstack.audio.studio.progress.FormSection> sections) {
+                onOpen.accept(() -> showForm(sections));
+            }
+
+            @Override
+            public void instruments(List<String[]> chosen) {
+                onOpen.accept(() -> showChosenInstruments(chosen));
+            }
+        };
+    }
+
+    /** The album production of a piece ended: if it is open, it is shown as it is now, from its files. */
+    private void albumPieceProduced(Path piece) {
+        boolean shown = piece.equals(albumLive);
+        if (shown) {
+            albumLive = null;
+            preparing = null;
+            preparingClock.stop();
+            trackStates.clear();
+            trackTable.clearWork();
+            endChoosing(true); // the instruments the production chose are the piece's now
+        }
+        if (piece.equals(Paths.get(directory.getText().trim())) && (worker == null || worker.isDone())) {
+            Path song = piece.resolve("arrangement.tsv");
+            arrangementFile.setText(Files.isRegularFile(song) ? song.toString() : "");
+            loadArrangementForCurrentDirectory(new Properties());
+        }
+        refreshSongs();
+    }
+
     /** A track reports from the workers: its strip shows it, and the display counts all of them. */
     private void trackWork(String trackId, TrackProgress.Stage stage, TrackProgress.State state,
                            String detail) {
-        if (worker == null || worker.isDone()) {
+        if (!livePicture()) {
             return; // a late word after the work was cancelled
         }
         if (stage != trackStage) {
@@ -4678,7 +4777,7 @@ public final class AudioStudioFrame extends JFrame {
      * answer is there.
      */
     private void showPreparing(String what, long characters) {
-        if (worker == null || worker.isDone()) {
+        if (!livePicture()) {
             return;
         }
         if (!what.equals(preparing)) {
@@ -4693,7 +4792,7 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     private void sayPreparing() {
-        if (preparing == null || worker == null || worker.isDone()) {
+        if (preparing == null || !livePicture()) {
             preparing = null;
             preparingClock.stop();
             return;
@@ -4708,7 +4807,7 @@ public final class AudioStudioFrame extends JFrame {
 
     /** The plan is there: the chords are said until the first notes arrive. */
     private void showPlanned(List<String> chords) {
-        if (worker == null || worker.isDone()) {
+        if (!livePicture()) {
             return;
         }
         preparing = null;
@@ -4731,7 +4830,7 @@ public final class AudioStudioFrame extends JFrame {
      * is shown again when the work is over.
      */
     private void showForm(List<com.aresstack.audio.studio.progress.FormSection> sections) {
-        if (worker == null || worker.isDone()) {
+        if (!livePicture()) {
             return;
         }
         try {
@@ -4781,7 +4880,7 @@ public final class AudioStudioFrame extends JFrame {
      * there, and a choice that fails gives the lanes back as they were.
      */
     private void showChosenInstruments(List<String[]> chosen) {
-        if (worker == null || worker.isDone() || chosen.isEmpty()) {
+        if (!livePicture() || chosen.isEmpty()) {
             return;
         }
         boolean loading = loadingTracks;
@@ -4834,7 +4933,7 @@ public final class AudioStudioFrame extends JFrame {
 
     /** The mix while the AI writes it: the players move on the stage, dashed, as their places arrive. */
     private void showMixArriving(com.aresstack.audio.studio.stage.SpatialScene seen) {
-        if (worker == null || worker.isDone()) {
+        if (!livePicture()) {
             return;
         }
         try {
@@ -4849,7 +4948,7 @@ public final class AudioStudioFrame extends JFrame {
     /** The movements while the AI writes them: the curves appear dashed under the sliders, track by track. */
     private void showMovesArriving(com.aresstack.audio.studio.stage.SpatialScene proposed,
                                    com.aresstack.audio.studio.application.MovementDirector.Proposal seen) {
-        if (worker == null || worker.isDone()) {
+        if (!livePicture()) {
             return;
         }
         try {
@@ -4880,7 +4979,7 @@ public final class AudioStudioFrame extends JFrame {
      * note that arrives. Only shown; the saved piece is shown again when the work is over.
      */
     private void showSketch(List<String> arrangement) {
-        if (worker == null || worker.isDone()) {
+        if (!livePicture()) {
             return; // a late picture after the work ended: the score shows the piece itself again
         }
         preparing = null;

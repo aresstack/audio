@@ -117,6 +117,18 @@ final class AlbumsPanel extends JPanel {
         /** The library changed: pieces were made. */
         void piecesChanged();
 
+        /**
+         * Where the piece of a title shows itself while the AI writes it: notes, instruments and
+         * form as they stream in, if the piece is open in the window. {@code null}: nowhere.
+         */
+        default com.aresstack.audio.studio.progress.SketchProgress pieceWatch(Path piece) {
+            return null;
+        }
+
+        /** The production of this piece ended (finished or failed): the window shows it as it is now. */
+        default void pieceProduced(Path piece) {
+        }
+
         /** The user chose this album in the list of the page; the window's choice of the album follows. */
         default void albumChosen(String id) {
         }
@@ -992,6 +1004,26 @@ final class AlbumsPanel extends JPanel {
                 @Override
                 public void changed(Album now, AlbumProductionState at) {
                     SwingUtilities.invokeLater(() -> produced(id, now, at));
+                    for (AlbumTrack each : now.tracks()) {
+                        Status is = at.status(each.id());
+                        if (is == Status.RUNNING) {
+                            running.add(each.id());
+                        } else if (each.hasPiece() && running.remove(each.id())) {
+                            // A piece this run worked on is finished, failed or stopped.
+                            Path piece = songs.root().resolve(each.piece());
+                            SwingUtilities.invokeLater(() -> host.pieceProduced(piece));
+                        }
+                    }
+                }
+
+                /** The titles this run is working on. */
+                private final java.util.Set<String> running = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+                @Override
+                public com.aresstack.audio.studio.progress.Progress watching(AlbumTrack track, Path piece,
+                        com.aresstack.audio.studio.progress.Progress plain) {
+                    com.aresstack.audio.studio.progress.SketchProgress shown = host.pieceWatch(piece);
+                    return shown == null ? plain : new PieceWatch(plain, shown);
                 }
 
                 @Override
@@ -1300,6 +1332,58 @@ final class AlbumsPanel extends JPanel {
             } catch (IOException | RuntimeException failed) {
                 say("Die Änderung ließ sich nicht speichern: " + failed.getMessage());
             }
+        }
+    }
+
+    /** The progress of a piece of the album that tells the page and shows the piece where it is open. */
+    private static final class PieceWatch implements com.aresstack.audio.studio.progress.SketchProgress {
+        private final com.aresstack.audio.studio.progress.Progress plain;
+        private final com.aresstack.audio.studio.progress.SketchProgress shown;
+
+        PieceWatch(com.aresstack.audio.studio.progress.Progress plain,
+                   com.aresstack.audio.studio.progress.SketchProgress shown) {
+            this.plain = plain;
+            this.shown = shown;
+        }
+
+        @Override
+        public void update(String message) {
+            plain.update(message);
+        }
+
+        @Override
+        public void track(String trackId, Stage stage, State state, String detail) {
+            shown.track(trackId, stage, state, detail);
+        }
+
+        @Override
+        public void sketch(List<String> arrangement) {
+            shown.sketch(arrangement);
+        }
+
+        @Override
+        public void arriving(long characters) {
+            shown.arriving(characters);
+        }
+
+        @Override
+        public void preparing(String what, long characters) {
+            shown.preparing(what, characters);
+        }
+
+        @Override
+        public void planned(List<String> chords) {
+            shown.planned(chords);
+        }
+
+        @Override
+        public void form(List<com.aresstack.audio.studio.progress.FormSection> sections) {
+            shown.form(sections);
+        }
+
+        @Override
+        public void instruments(List<String[]> chosen) {
+            shown.instruments(chosen);
         }
     }
 }
