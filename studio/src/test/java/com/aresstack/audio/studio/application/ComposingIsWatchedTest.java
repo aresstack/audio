@@ -58,6 +58,21 @@ public final class ComposingIsWatchedTest {
     private static final class Watcher implements SketchProgress {
         final List<List<String>> sketches = Collections.synchronizedList(new ArrayList<List<String>>());
 
+        final List<String> steps = java.util.Collections.synchronizedList(new ArrayList<String>());
+        final List<List<String>> plans = java.util.Collections.synchronizedList(new ArrayList<List<String>>());
+        volatile int sketchesWhenPlanned = -1;
+
+        @Override
+        public void preparing(String what, long characters) {
+            steps.add(what);
+        }
+
+        @Override
+        public void planned(List<String> chords) {
+            sketchesWhenPlanned = sketches.size();
+            plans.add(chords);
+        }
+
         @Override
         public void sketch(List<String> arrangement) {
             sketches.add(new ArrayList<String>(arrangement));
@@ -102,6 +117,12 @@ public final class ComposingIsWatchedTest {
             assertEquals("the paper has the length of the plan from the start", 24, score.bars());
             assertFalse(score.staves().isEmpty());
         }
+
+        // The time before the first note is not silent: the planning is said, then the plan.
+        assertEquals("Die KI plant Struktur und Harmonien", watcher.steps.get(0));
+        assertEquals(1, watcher.plans.size());
+        assertEquals(24, watcher.plans.get(0).size());
+        assertEquals("the plan is said before the first notes", 0, watcher.sketchesWhenPlanned);
 
         // Watching changes nothing of the piece.
         Path unwatched = folder.newFolder("unwatched").toPath();
