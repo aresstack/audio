@@ -552,6 +552,44 @@ public final class ProjectSessionTest {
         assertEquals(session.composition(), ProjectSession.open(piece).orElseThrow().composition());
     }
 
+    @Test
+    public void aSoundBankChangedBackToBuiltinWithoutInstrumentIsTakenOverToo() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        assertEquals("generaluser::48", session.composition().part("harmony").libraryId());
+        assertTrue(StemManifest.load(piece).stream().anyMatch(entry -> entry.partId().equals("harmony")));
+        Path tracks = piece.resolve(ProjectFolder.TRACKS);
+        String json = new String(Files.readAllBytes(tracks), StandardCharsets.UTF_8)
+                .replace("\"instrument\":\"String ensemble\",\"program\":48,\"libraryId\":\"generaluser::48\"",
+                        "\"program\":48,\"libraryId\":\"builtin\"");
+        Files.write(tracks, json.getBytes(StandardCharsets.UTF_8));
+        assertTrue(session.synchronize());
+        assertEquals("builtin", session.composition().part("harmony").libraryId());
+        assertEquals("the instrument the model had stays", "String ensemble",
+                session.composition().part("harmony").instrument());
+        assertEquals("the others stay", "Music box", session.composition().part("melody").instrument());
+        assertFalse("the stem of the harmony no longer fits",
+                StemManifest.load(piece).stream().anyMatch(entry -> entry.partId().equals("harmony")));
+        assertTrue(StemManifest.load(piece).stream().anyMatch(entry -> entry.partId().equals("melody")));
+        assertFalse("taken over once", session.synchronize());
+        session.save();
+        ProjectSession reopened = ProjectSession.open(piece).orElseThrow();
+        assertEquals(session.composition(), reopened.composition());
+        assertEquals("builtin", reopened.composition().part("harmony").libraryId());
+        assertFalse(reopened.externalChanges());
+    }
+
+    @Test
+    public void aTracksJsonEntryThatNamesNoSoundBankLeavesTheModelsOne() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        Path tracks = piece.resolve(ProjectFolder.TRACKS);
+        String json = new String(Files.readAllBytes(tracks), StandardCharsets.UTF_8)
+                .replace("\"program\":48,\"libraryId\":\"generaluser::48\"", "\"program\":48");
+        Files.write(tracks, json.getBytes(StandardCharsets.UTF_8));
+        session.synchronize();
+        assertEquals("generaluser::48", session.composition().part("harmony").libraryId());
+        assertEquals("String ensemble", session.composition().part("harmony").instrument());
+    }
+
     private static Composition withVelocity(Composition composition, String trackId, int index, int velocity) {
         Track track = composition.track(trackId);
         MidiClip clip = (MidiClip) track.clips().get(0);
