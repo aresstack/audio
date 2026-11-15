@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -205,5 +206,68 @@ public final class AlbumTest {
         kept.save(folder);
         assertEquals(List.of("Chor", "Orgelmusik"), AlbumSuggestions.load(folder).of(AlbumSuggester.Field.STYLE));
         assertEquals(List.of(), AlbumSuggestions.load(folder).of(AlbumSuggester.Field.TITLE));
+    }
+
+    /** PO finding on PR #39: an id is one safe folder name; nothing else is opened or deleted. */
+    @Test
+    public void onlyTheFolderOfOneAlbumIsEverDeleted() throws Exception {
+        Path library = temporary.newFolder("lib-delete").toPath();
+        AlbumFiles files = new AlbumFiles(library);
+        Album one = files.create("One", new AlbumConcept("x", "", 2, 60));
+        Album two = files.create("Two", new AlbumConcept("y", "", 2, 60));
+        Files.createDirectories(library.resolve("a-piece"));
+        for (String bad : new String[]{".", "..", "", "one/..", "one/../two", "../a-piece", "one/", "/tmp", "One",
+                "one\\..", ".albums", null}) {
+            try {
+                files.delete(bad);
+                Assert.fail("deleted with the id " + bad);
+            } catch (IllegalArgumentException refused) {
+                // as it must be
+            }
+            try {
+                files.folder(bad);
+                Assert.fail("a folder for the id " + bad);
+            } catch (IllegalArgumentException refused) {
+                // as it must be
+            }
+            assertTrue(files.album(bad == null ? "" : bad).isEmpty());
+            assertEquals("after delete(" + bad + ")", 2, files.albums().size());
+        }
+        assertTrue(Files.isDirectory(library.resolve("a-piece")));
+        files.delete(one.id());
+        assertEquals(List.of(two), files.albums());
+        files.delete("never-there");
+        assertEquals(List.of(two), files.albums());
+    }
+
+    /** PO finding on PR #39: a piece folder from album.json is one plain name in the library, or it is not followed. */
+    @Test
+    public void aPieceFolderFromTheFileNeverLeadsOutOfTheLibrary() throws Exception {
+        for (String bad : new String[]{"../other", "..", ".", "a/b", "a\\b", "/abs", "C:\\x", "C:x", ".albums",
+                ".hidden", "x/..", " padded", "dot."}) {
+            assertFalse(bad, AlbumTrack.isFolderName(bad));
+            try {
+                new AlbumTrack("t1", "T", "", 100, "C major", "4/4", "", "", 60, bad);
+                // " padded" is trimmed to a plain name, which is fine.
+                assertEquals(bad, " padded", bad);
+            } catch (IllegalArgumentException refused) {
+                // as it must be
+            }
+        }
+        assertTrue(AlbumTrack.isFolderName("Winter Waltz 2"));
+        assertTrue(AlbumTrack.isFolderName("stille-nacht"));
+
+        Path library = temporary.newFolder("lib-piece").toPath();
+        AlbumFiles files = new AlbumFiles(library);
+        Album album = files.create("Tampered", new AlbumConcept("x", "", 1, 60));
+        files.save(album.withTracks(List.of(new AlbumTrack("t1", "T", "", 100, "C major", "4/4", "", "", 60, "good"))));
+        Path file = files.folder(album.id()).resolve(AlbumFiles.FILE_NAME);
+        String json = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        assertTrue(json.contains("\"piece\": \"good\""));
+        Files.write(file, json.replace("\"piece\": \"good\"", "\"piece\": \"../outside\"")
+                .getBytes(StandardCharsets.UTF_8));
+        Album read = files.album(album.id()).orElseThrow();
+        assertEquals("the entry is not followed", "", read.tracks().get(0).piece());
+        assertFalse(read.tracks().get(0).hasPiece());
     }
 }

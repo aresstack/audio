@@ -721,12 +721,22 @@ final class AlbumsPanel extends JPanel {
         }
         final AlbumProducer producer;
         try {
+            // What the window says is read once, here on the event thread; the workers never ask it.
+            final int requests = Math.max(1, host.parallelRequests());
+            final int tokens = host.tokens();
+            final PieceAutopilot.Rendering rendering = host.rendering();
             // Every model of the production goes through the same permits: the limit holds over all pieces.
-            Semaphore permits = new Semaphore(Math.max(1, host.parallelRequests()), true);
-            ModelLineup lineup = host.models().through(model -> new LimitedChatModel(model, permits));
-            PieceAutopilot autopilot = new PieceAutopilot(registry, lineup, host.tokens(),
-                    Math.max(1, host.parallelRequests()), host.rendering());
-            producer = new AlbumProducer(files, songs, new AutopilotPieceProduction(autopilot, songs), PIECES_AT_ONCE);
+            final Semaphore permits = new Semaphore(requests, true);
+            // The settings are checked now, so that a missing one is said before anything starts.
+            final ModelLineup[] first = {host.models()};
+            // Every start gets models of its own: "Abbrechen" stops those of its run for good.
+            producer = new AlbumProducer(files, songs, () -> {
+                ModelLineup models = first[0] != null ? first[0] : host.models();
+                first[0] = null;
+                return new AutopilotPieceProduction(new PieceAutopilot(registry,
+                        models.through(model -> new LimitedChatModel(model, permits)), tokens, requests, rendering),
+                        songs);
+            }, PIECES_AT_ONCE);
         } catch (RuntimeException invalid) {
             say(invalid.getMessage());
             return;
