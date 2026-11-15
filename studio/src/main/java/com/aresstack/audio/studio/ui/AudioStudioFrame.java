@@ -108,6 +108,8 @@ public final class AudioStudioFrame extends JFrame {
     });
     private final JTextField fluidSynth = new JTextField("fluidsynth", 17);
     private final JTextField sfizz = new JTextField("sfizz_render", 17);
+    /** Length, tempo, key and meter of a new piece. */
+    private final PieceSpecFields specFields = new PieceSpecFields();
     private final JTextArea description = new JTextArea(
             "A charming pastel city slowly grows; compose a playful, cozy, uplifting orchestral theme.", 3, 54);
     private final JTextArea log = new JTextArea(10, 70);
@@ -596,6 +598,7 @@ public final class AudioStudioFrame extends JFrame {
         wish.setOpaque(false);
         wish.add(DeckWidgets.lettering("Was für Musik soll es sein? Das bekommt die KI gesagt."), BorderLayout.NORTH);
         wish.add(prompt, BorderLayout.CENTER);
+        wish.add(specFields, BorderLayout.SOUTH);
         prompt.setPreferredSize(new Dimension(300, 92));
 
         // Under the words for the AI: what came of them, as the score a conductor reads.
@@ -1057,12 +1060,24 @@ public final class AudioStudioFrame extends JFrame {
             return true;
         }
         Object[] choices = {"Neues Stück", "Dieses ersetzen", "Abbrechen"};
-        int choice = JOptionPane.showOptionDialog(this,
-                "„" + songs.name(folder) + "“ ist schon komponiert.\n\n"
-                        + "Neues Stück: es kommt als eigenes Stück in die Liste, dieses bleibt, wie es ist.\n"
-                        + "Dieses ersetzen: Instrumente und Noten werden neu erfunden; "
-                        + "die bisherige Fassung liegt danach im Ordner „earlier“.",
-                "Komponieren", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, choices, choices[0]);
+        // Both ways plan anew, so length, tempo, key and meter can be chosen anew here.
+        PieceSpecFields wanted = new PieceSpecFields();
+        final com.aresstack.audio.studio.application.CompositionSpec chosenSpec;
+        int choice;
+        try {
+            wanted.choose(specFields.spec());
+            choice = JOptionPane.showOptionDialog(this, new Object[]{
+                    "„" + songs.name(folder) + "“ ist schon komponiert.\n\n"
+                            + "Neues Stück: es kommt als eigenes Stück in die Liste, dieses bleibt, wie es ist.\n"
+                            + "Dieses ersetzen: Instrumente und Noten werden neu erfunden; "
+                            + "die bisherige Fassung liegt danach im Ordner „earlier“.\n\n"
+                            + "Vorgaben für die neue Komposition:", wanted},
+                    "Komponieren", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, choices, choices[0]);
+            chosenSpec = choice == 0 || choice == 1 ? wanted.spec() : null;
+        } catch (RuntimeException invalid) {
+            message(invalid.getMessage());
+            return false;
+        }
         try {
             if (choice == 0) {
                 keepSong();
@@ -1074,11 +1089,15 @@ public final class AudioStudioFrame extends JFrame {
                 saveSettings(false);
                 refreshSongs();
                 append("Neues Stück angelegt; seinen Namen bekommt es vom Plan der KI: " + fresh.getFileName());
+                specFields.show(null);
+                specFields.choose(chosenSpec);
                 return true;
             }
             if (choice == 1) {
                 int put = putAnswersAside(folder, null);
                 append("Das Stück wird neu komponiert; " + put + " bisherige Antworten liegen im Ordner „earlier“.");
+                specFields.show(null);
+                specFields.choose(chosenSpec);
                 return true;
             }
         } catch (IOException failed) {
@@ -1198,6 +1217,13 @@ public final class AudioStudioFrame extends JFrame {
         }
         final String prompt = description.getText().trim();
         final Path output = Paths.get(directory.getText().trim());
+        final com.aresstack.audio.studio.application.CompositionSpec spec;
+        try {
+            spec = specFields.spec();
+        } catch (RuntimeException invalid) {
+            message(invalid.getMessage());
+            return;
+        }
         final int tokens = (Integer) tokenLimit.getValue();
         final int parallel = (Integer) parallelRequests.getValue();
         final RenderSettings settings;
@@ -1217,7 +1243,7 @@ public final class AudioStudioFrame extends JFrame {
             public Path execute(Progress progress) throws Exception {
                 try {
                     Path arrangement = composeIntoPiece(new GemmaMusicComposer(client, tokens, parallel),
-                            prompt, output, chosen, progress);
+                            prompt, output, chosen, spec, progress);
                     return renderArrangement(arrangement, output, settings, progress);
                 } finally {
                     activeClient = null;
@@ -1234,9 +1260,11 @@ public final class AudioStudioFrame extends JFrame {
      * changed behind the model's back stays out of it.
      */
     private Path composeIntoPiece(final GemmaMusicComposer composer, final String prompt, final Path output,
-                                  final TrackArrangement tracks, final Progress progress) throws Exception {
+                                  final TrackArrangement tracks,
+                                  final com.aresstack.audio.studio.application.CompositionSpec spec,
+                                  final Progress progress) throws Exception {
         return com.aresstack.audio.studio.application.ComposingIntoPiece.run(
-                () -> composer.compose(prompt, output, tracks, progress), output, prompt, songs, pieceModel);
+                () -> composer.compose(prompt, output, tracks, spec, progress), output, prompt, songs, pieceModel);
     }
 
     /** First ask the AI only for a proposal; optionally continue automatically. */
@@ -1250,6 +1278,13 @@ public final class AudioStudioFrame extends JFrame {
         }
         final Path output = Paths.get(directory.getText().trim());
         final String prompt = description.getText().trim();
+        final com.aresstack.audio.studio.application.CompositionSpec spec;
+        try {
+            spec = specFields.spec();
+        } catch (RuntimeException invalid) {
+            message(invalid.getMessage());
+            return;
+        }
         final int tokens = (Integer) tokenLimit.getValue();
         final int parallel = (Integer) parallelRequests.getValue();
         if (!saveSettings(false)) {
@@ -1296,7 +1331,7 @@ public final class AudioStudioFrame extends JFrame {
                     }
                     new TrackArrangementStore().save(output, selected);
                     Path arrangement = composeIntoPiece(new GemmaMusicComposer(client, tokens, parallel),
-                            prompt, output, selected, progress);
+                            prompt, output, selected, spec, progress);
                     return renderArrangement(arrangement, output, rendering.get(), progress);
                 } finally {
                     activeClient = null;
@@ -2344,6 +2379,8 @@ public final class AudioStudioFrame extends JFrame {
             }
         }
         Path folder = Paths.get(directory.getText().trim());
+        // A planned piece shows what it was planned with; only a new one can still be given its length, tempo and key.
+        specFields.show(GemmaMusicComposer.specOf(folder));
         arrangementView.setArrangement(ArrangementView.Arrangement.read(folder.resolve("arrangement.tsv")), ids,
                 there ? "" : "Noch nichts gerendert · Komponieren oder Demo laden");
         arrangementView.setMix(player.envelope(), soloTrack() == null ? "Mix" : "Solo", soloTrack(), player.length());

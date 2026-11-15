@@ -54,6 +54,8 @@ final class ArrangementView extends JComponent {
         final int tempo;
         final Map<String, List<Note>> lanes = new LinkedHashMap<String, List<Note>>();
         long ticks;
+        /** The length of a bar in ticks, as the meter of the piece says it; four quarters if it names none. */
+        long barTicks = TICKS_PER_BEAT * 4L;
 
         Arrangement(int tempo) {
             this.tempo = tempo;
@@ -65,7 +67,7 @@ final class ArrangementView extends JComponent {
         }
 
         int bars() {
-            return (int) Math.max(1, Math.ceil(ticks / (TICKS_PER_BEAT * 4.0)));
+            return (int) Math.max(1, (ticks + barTicks - 1) / barTicks);
         }
 
         /** Reads an arrangement file; {@code null} if there is none or it cannot be read. */
@@ -88,8 +90,14 @@ final class ArrangementView extends JComponent {
                         end = Math.max(end, note.start + note.length);
                     }
                 }
-                long bar = TICKS_PER_BEAT * 4L;
-                arrangement.ticks = Math.max(bar * 8, (end + bar - 1) / bar * bar); // whole bars, eight at least
+                // As long as the piece says it is: its bars line, else the bars its notes reach into
+                // (and the eight bars every piece had before length, meter and key could be chosen).
+                arrangement.barTicks = file.barTicks();
+                boolean asEver = file.meter().map(ArrangementFile.Meter::fourFour).orElse(true)
+                        && file.key().map(ArrangementFile.Key::cMajor).orElse(true);
+                int covering = ArrangementFile.barsCovering(end, arrangement.barTicks);
+                arrangement.ticks = arrangement.barTicks
+                        * file.bars().orElse(ArrangementFile.defaultBars(covering, asEver));
                 return arrangement;
             } catch (Exception unreadable) {
                 return null;
