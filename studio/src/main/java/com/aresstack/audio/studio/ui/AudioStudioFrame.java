@@ -4063,6 +4063,8 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     /** One line for many tracks: how many are being worked on at the same time, and how many are done. */
+    private String saidWaiting;
+
     private void showTrackWork() {
         int working = 0;
         int waiting = 0;
@@ -4080,6 +4082,15 @@ public final class AudioStudioFrame extends JFrame {
             return; // the next line of the log takes the display again
         }
         long seconds = (System.currentTimeMillis() - trackStageBegan) / 1000;
+        if (trackStage == TrackProgress.Stage.COMPOSE && sketchNotes == 0 && arrived == 0 && done == 0) {
+            // Between the plan and the first note: the requests are out, the service has sent nothing yet.
+            String waitingFor = "Noten angefragt: " + working + " Spuren gleichzeitig · " + seconds
+                    + " s · der Dienst hat noch keinen Text geschickt";
+            if (!waitingFor.equals(saidWaiting)) {
+                saidWaiting = waitingFor;
+                sayOnPaper(waitingFor);
+            }
+        }
         setStatus((trackStage == TrackProgress.Stage.COMPOSE ? "KI komponiert" : "Rendern") + ": "
                 + working + " gleichzeitig · " + done + " von " + trackStates.size() + " fertig"
                 + (waiting > 0 ? " · " + waiting + " warten" : "") + (failed > 0 ? " · " + failed + " Fehler" : "")
