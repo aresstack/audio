@@ -39,6 +39,8 @@ public final class LiveStage implements AutoCloseable {
     private final double secondsPerBar;
     private final List<String> trackIds;
     private final LiveGraph graph;
+    /** How long the music is, without the ring of the room at the end. */
+    private final long musicFrames;
     /** Where each track stands as last handed to its channel, for glides that start from there. */
     private final SoundSourcePlacement[] current;
     /** The running glide of each track, so that a new move or glide replaces it. */
@@ -70,6 +72,7 @@ public final class LiveStage implements AutoCloseable {
         this.trackIds = List.copyOf(ids);
         this.current = placements.toArray(new SoundSourcePlacement[0]);
         this.glides = new java.util.concurrent.Future<?>[placements.size()];
+        this.musicFrames = length;
         this.graph = new LiveGraph(channels, SpatialStemMixer.reverb(room), (float) room.amount(),
                 length + SpatialStemMixer.tail(length, room));
     }
@@ -124,6 +127,14 @@ public final class LiveStage implements AutoCloseable {
     private ChannelParameters parameters(SoundSourcePlacement placement) {
         ChannelParameters parameters = SpatialStemMixer.parameters(placement, room, secondsPerBar);
         return placement.muted() ? parameters.toBuilder().level(0).build() : parameters;
+    }
+
+    /**
+     * Plays the music over and over without a gap (the room rings from the end into the start);
+     * {@code false} lets it end with the ring of the room.
+     */
+    public void loop(boolean on) {
+        graph.setLoop(on ? musicFrames : 0);
     }
 
     public LiveGraph graph() {

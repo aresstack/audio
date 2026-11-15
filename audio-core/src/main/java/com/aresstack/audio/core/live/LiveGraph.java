@@ -34,6 +34,8 @@ public final class LiveGraph implements AudioSource {
     private final AtomicLong seekTo = new AtomicLong(-1);
     private AudioBlock send;
     private AudioBlock ring;
+    private AudioBlock scratch;
+    private volatile long loopEnd = -1;
     private int glideFrames;
     private long position;
     private volatile long published;
@@ -91,6 +93,16 @@ public final class LiveGraph implements AudioSource {
         seekTo.set(Math.max(0, Math.min(frames, frame)));
     }
 
+    /**
+     * Plays the first {@code endFrame} frames over and over (for a piece shorter than a listening
+     * test, or a loop the user set), without a gap: at the end the sources start again while the
+     * room and the echoes ring on. 0 or less ends looping; the graph then ends at {@link #frames()}.
+     * Any thread; takes effect with the next block.
+     */
+    public void setLoop(long endFrame) {
+        loopEnd = endFrame <= 0 ? -1 : Math.min(endFrame, frames);
+    }
+
     /** Whether a jump was asked for that the audio thread has not made yet. */
     public boolean seekPending() {
         return seekTo.get() >= 0;
@@ -107,6 +119,7 @@ public final class LiveGraph implements AudioSource {
         for (LiveChannel channel : channels) {
             channel.prepare(sampleRate, maxBlockFrames, glideFrames);
         }
+        scratch = new AudioBlock(maxBlockFrames);
         if (room != null) {
             send = new AudioBlock(maxBlockFrames);
             ring = new AudioBlock(maxBlockFrames);
@@ -132,29 +145,55 @@ public final class LiveGraph implements AudioSource {
             }
         }
         int wanted = block.frames();
-        int count = (int) Math.max(0, Math.min(wanted, frames - position));
         block.clear(0, wanted);
+        long end = loopEnd;
+        if (end > 0 && position < end) {
+            // Looping: the block may run over the end of the loop; then the rest comes from its start.
+            int first = (int) Math.min(wanted, end - position);
+            renderInto(block, first);
+            if (position >= end) {
+                position = 0;
+                for (LiveChannel channel : channels) {
+                    channel.rewind();
+                }
+            }
+            if (first < wanted) {
+                int rest = wanted - first;
+                scratch.clear(0, rest);
+                renderInto(scratch, rest);
+                System.arraycopy(scratch.left, 0, block.left, first, rest);
+                System.arraycopy(scratch.right, 0, block.right, first, rest);
+            }
+            published = position;
+            return wanted;
+        }
+        int count = (int) Math.max(0, Math.min(wanted, frames - position));
         if (count == 0) {
             return 0;
         }
+        renderInto(block, count);
+        published = position;
+        return count;
+    }
+
+    /** Renders the next {@code count} frames into the first frames of {@code out} (cleared) and advances. */
+    private void renderInto(AudioBlock out, int count) {
         if (send != null) {
             send.clear(0, count);
         }
         for (LiveChannel channel : channels) {
-            channel.render(position, count, block, send);
+            channel.render(position, count, out, send);
         }
         if (room != null) {
             roomGain.glideTo(wantedRoomGain, glideFrames);
             if (roomGain.settled()) {
-                room.process(send, count, block, roomGain.value());
+                room.process(send, count, out, roomGain.value());
             } else {
                 // The room adds its ring scaled by one gain per call; a gliding gain goes frame by frame.
-                ring(count, block);
+                ring(count, out);
             }
         }
         position += count;
-        published = position;
-        return count;
     }
 
     /** The ring of the room with a gliding gain: rendered at full level into a block of its own, then glided onto the master. */
