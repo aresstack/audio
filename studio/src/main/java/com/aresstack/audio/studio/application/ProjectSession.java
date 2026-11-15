@@ -297,6 +297,72 @@ public final class ProjectSession {
     // Edit core (work package F3)
 
     /**
+     * Sets by hand how a parameter of a channel moves over time (work package D3): the place of
+     * an instrument on the stage, its share of the room, or its level. The lane of that parameter
+     * is replaced; without points it is taken away, and the channel stands still again. Only
+     * {@code mix.json} is written: neither the composition nor a stem changes (A12). An undoable
+     * step, no revision.
+     *
+     * @param ownerId   the part or audio track the channel belongs to
+     * @param parameter one of {@link AutomationLane#PARAMETERS}
+     * @param points    the points in ticks, in order
+     * @return whether the mix changed
+     * @throws IOException if the piece has no mix or no channel of that owner, or the file cannot be written
+     */
+    public boolean automate(String ownerId, String parameter, List<AutomationLane.Point> points) throws IOException {
+        if (mix == null) {
+            throw new IOException("Das Stück hat noch keine Abmischung im Werkmodell: " + folder);
+        }
+        if (!AutomationLane.PARAMETERS.contains(parameter)) {
+            throw new IllegalArgumentException("Unknown automation parameter: " + parameter);
+        }
+        MixChannel channel = null;
+        for (MixChannel candidate : mix.channels()) {
+            if (candidate.owner().id().equals(ownerId)) {
+                channel = candidate;
+                break;
+            }
+        }
+        if (channel == null) {
+            throw new IOException("Die Abmischung kennt keinen Kanal für „" + ownerId + "“.");
+        }
+        List<AutomationLane.Point> wanted = points == null ? List.of() : points;
+        List<AutomationLane> lanes = new ArrayList<>();
+        boolean placed = false;
+        for (AutomationLane lane : mix.automation()) {
+            if (channel.id().equals(lane.channelId()) && lane.parameter().equals(parameter)) {
+                // the lane keeps its id and its place in the file; a second lane of the same kind goes
+                if (!placed && !wanted.isEmpty()) {
+                    lanes.add(new AutomationLane(lane.id(), channel.id(), parameter, wanted));
+                }
+                placed = true;
+            } else {
+                lanes.add(lane);
+            }
+        }
+        if (!placed && !wanted.isEmpty()) {
+            Set<String> taken = new java.util.HashSet<>();
+            for (AutomationLane lane : mix.automation()) {
+                taken.add(lane.id());
+            }
+            String id = ids.next();
+            while (taken.contains(id)) {
+                id = ids.next();
+            }
+            lanes.add(new AutomationLane(id, channel.id(), parameter, wanted));
+        }
+        MixScene changed = new MixScene(mix.room(), mix.masterDb(), mix.levelMode(), mix.channels(), lanes);
+        if (changed.equals(mix)) {
+            return false;
+        }
+        MixJson.save(folder, changed); // first the file, then the session
+        mix = changed;
+        history.push(new State(composition, mix), wanted.isEmpty() ? "Verlauf entfernt (" + parameter + ")"
+                : "Verlauf geändert (" + parameter + ")");
+        return true;
+    }
+
+    /**
      * Applies a change by hand at once, without preview: an undoable step, no revision.
      *
      * @return which parts sound different now

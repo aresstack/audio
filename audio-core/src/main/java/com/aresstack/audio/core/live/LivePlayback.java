@@ -108,8 +108,8 @@ public final class LivePlayback implements AutoCloseable {
     }
 
     /**
-     * Plays from where playback stands; from the start if it had played to the end. The state is
-     * {@link State#PLAYING} when this returns.
+     * Plays from where playback stands; from the start if it had played to the end, unless a jump
+     * was asked for since: then from there. The state is {@link State#PLAYING} when this returns.
      */
     public void play() {
         if (state == State.CLOSED || state == State.FAILED) {

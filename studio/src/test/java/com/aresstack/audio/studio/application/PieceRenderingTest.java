@@ -207,6 +207,44 @@ public final class PieceRenderingTest {
                 new String(Files.readAllBytes(folder.resolve("composition.json")), StandardCharsets.UTF_8));
     }
 
+    /**
+     * Architect review of the D4 stage: rendering mixes as the stage is heard, so that rendering
+     * and mixing again write the same file; and the live stage opens from the model, without a
+     * written arrangement, for the same way of hearing.
+     */
+    @Test
+    public void renderingMixingAgainAndTheLiveStageHearThePieceTheSameWay() throws Exception {
+        Path folder = pieceWithoutWrittenArrangement(true);
+        PieceModel model = new PieceModel(line -> { });
+        model.open(folder);
+        com.aresstack.audio.studio.mix.StageSound headphones = com.aresstack.audio.studio.mix.StageSound.binaural();
+        PieceRendering rendering = new PieceRendering(new InstrumentRegistry(folder.resolve("none.properties")));
+
+        Path mix = rendering.render(model.of(folder).get(), null, Sf2Engine.GERVILL, "fluidsynth", "sfizz_render",
+                new HashMap<String, Integer>(), message -> { }).mix();
+        byte[] onLoudspeakers = Files.readAllBytes(mix);
+        rendering.withSound(headphones).render(model.of(folder).get(), null, Sf2Engine.GERVILL, "fluidsynth",
+                "sfizz_render", new HashMap<String, Integer>(), message -> { });
+        byte[] onHeadphones = Files.readAllBytes(mix);
+        assertFalse("the rendering hears the way it is told", Arrays.equals(onLoudspeakers, onHeadphones));
+
+        StageMixService.Piece piece = StageMixService.Piece.of(model.session().get().composition());
+        StageMixService mixing = new StageMixService();
+        mixing.setSound(headphones);
+        mixing.mix(piece, folder, message -> { });
+        assertTrue("mixing again writes what the rendering wrote", Arrays.equals(onHeadphones, Files.readAllBytes(mix)));
+
+        assertFalse(Files.exists(folder.resolve("arrangement.tsv")));
+        LiveDeck deck = LiveDeck.open(piece, folder, mixing.scene(piece, folder), null, Float.NaN,
+                () -> block -> { }, headphones);
+        try {
+            assertEquals(headphones, deck.sound());
+            assertEquals("the live stage is as long as the file", seconds(mix), deck.length(), 0.05);
+        } finally {
+            deck.close();
+        }
+    }
+
     /** A piece that has only its model: no {@code arrangement.tsv}; on demand with a tempo that halves after one beat. */
     private static Path pieceWithoutWrittenArrangement(boolean tempoChanges) throws Exception {
         Path folder = Files.createTempDirectory("piece-rendering-");

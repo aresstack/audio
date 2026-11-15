@@ -402,29 +402,34 @@ public final class SpatialStemMixer {
         int walls = walls(room, sound);
         // Where the track stands when nothing moves, with exactly the numbers of a standing track.
         Seat standing = standing(parameters(placement, room, curve, sound));
-        SpatialMotion motion;
-        if (lanes.moves()) {
-            float[] scratch = new float[ChannelMotion.GAINS];
-            motion = (frame, seat) -> {
-                double x = lanes.x() == null ? placement.x() : lanes.x().valueAt(frame);
-                double depth = lanes.depth() == null ? placement.depth() : lanes.depth().valueAt(frame);
-                double height = lanes.height() == null ? placement.height() : lanes.height().valueAt(frame);
-                double reverb = lanes.reverb() == null ? placement.reverb() : lanes.reverb().valueAt(frame);
-                if (x == placement.x() && depth == placement.depth() && height == placement.height()) {
-                    // At its own place the track sounds exactly as standing; only the room share may move.
-                    seat.copyFrom(standing);
-                    gains(x, depth, height, reverb, rings(room), sound.headphones(), scratch);
-                    seat.sendLeft = scratch[ChannelMotion.SEND_LEFT];
-                    seat.sendRight = scratch[ChannelMotion.SEND_RIGHT];
-                } else {
-                    seat(x, depth, height, reverb, room, sound, seat);
-                }
-            };
-        } else {
-            motion = (frame, seat) -> seat.copyFrom(standing);
-        }
+        SpatialMotion motion = lanes.moves() ? motion(placement, lanes, room, sound, standing)
+                : (frame, seat) -> seat.copyFrom(standing);
         return new SpatialChannel(source, length, strip, motion, walls, walls > 0 ? longestEcho(room) : 0,
                 walls > 0 ? echoLowPass(room) : null, sound.headphones() ? sound.head() : null);
+    }
+
+    /**
+     * Where a moving track is at a frame: the file mix and live playback both ask this, so a
+     * movement sounds the same in both.
+     */
+    private static SpatialMotion motion(SoundSourcePlacement placement, StageAutomation.Lanes lanes,
+                                        AcousticRoom room, StageSound sound, Seat standing) {
+        float[] scratch = new float[ChannelMotion.GAINS];
+        return (frame, seat) -> {
+            double x = lanes.x() == null ? placement.x() : lanes.x().valueAt(frame);
+            double depth = lanes.depth() == null ? placement.depth() : lanes.depth().valueAt(frame);
+            double height = lanes.height() == null ? placement.height() : lanes.height().valueAt(frame);
+            double reverb = lanes.reverb() == null ? placement.reverb() : lanes.reverb().valueAt(frame);
+            if (x == placement.x() && depth == placement.depth() && height == placement.height()) {
+                // At its own place the track sounds exactly as standing; only the room share may move.
+                seat.copyFrom(standing);
+                gains(x, depth, height, reverb, rings(room), sound.headphones(), scratch);
+                seat.sendLeft = scratch[ChannelMotion.SEND_LEFT];
+                seat.sendRight = scratch[ChannelMotion.SEND_RIGHT];
+            } else {
+                seat(x, depth, height, reverb, room, sound, seat);
+            }
+        };
     }
 
     /** The numbers of a standing track as a seat of a {@link SpatialChannel}. */
@@ -551,6 +556,43 @@ public final class SpatialStemMixer {
                 ? frame -> (float) Math.pow(10, placement.dynamicsAt(frame / (RATE * secondsPerBar)) / 20)
                 : null;
         return parameters(placement, room, curve, sound);
+    }
+
+    /**
+     * As above, with the movements of the place, the height and the room share from elsewhere (the
+     * mix document): live playback of a stage with moving sources. The level curve stays the one of
+     * the placement.
+     */
+    static ChannelParameters parameters(SoundSourcePlacement placement, StageAutomation.Lanes movements,
+                                        AcousticRoom room, double secondsPerBar, StageSound sound) {
+        ChannelParameters standing = parameters(placement, room, secondsPerBar, sound);
+        if (!movements.moves()) {
+            return standing;
+        }
+        return standing.toBuilder().motion(motion(placement, movements, room, sound, standing(standing))).build();
+    }
+
+    /**
+     * The numbers of a channel as the file mix makes them from the curves of a track: the level
+     * curve and the trim of {@code lanes} (laid along the time of the piece, see {@link
+     * StageAutomation#of(List, com.aresstack.audio.composition.TimeMap)}), and its movements. Live
+     * playback of a piece whose tempo or meter changes takes its channels from here, so that a
+     * level curve lies live where it lies in the file.
+     */
+    static ChannelParameters parameters(SoundSourcePlacement placement, StageAutomation.Lanes lanes,
+                                        AcousticRoom room, StageSound sound) {
+        StereoStrip.LevelCurve curve = lanes.level() == null ? null
+                : frame -> (float) Math.pow(10, lanes.level().valueAt(frame) / 20);
+        ChannelParameters standing = parameters(placement, room, curve, sound);
+        if (lanes.trimDb() != 0) {
+            // What the mix document says beyond the range of the placement (D3), as in the file.
+            standing = standing.toBuilder()
+                    .level((float) Math.pow(10, (placement.levelDb() + lanes.trimDb()) / 20)).build();
+        }
+        if (!lanes.moves()) {
+            return standing;
+        }
+        return standing.toBuilder().motion(motion(placement, lanes, room, sound, standing(standing))).build();
     }
 
     /** As {@link #parameters(SoundSourcePlacement, AcousticRoom, double)}, with the level curve given. */

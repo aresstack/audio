@@ -111,6 +111,7 @@ final class PartSeats {
                     placements.add(placement);
                 }
             }
+            // The stage keeps how its level is made (fixed or as before); the seats that stay keep their height.
             SpatialScene changed = new SpatialScene(scene.room(), placements, scene.masterDb());
             for (String id : changes.added()) {
                 MixChannel channel = mix == null ? null : mix.channelOf(MixChannel.Owner.part(id));

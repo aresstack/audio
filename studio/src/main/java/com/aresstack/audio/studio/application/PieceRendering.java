@@ -26,9 +26,24 @@ public final class PieceRendering {
     }
 
     private final InstrumentRegistry registry;
+    private final com.aresstack.audio.studio.mix.StageSound sound;
 
     public PieceRendering(InstrumentRegistry registry) {
+        this(registry, com.aresstack.audio.studio.mix.StageSound.LOUDSPEAKERS);
+    }
+
+    private PieceRendering(InstrumentRegistry registry, com.aresstack.audio.studio.mix.StageSound sound) {
         this.registry = registry;
+        this.sound = sound;
+    }
+
+    /**
+     * The same rendering, mixed as the stage is heard (work package D4: headphones, convolved
+     * room), so that rendering and mixing again write the same file. The usual one mixes for
+     * loudspeakers.
+     */
+    public PieceRendering withSound(com.aresstack.audio.studio.mix.StageSound heardAs) {
+        return new PieceRendering(registry, heardAs == null ? com.aresstack.audio.studio.mix.StageSound.LOUDSPEAKERS : heardAs);
     }
 
     /**
@@ -90,7 +105,9 @@ public final class PieceRendering {
         }
         com.aresstack.audio.studio.project.MidiExport.write(composition, folder.resolve(MIDI_FILE));
         // The tracks and the time of the mix are those of the model: arrangement.tsv is not read.
-        Path mix = new StageMixService().mix(StageMixService.Piece.of(composition), folder, progress);
+        StageMixService mixing = new StageMixService();
+        mixing.setSound(sound);
+        Path mix = mixing.mix(StageMixService.Piece.of(composition), folder, progress);
         return new Outcome(mix, stems);
     }
 

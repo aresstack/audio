@@ -108,6 +108,45 @@ public final class PieceStepsCarryStageDemoAndAnswersTest {
                 .contains("stageFollows(edited.get())"));
     }
 
+    /**
+     * PO finding on the D4 stage: the mix document holds no height. A revision that differs in
+     * the mix alone, and its undo, leave the height of a track as the user set it on the stage,
+     * and so the fixed level of the stage.
+     */
+    @Test
+    public void aRevisionOfTheMixLeavesTheHeightOfATrackAsItStands() throws Exception {
+        Path folder = piece();
+        PieceModel model = new PieceModel(line -> { });
+        model.open(folder);
+        ProjectSession session = model.session().get();
+        SpatialSceneStore stages = new SpatialSceneStore();
+        StageMixService.Piece tracks = StageMixService.Piece.of(session.composition());
+        Revision original = session.revisions().get(0);
+        SpatialScene first = new StageMixService().scene(tracks, folder);
+        double bassAtFirst = first.placement("bass").levelDb();
+
+        SpatialScene high = first.with(first.placement("bass").atHeight(0.6).withLevel(bassAtFirst - 9))
+                .with(first.placement("melody").atHeight(0.25));
+        stages.save(folder, high);
+        assertEquals("the height is saved with the stage", 0.6, stages.load(folder).placement("bass").height(), 0);
+        session.synchronize();
+        session.markRevision("Bass leise und oben");
+        StageFollowsMix following = new StageFollowsMix();
+        following.remember(session);
+
+        session.restoreRevision(original.id());
+        SpatialScene restored = following.follow(session, high).get();
+        assertEquals("the step is taken", bassAtFirst, restored.placement("bass").levelDb(), 0);
+        assertEquals("and the height stays", 0.6, restored.placement("bass").height(), 0);
+        assertEquals(0.25, restored.placement("melody").height(), 0);
+
+        session.undo();
+        SpatialScene again = following.follow(session, restored).get();
+        assertEquals(bassAtFirst - 9, again.placement("bass").levelDb(), 0);
+        assertEquals(0.6, again.placement("bass").height(), 0);
+        assertEquals(0.25, again.placement("melody").height(), 0);
+    }
+
     // ---- 2. The demo over an open model ----------------------------------------------------------------------
 
     @Test

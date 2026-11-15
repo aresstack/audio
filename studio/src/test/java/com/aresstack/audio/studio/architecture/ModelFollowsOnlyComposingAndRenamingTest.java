@@ -33,10 +33,21 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         while (use.find()) {
             users.add(methodAround(source, use.start()));
         }
-        assertEquals("opening loads the model, composing and renaming bring it in step, rendering reads it;"
-                        + " nothing else reaches it",
+        // Beside these, the stage page shows the movements the model holds and keeps a curve the user
+        // drew there (work package D3): an edit of the mix on purpose, which takes over no old file.
+        assertEquals("opening loads the model, composing and renaming bring it in step, rendering reads it,"
+                        + " a drawn movement is kept; nothing else reaches it",
                 new java.util.TreeSet<String>(List.of("composeIntoPiece", "loadArrangementForCurrentDirectory",
-                        "loadDemo", "pieceToEdit", "renamed", "renderArrangement", "savedPiece", "scoreOf")), users);
+                        "loadDemo", "movementChanged", "pieceToEdit", "renamed", "renderArrangement", "savedPiece", "scoreOf",
+                        "showMovements")), users);
+        assertEquals("only a curve the user drew is written into the mix of the model", List.of("movementChanged"),
+                callers(source, "pieceModel\\.move\\("));
+        assertTrue("showing the movements only reads the model",
+                bodyOf(source, "private void showMovements()").replace("pieceModel.movements()", "")
+                        .indexOf("pieceModel") < 0);
+        assertTrue("a curve is kept only once it has settled, and never brings old files into the model",
+                bodyOf(source, "private void movementChanged(").indexOf("synchronize") < 0
+                        && bodyOf(source, "private void movementChanged(").contains("if (!settled) {"));
         assertTrue("loading the demo replaces the piece on the user's word, through the one place that"
                         + " protects a model the demo cannot replace",
                 bodyOf(source, "private void loadDemo() {").contains("DemoIntoPiece.load(input, folder, pieceModel)"));

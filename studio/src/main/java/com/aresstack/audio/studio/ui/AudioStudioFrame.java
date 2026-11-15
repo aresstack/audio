@@ -83,6 +83,16 @@ public final class AudioStudioFrame extends JFrame {
     private Map<String, DeckPlayer.Envelope> stemEnvelopes = new HashMap<String, DeckPlayer.Envelope>();
     private boolean loadingTracks;
     private final StudioSettingsStore settingsStore = StudioSettingsStore.standard();
+    /** How the stage is heard (work package D4): the choice kept in the settings, and what was read for it. */
+    private com.aresstack.audio.studio.application.StageListening listening =
+            com.aresstack.audio.studio.application.StageListening.USUAL;
+    private volatile com.aresstack.audio.studio.mix.StageSound stageSound =
+            com.aresstack.audio.studio.mix.StageSound.LOUDSPEAKERS;
+    private final com.aresstack.audio.studio.hrtf.HrtfLibrary hrtfLibrary =
+            new com.aresstack.audio.studio.hrtf.HrtfLibrary(com.aresstack.audio.studio.hrtf.HrtfLibrary.standardRoot());
+    private ListeningPanel listeningPanel;
+    private int listeningAsked;
+    private boolean hrtfLoading;
     private final JTextField endpoint = new JTextField(38);
     private final JPasswordField apiKey = new JPasswordField(38);
     private final JTextField model = new JTextField("google/gemma-4-31B-it", 23);
@@ -132,7 +142,11 @@ public final class AudioStudioFrame extends JFrame {
             () -> loadModelNames(false));
     private String preferredKeePassEntry = "";
     // The desk: display, transport, waveform, master meters, and the pages behind the keys under the display.
-    private final DeckPlayer player = new DeckPlayer();
+    private final StageDeck player = new StageDeck();
+    /** The factor the last file mix of the stage found (compatibility mode), for which piece and master level. */
+    private float mixFactor = Float.NaN;
+    private double mixFactorMasterDb;
+    private Path mixFactorFolder;
     private final DeckDisplays.Lcd lcd = new DeckDisplays.Lcd();
     /** The line at the lower edge of the window: what the studio is doing or did last. */
     private final JLabel statusLine = new JLabel("Bereit");
@@ -712,14 +726,141 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
+            public void movementChanged(com.aresstack.audio.studio.application.StageMovements movements,
+                                        String trackId, String parameter, boolean settled) {
+                AudioStudioFrame.this.movementChanged(movements, trackId, parameter, settled);
+            }
+
+            @Override
             public void askDirector() {
                 AudioStudioFrame.this.askDirector();
             }
         });
-        JPanel page = new JPanel(new BorderLayout());
+        listeningPanel = new ListeningPanel(new ListeningPanel.Host() {
+            @Override
+            public void listeningChanged(com.aresstack.audio.studio.application.StageListening wanted) {
+                listening = wanted;
+                saveSettings(false);
+                applyListening(true);
+            }
+
+            @Override
+            public String chooseImpulseResponse() {
+                JFileChooser chooser = new JFileChooser();
+                chooser.setDialogTitle("Impulsantwort (WAV) wählen");
+                chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("WAV-Dateien", "wav"));
+                return chooser.showOpenDialog(AudioStudioFrame.this) == JFileChooser.APPROVE_OPTION
+                        ? chooser.getSelectedFile().getAbsolutePath() : null;
+            }
+
+            @Override
+            public String chooseHrtfFolder() {
+                JFileChooser chooser = new JFileChooser();
+                chooser.setDialogTitle("Ordner mit Kopfdaten (Format MIT KEMAR) wählen");
+                chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+                return chooser.showOpenDialog(AudioStudioFrame.this) == JFileChooser.APPROVE_OPTION
+                        ? chooser.getSelectedFile().getAbsolutePath() : null;
+            }
+
+            @Override
+            public void downloadHrtf(com.aresstack.audio.studio.hrtf.HrtfDataset dataset) {
+                AudioStudioFrame.this.downloadHrtf(dataset);
+            }
+        });
+        JPanel page = new JPanel(new BorderLayout(0, 10));
         page.setOpaque(false);
         page.add(stagePanel, BorderLayout.CENTER);
+        page.add(new DeckWidgets.Module("Hören · Lautsprecher oder Kopfhörer, Raum", listeningPanel),
+                BorderLayout.SOUTH);
+        applyListening(false); // what the settings said, read from the disk in the background
         return page;
+    }
+
+    /** The stage mixer of the window: it mixes the way the stage is heard (work package D4). */
+    private com.aresstack.audio.studio.application.StageMixService stageMixing() {
+        com.aresstack.audio.studio.application.StageMixService mixing =
+                new com.aresstack.audio.studio.application.StageMixService();
+        mixing.setSound(stageSound);
+        return mixing;
+    }
+
+    /**
+     * Makes the way of hearing the user chose the one of the stage: the files it names are read in
+     * the background (from the disk only, never from the network), then the live stage and the
+     * mixed file follow. A live stage that plays another way is made anew where playback stands.
+     *
+     * @param hear whether the stage is to be mixed and played anew now (not at the start, when
+     *             nothing has been heard yet)
+     */
+    private void applyListening(boolean hear) {
+        final com.aresstack.audio.studio.application.StageListening wanted = listening;
+        final int ticket = ++listeningAsked;
+        if (listeningPanel != null) {
+            listeningPanel.show(wanted, null, hrtfLibrary.isInstalled(
+                    com.aresstack.audio.studio.hrtf.HrtfDataset.MIT_KEMAR), hrtfLoading);
+        }
+        Thread reader = new Thread(() -> {
+            com.aresstack.audio.studio.application.StageListening.Loaded loaded = wanted.load(hrtfLibrary);
+            boolean installed = hrtfLibrary.isInstalled(com.aresstack.audio.studio.hrtf.HrtfDataset.MIT_KEMAR);
+            SwingUtilities.invokeLater(() -> {
+                if (ticket != listeningAsked) {
+                    return; // chosen again in the meantime
+                }
+                for (String problem : loaded.problems()) {
+                    append("WARN: " + problem);
+                }
+                boolean changed = !loaded.sound().equals(stageSound);
+                stageSound = loaded.sound();
+                player.sound(stageSound);
+                if (listeningPanel != null) {
+                    listeningPanel.show(wanted, loaded, installed, hrtfLoading);
+                }
+                if (hear && changed) {
+                    append("Hören: " + (wanted.headphones() ? "Kopfhörer (3D), " + loaded.head() : "Lautsprecher")
+                            + " · " + loaded.room());
+                    hearStage(true);
+                    remixTimer.restart();
+                }
+            });
+        }, "stage-listening");
+        reader.setDaemon(true);
+        reader.start();
+    }
+
+    /**
+     * Downloads a set of head responses. Only ever called after the user has seen its source, its
+     * terms and its citation and confirmed: the studio asks the network for it at no other time.
+     */
+    private void downloadHrtf(com.aresstack.audio.studio.hrtf.HrtfDataset dataset) {
+        final AudioProxyRoutes routes;
+        try {
+            routes = configureNetworkRoutes();
+        } catch (RuntimeException error) {
+            message(error.getMessage());
+            applyListening(false);
+            return;
+        }
+        hrtfLoading = true;
+        applyListening(false);
+        Thread loader = new Thread(() -> {
+            String problem = null;
+            try {
+                hrtfLibrary.download(dataset, routes::proxyFor,
+                        line -> SwingUtilities.invokeLater(() -> append(line)));
+            } catch (Exception failed) {
+                problem = String.valueOf(failed.getMessage());
+            }
+            final String said = problem;
+            SwingUtilities.invokeLater(() -> {
+                hrtfLoading = false;
+                if (said != null) {
+                    message(dataset.title() + " ließ sich nicht laden: " + said);
+                }
+                applyListening(true);
+            });
+        }, "hrtf-download");
+        loader.setDaemon(true);
+        loader.start();
     }
 
     /**
@@ -735,6 +876,7 @@ public final class AudioStudioFrame extends JFrame {
         } else {
             trackTable.refreshStage();
         }
+        hearStage(settled);
         if (settled) {
             saveScene();
             remixTimer.restart();
@@ -745,6 +887,82 @@ public final class AudioStudioFrame extends JFrame {
         if (stagePanel != null && trackTable != null) {
             stagePanel.setScene(scene, trackTable.tracks());
         }
+        hearStage(true); // a whole scene from elsewhere: a proposal taken, a step undone
+        showMovements();
+    }
+
+    /**
+     * The stage as it stands is heard at once where it is played live, also in the middle of a
+     * drag. Another room (or another way of setting the level) needs a new live stage: that is
+     * made in the background once the change has settled, and goes on where playback stands.
+     */
+    private void hearStage(boolean settled) {
+        if (!player.stage(scene, soloTrack()) && settled) {
+            openLive(Double.NaN, false);
+        }
+    }
+
+    /** Whether a choice of the playback is heard on the stage, and so can be played live. */
+    private boolean onStage(String selected) {
+        return StageDeck.LIVE_WANTED && selected != null && !"Java reference mix".equals(selected)
+                && writtenArrangement() != null;
+    }
+
+    /**
+     * Plays the stage live from now on: the tracks are read in the background, then playback goes
+     * on at a second ({@code at}), or where it stands by then if {@code at} is not a number. If the
+     * stage cannot be played live (no sound card for it, a track not rendered), the file is played
+     * as before.
+     */
+    private void openLive(final double at, final boolean play) {
+        final String selected = (String) playbackSelection.getSelectedItem();
+        final Path folder = Paths.get(directory.getText().trim());
+        // The factor of the whole mix is not that of a track alone: that one the live stage measures itself.
+        float factor = soloTrack() == null && folder.equals(mixFactorFolder)
+                && mixFactorMasterDb == scene.masterDb() ? mixFactor : Float.NaN;
+        player.openLive(pieceToMix(), folder, scene, soloTrack(), factor, at, play, problem -> {
+            if (problem == null) {
+                hearStage(true); // what moved while the tracks were read
+                return;
+            }
+            append("WARN: Die Bühne lässt sich nicht live spielen, es spielt die gemischte Datei: "
+                    + problem.getMessage());
+            if (selected == null || !selected.equals(playbackSelection.getSelectedItem())) {
+                return;
+            }
+            if (Double.isNaN(at)) {
+                // A live stage made anew (another room) failed: the old one must not go on in the old
+                // room. The file takes over where playback stands; the mix that follows is swapped in.
+                playFile(selected, player.seconds(), player.playing());
+            } else {
+                playFile(selected, at, play);
+            }
+        });
+    }
+
+    /** Shows on the stage page how the instruments move over the bars, as the model of the piece says. */
+    private void showMovements() {
+        if (stagePanel != null) {
+            stagePanel.setMovements(pieceModel.movements());
+        }
+    }
+
+    /**
+     * A curve of the place or of the room share of a track was drawn on the stage page (work
+     * package D3). When the change has settled, it is kept in the mix document of the piece and
+     * the rendered tracks are mixed again; the notes and the rendered sound stay as they are.
+     */
+    private void movementChanged(com.aresstack.audio.studio.application.StageMovements movements, String trackId,
+                                 String parameter, boolean settled) {
+        if (!settled) {
+            return;
+        }
+        if (!pieceModel.move(movements, trackId, parameter)) {
+            showMovements(); // not kept: the page shows again what the piece says
+            return;
+        }
+        player.movementsChanged(); // heard at once where the stage is played live
+        remixTimer.restart();
     }
 
     private void saveScene() {
@@ -812,16 +1030,37 @@ public final class AudioStudioFrame extends JFrame {
             }
             final long began = System.nanoTime();
             String problem = null;
+            com.aresstack.audio.studio.application.StageMixService mixing = stageMixing();
             try {
-                new com.aresstack.audio.studio.application.StageMixService().mix(arrangement, folder, mixed,
-                        message -> { });
+                mixing.mix(arrangement, folder, mixed, message -> { });
             } catch (Exception failed) {
                 problem = String.valueOf(failed.getMessage());
             }
             final String said = problem;
+            final float factor = mixing.legacyFactor();
+            if (problem == null && factor > 0 && Float.isFinite(factor)) {
+                SwingUtilities.invokeLater(() -> mixFactorFound(folder, ticket, factor, mixed.masterDb()));
+            }
             final double seconds = (System.nanoTime() - began) / 1e9;
             SwingUtilities.invokeLater(() -> mixedAgain(folder, ticket, said, seconds));
         });
+    }
+
+    /**
+     * The file mix of the stage found the factor it brought the mix to its peak with. Live
+     * playback takes it, so that it is as loud as the file; kept for the next time the stage is
+     * played live.
+     */
+    private void mixFactorFound(Path folder, int ticket, float factor, double masterDb) {
+        if (ticket != mixWanted || !folder.equals(Paths.get(directory.getText().trim()))) {
+            return;
+        }
+        mixFactor = factor;
+        mixFactorMasterDb = masterDb;
+        mixFactorFolder = folder;
+        if (soloTrack() == null) {
+            player.legacyFactor(factor, masterDb);
+        }
     }
 
     private void mixedAgain(Path folder, int ticket, String problem, double seconds) {
@@ -855,7 +1094,7 @@ public final class AudioStudioFrame extends JFrame {
         lcd.setSource(playbackName(selected), true);
     }
 
-    /** Writes the mix on the stage to a WAV file of the user's choice, with 24 bits. */
+    /** Writes the mix on the stage to a WAV file of the user's choice, with 24 bits, as loud as the mixed file. */
     private void exportMix() {
         final com.aresstack.audio.studio.application.StageMixService.Piece arrangement = pieceToMix();
         if (arrangement == null) {
@@ -873,8 +1112,8 @@ public final class AudioStudioFrame extends JFrame {
         final Path target = chosen.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".wav")
                 ? chosen : chosen.resolveSibling(chosen.getFileName() + ".wav");
         try {
-            new com.aresstack.audio.studio.application.StageMixService().export(arrangement,
-                    Paths.get(directory.getText().trim()), scene, target, 24);
+            com.aresstack.audio.studio.application.StageMixService mixing = stageMixing();
+            mixing.export(arrangement, Paths.get(directory.getText().trim()), scene, target, 24);
             append("Mischung gespeichert (24 Bit, 44,1 kHz): " + target);
         } catch (Exception failed) {
             message("Die Mischung ließ sich nicht speichern: " + failed.getMessage());
@@ -1799,7 +2038,7 @@ public final class AudioStudioFrame extends JFrame {
             java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece =
                     pieceModel.of(destination);
             if (piece.isPresent()) {
-                return new com.aresstack.audio.studio.application.PieceRendering(registry).render(piece.get(),
+                return new com.aresstack.audio.studio.application.PieceRendering(registry).withSound(stageSound).render(piece.get(),
                         librariesOf(settings), settings.sf2Engine, settings.fluidSynthExecutable, settings.sfizzExecutable,
                         settings.programs, progress).mix();
             }
@@ -1876,7 +2115,7 @@ public final class AudioStudioFrame extends JFrame {
                             progress);
                     Path preview = offer.propose(runId);
                     progress.update("Der Vorschlag wird zum Anhören gerendert ...");
-                    final Path heard = new com.aresstack.audio.studio.application.PieceRendering(registry).render(
+                    final Path heard = new com.aresstack.audio.studio.application.PieceRendering(registry).withSound(stageSound).render(
                             preview, offer.proposal().result(), librariesOf(settings), settings.sf2Engine,
                             settings.fluidSynthExecutable, settings.sfizzExecutable, settings.programs, progress)
                             .mix();
@@ -2575,6 +2814,7 @@ public final class AudioStudioFrame extends JFrame {
                 description.setText(keptDescription);
             }
             ownTracks.setSelected("own".equals(saved.getProperty("instrumentMode")));
+            listening = com.aresstack.audio.studio.application.StageListening.from(saved);
             loadArrangementForCurrentDirectory(saved);
             refreshSongs();
             append("Einstellungen geladen: " + settingsStore.location());
@@ -2613,6 +2853,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("description", description.getText());
             saved.setProperty("parallel", parallelRequests.getValue().toString());
             saved.setProperty("instrumentMode", ownTracks.isSelected() ? "own" : "ai");
+            listening.into(saved);
             if (trackTable != null && !loadingTracks && trackTable.arrangement() != null) {
                 trackStore.save(Paths.get(directory.getText().trim()), trackTable.currentArrangement());
             }
@@ -2872,8 +3113,7 @@ public final class AudioStudioFrame extends JFrame {
         Path raw = com.aresstack.audio.studio.application.StageMixService.stem(folder, selected);
         if (arrangement != null && Files.isRegularFile(raw)) {
             try {
-                return new com.aresstack.audio.studio.application.StageMixService().solo(arrangement, folder, scene,
-                        selected);
+                return stageMixing().solo(arrangement, folder, scene, selected);
             } catch (Exception failed) {
                 return raw; // then the track as it was rendered
             }
@@ -2912,6 +3152,7 @@ public final class AudioStudioFrame extends JFrame {
         com.aresstack.audio.studio.score.Score written = scoreOf(folder);
         if (stagePanel != null) {
             stagePanel.setBars(written == null ? 8 : written.bars());
+            showMovements(); // after composing, the model of the piece may be new
         }
         scoreView.setScore(written, ids,
                 "Noch keine Noten: erst komponieren, dann steht hier die Partitur");
@@ -3138,11 +3379,33 @@ public final class AudioStudioFrame extends JFrame {
                     + "\nErst „Demo laden“ oder komponieren, dann „Rendern“.");
             return;
         }
+        if (onStage(selected)) {
+            // The stage is played live: what is moved on it is heard while it plays.
+            if (!output.equals(player.file())) {
+                player.show(output);
+                arrangementView.setMix(player.envelope(), soloTrack() == null ? "Mix" : "Solo", soloTrack(),
+                        player.length());
+            }
+            lcd.setSource(playbackName(selected), true);
+            openLive(player.seconds(), true);
+            return;
+        }
+        playFile(selected, 0, true);
+    }
+
+    /** Plays the file behind a choice of the playback, as before the stage could be played live. */
+    private void playFile(String selected, double at, boolean play) {
+        Path output = playbackFile(selected);
         try {
             player.open(output);
             arrangementView.setMix(player.envelope(), soloTrack() == null ? "Mix" : "Solo", soloTrack(), player.length());
             lcd.setSource(playbackName(selected), true);
-            player.play();
+            if (at > 0 && player.length() > 0) {
+                player.seek(at / player.length());
+            }
+            if (play) {
+                player.play();
+            }
         } catch (Exception error) {
             message("Cannot play " + output + ": " + error.getMessage());
         }
@@ -3155,6 +3418,15 @@ public final class AudioStudioFrame extends JFrame {
 
     private void seek(double share) {
         if (!player.ready() && player.file() != null) {
+            String selected = (String) playbackSelection.getSelectedItem();
+            if (onStage(selected)) {
+                // A jump before anything played: the stage is got ready live, paused at that place.
+                DeckPlayer.Envelope shown = player.envelope();
+                if (shown != null) {
+                    openLive(Math.max(0, Math.min(1, share)) * shown.seconds, false);
+                }
+                return;
+            }
             try {
                 Path file = player.file();
                 player.open(file);
@@ -3166,6 +3438,9 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     /** Thirty times a second: the display, the place in the waveform and the meters follow the playback. */
+    private final com.aresstack.audio.studio.application.LimiterReadout limiterReadout =
+            new com.aresstack.audio.studio.application.LimiterReadout();
+
     private void tick() {
         boolean playing = player.playing();
         double second = player.seconds();
@@ -3175,11 +3450,14 @@ public final class AudioStudioFrame extends JFrame {
         lcd.tick();
         arrangementView.setSecond(second);
         scoreView.setSecond(playing || second > 0 ? second : -1);
-        DeckPlayer.Envelope envelope = player.envelope();
-        masterLeft.setLevel(playing && envelope != null ? envelope.at(second, false) : 0f);
-        masterRight.setLevel(playing && envelope != null ? envelope.at(second, true) : 0f);
+        masterLeft.setLevel(player.level(false));
+        masterRight.setLevel(player.level(true));
         if (trackTable != null) {
             trackTable.pulse();
+        }
+        if (stagePanel != null) {
+            // Live only: a file and an export are mixed as before and have no limiter to show.
+            stagePanel.setLimiter(limiterReadout.read(player.limiterGain(), System.nanoTime()));
         }
         if (stagePanel != null && stagePanel.isShowing()) {
             // On the stage every disc glows as loud as its track is right now.
@@ -3284,6 +3562,7 @@ public final class AudioStudioFrame extends JFrame {
         // The piece as a model: an old piece is taken into it here, its old files stay as they are.
         String chosen = directory.getText().trim();
         pieceModel.open(chosen.isEmpty() ? null : Paths.get(chosen));
+        showMovements();
         stageFollowsMix.remember(pieceToEdit().orElse(null)); // the stage as it stands belongs to this mix
         answersState = pieceToEdit().map(com.aresstack.audio.studio.application.ProjectSession::composition)
                 .orElse(null);

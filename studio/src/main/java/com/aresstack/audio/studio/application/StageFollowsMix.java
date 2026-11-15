@@ -82,9 +82,10 @@ public final class StageFollowsMix {
                     dynamics.add(new SoundSourcePlacement.LevelPoint(point.tick() / (double) barTicks, point.value()));
                 }
             }
+            // The mix document holds no height of a channel (work package D4): the one of the stage stays.
             stage = stage.with(new SoundSourcePlacement(channel.owner().id(), channel.x(), channel.depth(),
                     channel.levelDb(), channel.width(), channel.reverb(), channel.muted(), channel.locked(),
-                    dynamics));
+                    dynamics).atHeight(stage.placement(channel.owner().id()).height()));
         }
         return stage;
     }

@@ -36,6 +36,8 @@ final class LiveReflections {
     private final int[] glideLeft;
     /** Where the delay is going: whole frames. */
     private final int[] target;
+    /** Where a glide ends: the target, or a place between two frames for a source that moves with the piece. */
+    private final double[] goal;
     private final double[] oldDelay;
     private final int[] fadeLeft;
     /** A delay that arrived while a fade was running; it is taken when that fade ends. -1 for none. */
@@ -58,6 +60,7 @@ final class LiveReflections {
         step = new double[walls];
         glideLeft = new int[walls];
         target = new int[walls];
+        goal = new double[walls];
         oldDelay = new double[walls];
         fadeLeft = new int[walls];
         pending = new int[walls];
@@ -87,6 +90,7 @@ final class LiveReflections {
     void jumpTo(ChannelParameters parameters) {
         for (int i = 0; i < walls; i++) {
             target[i] = Math.min(capacity, parameters.echoDelay(i));
+            goal[i] = target[i];
             delay[i] = target[i];
             oldDelay[i] = target[i];
             glideLeft[i] = 0;
@@ -106,16 +110,51 @@ final class LiveReflections {
         }
     }
 
+    /** Takes the echoes of a moving source at once. */
+    void jumpTo(com.aresstack.audio.core.mix.Seat seat) {
+        for (int i = 0; i < walls; i++) {
+            goal[i] = Math.max(0, Math.min(capacity, seat.echoDelay[i]));
+            target[i] = (int) Math.round(goal[i]);
+            delay[i] = goal[i];
+            oldDelay[i] = target[i];
+            glideLeft[i] = 0;
+            fadeLeft[i] = 0;
+            pending[i] = -1;
+            toLeft[i].reset(seat.echoLeft[i]);
+            toRight[i].reset(seat.echoRight[i]);
+        }
+    }
+
+    /** Glides to the echoes of a moving source, starting with the next frame. */
+    void glideTo(com.aresstack.audio.core.mix.Seat seat, int frames) {
+        for (int i = 0; i < walls; i++) {
+            double wanted = Math.max(0, Math.min(capacity, seat.echoDelay[i]));
+            if (fadeLeft[i] > 0) {
+                // A crossfade from before the movement ends first; then the echo goes on from here.
+                pending[i] = (int) Math.round(wanted);
+            } else if (wanted != delay[i] || glideLeft[i] > 0) {
+                // The wall moves with the source, between samples, as in the file.
+                goal[i] = wanted;
+                target[i] = (int) Math.round(wanted);
+                glideLeft[i] = Math.max(1, frames);
+                step[i] = (wanted - delay[i]) / glideLeft[i];
+            }
+            toLeft[i].glideTo(seat.echoLeft[i], frames);
+            toRight[i].glideTo(seat.echoRight[i], frames);
+        }
+    }
+
     /** Starts the way of one wall's delay to a new whole number of frames. */
     private void change(int wall, int wanted) {
         if (fadeLeft[wall] > 0) {
             pending[wall] = wanted == target[wall] ? -1 : wanted;
             return;
         }
-        if (wanted == target[wall]) {
+        if (wanted == target[wall] && (delay[wall] == wanted || (glideLeft[wall] > 0 && goal[wall] == wanted))) {
             return;
         }
         target[wall] = wanted;
+        goal[wall] = wanted;
         double distance = wanted - delay[wall];
         if (Math.abs(distance) <= GLIDE_SHARE * glideFrames) {
             glideLeft[wall] = glideFrames;
@@ -139,30 +178,41 @@ final class LiveReflections {
      * its sound, and adds the echoes that fall into them to the bus.
      */
     void process(AudioBlock channel, int heard, int count, AudioBlock bus) {
+        process(channel, 0, heard, count, bus);
+    }
+
+    /**
+     * Takes the frames {@code from..to} of the block, of which those before {@code heardEnd} carry
+     * the sound of the channel, and adds the echoes that fall into them to the same frames of the
+     * bus. A channel that follows a motion hands over its block in pieces this way.
+     */
+    void process(AudioBlock channel, int from, int heardEnd, int to, AudioBlock bus) {
         int size = history.length;
         float[] left = channel.left;
         float[] right = channel.right;
-        for (int i = 0; i < heard; i++) {
+        int heard = Math.max(from, Math.min(heardEnd, to));
+        for (int i = from; i < heard; i++) {
             mono[i] = (left[i] + right[i]) * 0.5f;
         }
-        lowPass.process(mono, 0, heard);
+        lowPass.process(mono, from, heard - from);
         int at = (int) (written % size);
-        for (int i = 0; i < count; i++) {
+        for (int i = from; i < to; i++) {
             history[at] = i < heard ? mono[i] : 0f;
             at = at + 1 == size ? 0 : at + 1;
         }
         float[] busLeft = bus.left;
         float[] busRight = bus.right;
-        int base = (int) (written % size);
+        int base = (int) (written % size) - from;
         for (int wall = 0; wall < walls; wall++) {
             Ramp gainLeft = toLeft[wall];
             Ramp gainRight = toRight[wall];
-            if (fadeLeft[wall] == 0 && glideLeft[wall] == 0 && gainLeft.settled() && gainRight.settled()) {
+            if (fadeLeft[wall] == 0 && glideLeft[wall] == 0 && delay[wall] == target[wall]
+                    && gainLeft.settled() && gainRight.settled()) {
                 // Nothing moves: a whole delay, exactly as EarlyReflections reads it.
-                int read = wrap(base - target[wall], size);
+                int read = wrap(base + from - target[wall], size);
                 float gl = gainLeft.value();
                 float gr = gainRight.value();
-                for (int i = 0; i < count; i++) {
+                for (int i = from; i < to; i++) {
                     float echo = history[read];
                     busLeft[i] += echo * gl;
                     busRight[i] += echo * gr;
@@ -171,11 +221,11 @@ final class LiveReflections {
                 continue;
             }
             float share = 1f / glideFrames;
-            for (int i = 0; i < count; i++) {
+            for (int i = from; i < to; i++) {
                 int now = base + i;
                 if (glideLeft[wall] > 0) {
                     if (--glideLeft[wall] == 0) {
-                        delay[wall] = target[wall];
+                        delay[wall] = goal[wall];
                     } else {
                         delay[wall] += step[wall];
                     }
@@ -197,7 +247,7 @@ final class LiveReflections {
                 busRight[i] += echo * gainRight.next();
             }
         }
-        written += count;
+        written += to - from;
     }
 
     /** The history {@code delay} frames before frame {@code now} of the ring, between two samples if need be. */

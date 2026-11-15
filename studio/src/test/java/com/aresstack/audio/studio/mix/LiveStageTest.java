@@ -1,5 +1,10 @@
 package com.aresstack.audio.studio.mix;
 
+import com.aresstack.audio.composition.TimeMap;
+import com.aresstack.audio.composition.mix.AutomationLane;
+import com.aresstack.audio.composition.mix.MixChannel;
+import com.aresstack.audio.composition.mix.MixScene;
+import com.aresstack.audio.composition.mix.Room;
 import com.aresstack.audio.core.AudioBlock;
 import com.aresstack.audio.core.live.LiveGraph;
 import com.aresstack.audio.core.dsp.LookaheadLimiter;
@@ -122,6 +127,197 @@ public final class LiveStageTest {
             }
             Assert.assertTrue("largest step " + most, most < 0.03f);
         }
+    }
+
+    /**
+     * Work packages D2 and D3 together: a source that moves with the piece (place and room share
+     * from the mix document) is heard live as in the file. The file looks at the movement every 64
+     * frames, live playback once per block; both follow the same curve, so they differ by a trifle.
+     */
+    @Test
+    public void aSourceThatMovesWithThePieceIsHeardLiveAsInTheFile() throws Exception {
+        float[] sine = tone(4 * RATE, 220, RATE);
+        List<SpatialStemMixer.Signal> signals = List.of(new SpatialStemMixer.Signal(sine, sine, RATE),
+                new SpatialStemMixer.Signal(noise(4 * RATE, 5), noise(4 * RATE, 6), RATE));
+        List<SoundSourcePlacement> placements = List.of(
+                new SoundSourcePlacement("violin", -0.5, 0.2, 0, 1, 0.3, false, false, null),
+                new SoundSourcePlacement("pad", 0.3, 0.6, -6, 0.8, 0.5, false, false, null));
+        StageAutomation movements = movements("violin", "c1");
+        for (AcousticRoom room : new AcousticRoom[]{AcousticRoom.STUDIO.withAmount(0), AcousticRoom.HALL}) {
+            SpatialStemMixer.Mix file = new SpatialStemMixer().withAutomation(movements)
+                    .render(signals, placements, room, 2);
+            float[][] live;
+            try (LiveStage stage = LiveStage.of(signals, placements, room, 2, movements)) {
+                live = drain(stage.graph(), SpatialStemMixer.BLOCK);
+            }
+            Assert.assertArrayEquals(room.kind() + " left", file.left, live[0], 2e-3f);
+            Assert.assertArrayEquals(room.kind() + " right", file.right, live[1], 2e-3f);
+            // It does move: at the start the violin is on the left, at the end on the right.
+            Assert.assertTrue(rms(live[0], 0, RATE / 2) > 1.5 * rms(live[1], 0, RATE / 2));
+        }
+    }
+
+    /** A curve drawn while the piece plays: the source follows it from the next block on, without a jump. */
+    @Test
+    public void movementsHandedOverWhilePlayingAreFollowedWithoutAJump() throws Exception {
+        float[] sine = tone(4 * RATE, 110, RATE);
+        SoundSourcePlacement left = new SoundSourcePlacement("violin", -1, 0, 0, 1, 0, false, false, null);
+        try (LiveStage stage = LiveStage.of(List.of(new SpatialStemMixer.Signal(sine, sine, RATE)), List.of(left),
+                AcousticRoom.STUDIO.withAmount(0), 2)) {
+            LiveGraph graph = stage.graph();
+            int blockFrames = SpatialStemMixer.BLOCK;
+            float[][] out = new float[][]{new float[(int) graph.frames()], new float[(int) graph.frames()]};
+            AudioBlock block = new AudioBlock(blockFrames);
+            graph.prepare(RATE, blockFrames);
+            int at = 0;
+            int changedAt = -1;
+            int stillAt = -1;
+            int got;
+            do {
+                if (changedAt < 0 && at >= RATE) {
+                    // From now on the violin stands far right for the whole piece, says its curve.
+                    stage.moving(StageAutomation.of(mix("violin", "c1", new AutomationLane("l1", "c1",
+                            AutomationLane.X, List.of(new AutomationLane.Point(0, 1)))), TimeMap.of(120)));
+                    changedAt = at;
+                } else if (stillAt < 0 && at >= 2 * RATE) {
+                    // A drag of the disc does not move it while the curve says where it is ...
+                    Assert.assertTrue(stage.move(left.at(-1, 0).withLevel(0)));
+                    // ... and without the curve it stands where its placement says again.
+                    stage.moving(StageAutomation.NONE);
+                    stillAt = at;
+                }
+                block.setFrames(blockFrames);
+                got = graph.read(block);
+                System.arraycopy(block.left, 0, out[0], at, got);
+                System.arraycopy(block.right, 0, out[1], at, got);
+                at += got;
+            } while (got == blockFrames);
+            Assert.assertTrue(rms(out[0], changedAt - 4096, changedAt) > 3 * rms(out[1], changedAt - 4096, changedAt));
+            int after = changedAt + 2 * blockFrames;
+            Assert.assertTrue(rms(out[1], after, after + 4096) > 3 * rms(out[0], after, after + 4096));
+            int back = stillAt + graph.glideFrames() + 2 * blockFrames;
+            Assert.assertTrue(rms(out[0], back, back + 4096) > 3 * rms(out[1], back, back + 4096));
+            float most = 0;
+            for (float[] side : out) {
+                for (int i = changedAt - blockFrames; i < back; i++) {
+                    most = Math.max(most, Math.abs(side[i] - side[i - 1]));
+                }
+            }
+            Assert.assertTrue("largest step " + most, most < 0.02f);
+        }
+    }
+
+    /** The violin wanders from the left to the right and into the depth, and its room share rises. */
+    /**
+     * Work package D4 with D3: on headphones and with a convolved room a source that rises and
+     * crosses the stage is heard live as in the file, and a standing source at a height as well.
+     */
+    @Test
+    public void onHeadphonesASourceThatRisesIsHeardLiveAsInTheFile() throws Exception {
+        float[] sine = tone(4 * RATE, 220, RATE);
+        List<SpatialStemMixer.Signal> signals = List.of(new SpatialStemMixer.Signal(sine, sine, RATE),
+                new SpatialStemMixer.Signal(noise(4 * RATE, 5), noise(4 * RATE, 6), RATE));
+        List<SoundSourcePlacement> placements = List.of(
+                new SoundSourcePlacement("violin", -0.5, 0.2, 0, 1, 0.3, false, false, null),
+                new SoundSourcePlacement("pad", 0.3, 0.6, -6, 0.8, 0.5, false, false, null).atHeight(0.5));
+        StageAutomation movements = rising("violin", "c1");
+        StageSound[] sounds = {StageSound.binaural(), StageSound.binaural().withConvolution(true)};
+        for (StageSound sound : sounds) {
+            SpatialStemMixer.Mix file = new SpatialStemMixer().withAutomation(movements).withSound(sound)
+                    .render(signals, placements, AcousticRoom.HALL, 2);
+            float[][] live;
+            try (LiveStage stage = LiveStage.of(signals, placements, AcousticRoom.HALL, 2, movements, sound)) {
+                Assert.assertSame(sound, stage.sound());
+                live = drain(stage.graph(), SpatialStemMixer.BLOCK);
+            }
+            // Live asks the motion on the grid of the file (every 64 frames), so both take the same
+            // course (see the broadband test below for what is left).
+            Assert.assertArrayEquals("left, convolution " + sound.convolution(), file.left, live[0], 1e-3f);
+            Assert.assertArrayEquals("right, convolution " + sound.convolution(), file.right, live[1], 1e-3f);
+        }
+
+        // It does cross the head: noise alone in a dry room is nearer the left ear at the start
+        // and nearer the right ear at the end.
+        float[] hiss = noise(4 * RATE, 3);
+        try (LiveStage stage = LiveStage.of(List.of(new SpatialStemMixer.Signal(hiss, hiss, RATE)),
+                List.of(placements.get(0)), AcousticRoom.STUDIO.withAmount(0), 2, movements, StageSound.binaural())) {
+            float[][] live = drain(stage.graph(), SpatialStemMixer.BLOCK);
+            Assert.assertTrue(rms(live[0], 0, RATE / 2) > 1.2 * rms(live[1], 0, RATE / 2));
+            Assert.assertTrue(rms(live[1], 3 * RATE, 7 * RATE / 2) > 1.2 * rms(live[0], 3 * RATE, 7 * RATE / 2));
+        }
+    }
+
+    /**
+     * PO finding on the D4 stage: the same course with a broadband source that ends while another
+     * track goes on, so that its echoes, the room and the filters of the head ring out. Live asks
+     * the motion on the grid of the file, so both take the same course.
+     */
+    @Test
+    public void aMovingBroadbandSourceAndItsTailAreHeardLiveAsInTheFile() throws Exception {
+        float[] pad = tone(6 * RATE + RATE / 2, 220, RATE);
+        List<SpatialStemMixer.Signal> signals = List.of(
+                new SpatialStemMixer.Signal(noise(4 * RATE, 5), noise(4 * RATE, 6), RATE),
+                new SpatialStemMixer.Signal(pad, pad, RATE));
+        List<SoundSourcePlacement> placements = List.of(
+                new SoundSourcePlacement("violin", -0.5, 0.2, 0, 1, 0.3, false, false, null),
+                new SoundSourcePlacement("pad", 0.3, 0.6, -6, 0.8, 0.5, false, false, null).atHeight(0.5));
+        StageAutomation movements = rising("violin", "c1");
+        StageSound[] sounds = {StageSound.LOUDSPEAKERS, StageSound.binaural(),
+                StageSound.binaural().withConvolution(true)};
+        for (StageSound sound : sounds) {
+            SpatialStemMixer.Mix file = new SpatialStemMixer().withAutomation(movements).withSound(sound)
+                    .render(signals, placements, AcousticRoom.HALL, 2);
+            float[][] live;
+            try (LiveStage stage = LiveStage.of(signals, placements, AcousticRoom.HALL, 2, movements, sound)) {
+                live = drain(stage.graph(), SpatialStemMixer.BLOCK);
+            }
+            String how = "headphones " + sound.headphones() + ", convolution " + sound.convolution();
+            int end = 4 * RATE;
+            // The moving source, from its first echoes on: measured 5e-4 at a signal of 0.16 (rms),
+            // 50 dB below it. Where the rest comes from was not followed up further.
+            Assert.assertEquals(how + ", moving", 0, worst(file, live, 0, end), 1e-3);
+            // After the source has ended: its echoes, the room and the filters of the head ring out.
+            Assert.assertEquals(how + ", tail", 0, worst(file, live, end, file.left.length), 2e-4);
+            Assert.assertTrue(how + ": the tail is heard", rms(file.left, end, end + RATE / 2) > 1e-3);
+        }
+    }
+
+    /** The largest difference of one sample between file and live in the frames {@code from..to}. */
+    private static double worst(SpatialStemMixer.Mix file, float[][] live, int from, int to) {
+        double worst = 0;
+        for (int i = from; i < to; i++) {
+            worst = Math.max(worst, Math.max(Math.abs(file.left[i] - live[0][i]), Math.abs(file.right[i] - live[1][i])));
+        }
+        return worst;
+    }
+
+    /** A track that crosses the stage from left to right and rises from the ears to the top. */
+    private static StageAutomation rising(String track, String channel) {
+        long bar = 1920;
+        return StageAutomation.of(mix(track, channel,
+                new AutomationLane("l1", channel, AutomationLane.X,
+                        List.of(new AutomationLane.Point(0, -0.9), new AutomationLane.Point(2 * bar, 0.9))),
+                new AutomationLane("l2", channel, AutomationLane.HEIGHT,
+                        List.of(new AutomationLane.Point(0, 0), new AutomationLane.Point(2 * bar, 1)))),
+                TimeMap.of(120));
+    }
+
+    private static StageAutomation movements(String track, String channel) {
+        long bar = 1920;
+        return StageAutomation.of(mix(track, channel,
+                new AutomationLane("l1", channel, AutomationLane.X,
+                        List.of(new AutomationLane.Point(0, -0.9), new AutomationLane.Point(2 * bar, 0.9))),
+                new AutomationLane("l2", channel, AutomationLane.DEPTH,
+                        List.of(new AutomationLane.Point(bar / 2, 0.1), new AutomationLane.Point(2 * bar, 0.8))),
+                new AutomationLane("l3", channel, AutomationLane.REVERB,
+                        List.of(new AutomationLane.Point(0, 0.1), new AutomationLane.Point(bar, 0.7)))),
+                TimeMap.of(120));
+    }
+
+    private static MixScene mix(String track, String channel, AutomationLane... lanes) {
+        return new MixScene(new Room("hall", 2, 0.4), 0, com.aresstack.audio.composition.mix.LevelMode.LEGACY_PEAK,
+                List.of(new MixChannel(channel, MixChannel.Owner.part(track), 0, 0.2, 0, 1, 0.3, false, false)),
+                List.of(lanes));
     }
 
     @Test
