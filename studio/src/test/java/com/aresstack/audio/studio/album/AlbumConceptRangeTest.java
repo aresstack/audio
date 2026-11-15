@@ -23,8 +23,8 @@ public final class AlbumConceptRangeTest {
         Album old = AlbumFiles.read("a2", JsonParser.parseString(
                 "{\"title\":\"Alt\",\"concept\":{\"trackCount\":2,\"secondsPerTrack\":200},\"tracks\":[]}")
                 .getAsJsonObject());
-        assertEquals(200, old.concept().minSeconds());
-        assertEquals(200, old.concept().maxSeconds());
+        assertEquals(140, old.concept().minSeconds());
+        assertEquals(260, old.concept().maxSeconds());
     }
 
     @Test

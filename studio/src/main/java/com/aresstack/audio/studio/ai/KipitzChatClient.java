@@ -235,6 +235,31 @@ public final class KipitzChatClient implements ChatModel {
         }
     }
 
+    /**
+     * The answer in a response that came whole, not streamed. A model that thinks first (gpt-oss)
+     * may send its thinking apart and no content at all ({@code null}) when it was cut off while
+     * thinking: that is an empty answer with its finish reason, which asks again with more room,
+     * not an unreadable response. {@code null} only if there is no answer in it at all.
+     */
+    static Answer wholeAnswer(String response) {
+        try {
+            JsonObject envelope = new JsonParser().parse(response).getAsJsonObject();
+            if (envelope.has("error")) {
+                return null;
+            }
+            JsonObject choice = envelope.getAsJsonArray("choices").get(0).getAsJsonObject();
+            com.google.gson.JsonElement message = choice.get("message");
+            com.google.gson.JsonElement content = message != null && message.isJsonObject()
+                    ? message.getAsJsonObject().get("content") : choice.get("text");
+            String text = content != null && content.isJsonPrimitive() ? content.getAsString() : "";
+            com.google.gson.JsonElement finish = choice.get("finish_reason");
+            String reason = finish != null && finish.isJsonPrimitive() ? finish.getAsString() : "stop";
+            return new Answer(text, reason);
+        } catch (RuntimeException malformed) {
+            return null;
+        }
+    }
+
     /** The start of an answer, on one line, for a message. */
     static String glimpse(String content) {
         String line = content == null ? "" : content.replaceAll("\\s+", " ").trim();
@@ -430,14 +455,12 @@ public final class KipitzChatClient implements ChatModel {
                     return readStream(input, heard);
                 }
                 String response = readText(input, RESPONSE_LIMIT);
-                try {
-                    JsonObject choice = new JsonParser().parse(response).getAsJsonObject()
-                            .getAsJsonArray("choices").get(0).getAsJsonObject();
-                    return new Answer(choice.getAsJsonObject("message").get("content").getAsString(),
-                            choice.get("finish_reason").getAsString());
-                } catch (RuntimeException malformed) {
-                    throw new Unusable("Could not parse the KIPITZ model response.", malformed);
+                Answer whole = wholeAnswer(response);
+                if (whole == null) {
+                    throw new Unusable("Could not parse the KIPITZ model response (\"" + glimpse(response) + "\").",
+                            null);
                 }
+                return whole;
             }
         } catch (Refused | Unusable told) {
             throw told;
