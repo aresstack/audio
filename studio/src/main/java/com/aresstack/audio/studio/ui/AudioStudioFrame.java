@@ -253,6 +253,14 @@ public final class AudioStudioFrame extends JFrame {
     private int longerAnswers = KipitzChatClient.LONGER_ANSWERS;
     private int longerAnswerFactor = KipitzChatClient.LONGER_FACTOR;
 
+    /** How many requests to the models are open right now, from whatever part of the studio. */
+    private int aiRequests;
+
+    /** The AI lamp: on while the window works or any model is being asked. */
+    private void showAiLamp() {
+        lcd.setBusy((worker != null && !worker.isDone()) || aiRequests > 0);
+    }
+
     /** The models last named in the protocol; a production asks for them often, they are named once. */
     private String modelsSaid;
     /** The note editor's way into the open piece: every change a patch through the edit core (B1). */
@@ -2298,6 +2306,11 @@ public final class AudioStudioFrame extends JFrame {
         return new com.aresstack.audio.studio.ai.ModelLineup(fixed,
                 name -> new KipitzChatClient(url, key, name, routes).legacyModel(fixed.base())
                         .longerAnswers(longerAnswers, longerAnswerFactor)
+                        // Every request to a model lights the AI lamp, whoever asks (an album too).
+                        .activity(change -> SwingUtilities.invokeLater(() -> {
+                            aiRequests += change;
+                            showAiLamp();
+                        }))
                         // A connection that breaks off or is tried again is said at once, in the protocol and below.
                         .troubles(line -> SwingUtilities.invokeLater(() -> append(line))));
     }
@@ -4219,7 +4232,7 @@ public final class AudioStudioFrame extends JFrame {
         cancelButton.setEnabled(true);
         cancelKey.setEnabled(true);
         renderKey.setEnabled(false);
-        lcd.setBusy(true);
+        lcd.setBusy(true); // the work of the window itself; the requests of an album light it as well
         trackStates.clear();
         trackTable.clearWork();
         arrived = 0;
@@ -4305,7 +4318,7 @@ public final class AudioStudioFrame extends JFrame {
                 cancelButton.setEnabled(false);
                 cancelKey.setEnabled(false);
                 renderKey.setEnabled(true);
-                lcd.setBusy(false);
+                showAiLamp();
                 trackStates.clear();
                 trackTable.clearWork();
                 endChoosing(false); // a choice of instruments that did not get to its end
