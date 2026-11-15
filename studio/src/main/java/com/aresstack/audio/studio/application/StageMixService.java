@@ -115,7 +115,7 @@ public final class StageMixService {
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
             MixLevel chosen = level != null ? level : level(fitting, null);
-            outcome = mixer.mix(files, placements, fitting.room(), 4 * 60.0 / tempo(arrangement), chosen, fresh, bits);
+            outcome = mixer.mix(files, placements, fitting.room(), secondsPerBar(arrangement), chosen, fresh, bits);
             Files.move(fresh, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(fresh);
@@ -128,6 +128,20 @@ public final class StageMixService {
         List<String> lines = new ArrayList<String>();
         for (int i = 0; i < trackIds.size(); i++) {
             lines.add(trackIds.get(i) + "\t" + files[i].getFileName());
+        }
+        Files.write(directory.resolve(STEMS_FILE), lines, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Notes which file holds the sound of each track, as a path relative to the folder of the
+     * piece; the stem cache keeps its files under {@code render/stems/}.
+     */
+    public static void keepStems(Path directory, Map<String, Path> files) throws IOException {
+        Path base = directory.toAbsolutePath().normalize();
+        List<String> lines = new ArrayList<String>();
+        for (Map.Entry<String, Path> file : files.entrySet()) {
+            lines.add(file.getKey() + "\t"
+                    + base.relativize(file.getValue().toAbsolutePath().normalize()).toString().replace('\\', '/'));
         }
         Files.write(directory.resolve(STEMS_FILE), lines, StandardCharsets.UTF_8);
     }
@@ -145,7 +159,9 @@ public final class StageMixService {
 
     private static Path stem(Path directory, String trackId, Map<String, String> stems) {
         String named = stems.get(trackId);
-        if (named != null && named.matches("[A-Za-z0-9_.-]+") && Files.isRegularFile(directory.resolve(named))) {
+        // A name, or a path below the folder of the piece (the stem cache), never one that leaves it.
+        if (named != null && named.matches("[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*")
+                && !named.matches("(.*/)?\\.\\.(/.*)?") && Files.isRegularFile(directory.resolve(named))) {
             return directory.resolve(named);
         }
         Path sampled = directory.resolve(trackId + "-sampled.wav");
@@ -213,6 +229,12 @@ public final class StageMixService {
             throw new IllegalArgumentException("Arrangement must contain at least one track.");
         }
         return tracks;
+    }
+
+    /** How long one bar of a written arrangement lasts: its meter at its tempo (4/4 for pieces from before F2). */
+    public static double secondsPerBar(Path arrangement) throws IOException {
+        ArrangementFile file = ArrangementFile.read(arrangement);
+        return file.quartersPerBar() * 60.0 / file.tempoOrDefault();
     }
 
     /** The tempo of a written arrangement, kept within 20..400; 108 if it names none that can be read. */
