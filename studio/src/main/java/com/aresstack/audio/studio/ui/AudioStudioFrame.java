@@ -102,6 +102,9 @@ public final class AudioStudioFrame extends JFrame {
     private final JSpinner tokenLimit = new JSpinner(
             new SpinnerNumberModel(16384, 256, Integer.MAX_VALUE, 256));
     private final JSpinner sectionBars = new JSpinner(new SpinnerNumberModel(8, 2, 64, 1));
+    /** How many bars a long piece begins with and grows by per step of the continuation. */
+    private final JSpinner growBars = new JSpinner(new SpinnerNumberModel(PieceAutopilot.GROW_BARS,
+            PieceAutopilot.MIN_GROW_BARS, PieceAutopilot.MAX_GROW_BARS, 1));
     private final JTextField proxyHost = new JTextField(16);
     private final JTextField proxyPort = new JTextField("", 5);
     private final JComboBox<String> proxyMode = new JComboBox<String>(new String[]{
@@ -1430,6 +1433,11 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
+            public int growBars() {
+                return (Integer) growBars.getValue();
+            }
+
+            @Override
             public PieceAutopilot.Rendering rendering() {
                 return new PieceAutopilot.Rendering(
                         sf2Engine.getSelectedIndex() == 1 ? Sf2Engine.FLUIDSYNTH : Sf2Engine.GERVILL,
@@ -1567,6 +1575,11 @@ public final class AudioStudioFrame extends JFrame {
         sectionBars.setToolTipText("So viele Takte schreibt die KI je Anfrage und Spur, 2 bis 64");
         addRow(ai, row++, "Takte je Abschnitt",
                 line(sectionBars, note("Takte je Anfrage und Spur; Stücke bis zur doppelten Länge entstehen in einem Zug.")));
+        growBars.setPreferredSize(new Dimension(110, 30));
+        growBars.setToolTipText("Ein langes Stück beginnt mit so vielen Takten und wächst in Schritten dieser Größe, "
+                + PieceAutopilot.MIN_GROW_BARS + " bis " + PieceAutopilot.MAX_GROW_BARS);
+        addRow(ai, row++, "Takte je Wachstumsschritt",
+                line(growBars, note("Längere Stücke beginnen so lang und werden schrittweise verlängert.")));
         addRow(ai, row++, "Parallel",
                 line(parallelRequests, note("Anfragen gleichzeitig; höchstens so viele wie Spuren.")));
         addRow(ai, row, "", note("Der API-Key wird lokal im Klartext gespeichert (studio.properties im Benutzerordner)."));
@@ -1976,6 +1989,7 @@ public final class AudioStudioFrame extends JFrame {
         final int tokens = (Integer) tokenLimit.getValue();
         final int parallel = (Integer) parallelRequests.getValue();
         final int sections = (Integer) sectionBars.getValue();
+        final int grow = (Integer) growBars.getValue();
         if (!saveSettings(false)) {
             return;
         }
@@ -2001,7 +2015,7 @@ public final class AudioStudioFrame extends JFrame {
                     recordModels(output, autopilot ? "Autopilot" : "Instrumentenvorschlag", models);
                     if (autopilot) {
                         // The AI decides everything: the same steps the production of an album runs.
-                        PieceAutopilot pilot = new PieceAutopilot(registry, models, tokens, parallel, rendering).sectionBars(sections);
+                        PieceAutopilot pilot = new PieceAutopilot(registry, models, tokens, parallel, rendering).sectionBars(sections).growBars(grow);
                         return composeIntoPiece(pilot, prompt, output, stageBefore, progress);
                     }
                     final InstrumentProposalService.Staged staged = new InstrumentProposalService(
@@ -3374,6 +3388,7 @@ public final class AudioStudioFrame extends JFrame {
             albumModelChoices.setAssignment(modelChoices.assignment());
             tokenLimit.setValue(AiDefaults.maxTokens(saved));
             sectionBars.setValue(AiDefaults.sectionBars(saved));
+            growBars.setValue(AiDefaults.growBars(saved));
             proxyHost.setText(saved.getProperty("proxyHost", ""));
             proxyPort.setText(saved.getProperty("proxyPort", ""));
             proxyPacUrl.setText(saved.getProperty("proxyPacUrl", ""));
@@ -3430,6 +3445,7 @@ public final class AudioStudioFrame extends JFrame {
             com.aresstack.audio.studio.settings.ModelSettings.write(saved, currentAssignment());
             saved.setProperty("maxTokens", tokenLimit.getValue().toString());
             saved.setProperty("sectionBars", sectionBars.getValue().toString());
+            saved.setProperty("growBars", growBars.getValue().toString());
             saved.setProperty("proxyHost", proxyHost.getText().trim());
             saved.setProperty("proxyPort", proxyPort.getText().trim());
             String selectedProxyMode = proxyMode.getSelectedIndex() == 0 ? ""

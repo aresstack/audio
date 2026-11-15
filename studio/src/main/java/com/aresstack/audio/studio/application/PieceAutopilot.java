@@ -55,13 +55,14 @@ public final class PieceAutopilot {
     }
 
     /**
-     * A long piece is not composed in one go: it begins with this many bars, and the continuation
-     * (C3) adds the rest step by step, each step planned with the piece so far in view. One plan
-     * for minutes of music would need an answer of the model longer than any limit of tokens.
+     * A long piece is not composed in one go: it begins with {@link #growBars} bars, and the
+     * continuation (C3) adds the rest in steps of as many bars, each step planned with the piece so
+     * far in view. One plan for minutes of music would need an answer of the model longer than any
+     * limit of tokens. The number is the setting "Takte je Wachstumsschritt"; this is its default.
      */
-    public static final int FIRST_BARS = 16;
-    /** How many bars one step of the continuation adds at most. */
-    public static final int STEP_BARS = 16;
+    public static final int GROW_BARS = 16;
+    public static final int MIN_GROW_BARS = 4;
+    public static final int MAX_GROW_BARS = 256;
 
     private final InstrumentRegistry registry;
     private final ModelLineup models;
@@ -69,6 +70,7 @@ public final class PieceAutopilot {
     private final int maxParallel;
     private final Rendering rendering;
     private int sectionBars = CompositionSpec.SECTION_BARS;
+    private int growBars = GROW_BARS;
     private final SpatialSceneStore scenes = new SpatialSceneStore();
 
     public PieceAutopilot(InstrumentRegistry registry, ModelLineup models, int maxTokens, int maxParallel,
@@ -78,6 +80,16 @@ public final class PieceAutopilot {
         this.maxTokens = maxTokens;
         this.maxParallel = maxParallel;
         this.rendering = rendering == null ? Rendering.BUILT_IN : rendering;
+    }
+
+    /** How many bars a long piece begins with and grows by in each step (setting "Takte je Wachstumsschritt"). */
+    public PieceAutopilot growBars(int bars) {
+        if (bars < MIN_GROW_BARS || bars > MAX_GROW_BARS) {
+            throw new IllegalArgumentException("Ein Wachstumsschritt hat " + MIN_GROW_BARS + " bis " + MAX_GROW_BARS
+                    + " Takte: " + bars);
+        }
+        this.growBars = bars;
+        return this;
     }
 
     /** How many bars one request for notes covers, see {@link GemmaMusicComposer#sectionBars(int)}. */
@@ -115,18 +127,18 @@ public final class PieceAutopilot {
         }
         new TrackArrangementStore().save(folder, tracks);
         GemmaMusicComposer composer = new GemmaMusicComposer(models, maxTokens, maxParallel).sectionBars(sectionBars);
-        CompositionSpec first = spec == null || spec.bars() <= FIRST_BARS ? spec
-                : new CompositionSpec(FIRST_BARS, spec.bpm(), spec.key(), spec.numerator(), spec.denominator(),
+        CompositionSpec first = spec == null || spec.bars() <= growBars ? spec
+                : new CompositionSpec(growBars, spec.bpm(), spec.key(), spec.numerator(), spec.denominator(),
                 spec.snapToHarmony());
         // The beginning of a long piece is told that it goes on: it must not end yet.
-        String opening = first == spec ? description : description + "\nCompose only the opening " + FIRST_BARS
+        String opening = first == spec ? description : description + "\nCompose only the opening " + growBars
                 + " bars of a piece of " + spec.bars() + " bars: introduce the themes and do not end;"
                 + " the piece is continued afterwards.";
         // A long piece that was interrupted after it had begun to grow goes on from the bars it has:
         // composing its opening again would write the short arrangement over the grown piece.
         java.util.Optional<ProjectSession> saved = first == spec || model == null ? java.util.Optional.empty()
                 : model.of(folder);
-        boolean grown = saved.isPresent() && bars(saved.get()) > FIRST_BARS;
+        boolean grown = saved.isPresent() && bars(saved.get()) > growBars;
         Path arrangement = grown ? folder.resolve("arrangement.tsv") : ComposingIntoPiece.run(
                 () -> first == null ? composer.compose(opening, folder, tracks, progress)
                         : composer.compose(opening, folder, tracks, first, progress),
@@ -176,7 +188,7 @@ public final class PieceAutopilot {
         }
         int have = bars(session);
         while (have < target) {
-            int step = Math.min(STEP_BARS, target - have);
+            int step = Math.min(growBars, target - have);
             boolean last = have + step >= target;
             progress.update("Verlängere das Stück von " + have + " auf " + (have + step) + " von " + target
                     + " Takten ...");

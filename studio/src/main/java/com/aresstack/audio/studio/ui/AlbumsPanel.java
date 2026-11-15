@@ -89,6 +89,11 @@ final class AlbumsPanel extends JPanel {
             return com.aresstack.audio.studio.application.CompositionSpec.SECTION_BARS;
         }
 
+        /** How many bars a long piece begins with and grows by (setting "Takte je Wachstumsschritt"). */
+        default int growBars() {
+            return PieceAutopilot.GROW_BARS;
+        }
+
         PieceAutopilot.Rendering rendering();
 
         /** Opens a piece in the editor of the single piece. */
@@ -874,6 +879,7 @@ final class AlbumsPanel extends JPanel {
             // What the window says is read once, here on the event thread; the workers never ask it.
             final int requests = Math.max(1, host.parallelRequests());
             final int sectionBars = host.sectionBars();
+            final int growBars = host.growBars();
             final int tokens = host.tokens();
             final PieceAutopilot.Rendering rendering = host.rendering();
             // Every model of the production goes through the same permits: the limit holds over all pieces.
@@ -886,7 +892,7 @@ final class AlbumsPanel extends JPanel {
                 first[0] = null;
                 return new AutopilotPieceProduction(new PieceAutopilot(registry,
                         models.through(model -> new LimitedChatModel(model, permits)), tokens, requests, rendering)
-                        .sectionBars(sectionBars),
+                        .sectionBars(sectionBars).growBars(growBars),
                         songs);
             }, PIECES_AT_ONCE);
         } catch (RuntimeException invalid) {
