@@ -15,7 +15,7 @@ import java.util.List;
  */
 public record Album(String id, String title, AlbumConcept concept, List<AlbumTrack> tracks) {
     public Album {
-        if (id == null || !id.matches("[a-z0-9][a-z0-9-]*")) {
+        if (!isId(id)) {
             throw new IllegalArgumentException("Keine Kennung eines Albums: " + id);
         }
         title = title == null || title.isBlank() ? "Album" : title.trim();
@@ -30,6 +30,15 @@ public record Album(String id, String title, AlbumConcept concept, List<AlbumTra
             }
             seen.add(track.id());
         }
+    }
+
+    /**
+     * Whether this is the id of an album: lower-case letters, digits and hyphens, starting with a
+     * letter or digit. An id is the name of the album's folder, so nothing else may ever be one:
+     * no dot, no separator, nothing that leads out of the folder of the albums.
+     */
+    public static boolean isId(String id) {
+        return id != null && id.length() <= 80 && id.matches("[a-z0-9][a-z0-9-]*");
     }
 
     public Album withTracks(List<AlbumTrack> changed) {
