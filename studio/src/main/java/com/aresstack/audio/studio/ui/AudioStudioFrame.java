@@ -104,6 +104,15 @@ public final class AudioStudioFrame extends JFrame {
             new SpinnerNumberModel(AiDefaults.MAX_TOKENS, 256, Integer.MAX_VALUE, 256));
     private final JSpinner sectionBars = new JSpinner(new SpinnerNumberModel(8, 2, 64, 1));
     /** How many bars a long piece begins with and grows by per step of the continuation. */
+    private final JSpinner templateLines = new JSpinner(new SpinnerNumberModel(
+            com.aresstack.audio.studio.template.TextTemplate.DEFAULT_LINES,
+            com.aresstack.audio.studio.template.TextTemplate.MIN_LINES,
+            com.aresstack.audio.studio.template.TextTemplate.MAX_LINES, 1));
+    /** Which notes the open piece follows, if it follows any; beside it the keys to give or drop them. */
+    private final JLabel templateShown = new JLabel(" ");
+    private final JButton chooseTemplate = new DeckWidgets.HeadKey("Noten vorgeben …");
+    private final JButton dropTemplate = new DeckWidgets.HeadKey("Ohne Vorlage");
+    private final JPanel whoRowShown = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
     private final JSpinner growBars = new JSpinner(new SpinnerNumberModel(PieceAutopilot.GROW_BARS,
             PieceAutopilot.MIN_GROW_BARS, PieceAutopilot.MAX_GROW_BARS, 1));
     private final javax.swing.JCheckBox detailedLog = new javax.swing.JCheckBox("Erweitertes Protokoll");
@@ -936,7 +945,28 @@ public final class AudioStudioFrame extends JFrame {
         JPanel asked = new JPanel(new BorderLayout());
         asked.setOpaque(false);
         asked.add(wish, BorderLayout.CENTER);
-        asked.add(whoRow, BorderLayout.SOUTH);
+        // Or no free composing at all: notes the user gives, which the AI only brings into shape.
+        JPanel templateRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        templateRow.setOpaque(false);
+        templateRow.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
+        JLabel templateAsks = new JLabel("Notenvorlage:");
+        templateAsks.setForeground(AudioStudioTheme.TEXT_DIM);
+        templateShown.setForeground(AudioStudioTheme.TEXT_DIM);
+        chooseTemplate.setToolTipText("Eigene Noten geben (MIDI, MusicXML, ABC …), z. B. ein gemeinfreies Werk aus einer"
+                + " Notensammlung. Die KI komponiert dann nicht frei: sie übernimmt die Noten, wählt die Besetzung und"
+                + " berichtigt nur Format und offensichtliche Fehler. Es geht gleich los.");
+        dropTemplate.setToolTipText("Das Stück folgt keiner Notenvorlage mehr; „Komponieren“ komponiert wieder frei");
+        chooseTemplate.addActionListener(event -> chooseTemplate());
+        dropTemplate.addActionListener(event -> dropTemplate());
+        templateRow.add(templateAsks);
+        templateRow.add(templateShown);
+        templateRow.add(chooseTemplate);
+        templateRow.add(dropTemplate);
+        whoRowShown.setOpaque(false);
+        whoRowShown.setLayout(new BorderLayout());
+        whoRowShown.add(whoRow, BorderLayout.NORTH);
+        whoRowShown.add(templateRow, BorderLayout.SOUTH);
+        asked.add(whoRowShown, BorderLayout.SOUTH);
         draft.add(asked, BorderLayout.NORTH);
         songView.setOpaque(false);
         songView.add(draft, "draft");
@@ -1604,6 +1634,29 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
+            public int templateLines() {
+                return (Integer) templateLines.getValue();
+            }
+
+            @Override
+            public List<Path> chooseScores(String title) {
+                JFileChooser chooser = new JFileChooser();
+                chooser.setDialogTitle(title);
+                chooser.setMultiSelectionEnabled(true);
+                chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                        "Noten (MIDI, MusicXML, ABC, LilyPond …)",
+                        com.aresstack.audio.studio.template.TemplateReader.ENDINGS));
+                if (chooser.showOpenDialog(AudioStudioFrame.this) != JFileChooser.APPROVE_OPTION) {
+                    return List.of();
+                }
+                List<Path> chosen = new ArrayList<Path>();
+                for (java.io.File file : chooser.getSelectedFiles()) {
+                    chosen.add(file.toPath());
+                }
+                return chosen;
+            }
+
+            @Override
             public int[] voices() {
                 int fewest = (Integer) voicesMin.getValue();
                 return new int[]{fewest, Math.max(fewest, (Integer) voicesMax.getValue())};
@@ -1769,6 +1822,12 @@ public final class AudioStudioFrame extends JFrame {
         addRow(ai, row++, "Takte je Stück und Schritt",
                 line(growBars, note("Vorgabe für neue Stücke, für „Verlängern“ und für jeden Schritt, um den lange Stücke wachsen.")));
         growBars.addChangeListener(event -> specFields.suggestBars((Integer) growBars.getValue()));
+        templateLines.setPreferredSize(new Dimension(110, 30));
+        templateLines.setToolTipText("So viele Zeilen einer Notenvorlage in Textform (ABC, LilyPond …) überträgt die KI je Anfrage, "
+                + com.aresstack.audio.studio.template.TextTemplate.MIN_LINES + " bis "
+                + com.aresstack.audio.studio.template.TextTemplate.MAX_LINES);
+        addRow(ai, row++, "Zeilen der Vorlage je Anfrage",
+                line(templateLines, note("Für Notenvorlagen in Textform; MIDI und MusicXML liest das Studio selbst.")));
         addRow(ai, row++, "Parallel",
                 line(parallelRequests, note("Anfragen gleichzeitig; höchstens so viele wie Spuren.")));
         retryFirst.setPreferredSize(new Dimension(110, 30));
@@ -1955,13 +2014,18 @@ public final class AudioStudioFrame extends JFrame {
      * the tracks composed that have no notes yet.
      */
     private void updateComposeKey() {
+        boolean template = showTemplate();
         // A piece that is composed opens on its score, one that is not on its draft; after that the
         // switch in the head is the user's.
         if (composedShown == null || composedShown.booleanValue() != specFields.locked()) {
             composedShown = Boolean.valueOf(specFields.locked());
             showSongView(specFields.locked());
         }
-        if (!specFields.locked()) {
+        if (template) {
+            composeButton.setText(specFields.locked() ? "Aus Noten neu machen …" : "Aus Noten übernehmen");
+            composeButton.setToolTipText("Die Notenvorlage wird gelesen, die KI wählt die Besetzung und berichtigt nur"
+                    + " offensichtliche Fehler; dann wird gerendert.");
+        } else if (!specFields.locked()) {
             composeButton.setText("Komponieren");
             composeButton.setToolTipText("Komponieren und gleich rendern");
         } else if (aiChooses.isSelected()) {
@@ -1983,6 +2047,25 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     private void compose() {
+        // Notes given as a template: the piece is made from them; the AI chooses no instruments of its own.
+        Path folderBefore = Paths.get(directory.getText().trim());
+        java.util.Optional<Path> template = com.aresstack.audio.studio.application.ScoreTemplates.of(folderBefore);
+        if (template.isPresent()) {
+            if (startAfresh()) {
+                Path folder = Paths.get(directory.getText().trim());
+                if (!folder.toAbsolutePath().normalize().equals(folderBefore.toAbsolutePath().normalize())) {
+                    try {
+                        com.aresstack.audio.studio.application.ScoreTemplates.put(folder, template.get());
+                    } catch (IOException failed) {
+                        message("Die Notenvorlage ließ sich nicht ins neue Stück legen: " + failed.getMessage());
+                        return;
+                    }
+                }
+                showSongView(true);
+                proposeInstruments(true);
+            }
+            return;
+        }
         // The draft is said: the page turns to the score, where the notes appear as they are written.
         if (aiChooses.isSelected()) {
             if (startAfresh()) {
@@ -1993,6 +2076,62 @@ public final class AudioStudioFrame extends JFrame {
             showSongView(true);
             generate();
         }
+    }
+
+    /**
+     * Shows which notes the open piece follows, and lets the choice of instruments rest while it
+     * follows any: the template names who plays.
+     *
+     * @return whether the open piece follows a template
+     */
+    private boolean showTemplate() {
+        String folderText = directory.getText().trim();
+        java.util.Optional<Path> template = folderText.isEmpty() ? java.util.Optional.<Path>empty()
+                : com.aresstack.audio.studio.application.ScoreTemplates.of(Paths.get(folderText));
+        templateShown.setText(template.isPresent() ? "„" + template.get().getFileName() + "“ · die KI bringt sie nur in Form"
+                : "keine, die KI komponiert frei");
+        templateShown.setForeground(template.isPresent() ? AudioStudioTheme.TEXT : AudioStudioTheme.TEXT_DIM);
+        dropTemplate.setVisible(template.isPresent());
+        aiChooses.setEnabled(!template.isPresent());
+        ownTracks.setEnabled(!template.isPresent());
+        return template.isPresent();
+    }
+
+    /**
+     * Notes the user gives for the open piece: kept with it, and made into the piece at once
+     * (a piece that is composed already asks first whether beside it or in its place).
+     */
+    private void chooseTemplate() {
+        if (busy()) {
+            return;
+        }
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Noten als Vorlage wählen");
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "Noten (MIDI, MusicXML, ABC, LilyPond …)", com.aresstack.audio.studio.template.TemplateReader.ENDINGS));
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        Path folder = Paths.get(directory.getText().trim());
+        try {
+            com.aresstack.audio.studio.application.ScoreTemplates.put(folder, chooser.getSelectedFile().toPath());
+        } catch (IOException failed) {
+            message("Die Notenvorlage ließ sich nicht übernehmen: " + failed.getMessage());
+            return;
+        }
+        append("Notenvorlage für dieses Stück: " + chooser.getSelectedFile().getName());
+        updateComposeKey();
+        compose();
+    }
+
+    private void dropTemplate() {
+        try {
+            com.aresstack.audio.studio.application.ScoreTemplates.remove(Paths.get(directory.getText().trim()));
+            append("Das Stück folgt keiner Notenvorlage mehr; „Komponieren“ komponiert wieder frei.");
+        } catch (IOException failed) {
+            message("Die Notenvorlage ließ sich nicht entfernen: " + failed.getMessage());
+        }
+        updateComposeKey();
     }
 
     /**
@@ -2244,6 +2383,7 @@ public final class AudioStudioFrame extends JFrame {
         final int parallel = (Integer) parallelRequests.getValue();
         final int sections = (Integer) sectionBars.getValue();
         final int grow = (Integer) growBars.getValue();
+        final int linesPerRequest = (Integer) templateLines.getValue();
         final int fewest = (Integer) voicesMin.getValue();
         final int most = Math.max(fewest, (Integer) voicesMax.getValue());
         if (!saveSettings(false)) {
@@ -2272,7 +2412,7 @@ public final class AudioStudioFrame extends JFrame {
                     if (autopilot) {
                         // The AI decides everything: the same steps the production of an album runs.
                         PieceAutopilot pilot = new PieceAutopilot(registry, models, tokens, parallel, rendering).sectionBars(sections).growBars(grow)
-                                .voices(fewest, most);
+                                .voices(fewest, most).templateLines(linesPerRequest);
                         return composeIntoPiece(pilot, prompt, output, stageBefore, progress);
                     }
                     final InstrumentProposalService.Staged staged = new InstrumentProposalService(
@@ -4138,6 +4278,7 @@ public final class AudioStudioFrame extends JFrame {
             sectionBars.setValue(AiDefaults.sectionBars(saved));
             detailedLog.setSelected(Boolean.parseBoolean(saved.getProperty("detailedLog", "false")));
             growBars.setValue(AiDefaults.growBars(saved));
+            templateLines.setValue(AiDefaults.templateLines(saved));
             longerAnswers = AiDefaults.longerAnswers(saved);
             longerAnswerFactor = AiDefaults.longerAnswerFactor(saved);
             specFields.suggestBars((Integer) growBars.getValue());
@@ -4227,6 +4368,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("sectionBars", sectionBars.getValue().toString());
             saved.setProperty("detailedLog", Boolean.toString(detailedLog.isSelected()));
             saved.setProperty("portionBars", growBars.getValue().toString());
+            saved.setProperty("templateLines", templateLines.getValue().toString());
             saved.setProperty("longerAnswers", Integer.toString(longerAnswers));
             saved.remove("albumPiecesAtOnce"); // no more: the parallel requests alone set how much runs at once
             saved.setProperty("longerAnswerFactor", Integer.toString(longerAnswerFactor));

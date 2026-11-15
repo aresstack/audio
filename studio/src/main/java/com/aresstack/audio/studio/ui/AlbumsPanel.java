@@ -16,6 +16,7 @@ import com.aresstack.audio.studio.album.AlbumRoles;
 import com.aresstack.audio.studio.album.AlbumSuggester;
 import com.aresstack.audio.studio.album.AlbumSuggester.Field;
 import com.aresstack.audio.studio.album.AlbumSuggestions;
+import com.aresstack.audio.studio.album.AlbumTemplates;
 import com.aresstack.audio.studio.album.AlbumTrack;
 import com.aresstack.audio.studio.album.AutopilotPieceProduction;
 import com.aresstack.audio.studio.album.ChatAlbumPlanner;
@@ -105,6 +106,19 @@ final class AlbumsPanel extends JPanel {
         /** Opens a piece in the editor of the single piece. */
         void openPiece(Path folder);
 
+        /**
+         * Lets the user choose files of notes (MIDI, MusicXML, ABC ...) as templates for titles;
+         * empty if they choose none.
+         */
+        default List<Path> chooseScores(String title) {
+            return List.of();
+        }
+
+        /** How many lines of a template written as text the AI writes over in one request. */
+        default int templateLines() {
+            return com.aresstack.audio.studio.template.TextTemplate.DEFAULT_LINES;
+        }
+
         /** Lets the user choose a folder to export into; {@code null} if they do not. */
         Path chooseFolder(String title);
 
@@ -175,6 +189,10 @@ final class AlbumsPanel extends JPanel {
     private final JButton again = new DeckWidgets.HeadKey("Titel neu");
     private final JButton open = new DeckWidgets.HeadKey("Öffnen");
     private final JButton export = new DeckWidgets.HeadKey("Exportieren");
+    private final JButton scores = new DeckWidgets.HeadKey("Noten vorgeben …");
+    private final JButton noScore = new DeckWidgets.HeadKey("Ohne Vorlage");
+    /** The name of the template file of each title that has one, for the album shown. */
+    private final Map<String, String> templateNames = new HashMap<String, String>();
 
     private Album album;
     private AlbumProductionState state = AlbumProductionState.EMPTY;
@@ -368,8 +386,13 @@ final class AlbumsPanel extends JPanel {
         hint(again, "Den gewählten Titel neu produzieren");
         hint(export, "Das Album in einen Ordner exportieren");
         hint(cancel, "Die laufende Produktion abbrechen");
+        hint(scores, "Eigene Noten (MIDI, MusicXML, ABC …) als Vorlage geben: eine Datei für den gewählten Titel,"
+                + " mehrere für die Titel ab dem gewählten, neue Titel nach Bedarf. Die KI komponiert diese Titel"
+                + " nicht frei, sondern übernimmt die Noten und berichtigt nur Format und offensichtliche Fehler.");
+        hint(noScore, "Der gewählte Titel folgt keiner Notenvorlage mehr; er wird wieder frei komponiert");
         for (java.awt.Component key : new java.awt.Component[]{plan, produce, cancel, export,
-                javax.swing.Box.createHorizontalStrut(10), add, remove, up, down, open, again}) {
+                javax.swing.Box.createHorizontalStrut(10), add, remove, up, down, open, again,
+                javax.swing.Box.createHorizontalStrut(10), scores, noScore}) {
             headKeys.add(key);
         }
         status.setForeground(AudioStudioTheme.TEXT_DIM);
@@ -413,6 +436,8 @@ final class AlbumsPanel extends JPanel {
         again.addActionListener(event -> produceAgain());
         open.addActionListener(event -> openPiece());
         export.addActionListener(event -> exportAlbum());
+        scores.addActionListener(event -> giveScores());
+        noScore.addActionListener(event -> dropScore());
         reload(null);
     }
 
@@ -476,6 +501,7 @@ final class AlbumsPanel extends JPanel {
         trackCount.setValue(chosen == null ? 12 : chosen.concept().trackCount());
         minutes.setValue(chosen == null ? AlbumConcept.DEFAULT_MIN_SECONDS / 60.0 : chosen.concept().minSeconds() / 60.0);
         minutesTo.setValue(chosen == null ? AlbumConcept.DEFAULT_MAX_SECONDS / 60.0 : chosen.concept().maxSeconds() / 60.0);
+        readTemplates();
         tracks.fireTableDataChanged();
         say(chosen == null ? "Noch kein Album. „Neues Album“ legt eines an." : summary());
         keys();
@@ -555,6 +581,8 @@ final class AlbumsPanel extends JPanel {
         again.setEnabled(free && selected != null && selected.hasPiece());
         open.setEnabled(there && selected != null && selected.hasPiece());
         // A piece put into the album by hand, or an old one in the unnamed album, can be exported as well.
+        scores.setEnabled(free);
+        noScore.setEnabled(free && selected != null && templateNames.containsKey(selected.id()));
         export.setEnabled(free && (state.count(album, Status.DONE) > 0
                 || album != null && album.tracks().stream().anyMatch(AlbumTrack::hasPiece)));
     }
@@ -925,6 +953,12 @@ final class AlbumsPanel extends JPanel {
         }
         List<AlbumTrack> changed = new ArrayList<AlbumTrack>(album.tracks());
         changed.remove(row);
+        try {
+            new AlbumTemplates(files).remove(album.id(), gone.id()); // a later title may get its id
+        } catch (IOException | RuntimeException kept) {
+            say("Die Notenvorlage des Titels ließ sich nicht entfernen: " + kept.getMessage());
+        }
+        templateNames.remove(gone.id());
         change(changed, Math.min(row, changed.size() - 1));
     }
 
@@ -972,6 +1006,106 @@ final class AlbumsPanel extends JPanel {
         }
     }
 
+    // ---- notes given as templates ----
+
+    /** Reads which titles of the album shown follow a template. */
+    private void readTemplates() {
+        templateNames.clear();
+        if (album == null) {
+            return;
+        }
+        AlbumTemplates templates = new AlbumTemplates(files);
+        for (AlbumTrack track : album.tracks()) {
+            try {
+                templates.of(album.id(), track.id()).ifPresent(file -> templateNames.put(track.id(),
+                        file.getFileName().toString()));
+            } catch (RuntimeException odd) {
+                // a title whose id names no folder has no template
+            }
+        }
+    }
+
+    /**
+     * Notes the user gives as templates: one file for the title chosen in the list, several for
+     * the titles from the chosen one on (from the first title without notes if none is chosen),
+     * with new titles where there are more files than titles. A new title is named after its file.
+     */
+    void giveScores() {
+        if (!keepConcept()) {
+            return;
+        }
+        List<Path> chosen = host.chooseScores("Noten als Vorlage für die Titel wählen");
+        if (chosen == null || chosen.isEmpty()) {
+            return;
+        }
+        giveScores(chosen);
+    }
+
+    /** Gives these files as templates, as {@link #giveScores()} describes; a test calls it directly. */
+    void giveScores(List<Path> chosen) {
+        List<Path> sorted = new ArrayList<Path>(chosen);
+        sorted.sort(java.util.Comparator.comparing(file -> file.getFileName().toString().toLowerCase(Locale.ROOT)));
+        int row = table.getSelectedRow();
+        if (row < 0 || sorted.size() > 1 && row >= album.tracks().size()) {
+            row = 0;
+            while (row < album.tracks().size() && templateNames.containsKey(album.tracks().get(row).id())) {
+                row++;
+            }
+        }
+        List<AlbumTrack> changed = new ArrayList<AlbumTrack>(album.tracks());
+        Album growing = album;
+        AlbumTemplates templates = new AlbumTemplates(files);
+        int given = 0;
+        try {
+            for (int i = 0; i < sorted.size(); i++) {
+                Path file = sorted.get(i);
+                int at = row + i;
+                if (at >= changed.size()) {
+                    String name = file.getFileName().toString();
+                    String named = name.contains(".") ? name.substring(0, name.lastIndexOf('.')) : name;
+                    AlbumTrack fresh = new AlbumTrack(growing.freshTrackId(), named.replace('_', ' '), "", 100,
+                            "C major", "4/4", "", "", album.concept().secondsPerTrack(), "");
+                    changed.add(fresh);
+                    growing = growing.withTracks(changed);
+                    at = changed.size() - 1;
+                }
+                templates.put(album.id(), changed.get(at).id(), file);
+                given++;
+            }
+        } catch (IOException | RuntimeException failed) {
+            say("Die Noten ließen sich nicht übernehmen: " + failed.getMessage());
+        }
+        change(changed, row < changed.size() ? row : -1);
+        readTemplates();
+        tracks.fireTableDataChanged();
+        if (row >= 0 && row < changed.size()) {
+            table.setRowSelectionInterval(row, row);
+        }
+        if (given > 0) {
+            say(given == 1 ? "Der Titel folgt jetzt dieser Notenvorlage; „Album produzieren“ macht ihn daraus"
+                    + " (ein fertiger Titel mit „Titel neu“)."
+                    : given + " Titel folgen jetzt Notenvorlagen; „Album produzieren“ macht sie daraus.");
+        }
+        keys();
+    }
+
+    private void dropScore() {
+        int row = table.getSelectedRow();
+        if (album == null || row < 0 || row >= album.tracks().size()) {
+            return;
+        }
+        try {
+            new AlbumTemplates(files).remove(album.id(), album.tracks().get(row).id());
+            say("„" + album.tracks().get(row).title() + "“ wird wieder frei komponiert.");
+        } catch (IOException | RuntimeException failed) {
+            say("Die Notenvorlage ließ sich nicht entfernen: " + failed.getMessage());
+        }
+        readTemplates();
+        tracks.fireTableDataChanged();
+        table.setRowSelectionInterval(row, row);
+        keys();
+    }
+
     // ---- making the pieces ----
 
     void produceAlbum() {
@@ -992,6 +1126,7 @@ final class AlbumsPanel extends JPanel {
             final int requests = Math.max(1, host.parallelRequests());
             final int sectionBars = host.sectionBars();
             final int growBars = host.growBars();
+            final int templateLines = host.templateLines();
             final int[] voices = host.voices();
             final int tokens = host.tokens();
             final PieceAutopilot.Rendering rendering = host.rendering();
@@ -1005,7 +1140,8 @@ final class AlbumsPanel extends JPanel {
                 first[0] = null;
                 return new AutopilotPieceProduction(new PieceAutopilot(registry,
                         models.through(model -> new LimitedChatModel(model, permits)), tokens, requests, rendering)
-                        .sectionBars(sectionBars).growBars(growBars).voices(voices[0], voices[1]),
+                        .sectionBars(sectionBars).growBars(growBars).voices(voices[0], voices[1])
+                                .templateLines(templateLines),
                         songs);
             // As many titles at once as there are requests allowed: every title gets its turn at the
             // shared permits, so the setting "Parallel" alone limits the connections.
@@ -1295,29 +1431,40 @@ final class AlbumsPanel extends JPanel {
                 case 6:
                     return track.instrumentation();
                 case 7:
+                    // A title made from notes is as long as its notes: the album's minutes do not apply to it.
+                    if (templateNames.containsKey(track.id())) {
+                        return entry.status() == Status.DONE && entry.seconds() > 0 ? clock(entry.seconds())
+                                : "aus den Noten";
+                    }
                     if (entry.status() == Status.DONE && entry.seconds() > 0) {
                         return clock(entry.seconds()) + (track.asLongAsAsked(entry.seconds()) ? ""
                                 : "  (Ziel " + clock(track.targetSeconds()) + ")");
                     }
                     return clock(track.targetSeconds()) + " (" + track.spec().bars() + " Takte)";
                 default:
-                    switch (entry.status()) {
-                        case DONE:
-                            return "fertig";
-                        case FAILED:
-                            return "Fehler: " + entry.reason();
-                        case RUNNING:
-                            if (production == null || !production.running()) {
-                                // Left from a run that ended without finishing it: it goes on at the next start.
-                                return "unterbrochen";
-                            }
-                            String now = doing.get(track.id());
-                            return now == null ? "in Arbeit ..." : now;
-                        case QUEUED:
-                            return "wartet";
-                        default:
-                            return track.hasPiece() ? "eigenes Stück" : "geplant";
+                    String notes = templateNames.containsKey(track.id())
+                            ? "  · Noten: " + templateNames.get(track.id()) : "";
+                    return stateOf(track, entry) + notes;
+            }
+        }
+
+        private String stateOf(AlbumTrack track, AlbumProductionState.Entry entry) {
+            switch (entry.status()) {
+                case DONE:
+                    return "fertig";
+                case FAILED:
+                    return "Fehler: " + entry.reason();
+                case RUNNING:
+                    if (production == null || !production.running()) {
+                        // Left from a run that ended without finishing it: it goes on at the next start.
+                        return "unterbrochen";
                     }
+                    String now = doing.get(track.id());
+                    return now == null ? "in Arbeit ..." : now;
+                case QUEUED:
+                    return "wartet";
+                default:
+                    return track.hasPiece() ? "eigenes Stück" : "geplant";
             }
         }
 
