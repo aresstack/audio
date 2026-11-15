@@ -215,6 +215,11 @@ final class ModelChoicePanel extends JPanel {
     }
 
     /** The models the service offers. */
+    /** The models the service named, empty until they were loaded. */
+    List<String> knownModels() {
+        return List.copyOf(known);
+    }
+
     void setModels(List<String> models) {
         known.clear();
         known.addAll(models);

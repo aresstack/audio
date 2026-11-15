@@ -17,6 +17,7 @@ import com.aresstack.audio.studio.album.AlbumSuggester;
 import com.aresstack.audio.studio.album.AlbumSuggester.Field;
 import com.aresstack.audio.studio.album.AlbumSuggestions;
 import com.aresstack.audio.studio.album.AlbumTemplates;
+import com.aresstack.audio.studio.album.AlbumTools;
 import com.aresstack.audio.studio.album.AlbumTrack;
 import com.aresstack.audio.studio.album.AutopilotPieceProduction;
 import com.aresstack.audio.studio.album.ChatAlbumPlanner;
@@ -154,6 +155,11 @@ final class AlbumsPanel extends JPanel {
 
         /** An album was written: its title, its concept or its list of titles changed. */
         default void albumChanged() {
+        }
+
+        /** The AI help of the fields; {@code null}: the page has none. */
+        default Assistant assistant() {
+            return null;
         }
     }
 
@@ -306,7 +312,23 @@ final class AlbumsPanel extends JPanel {
         c.insets = new Insets(0, 0, 6, 8);
         c.anchor = GridBagConstraints.WEST;
         c.fill = GridBagConstraints.HORIZONTAL;
-        row(concept, c, 0, "Titel", titleBox, 3);
+        Assistant assistant = host.assistant();
+        java.awt.Component titled = titleBox;
+        if (assistant != null) {
+            JPanel withKey = new JPanel(new BorderLayout(4, 0));
+            withKey.setOpaque(false);
+            withKey.add(titleBox, BorderLayout.CENTER);
+            withKey.add(assistant.key("KI-Hilfe für den Titel des Albums", () -> textHelp("Titel", "title", title,
+                    "the title of the album, short and memorable.")), BorderLayout.EAST);
+            titled = withKey;
+            descriptionWide.aside(assistant.key("KI-Hilfe für „Worum geht es?“", () -> textHelp("Worum geht es?",
+                    "description", description, "what the album is about, in the user's words: the story or "
+                            + "theme, the pieces and their order, everything the AI that plans and composes the "
+                            + "album should know. It may be long.")));
+            styleWide.aside(assistant.key("KI-Hilfe für den Stil", () -> textHelp("Stil", "style", style,
+                    "how the album sounds: genre, instruments, sound, in a few lines.")));
+        }
+        row(concept, c, 0, "Titel", titled, 3);
         row(concept, c, 1, "Worum geht es? Das bekommt die KI gesagt.", descriptionWide, 3);
         row(concept, c, 2, "Stil", styleWide, 3);
         // An empty list that is opened asks the AI (again): a request that failed is not the last word.
@@ -417,6 +439,10 @@ final class AlbumsPanel extends JPanel {
                 + " mehrere für die Titel ab dem gewählten, neue Titel nach Bedarf. Die KI komponiert diese Titel"
                 + " nicht frei, sondern übernimmt die Noten und berichtigt nur Format und offensichtliche Fehler.");
         hint(noScore, "Der gewählte Titel folgt keiner Notenvorlage mehr; er wird wieder frei komponiert");
+        if (assistant != null) {
+            headKeys.add(assistant.key("KI-Hilfe für die Trackliste: einen Text oder eine Liste hineinkopieren, "
+                    + "die KI legt die Titel an, ändert, sortiert sie und setzt das Hauptthema", this::tracksHelp));
+        }
         for (java.awt.Component key : new java.awt.Component[]{plan, produce, cancel, export,
                 javax.swing.Box.createHorizontalStrut(10), add, remove, up, down, open, again,
                 javax.swing.Box.createHorizontalStrut(10), scores, noScore}) {
@@ -916,6 +942,135 @@ final class AlbumsPanel extends JPanel {
         } catch (IOException failed) {
             say("Das Album ließ sich nicht löschen: " + failed.getMessage());
         }
+    }
+
+    // ---- the AI help of the fields ----
+
+    /** The help of a text field of the album shown; {@code null} without an album. */
+    private Assistant.Field textHelp(String label, String name, JTextField field, String what) {
+        if (album == null) {
+            say("Erst ein Album wählen oder anlegen.");
+            return null;
+        }
+        return Assistant.textField(label, "album-" + album.id() + "-" + name, field, what,
+                () -> album == null ? "" : AlbumTools.read(album), this::keepConcept);
+    }
+
+    /** The help of the track list of the album shown: it reads the album and changes only its titles and theme. */
+    private Assistant.Field tracksHelp() {
+        if (album == null) {
+            say("Erst ein Album wählen oder anlegen.");
+            return null;
+        }
+        final String id = album.id();
+        return new Assistant.Field() {
+            @Override
+            public String label() {
+                return "Trackliste";
+            }
+
+            @Override
+            public String key() {
+                return "album-" + id + "-tracks";
+            }
+
+            @Override
+            public String system() {
+                return "You help the user of a music studio with the track list of an album: put titles in, change, "
+                        + "remove and order them, and set the main theme (leitmotif) of the album as notes. Talk with "
+                        + "the user in their language. Read the album first with read_album. When the user gives a "
+                        + "text or a list, take the titles and what is said about each (as mood) from it exactly; "
+                        + "fill in tempo, key, meter, players, form, length and how the main theme appears where "
+                        + "it helps, or leave them for the planning. Titles with a piece already cannot be changed. "
+                        + "You can change nothing but the track list and the main theme. After a change, say in a "
+                        + "few sentences what you did.";
+            }
+
+            @Override
+            public List<com.aresstack.audio.studio.assist.AssistTool> tools() {
+                String fields = "{\"type\":\"object\",\"properties\":{" + AlbumTools.TRACK_FIELDS + "}}";
+                return List.of(
+                        com.aresstack.audio.studio.assist.AssistTool.reading("read_album",
+                                "Reads the album: title, description, style, number of pieces and length range, the "
+                                        + "titles with their numbers, and the main theme.",
+                                arguments -> Assistant.onScreen(() -> AlbumTools.read(current(id)))),
+                        com.aresstack.audio.studio.assist.AssistTool.of("add_titles",
+                                "Puts titles into the track list, in order. replace=true first removes the titles "
+                                        + "that have no piece yet.",
+                                "{\"type\":\"object\",\"properties\":{\"titles\":{\"type\":\"array\",\"items\":"
+                                        + fields + "},\"replace\":{\"type\":\"boolean\"}},\"required\":[\"titles\"]}",
+                                arguments -> changeAlbum(id, now -> AlbumTools.addTracks(now, arguments))),
+                        com.aresstack.audio.studio.assist.AssistTool.of("change_title",
+                                "Changes the fields given of the title with this number (from 1).",
+                                "{\"type\":\"object\",\"properties\":{\"number\":{\"type\":\"integer\"},"
+                                        + AlbumTools.TRACK_FIELDS + "},\"required\":[\"number\"]}",
+                                arguments -> changeAlbum(id, now -> AlbumTools.changeTrack(now, arguments))),
+                        com.aresstack.audio.studio.assist.AssistTool.of("remove_title",
+                                "Removes the title with this number (from 1) from the list.",
+                                "{\"type\":\"object\",\"properties\":{\"number\":{\"type\":\"integer\"}},"
+                                        + "\"required\":[\"number\"]}",
+                                arguments -> changeAlbum(id, now -> AlbumTools.removeTrack(now, arguments))),
+                        com.aresstack.audio.studio.assist.AssistTool.of("move_title",
+                                "Moves the title with this number to the place 'to' (both from 1).",
+                                "{\"type\":\"object\",\"properties\":{\"number\":{\"type\":\"integer\"},"
+                                        + "\"to\":{\"type\":\"integer\"}},\"required\":[\"number\",\"to\"]}",
+                                arguments -> changeAlbum(id, now -> AlbumTools.moveTrack(now, arguments))),
+                        com.aresstack.audio.studio.assist.AssistTool.of("set_main_theme",
+                                "Sets the main theme of the album: a melody of 4 to 8 bars as notes (beat and "
+                                        + "duration in quarters from its start, MIDI pitch).",
+                                "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},"
+                                        + "\"description\":{\"type\":\"string\"},\"key\":{\"type\":\"string\"},"
+                                        + "\"notes\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{"
+                                        + "\"beat\":{\"type\":\"number\"},\"duration\":{\"type\":\"number\"},"
+                                        + "\"pitch\":{\"type\":\"integer\"}}}}},\"required\":[\"notes\"]}",
+                                arguments -> changeAlbum(id, now -> AlbumTools.setTheme(now, arguments))));
+            }
+
+            @Override
+            public Runnable snapshot() {
+                Album was = current(id);
+                return () -> {
+                    if (was != null && !busy && !shownRunning()) {
+                        try {
+                            files.save(was);
+                            reload(was.id());
+                            host.albumChanged();
+                        } catch (IOException failed) {
+                            say("Die Änderung ließ sich nicht zurücknehmen: " + failed.getMessage());
+                        }
+                    }
+                };
+            }
+        };
+    }
+
+    /** The album as its file has it now. */
+    private Album current(String id) {
+        return files.album(id).orElseThrow(() -> new IllegalArgumentException("Das Album gibt es nicht mehr."));
+    }
+
+    /** Changes the album through the help, on the event thread; refused while it is planned or produced. */
+    private String changeAlbum(String id, java.util.function.UnaryOperator<Album> change) throws Exception {
+        return Assistant.onScreen(() -> {
+            if (busy || productions.containsKey(id)) {
+                throw new IllegalStateException("Das Album wird gerade geplant oder produziert; bitte danach.");
+            }
+            if (table.isEditing()) {
+                table.getCellEditor().stopCellEditing();
+            }
+            Album changed = change.apply(current(id));
+            try {
+                files.save(changed);
+            } catch (IOException failed) {
+                throw new IllegalStateException(failed.getMessage(), failed);
+            }
+            host.albumChanged();
+            if (album != null && album.id().equals(id)) {
+                reload(id);
+            }
+            return "Die Trackliste hat jetzt " + changed.tracks().size() + " Titel"
+                    + (changed.theme().isEmpty() ? "." : "; Hauptthema „" + changed.theme().name() + "“.");
+        });
     }
 
     // ---- the list of titles ----
