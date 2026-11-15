@@ -97,10 +97,33 @@ public final class ContextBuilder {
         StringBuilder text = new StringBuilder();
         profile(text, piece, pieceBars);
         form(text, piece);
-        parts(text, piece, pieceBars, highlightPartId);
+        parts(text, piece, pieceBars, highlightPartId, 1);
         notes(text, piece, windowFrom, windowTo, highlightPartId, region);
         String written = text.toString();
         return new MusicalContext(written, sha256(written), windowFrom, windowTo);
+    }
+
+    /**
+     * The context of a piece told in tiers ({@link ContextTiers}): profile, form and part summaries
+     * as always, then the notes of each window in full, each under its label. Same piece and same
+     * tiers give the same bytes.
+     */
+    public static MusicalContext build(Composition piece, ContextTiers tiers, String highlightPartId) {
+        TimeMap time = piece.timeMap();
+        int pieceBars = time.barsCovering(Math.max(piece.endTick(), 1));
+        StringBuilder text = new StringBuilder();
+        profile(text, piece, pieceBars);
+        form(text, piece);
+        parts(text, piece, pieceBars, highlightPartId, tiers.compact() ? ContextTiers.COMPACT_BARS : 1);
+        for (ContextTiers.Window window : tiers.windows()) {
+            if (window.label() != null) {
+                text.append("# ").append(window.label().toUpperCase(Locale.ROOT)).append('\n');
+            }
+            notes(text, piece, window.fromTick(), window.toTick(), highlightPartId, null);
+        }
+        String written = text.toString();
+        ContextTiers.Window end = tiers.end();
+        return new MusicalContext(written, sha256(written), end.fromTick(), end.toTick());
     }
 
     private static void profile(StringBuilder text, Composition piece, int bars) {
@@ -153,7 +176,7 @@ public final class ContextBuilder {
         text.append('\n');
     }
 
-    private static void parts(StringBuilder text, Composition piece, int bars, String highlight) {
+    private static void parts(StringBuilder text, Composition piece, int bars, String highlight, int group) {
         TimeMap time = piece.timeMap();
         text.append("# PARTS\n");
         for (Part part : piece.parts()) {
@@ -182,14 +205,14 @@ public final class ContextBuilder {
                 int high = notes.stream().mapToInt(n -> n.note().pitch()).max().orElse(0);
                 text.append("  range: ").append(pitch(low)).append('-').append(pitch(high)).append('\n');
             }
-            int[] perBar = new int[bars];
+            int[] perBar = new int[(bars + group - 1) / group];
             for (PlacedNote n : notes) {
                 int bar = time.barOf(n.tick());
                 if (bar < bars) {
-                    perBar[bar]++;
+                    perBar[bar / group]++;
                 }
             }
-            text.append("  notes per bar:");
+            text.append(group == 1 ? "  notes per bar:" : "  notes per " + group + " bars:");
             for (int count : perBar) {
                 text.append(' ').append(count);
             }

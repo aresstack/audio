@@ -36,6 +36,8 @@ public final class Score {
     /** The lengths a single note can have, in sixteenths: whole, dotted half, half, dotted quarter, and so on. */
     private static final int[] NOTE_VALUES = {16, 12, 8, 6, 4, 3, 2, 1};
     private static final int[] REST_VALUES = {16, 8, 4, 2, 1};
+    /** In compound meters a beat of silence is a dotted quarter rest. */
+    private static final int[] COMPOUND_REST_VALUES = {12, 6, 4, 2, 1};
 
     public enum Clef { TREBLE, BASS, PERCUSSION }
 
@@ -271,7 +273,7 @@ public final class Score {
         for (Map.Entry<String, TreeMap<Integer, List<int[]>>> track : sounding.entrySet()) {
             boolean kit = drums.get(track.getKey());
             Staff staff = new Staff(track.getKey(), kit ? Clef.PERCUSSION : clef(track.getValue()),
-                    voices(track.getValue(), bars, kit, bar));
+                    voices(track.getValue(), bars, kit, bar, beat(numerator, denominator)));
             if (!kit) {
                 spell(staff, key, bars);
             }
@@ -424,15 +426,15 @@ public final class Score {
      * @param struck whether the track is struck, not held (drums): a hit ends when the next one comes
      */
     private static List<List<List<Event>>> voices(TreeMap<Integer, List<int[]>> track, int bars, boolean struck,
-                                                  int bar) {
+                                                  int bar, int beat) {
         List<int[]> notes = sounding(track, bars, struck, bar);
         List<List<List<Event>>> written = new ArrayList<List<List<Event>>>();
         List<List<int[]>> parts = struck ? null : separate(notes);
         if (parts == null) {
-            written.add(write(notes, bars, bar));
+            written.add(write(notes, bars, bar, beat));
         } else {
-            written.add(write(parts.get(0), bars, bar));
-            written.add(write(parts.get(1), bars, bar));
+            written.add(write(parts.get(0), bars, bar, beat));
+            written.add(write(parts.get(1), bars, bar, beat));
         }
         return written;
     }
@@ -514,7 +516,7 @@ public final class Score {
     }
 
     /** Writes the notes of one voice into bars. */
-    private static List<List<Event>> write(List<int[]> notes, int bars, int barLength) {
+    private static List<List<Event>> write(List<int[]> notes, int bars, int barLength, int beat) {
         List<List<Event>> written = new ArrayList<List<Event>>();
         for (int bar = 0; bar < bars; bar++) {
             written.add(new ArrayList<Event>());
@@ -546,7 +548,7 @@ public final class Score {
                     pitches[place] = pitch.getKey();
                     held[place++] = pitch.getValue();
                 }
-                fill(written, from, to, pitches, held, barLength);
+                fill(written, from, to, pitches, held, barLength, beat);
             }
             from = to;
         }
@@ -558,7 +560,7 @@ public final class Score {
      * lengths, tied to one another; the last of them is tied on for the notes that are held beyond.
      */
     private static void fill(List<List<Event>> written, int from, int to, int[] pitches, boolean[] held,
-                             int barLength) {
+                             int barLength, int beat) {
         boolean rest = pitches.length == 0;
         boolean[] all = new boolean[pitches.length];
         java.util.Arrays.fill(all, true);
@@ -568,8 +570,8 @@ public final class Score {
             int inBar = at % barLength;
             int left = Math.min(to, (bar + 1) * barLength) - at;
             int value = 1;
-            for (int candidate : rest ? REST_VALUES : NOTE_VALUES) {
-                if (candidate <= left && fits(candidate, inBar, rest)) {
+            for (int candidate : rest ? (beat == 6 ? COMPOUND_REST_VALUES : REST_VALUES) : NOTE_VALUES) {
+                if (candidate <= left && fits(candidate, inBar, rest, beat)) {
                     value = candidate;
                     break;
                 }
@@ -579,8 +581,29 @@ public final class Score {
         }
     }
 
+    /**
+     * Sixteenths in a beat as a reader counts it: a dotted quarter in compound meters (6/8, 9/8,
+     * 12/8), else a quarter.
+     */
+    static int beat(int numerator, int denominator) {
+        return denominator == 8 && numerator % 3 == 0 && numerator >= 6 ? 6 : 4;
+    }
+
     /** Whether a written length may begin at this place of the bar, so that the beats stay readable. */
-    private static boolean fits(int value, int inBar, boolean rest) {
+    private static boolean fits(int value, int inBar, boolean rest, int beat) {
+        if (beat == 6) {
+            // Compound meter: lengths keep to the dotted-quarter beats, or to two of them.
+            int inBeat = inBar % 6;
+            switch (value) {
+                case 12: return inBar % 12 == 0;
+                case 6: return inBeat == 0;
+                case 4: return inBeat == 0 || inBeat == 2;
+                case 3: return inBeat == 0 || inBeat == 3;
+                case 2: return inBar % 2 == 0;
+                case 1: return true;
+                default: return false; // a whole or a half would cross a beat
+            }
+        }
         switch (value) {
             case 16: return inBar == 0;
             case 12: return inBar == 0;
