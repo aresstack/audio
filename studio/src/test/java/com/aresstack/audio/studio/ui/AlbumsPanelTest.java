@@ -9,6 +9,7 @@ import com.aresstack.audio.studio.ai.ChatModel;
 import com.aresstack.audio.studio.ai.FakeChatModel;
 import com.aresstack.audio.studio.album.AlbumFiles;
 import com.aresstack.audio.studio.album.AlbumProducer;
+import com.aresstack.audio.studio.album.AlbumSuggester.Field;
 import com.aresstack.audio.studio.album.AlbumProductionState;
 import com.aresstack.audio.studio.album.AlbumProductionState.Status;
 import com.aresstack.audio.studio.album.PieceProduction;
@@ -108,6 +109,8 @@ public final class AlbumsPanelTest {
         songs = new SongLibrary(library);
         onEvents(() -> {
             panel = new AlbumsPanel(host, songs, new InstrumentRegistry(library.resolve("none.properties")));
+            // Proposals for the fields have their own test; elsewhere nobody proposes.
+            panel.suggester((field, title, description, style, known) -> List.of());
             return null;
         });
     }
@@ -241,5 +244,71 @@ public final class AlbumsPanelTest {
 
     private javax.swing.JTextField field(String name) throws Exception {
         return (javax.swing.JTextField) member(name);
+    }
+
+    /**
+     * The AI proposes for the fields: once the title stands, rough directions for the style and
+     * ideas for the description and other titles; when the user types a style, finer ones. The
+     * lists only grow, never change what was typed, and are there again when the album is opened
+     * again.
+     */
+    @Test
+    public void theAiProposesStylesTitlesAndDescriptionsAndTheListsGrowAndAreKept() throws Exception {
+        List<String> requests = new ArrayList<String>();
+        com.aresstack.audio.studio.album.AlbumSuggester proposer = (field, title, description, style, known) -> {
+            synchronized (requests) {
+                requests.add(field + "|" + title + "|" + style + "|" + known.size());
+            }
+            if (field == Field.STYLE) {
+                return style.isEmpty() ? List.of("Chor a cappella", "Orgelmusik", "Blechbläserensemble")
+                        : List.of("Wiener Klassik, Streichquartett", "Barock, Cembalo und Streicher", "Orgelmusik");
+            }
+            return field == Field.TITLE ? List.of("Winterlichter") : List.of("Festliche Stücke für den Advent.");
+        };
+        onEvents(() -> {
+            panel.suggester(proposer);
+            panel.createAlbum();
+            return null;
+        });
+        until(() -> !panel.proposingNow() && panel.box(Field.STYLE).getItemCount() == 3);
+        assertEquals(List.of("Chor a cappella", "Orgelmusik", "Blechbläserensemble"),
+                onEvents(() -> panel.box(Field.STYLE).proposals()));
+        assertEquals(List.of("Winterlichter"), onEvents(() -> panel.box(Field.TITLE).proposals()));
+        assertEquals(List.of("Festliche Stücke für den Advent."),
+                onEvents(() -> panel.box(Field.DESCRIPTION).proposals()));
+        // Nothing was written into the fields: the title is the user's, the style is still empty.
+        assertEquals("Christmas Memories", onEvents(() -> panel.album().title()));
+        assertEquals("", onEvents(() -> (String) panel.box(Field.STYLE).getEditor().getItem()));
+
+        // The user types a style: finer proposals come in front, the old ones stay, none twice.
+        onEvents(() -> {
+            ((javax.swing.JTextField) panel.box(Field.STYLE).getEditor().getEditorComponent()).setText("klassisch");
+            panel.propose(Field.STYLE);
+            panel.propose(Field.STYLE);
+            return null;
+        });
+        until(() -> !panel.proposingNow() && panel.box(Field.STYLE).getItemCount() == 5);
+        assertEquals(List.of("Wiener Klassik, Streichquartett", "Barock, Cembalo und Streicher", "Chor a cappella",
+                "Orgelmusik", "Blechbläserensemble"), onEvents(() -> panel.box(Field.STYLE).proposals()));
+        assertEquals("klassisch", onEvents(() -> (String) panel.box(Field.STYLE).getEditor().getItem()));
+        synchronized (requests) {
+            assertEquals("the same words are asked once: " + requests, 4, requests.size());
+            assertEquals("STYLE|Christmas Memories|klassisch|3", requests.get(3));
+        }
+        // Choosing a proposal takes it into the field.
+        onEvents(() -> {
+            panel.box(Field.STYLE).setSelectedItem("Orgelmusik");
+            return null;
+        });
+        assertEquals("Orgelmusik", onEvents(() -> (String) panel.box(Field.STYLE).getEditor().getItem()));
+
+        // Opened again, the proposals are there without asking.
+        AlbumsPanel[] again = new AlbumsPanel[1];
+        onEvents(() -> {
+            again[0] = new AlbumsPanel(host, songs, new InstrumentRegistry(library.resolve("none.properties")));
+            return null;
+        });
+        assertEquals(5, (int) onEvents(() -> again[0].box(Field.STYLE).getItemCount()));
+        assertFalse(onEvents(() -> again[0].proposingNow()));
     }
 }

@@ -178,6 +178,36 @@ public final class AlbumTest {
         assertFalse(planned.tracks().get(2).form().isEmpty());
     }
 
+    /** Proposals: the model is asked as someone who knows music; its answer is cleaned, and a broken one gives none. */
+    @Test
+    public void proposalsForAFieldComeCleanedFromTheModel() throws Exception {
+        List<String> prompts = new ArrayList<String>();
+        FakeChatModel model = new FakeChatModel((instruction, prompt) -> {
+            assertEquals(ChatAlbumSuggester.INSTRUCTION, instruction);
+            prompts.add(prompt);
+            return "{\"suggestions\":[\"Barock,  Cembalo und Streicher\",\"barock, cembalo und streicher\",\"\",7,"
+                    + "\"Orgelmusik\",\"Wiener Klassik\"]}";
+        });
+        ChatAlbumSuggester suggester = new ChatAlbumSuggester(model, 4096);
+        assertEquals(List.of("Barock, Cembalo und Streicher", "Wiener Klassik"), suggester.suggest(
+                AlbumSuggester.Field.STYLE, "Weihnachtslieder", "", "klassisch", List.of("Orgelmusik")));
+        assertTrue(prompts.get(0).contains("has written \"klassisch\"") && prompts.get(0).contains("Weihnachtslieder")
+                && prompts.get(0).contains("do not repeat these: \"Orgelmusik\""));
+        // Without a style typed, rough directions are asked for.
+        suggester.suggest(AlbumSuggester.Field.STYLE, "Weihnachtslieder", "", "", List.of());
+        assertTrue(prompts.get(1).contains("different musical directions"));
+        assertEquals(List.of(), new ChatAlbumSuggester(new FakeChatModel((i, p) -> "{\"oops\":1}"), 512)
+                .suggest(AlbumSuggester.Field.TITLE, "A", "", "", List.of()));
+
+        // Kept with the album: new ones in front, old ones stay.
+        Path folder = temporary.newFolder().toPath();
+        AlbumSuggestions kept = AlbumSuggestions.EMPTY.with(AlbumSuggester.Field.STYLE, List.of("Orgelmusik"))
+                .with(AlbumSuggester.Field.STYLE, List.of("Chor", "orgelmusik"));
+        kept.save(folder);
+        assertEquals(List.of("Chor", "Orgelmusik"), AlbumSuggestions.load(folder).of(AlbumSuggester.Field.STYLE));
+        assertEquals(List.of(), AlbumSuggestions.load(folder).of(AlbumSuggester.Field.TITLE));
+    }
+
     /** PO finding on PR #39: an id is one safe folder name; nothing else is opened or deleted. */
     @Test
     public void onlyTheFolderOfOneAlbumIsEverDeleted() throws Exception {
