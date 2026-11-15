@@ -47,6 +47,15 @@ public final class AiDefaults {
         }
     }
 
+    /** The bars a long piece begins with and grows by per step: 4 to 256, 16 when missing or malformed. */
+    public static int growBars(Properties settings) {
+        try {
+            return Math.max(4, Math.min(256, Integer.parseInt(settings.getProperty("growBars", "16").trim())));
+        } catch (NumberFormatException invalid) {
+            return 16;
+        }
+    }
+
     /** The chat completions address for a base address, or {@code null} if it is no HTTP(S) address. */
     public static String completionsEndpoint(String base) {
         String normalized = base.trim().replaceAll("/+$", "");
