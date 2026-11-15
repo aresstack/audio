@@ -41,6 +41,7 @@ public final class MovementDirector {
 
     private final ChatModel client;
     private final int maxTokens;
+    private java.util.function.Consumer<Proposal> watching;
 
     public MovementDirector(ChatModel client, int maxTokens) {
         this.client = client;
@@ -169,9 +170,26 @@ public final class MovementDirector {
         }
         progress.update("KI schlägt Bewegungen auf der Bühne vor ...");
         Files.deleteIfExists(directory.resolve(FILE_NAME)); // asked anew each time; the answer is kept to be read
+        final java.util.function.Consumer<Proposal> watcher = watching;
+        final int bars = piece.bars();
         JsonObject response = client.generate("Return valid JSON only, no Markdown.",
                 prompt(description, piece, stage, movable), Math.min(maxTokens, 4096),
-                directory.resolve(FILE_NAME));
+                directory.resolve(FILE_NAME), watcher == null ? null : new java.util.function.Consumer<String>() {
+                    private long told;
+
+                    @Override
+                    public void accept(String text) {
+                        long now = System.currentTimeMillis();
+                        if (now - told < 200) {
+                            return; // a few pictures a second are enough
+                        }
+                        Proposal seen = seenMoves(text, movable, bars);
+                        if (seen != null && !seen.empty()) {
+                            told = now;
+                            watcher.accept(seen);
+                        }
+                    }
+                });
         try {
             return read(response, movable, piece.bars());
         } catch (RuntimeException invalid) {
@@ -224,6 +242,42 @@ public final class MovementDirector {
      *
      * @throws IllegalArgumentException if the answer has no array {@code movements}
      */
+    /**
+     * Who sees the movements while the answer arrives: the curves written so far. Only for
+     * looking; the proposal is the one {@code propose} returns.
+     */
+    public MovementDirector watching(java.util.function.Consumer<Proposal> seen) {
+        this.watching = seen;
+        return this;
+    }
+
+    /**
+     * The movements of an answer that is still being written: with the track that is being written
+     * as far as it can be read, else without it; {@code null} if nothing can be read yet.
+     */
+    static Proposal seenMoves(String text, Set<String> movable, int bars) {
+        try {
+            JsonObject seen = com.aresstack.audio.studio.ai.PartialJson.read(text);
+            if (seen == null || !seen.has("movements") || !seen.get("movements").isJsonArray()) {
+                return null;
+            }
+            try {
+                return read(seen, movable, bars);
+            } catch (RuntimeException unfinished) {
+                com.google.gson.JsonArray whole = seen.getAsJsonArray("movements").deepCopy();
+                if (whole.size() == 0) {
+                    return null;
+                }
+                whole.remove(whole.size() - 1);
+                JsonObject without = new JsonObject();
+                without.add("movements", whole);
+                return read(without, movable, bars);
+            }
+        } catch (RuntimeException unreadable) {
+            return null;
+        }
+    }
+
     static Proposal read(JsonObject response, Set<String> movable, int bars) {
         JsonElement listed = response == null ? null : response.get("movements");
         if (listed == null || !listed.isJsonArray()) {

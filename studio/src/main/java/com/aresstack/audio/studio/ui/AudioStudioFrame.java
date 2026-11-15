@@ -1460,6 +1460,7 @@ public final class AudioStudioFrame extends JFrame {
         try {
             com.aresstack.audio.studio.application.MovementDirector.Proposal moves =
                     new com.aresstack.audio.studio.application.MovementDirector(client, tokens)
+                            .watching(seen -> SwingUtilities.invokeLater(() -> showMovesArriving(proposed, seen)))
                             .propose(prompt, piece, current.taking(proposed), movable, output, progress);
             append(moves.empty() ? "Bewegungen: die KI lässt alle Spuren stehen."
                     : "Bewegungen vorgeschlagen für " + String.join(", ", moves.curves().keySet()) + ".");
@@ -4797,6 +4798,22 @@ public final class AudioStudioFrame extends JFrame {
             stagePanel.setStatus("Die KI mischt ab · die Plätze erscheinen gestrichelt, sobald sie ankommen");
         } catch (RuntimeException undrawn) {
             // a look at the mix on its way; the proposal itself does not depend on it
+        }
+    }
+
+    /** The movements while the AI writes them: the curves appear dashed under the sliders, track by track. */
+    private void showMovesArriving(com.aresstack.audio.studio.stage.SpatialScene proposed,
+                                   com.aresstack.audio.studio.application.MovementDirector.Proposal seen) {
+        if (worker == null || worker.isDone()) {
+            return;
+        }
+        try {
+            mixArriving = true;
+            stagePanel.setProposal(proposed, seen);
+            stagePanel.setStatus("Die KI schlägt Bewegungen vor · bisher für " + seen.tracks()
+                    + (seen.tracks() == 1 ? " Spur" : " Spuren"));
+        } catch (RuntimeException undrawn) {
+            // a look at the movements on their way; the proposal itself does not depend on it
         }
     }
 

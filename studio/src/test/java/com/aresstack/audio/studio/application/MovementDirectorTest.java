@@ -211,4 +211,26 @@ public final class MovementDirectorTest {
         assertFalse("movements are a request of their own", prompt.contains("movements"));
         assertFalse(prompt.contains("height"));
     }
+
+    @Test
+    public void theCurvesAreSeenWhileTheAnswerArrives() {
+        java.util.Set<String> movable = new java.util.LinkedHashSet<String>(java.util.List.of("harmony", "bass"));
+        String answer = "{\"movements\":[{\"track\":\"harmony\",\"parameter\":\"x\",\"points\":[{\"bar\":0,\"value\":-0.4},"
+                + "{\"bar\":4,\"value\":0.4}]},{\"track\":\"bass\",\"parameter\":\"depth\",\"points\":[{\"bar\":0,"
+                + "\"value\":0.2},{\"bar\":6,\"value\":0.8}]}]}";
+
+        org.junit.Assert.assertNull(MovementDirector.seenMoves("", movable, 8));
+        int tracks = 0;
+        for (int cut = 0; cut <= answer.length(); cut++) {
+            MovementDirector.Proposal seen = MovementDirector.seenMoves(answer.substring(0, cut), movable, 8);
+            int now = seen == null ? 0 : seen.tracks();
+            assertTrue("curves only come, at cut " + cut, now >= tracks);
+            tracks = now;
+        }
+        assertEquals(2, tracks);
+        MovementDirector.Proposal first = MovementDirector.seenMoves(
+                answer.substring(0, answer.indexOf("{\"track\":\"bass\"")), movable, 8);
+        assertEquals(1, first.tracks());
+        assertEquals(2, first.of("harmony", "x").size());
+    }
 }
