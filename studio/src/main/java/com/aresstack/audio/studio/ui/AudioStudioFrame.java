@@ -1850,6 +1850,9 @@ public final class AudioStudioFrame extends JFrame {
         retryFirst.addChangeListener(retry);
         retryMost.addChangeListener(retry);
         com.aresstack.audio.studio.ai.Backoff.tellTo(line -> SwingUtilities.invokeLater(() -> append(line)));
+        // A window that stops answering leaves a note of where it hung, next to the settings.
+        new EdtWatch(settingsStore.location().toAbsolutePath().getParent()
+                .resolve("logs"), this::append).start();
         detailedLog.setOpaque(false);
         detailedLog.setToolTipText("Zeigt im Protokoll zusätzlich, wie viele Stimmen gleichzeitig laufen und wann welche"
                 + " Antwort mit wie vielen Noten nach wie vielen Sekunden kam");

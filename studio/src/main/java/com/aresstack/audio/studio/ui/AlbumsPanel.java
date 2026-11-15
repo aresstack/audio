@@ -168,6 +168,9 @@ final class AlbumsPanel extends JPanel {
     private final SuggestBox titleBox = new SuggestBox(title);
     private final SuggestBox descriptionBox = new SuggestBox(description);
     private final SuggestBox styleBox = new SuggestBox(style);
+    /** Description and style open into a large box: an album may need a long text, not one line. */
+    private final WideText descriptionWide = new WideText(description, descriptionBox);
+    private final WideText styleWide = new WideText(style, styleBox);
     private final JSpinner trackCount = new JSpinner(new SpinnerNumberModel(12, 1, AlbumConcept.MAX_TRACKS, 1));
     /** How long a piece may be: from … to … minutes; the plan gives each title its own length in it. */
     private final JSpinner minutes = new JSpinner(new SpinnerNumberModel(
@@ -200,7 +203,12 @@ final class AlbumsPanel extends JPanel {
     private AlbumProductionState state = AlbumProductionState.EMPTY;
     /** What the piece of each title is doing right now, while the album is produced. */
     private final Map<String, String> doing = new HashMap<String, String>();
-    private AlbumProductionCoordinator.Production production;
+    /**
+     * The productions under way, by album: one album may be produced while another is shown and
+     * edited. Only on the event thread.
+     */
+    private final Map<String, AlbumProductionCoordinator.Production> productions =
+            new java.util.LinkedHashMap<String, AlbumProductionCoordinator.Production>();
     private boolean busy;
     private boolean showing;
 
@@ -295,8 +303,8 @@ final class AlbumsPanel extends JPanel {
         c.anchor = GridBagConstraints.WEST;
         c.fill = GridBagConstraints.HORIZONTAL;
         row(concept, c, 0, "Titel", titleBox, 3);
-        row(concept, c, 1, "Worum geht es? Das bekommt die KI gesagt.", descriptionBox, 3);
-        row(concept, c, 2, "Stil", styleBox, 3);
+        row(concept, c, 1, "Worum geht es? Das bekommt die KI gesagt.", descriptionWide, 3);
+        row(concept, c, 2, "Stil", styleWide, 3);
         // An empty list that is opened asks the AI (again): a request that failed is not the last word.
         for (final Field field : Field.values()) {
             box(field).addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
@@ -316,9 +324,9 @@ final class AlbumsPanel extends JPanel {
                 }
             });
         }
-        typed(title, afterTitle);
-        typed(description, afterDescription);
-        typed(style, afterStyle);
+        typed(title, afterTitle, title);
+        typed(description, afterDescription, descriptionWide.area());
+        typed(style, afterStyle, styleWide.area());
         c.gridy = 3;
         c.gridwidth = 1;
         c.gridx = 0;
@@ -534,13 +542,14 @@ final class AlbumsPanel extends JPanel {
      * middle of something: a plan, a proposal or a production.
      */
     void follow(String id) {
-        if (busy || (production != null && production.running())) {
+        if (busy) {
             return;
         }
         if (table.isEditing()) {
             table.getCellEditor().stopCellEditing();
         }
-        if (album != null) {
+        if (album != null && !shownRunning()) {
+            // An album being produced is written by its production alone; its fields are locked.
             keepConcept(); // what was typed into title, description or style is kept, not thrown away
         }
         reload(id);
@@ -572,25 +581,26 @@ final class AlbumsPanel extends JPanel {
 
     private void keys() {
         boolean there = album != null;
-        boolean running = production != null && production.running();
+        boolean running = shownRunning();
         boolean free = there && !running && !busy;
+        boolean other = producing(); // one production at a time: "Parallel" limits all connections
         int row = table.getSelectedRow();
         AlbumTrack selected = there && row >= 0 && row < album.tracks().size() ? album.tracks().get(row) : null;
-        create.setEnabled(!running && !busy);
+        create.setEnabled(!busy);
         delete.setEnabled(free);
-        for (Component field : new Component[]{titleBox, descriptionBox, styleBox, trackCount, minutes, minutesTo,
+        for (Component field : new Component[]{titleBox, descriptionWide, styleWide, trackCount, minutes, minutesTo,
                 original}) {
             field.setEnabled(free);
         }
         plan.setEnabled(free);
         if (beside != null) {
-            beside.setEnabled(!running && !busy); // no model is chosen while the models are at work
+            beside.setEnabled(!other && !busy); // no model is chosen while the models are at work
         }
         add.setEnabled(free);
         remove.setEnabled(free && selected != null);
         up.setEnabled(free && selected != null && row > 0);
         down.setEnabled(free && selected != null && row < album.tracks().size() - 1);
-        produce.setEnabled(free && !album.tracks().isEmpty());
+        produce.setEnabled(free && !other && !album.tracks().isEmpty());
         // A run that left titles undone (failed, cancelled) is taken up: only what is missing is made.
         int done = there ? state.count(album, Status.DONE) : 0;
         boolean partly = there && done < album.tracks().size()
@@ -599,7 +609,7 @@ final class AlbumsPanel extends JPanel {
         produce.setToolTipText(partly ? "Macht nur die Titel, die noch nicht fertig sind; fertige bleiben, wie sie sind"
                 : null);
         cancel.setEnabled(running);
-        again.setEnabled(free && selected != null && selected.hasPiece());
+        again.setEnabled(free && !other && selected != null && selected.hasPiece());
         open.setEnabled(there && selected != null && selected.hasPiece());
         // A piece put into the album by hand, or an old one in the unnamed album, can be exported as well.
         scores.setEnabled(free);
@@ -617,7 +627,7 @@ final class AlbumsPanel extends JPanel {
     }
 
     /** When the user has typed into a field and paused, proposals are asked for. */
-    private void typed(JTextField field, Timer timer) {
+    private void typed(JTextField field, Timer timer, Component box) {
         field.getDocument().addDocumentListener(new DocumentListener() {
             @Override
             public void insertUpdate(DocumentEvent event) {
@@ -635,7 +645,7 @@ final class AlbumsPanel extends JPanel {
 
             private void changed() {
                 // Only what the user types counts, not what the page puts into the field itself.
-                if (album != null && field.isFocusOwner()) {
+                if (album != null && (field.isFocusOwner() || box.isFocusOwner())) {
                     timer.restart();
                 }
             }
@@ -673,7 +683,7 @@ final class AlbumsPanel extends JPanel {
      */
     void propose(Field field) {
         Album asked = album;
-        if (asked == null || busy || (production != null && production.running())) {
+        if (asked == null || busy || shownRunning()) {
             return;
         }
         String named = title.getText().trim();
@@ -835,9 +845,25 @@ final class AlbumsPanel extends JPanel {
         return busy;
     }
 
-    /** Whether an album is being produced. */
+    /** Whether an album is being produced, any album. */
     boolean producing() {
-        return production != null && production.running();
+        for (AlbumProductionCoordinator.Production each : productions.values()) {
+            if (each.running()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The production of the album shown, or {@code null}. */
+    private AlbumProductionCoordinator.Production shownProduction() {
+        return album == null ? null : productions.get(album.id());
+    }
+
+    /** Whether the album shown is being produced; another album may be, and this one stays free. */
+    private boolean shownRunning() {
+        AlbumProductionCoordinator.Production shown = shownProduction();
+        return shown != null && shown.running();
     }
 
     void createAlbum() {
@@ -1158,6 +1184,10 @@ final class AlbumsPanel extends JPanel {
     // ---- making the pieces ----
 
     void produceAlbum() {
+        if (producing()) {
+            say("Erst die laufende Produktion abwarten oder abbrechen: es wird ein Album nach dem anderen produziert.");
+            return;
+        }
         if (!keepConcept() || album.tracks().isEmpty()) {
             return;
         }
@@ -1211,7 +1241,7 @@ final class AlbumsPanel extends JPanel {
     void start(AlbumProducer producer, String onlyTrack) {
         final String id = album.id();
         try {
-            production = producer.start(id, new AlbumProductionCoordinator.Listener() {
+            AlbumProductionCoordinator.Production started = producer.start(id, new AlbumProductionCoordinator.Listener() {
                 @Override
                 public void changed(Album now, AlbumProductionState at) {
                     SwingUtilities.invokeLater(() -> produced(id, now, at));
@@ -1248,14 +1278,28 @@ final class AlbumsPanel extends JPanel {
                     if (!step.equals(logged.put(track.id(), step))) {
                         SwingUtilities.invokeLater(() -> host.log("„" + track.title() + "“: " + message));
                     }
-                    SwingUtilities.invokeLater(() -> {
-                        if (album != null && album.id().equals(id)) {
-                            doing.put(track.id(), message);
-                            tracks.fireTableRowsUpdated(0, Math.max(0, album.tracks().size() - 1));
-                        }
-                    });
+                    // Many titles stream at once: the table is drawn once for what came meanwhile,
+                    // not once for every piece of text, so the window stays free to answer.
+                    latest.put(track.id(), message);
+                    if (drawing.compareAndSet(false, true)) {
+                        SwingUtilities.invokeLater(() -> {
+                            drawing.set(false);
+                            if (album != null && album.id().equals(id)) {
+                                doing.putAll(latest);
+                                tracks.fireTableRowsUpdated(0, Math.max(0, album.tracks().size() - 1));
+                            }
+                        });
+                    }
                 }
+
+                /** What each title does now, as the stream told it last. */
+                private final java.util.Map<String, String> latest = new java.util.concurrent.ConcurrentHashMap<>();
+
+                /** Whether the table is about to be drawn already. */
+                private final java.util.concurrent.atomic.AtomicBoolean drawing =
+                        new java.util.concurrent.atomic.AtomicBoolean();
             }, onlyTrack);
+            productions.put(id, started);
         } catch (IOException | RuntimeException failed) {
             say("Das Album ließ sich nicht produzieren: " + failed.getMessage());
             return;
@@ -1264,7 +1308,7 @@ final class AlbumsPanel extends JPanel {
                 : "Das Album wird produziert: bis zu " + Math.max(1, host.parallelRequests())
                 + " KI-Anfragen gleichzeitig, verteilt auf die Titel.");
         keys();
-        final AlbumProductionCoordinator.Production running = production;
+        final AlbumProductionCoordinator.Production running = productions.get(id);
         Thread waiter = new Thread(() -> {
             try {
                 running.await();
@@ -1272,10 +1316,12 @@ final class AlbumsPanel extends JPanel {
                 return;
             }
             SwingUtilities.invokeLater(() -> {
-                if (production == running) {
-                    production = null;
+                if (productions.get(id) == running) {
+                    productions.remove(id);
                 }
-                doing.clear();
+                if (album != null && album.id().equals(id)) {
+                    doing.clear();
+                }
                 host.piecesChanged();
                 if (album != null && album.id().equals(id)) {
                     reload(id);
@@ -1308,8 +1354,9 @@ final class AlbumsPanel extends JPanel {
     }
 
     private void cancelProduction() {
-        if (production != null) {
-            production.cancel();
+        AlbumProductionCoordinator.Production shown = shownProduction();
+        if (shown != null) {
+            shown.cancel();
             say("Wird angehalten ...");
         }
     }
@@ -1342,7 +1389,7 @@ final class AlbumsPanel extends JPanel {
                 + "Was du an dem Stück im Editor geändert hast, kann dabei verloren gehen.")) {
             return;
         }
-        if (production != null && production.running()) {
+        if (producing()) {
             say("Erst die laufende Produktion abwarten oder abbrechen, dann diesen Titel neu produzieren.");
             return;
         }
@@ -1448,8 +1495,7 @@ final class AlbumsPanel extends JPanel {
 
         @Override
         public boolean isCellEditable(int row, int column) {
-            if (column == 0 || column == STATE || busy || preview != null
-                    || (production != null && production.running())) {
+            if (column == 0 || column == STATE || busy || preview != null || shownRunning()) {
                 return false;
             }
             Status at = state.status(album.tracks().get(row).id());
@@ -1504,14 +1550,15 @@ final class AlbumsPanel extends JPanel {
                 case FAILED:
                     return "Fehler: " + entry.reason();
                 case RUNNING:
-                    if (production == null || !production.running()) {
+                    if (!shownRunning()) {
                         // Left from a run that ended without finishing it: it goes on at the next start.
                         return "unterbrochen";
                     }
                     String now = doing.get(track.id());
                     return now == null ? "in Arbeit ..." : now;
                 case QUEUED:
-                    return "wartet";
+                    // "wartet" only while a production of this album goes on; else it is open.
+                    return shownRunning() ? "wartet" : "offen";
                 default:
                     return track.hasPiece() ? "eigenes Stück" : "geplant";
             }
