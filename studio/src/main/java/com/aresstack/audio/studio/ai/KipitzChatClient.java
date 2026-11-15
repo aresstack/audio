@@ -18,6 +18,8 @@ import javax.net.ssl.HttpsURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Isolate the authenticated OpenAI-compatible KIPITZ protocol from music composition. */
 public final class KipitzChatClient implements ChatModel {
@@ -147,17 +149,96 @@ public final class KipitzChatClient implements ChatModel {
                         + ("length".equals(answer.finishReason) ? ", also with " + budget + " tokens" : "") + ").");
             }
             String content = answer.text.trim();
-            int start = content.indexOf('{');
-            int end = content.lastIndexOf('}');
-            if (start < 0 || end <= start) {
-                throw new IOException("The model returned no JSON object.");
+            JsonObject parsed = jsonObjectIn(content);
+            if (parsed == null) {
+                throw new IOException("Could not parse the KIPITZ model response (no JSON object in: \""
+                        + glimpse(content) + "\").");
             }
-            JsonObject parsed = new JsonParser().parse(content.substring(start, end + 1)).getAsJsonObject();
             AnswerCache.store(cache, origin, gson.toJson(parsed));
             return parsed;
         } catch (RuntimeException malformed) {
             throw new IOException("Could not parse the KIPITZ model response.", malformed);
         }
+    }
+
+    /**
+     * The JSON object in a model's answer. First the span from the first '{' to the last '}', as a
+     * plain answer has it; if that does not parse (a thinking part with braces before it, a code
+     * block, words with braces after it), every balanced object in the text, the last one that
+     * parses first, since the answer comes after the thinking. {@code null} if there is none.
+     */
+    static JsonObject jsonObjectIn(String content) {
+        if (content == null) {
+            return null;
+        }
+        int start = content.indexOf('{');
+        int end = content.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            return null;
+        }
+        JsonObject whole = object(content.substring(start, end + 1));
+        if (whole != null) {
+            return whole;
+        }
+        List<String> found = new ArrayList<String>();
+        for (int at = 0; at < content.length(); at++) {
+            if (content.charAt(at) != '{') {
+                continue;
+            }
+            int close = closing(content, at);
+            if (close > at) {
+                found.add(content.substring(at, close + 1));
+                at = close;
+            }
+        }
+        for (int each = found.size() - 1; each >= 0; each--) {
+            JsonObject one = object(found.get(each));
+            if (one != null) {
+                return one;
+            }
+        }
+        return null;
+    }
+
+    /** Where the object opened at {@code open} closes, strings respected; -1 if it does not. */
+    private static int closing(String text, int open) {
+        int depth = 0;
+        boolean inString = false;
+        for (int at = open; at < text.length(); at++) {
+            char c = text.charAt(at);
+            if (inString) {
+                if (c == '\\') {
+                    at++;
+                } else if (c == '"') {
+                    inString = false;
+                }
+            } else if (c == '"') {
+                inString = true;
+            } else if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) {
+                    return at;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static JsonObject object(String text) {
+        try {
+            com.google.gson.JsonElement element = new JsonParser().parse(text);
+            return element.isJsonObject() ? element.getAsJsonObject() : null;
+        } catch (RuntimeException unusable) {
+            return null;
+        }
+    }
+
+    /** The start of an answer, on one line, for a message. */
+    static String glimpse(String content) {
+        String line = content == null ? "" : content.replaceAll("\\s+", " ").trim();
+        return line.length() <= 200 ? line : line.substring(0, 200) + " …";
     }
 
     /** How often an answer that was cut off at its limit is asked for again, each time with twice the room. */
