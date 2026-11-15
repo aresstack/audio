@@ -38,7 +38,10 @@ public final class ModelLineup {
 
     /** The chat model of a role. */
     public ChatModel model(ModelRole role) {
-        String name = assignment.modelFor(role);
+        return named(assignment.modelFor(role));
+    }
+
+    private ChatModel named(String name) {
         ChatModel model;
         boolean late;
         synchronized (this) {
@@ -53,6 +56,16 @@ public final class ModelLineup {
             model.cancel(); // made after cancelling: it must not start anything either
         }
         return model;
+    }
+
+    /**
+     * The same lineup with every model wrapped, for example to limit how many requests run at
+     * once over a whole production. The models stay those of this lineup; cancelling either
+     * lineup stops them.
+     */
+    public ModelLineup through(java.util.function.UnaryOperator<ChatModel> wrapper) {
+        Objects.requireNonNull(wrapper, "wrapper");
+        return new ModelLineup(assignment, name -> wrapper.apply(named(name)));
     }
 
     /** Stops every request of every model of this lineup. */

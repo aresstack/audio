@@ -34,6 +34,19 @@ public final class StereoPanner {
         return (float) (Math.sin(angle) * Math.sqrt(2)) * distanceGain;
     }
 
+    private StereoPanner(float toLeft, float toRight) {
+        this.toLeft = toLeft;
+        this.toRight = toRight;
+    }
+
+    /** A panner with these two gains, as {@link #toLeft()} and {@link #toRight()} of another one gave them. */
+    public static StereoPanner ofGains(float toLeft, float toRight) {
+        if (!Float.isFinite(toLeft) || !Float.isFinite(toRight)) {
+            throw new IllegalArgumentException("The gains of a panner are finite.");
+        }
+        return new StereoPanner(toLeft, toRight);
+    }
+
     public float toLeft() {
         return toLeft;
     }
