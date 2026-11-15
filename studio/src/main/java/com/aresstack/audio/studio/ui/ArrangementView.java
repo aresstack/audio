@@ -265,6 +265,7 @@ final class ArrangementView extends JComponent {
     private double audioSeconds;
     private String hint = "";
     private Range marked;
+    private javax.swing.JComponent companion;
     /** Where a mark began, in pixels; {@code null} while none is drawn. */
     private java.awt.Point markFrom;
     /** Whether the mark began in the ruler: then it covers every track. */
@@ -408,6 +409,11 @@ final class ArrangementView extends JComponent {
                 : GUTTER + musicSpan() * Math.max(0, bar) / Math.max(1, arrangement.bars());
     }
 
+    /** A component that lies over the same bars (the section bar) and is drawn anew when they move. */
+    void setCompanion(javax.swing.JComponent other) {
+        companion = other;
+    }
+
     /** The lane at a height, or the nearest one for a place above or below the lanes. */
     private int laneNear(int y) {
         return Math.max(0, Math.min(order.size() - 1, (y - RULER) / Math.max(1, lane)));
@@ -443,6 +449,9 @@ final class ArrangementView extends JComponent {
         }
         revalidate();
         repaint();
+        if (companion != null) {
+            companion.repaint();
+        }
     }
 
     /** The file that is loaded for playing, as the waveform below the lanes. */
@@ -452,6 +461,9 @@ final class ArrangementView extends JComponent {
         alone = aloneTrack;
         audioSeconds = length;
         repaint();
+        if (companion != null) {
+            companion.repaint();
+        }
     }
 
     void setSecond(double played) {

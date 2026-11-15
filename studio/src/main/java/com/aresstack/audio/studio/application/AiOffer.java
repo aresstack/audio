@@ -37,6 +37,14 @@ public interface AiOffer {
         return "Nur das Neue anhören";
     }
 
+    /**
+     * The second of the proposed piece from which listening starts: 0 for a change within the
+     * piece, a little before the first new bar where the proposal makes the piece longer.
+     */
+    default double listenFromSecond() {
+        return 0;
+    }
+
     /** The General MIDI programs of parts the proposal adds, by part: the studio's table does not know them yet. */
     Map<String, Integer> newPrograms();
 

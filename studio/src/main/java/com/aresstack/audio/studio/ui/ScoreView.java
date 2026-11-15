@@ -116,6 +116,7 @@ final class ScoreView extends JComponent implements Scrollable {
 
     private Score score;
     private List<String> order = new ArrayList<String>();
+    private List<SectionMark> sections = new ArrayList<SectionMark>();
     private String hint = "";
     private double second = -1;
     private int shownSystem = -1;
@@ -127,6 +128,12 @@ final class ScoreView extends JComponent implements Scrollable {
     }
 
     /** Shows a score; the order of the tracks gives each staff the colour of its channel. */
+    /** The form of the piece: the name of a section stands over its first bar, the chords over theirs. */
+    void setSections(List<SectionMark> shown) {
+        sections = new ArrayList<SectionMark>(shown == null ? List.<SectionMark>of() : shown);
+        repaint();
+    }
+
     void setScore(Score shown, List<String> trackIds, String emptyHint) {
         score = shown;
         order = new ArrayList<String>(trackIds);
@@ -391,6 +398,31 @@ final class ScoreView extends JComponent implements Scrollable {
             g.setColor(faint);
             for (int bar = firstBar; bar < lastBar; bar++) {
                 g.drawString(Integer.toString(bar + 1), left + LEAD + (bar - firstBar) * barWidth + 4, systemTop - 8);
+            }
+            // The form: over the first bar of a section its name, over a bar its chord where it changes.
+            g.setFont(AudioStudioTheme.lettering(10.5f));
+            for (SectionMark section : sections) {
+                String sounding = null;
+                for (int bar = section.firstBar(); bar < section.firstBar() + section.bars(); bar++) {
+                    String chord = section.chordAt(bar);
+                    boolean first = bar == section.firstBar();
+                    boolean changes = chord != null && !chord.isBlank() && !chord.equals(sounding);
+                    sounding = chord == null || chord.isBlank() ? sounding : chord;
+                    if (bar < firstBar || bar >= lastBar || !(first || changes)) {
+                        continue;
+                    }
+                    float x = left + LEAD + (bar - firstBar) * barWidth + 22;
+                    if (first) {
+                        g.setColor(ink);
+                        String title = section.title();
+                        g.drawString(title, x, systemTop - 21);
+                        x += g.getFontMetrics().stringWidth(title) + 8;
+                    }
+                    if (changes) {
+                        g.setColor(faint);
+                        g.drawString(chord, first ? x : x - 18, systemTop - 21);
+                    }
+                }
             }
             if (system > 0) {
                 g.setColor(AudioStudioTheme.withAlpha(lines, 70));
