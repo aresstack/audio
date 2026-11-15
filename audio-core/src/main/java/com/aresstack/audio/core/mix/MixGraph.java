@@ -2,7 +2,7 @@ package com.aresstack.audio.core.mix;
 
 import com.aresstack.audio.core.AudioBlock;
 import com.aresstack.audio.core.AudioSource;
-import com.aresstack.audio.core.dsp.RoomReverb;
+import com.aresstack.audio.core.dsp.RoomBus;
 import java.io.IOException;
 import java.util.List;
 
@@ -19,8 +19,8 @@ import java.util.List;
  * per channel, whatever the length of the piece.
  */
 public final class MixGraph implements AudioSource {
-    private final StemChannel[] channels;
-    private final RoomReverb room;
+    private final MixChannel[] channels;
+    private final RoomBus room;
     private final float roomGain;
     private final long frames;
     private AudioBlock send;
@@ -32,8 +32,8 @@ public final class MixGraph implements AudioSource {
      * @param roomGain how loud the ring of the room is
      * @param frames   how long the mix is, including the ring at the end
      */
-    public MixGraph(List<StemChannel> channels, RoomReverb room, float roomGain, long frames) {
-        this.channels = channels.toArray(new StemChannel[0]);
+    public MixGraph(List<? extends MixChannel> channels, RoomBus room, float roomGain, long frames) {
+        this.channels = channels.toArray(new MixChannel[0]);
         this.room = room;
         this.roomGain = roomGain;
         this.frames = Math.max(0, frames);
@@ -45,7 +45,7 @@ public final class MixGraph implements AudioSource {
 
     @Override
     public void prepare(int sampleRate, int maxBlockFrames) {
-        for (StemChannel channel : channels) {
+        for (MixChannel channel : channels) {
             channel.prepare(sampleRate, maxBlockFrames);
         }
         if (room != null) {
@@ -66,7 +66,7 @@ public final class MixGraph implements AudioSource {
         if (send != null) {
             send.clear(0, count);
         }
-        for (StemChannel channel : channels) {
+        for (MixChannel channel : channels) {
             channel.render(count, block, send);
         }
         if (room != null) {
@@ -79,7 +79,7 @@ public final class MixGraph implements AudioSource {
     @Override
     public void close() throws IOException {
         IOException first = null;
-        for (StemChannel channel : channels) {
+        for (MixChannel channel : channels) {
             try {
                 channel.close();
             } catch (IOException failed) {

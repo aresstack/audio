@@ -73,7 +73,7 @@ public final class PieceInsertionTest {
     }
 
     /** Plans two four-bar sections for the room; generators write two notes per bar of every section. */
-    private static FakeChatModel model() {
+    static FakeChatModel model() {
         return new FakeChatModel((instruction, prompt) -> {
             if (instruction.equals(ChatContinuationPlanner.INSTRUCTION)) {
                 String all = "\"melody\",\"harmony\",\"bass\",\"drums\"";

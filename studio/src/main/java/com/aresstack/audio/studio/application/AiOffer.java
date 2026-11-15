@@ -48,6 +48,19 @@ public interface AiOffer {
     /** The General MIDI programs of parts the proposal adds, by part: the studio's table does not know them yet. */
     Map<String, Integer> newPrograms();
 
+    /**
+     * What the proposal takes from the original and cannot give back, one line each: the user has
+     * to see every line and say yes to it before the proposal can be taken ({@link #confirm}).
+     * Empty for most proposals.
+     */
+    default List<String> toConfirm() {
+        return List.of();
+    }
+
+    /** The user saw {@link #toConfirm()} and agrees; without it, {@link #accept} refuses such a proposal. */
+    default void confirm() {
+    }
+
     /** Has the AI do it again, differently; the open proposal is replaced. */
     void again(Progress progress) throws Exception;
 

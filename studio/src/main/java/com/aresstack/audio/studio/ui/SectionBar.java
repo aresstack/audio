@@ -21,13 +21,67 @@ import javax.swing.ToolTipManager;
 final class SectionBar extends JComponent {
     static final int HEIGHT = 38;
 
+    /** Who is told when the user sets the intensity of a section by hand. */
+    interface Listener {
+        /** @param intensity 0 to 1 */
+        void intensity(SectionMark section, double intensity);
+    }
+
     private final ArrangementView lanes;
     private List<SectionMark> sections = new ArrayList<SectionMark>();
+    private Listener listener;
 
     SectionBar(ArrangementView lanes) {
         this.lanes = lanes;
         setVisible(false);
         ToolTipManager.sharedInstance().registerComponent(this);
+        addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent event) {
+                SectionMark section = at(event.getX());
+                if (section != null && listener != null) {
+                    intensityMenu(section).show(SectionBar.this, event.getX(), HEIGHT);
+                }
+            }
+        });
+    }
+
+    /** Lets the user set the intensity of a section with a click on it (work package C4). */
+    void setListener(Listener told) {
+        listener = told;
+        setCursor(java.awt.Cursor.getPredefinedCursor(told == null ? java.awt.Cursor.DEFAULT_CURSOR
+                : java.awt.Cursor.HAND_CURSOR));
+    }
+
+    /** The small menu under a section: a slider for its intensity and the key that sets it. */
+    javax.swing.JPopupMenu intensityMenu(final SectionMark section) {
+        final javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+        final javax.swing.JSlider slider = new javax.swing.JSlider(0, 100,
+                (int) Math.round((section.intensity() == null ? 0.5 : section.intensity()) * 100));
+        slider.setName("intensity");
+        slider.setMajorTickSpacing(25);
+        slider.setPaintTicks(true);
+        final javax.swing.JLabel value = new javax.swing.JLabel();
+        Runnable show = () -> value.setText("Intensität von „" + section.name() + "“: " + slider.getValue() + " %");
+        show.run();
+        slider.addChangeListener(event -> show.run());
+        javax.swing.JButton set = new javax.swing.JButton("Setzen");
+        set.setName("set");
+        set.setToolTipText("Ändert nur die Form: keine Note ändert sich, nichts wird neu gerendert. Die KI richtet sich"
+                + " beim nächsten Verlängern, Einfügen oder Umorchestrieren danach.");
+        set.addActionListener(event -> {
+            menu.setVisible(false);
+            if (listener != null) {
+                listener.intensity(section, slider.getValue() / 100.0);
+            }
+        });
+        javax.swing.JPanel panel = new javax.swing.JPanel(new java.awt.BorderLayout(8, 6));
+        panel.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 10, 8, 10));
+        panel.add(value, java.awt.BorderLayout.NORTH);
+        panel.add(slider, java.awt.BorderLayout.CENTER);
+        panel.add(set, java.awt.BorderLayout.EAST);
+        menu.add(panel);
+        return menu;
     }
 
     void setSections(List<SectionMark> shown) {
@@ -54,7 +108,7 @@ final class SectionBar extends JComponent {
     @Override
     public String getToolTipText(MouseEvent event) {
         SectionMark section = at(event.getX());
-        return section == null ? null : section.told();
+        return section == null ? null : section.told() + (listener == null ? "" : " · Klick: Intensität setzen");
     }
 
     @Override

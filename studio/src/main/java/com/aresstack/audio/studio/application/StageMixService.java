@@ -9,6 +9,7 @@ import com.aresstack.audio.studio.mix.MixLevel;
 import com.aresstack.audio.studio.mix.MixOutcome;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
 import com.aresstack.audio.studio.mix.StageAutomation;
+import com.aresstack.audio.studio.mix.StageSound;
 import com.aresstack.audio.studio.project.CompositionJson;
 import com.aresstack.audio.studio.project.MixJson;
 import com.aresstack.audio.studio.progress.Progress;
@@ -44,6 +45,19 @@ public final class StageMixService {
     private final SpatialSceneStore store = new SpatialSceneStore();
     private final SpatialStemMixer mixer = new SpatialStemMixer();
     private volatile float legacyFactor = Float.NaN;
+    private volatile StageSound sound = StageSound.LOUDSPEAKERS;
+
+    /**
+     * How the following mixes are heard (work package D4): loudspeakers or headphones,
+     * algorithmic or convolved room. The default is {@link StageSound#LOUDSPEAKERS}, the mix as before.
+     */
+    public void setSound(StageSound sound) {
+        this.sound = sound == null ? StageSound.LOUDSPEAKERS : sound;
+    }
+
+    public StageSound sound() {
+        return sound;
+    }
 
     /**
      * What the mix has to know of a piece: its tracks, and where its bars lie in time. A piece
@@ -148,6 +162,16 @@ public final class StageMixService {
         return export(Piece.written(arrangement), directory, scene, target, bits);
     }
 
+    /**
+     * The factor the last mix of the whole stage to a file applied (peak normalization and master
+     * level), or NaN before the first. Files and exports are always mixed as before
+     * ({@code LEGACY_PEAK}); live playback takes this factor as its fixed gain
+     * ({@link MixLevel#liveMaster}) so that it sounds like the file.
+     */
+    public float legacyFactor() {
+        return legacyFactor;
+    }
+
     /** Mixes the rendered tracks of a piece on its saved stage; no written arrangement is read for a model. */
     public Path mix(Piece piece, Path directory, Progress progress) throws Exception {
         return mix(piece, directory, scene(piece, directory), progress);
@@ -165,16 +189,6 @@ public final class StageMixService {
     /** Writes the mix on the stage to a file of the user's choice, with 16 or 24 bits. */
     public Path export(Piece piece, Path directory, SpatialScene scene, Path target, int bits) throws Exception {
         return mix(piece, directory, scene, null, target, bits, message -> { });
-    }
-
-    /**
-     * The factor the last mix of the whole stage to a file applied (peak normalization and master
-     * level), or NaN before the first. Files and exports are always mixed as before
-     * ({@code LEGACY_PEAK}); live playback takes this factor as its fixed gain
-     * ({@link MixLevel#liveMaster}) so that it sounds like the file.
-     */
-    public float legacyFactor() {
-        return legacyFactor;
     }
 
     private Path mix(Piece piece, Path directory, SpatialScene scene, String only, Path target, int bits,
@@ -207,8 +221,8 @@ public final class StageMixService {
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
             // Files and exports sound exactly as before (decision of the product owner: "export old, live new").
-            MixOutcome outcome = mixer.withAutomation(automation).mix(files, placements, fitting.room(), secondsPerBar,
-                    MixLevel.legacy(fitting.masterDb()), fresh, bits);
+            MixOutcome outcome = mixer.withAutomation(automation).withSound(sound)
+                    .mix(files, placements, fitting.room(), secondsPerBar, MixLevel.legacy(fitting.masterDb()), fresh, bits);
             if (only == null) {
                 legacyFactor = outcome.legacyFactor();
             }

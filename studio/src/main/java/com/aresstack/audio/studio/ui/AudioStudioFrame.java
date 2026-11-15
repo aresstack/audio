@@ -456,6 +456,7 @@ public final class AudioStudioFrame extends JFrame {
             }
         }, arrangementView);
         trackTable.setHeader(sectionBar);
+        sectionBar.setListener((section, intensity) -> sectionIntensity(section, intensity));
         arrangementView.setCompanion(sectionBar);
         arrangementView.setEditing(pieceEditing);
         DeckWidgets.Module output = new DeckWidgets.Module("Arrangement", trackTable);
@@ -493,6 +494,19 @@ public final class AudioStudioFrame extends JFrame {
         extendItem.setToolTipText("Die KI plant und schreibt weitere Takte ans Ende; das bisherige Stück bleibt erhalten");
         extendItem.addActionListener(event -> extendPiece());
         moreMenu.add(extendItem);
+        javax.swing.JMenuItem insertItem = new javax.swing.JMenuItem("Takte einfügen …");
+        insertItem.setToolTipText("Die KI schreibt neue Takte vor einem Takt; alles ab dort rückt unverändert nach hinten");
+        insertItem.addActionListener(event -> insertBars());
+        moreMenu.add(insertItem);
+        javax.swing.JMenuItem orchestrateItem = new javax.swing.JMenuItem("Umorchestrieren …");
+        orchestrateItem.setToolTipText("Die KI verteilt das Material markierter Takte neu auf die Stimmen");
+        orchestrateItem.addActionListener(event -> reorchestrate());
+        moreMenu.add(orchestrateItem);
+        javax.swing.JMenuItem curveItem = new javax.swing.JMenuItem("Intensitätsverlauf setzen …");
+        curveItem.setToolTipText("Legt einen Verlauf über die Abschnitte der markierten Takte (oder des ganzen Stücks);"
+                + " keine Note ändert sich");
+        curveItem.addActionListener(event -> intensityOverBars());
+        moreMenu.add(curveItem);
         // The same on the marked passage itself, with the right mouse button.
         javax.swing.JPopupMenu passageMenu = new javax.swing.JPopupMenu();
         javax.swing.JMenuItem reworkMarked = new javax.swing.JMenuItem("Passage ersetzen oder variieren …");
@@ -2001,6 +2015,103 @@ public final class AudioStudioFrame extends JFrame {
                         com.aresstack.audio.studio.ai.ContinuationComposer.with(model), request, progress));
     }
 
+    /** Asks which bars the AI shall put into the piece and where, and has them written as a proposal (C4). */
+    private void insertBars() {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent()) {
+            message("Erst ein Stück komponieren: dann lassen sich Takte einfügen.");
+            return;
+        }
+        if (busy()) {
+            return;
+        }
+        ArrangementView.Range marked = arrangementView.marked();
+        final com.aresstack.audio.studio.ai.ContinuationRequest request = ExtendForm.askInsert(this,
+                piece.get().composition(), arrangementView.bars(), marked == null ? 1 : marked.firstBar());
+        if (request == null) {
+            return;
+        }
+        offerFromAi(piece.get(), "Vor Takt " + request.insertBeforeBar() + " werden als Vorschlag " + request.bars()
+                + (request.bars() == 1 ? " Takt" : " Takte") + " eingefügt; das Stück bleibt, wie es ist, bis der"
+                + " Vorschlag übernommen wird.",
+                (session, model, progress) -> com.aresstack.audio.studio.application.ExtensionOffer.start(session,
+                        com.aresstack.audio.studio.ai.ContinuationComposer.with(model), request, progress));
+    }
+
+    /** Asks how the AI shall orchestrate the marked bars anew, and has it done as a proposal (C4). */
+    private void reorchestrate() {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent()) {
+            message("Erst ein Stück komponieren: dann lässt es sich umorchestrieren.");
+            return;
+        }
+        if (busy()) {
+            return;
+        }
+        final com.aresstack.audio.studio.ai.ReorchestrationRequest request = ReorchestrateForm.ask(this,
+                piece.get().composition(), arrangementView.bars(), arrangementView.marked());
+        if (request == null) {
+            return;
+        }
+        offerFromAi(piece.get(), (request.firstBar() == request.lastBar() ? "Takt " + request.firstBar()
+                : "Takt " + request.firstBar() + " bis " + request.lastBar()) + " wird als Vorschlag umorchestriert ("
+                + request.preset().label() + "); das Stück bleibt, wie es ist, bis der Vorschlag übernommen wird.",
+                (session, model, progress) -> com.aresstack.audio.studio.application.ReorchestrationOffer.start(
+                        session, com.aresstack.audio.studio.ai.OrchestrationComposer.with(model), request, progress));
+    }
+
+    /**
+     * The user set the intensity of a section in the section bar: a change of the form only, by
+     * the edit core, undoable. No note changes and nothing is rendered; the AI follows the
+     * intensity the next time it continues, inserts or orchestrates.
+     */
+    private void sectionIntensity(SectionMark section, double intensity) {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent() || busy()) {
+            return;
+        }
+        try {
+            com.aresstack.audio.studio.application.IntensityEdit.apply(piece.get(),
+                    java.util.Map.of(section.id(), intensity));
+            append("Intensität von „" + section.name() + "“ auf " + Math.round(intensity * 100)
+                    + " % gesetzt (unter „Rückgängig“ zurückzunehmen). Die Noten sind unverändert.");
+        } catch (Exception failed) {
+            message("Die Intensität ließ sich nicht setzen: " + failed.getMessage());
+        }
+        showSections();
+    }
+
+    /** Lays an intensity curve over the sections of the marked bars, or of the whole piece; the form only. */
+    private void intensityOverBars() {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent()) {
+            message("Erst ein Stück komponieren: dann hat es Abschnitte, über die ein Verlauf gelegt werden kann.");
+            return;
+        }
+        if (busy()) {
+            return;
+        }
+        ArrangementView.Range marked = arrangementView.marked();
+        int first = marked == null ? 1 : marked.firstBar();
+        int last = marked == null ? Math.max(1, arrangementView.bars()) : marked.lastBar();
+        String[] names = ExtendForm.curveNames();
+        Object chosen = JOptionPane.showInputDialog(this, "Intensitätsverlauf über Takt " + first + " bis " + last
+                        + ".\nNur die Form ändert sich: keine Note, nichts wird neu gerendert.", "Intensitätsverlauf",
+                JOptionPane.PLAIN_MESSAGE, null, java.util.Arrays.copyOfRange(names, 1, names.length), names[1]);
+        if (chosen == null) {
+            return;
+        }
+        try {
+            com.aresstack.audio.studio.application.IntensityEdit.apply(piece.get(), first, last,
+                    ExtendForm.curveOf(java.util.Arrays.asList(names).indexOf(chosen)));
+            append("Intensitätsverlauf „" + chosen + "“ über Takt " + first + " bis " + last
+                    + " gelegt (unter „Rückgängig“ zurückzunehmen). Die Noten sind unverändert.");
+        } catch (Exception failed) {
+            message("Der Verlauf ließ sich nicht setzen: " + failed.getMessage());
+        }
+        showSections();
+    }
+
     /**
      * Shows the form of the saved piece above the lanes and in the score: its sections with name,
      * function, intensity and chords. It only reads the model; a piece without one shows no form.
@@ -2086,7 +2197,7 @@ public final class AudioStudioFrame extends JFrame {
                              final RenderSettings settings) {
         try {
             ProposalDialog.Verdict verdict = new ProposalDialog(this, "Vorschlag der KI", offer.what(), offer.notes(),
-                    alone == null ? null : offer.soloName(), true, new ProposalDialog.Listening() {
+                    offer.toConfirm(), alone == null ? null : offer.soloName(), true, new ProposalDialog.Listening() {
                         @Override
                         public void proposal() {
                             listenTo(whole, "VORSCHLAG", offer.listenFromSecond());
@@ -2112,6 +2223,7 @@ public final class AudioStudioFrame extends JFrame {
             showPlaybackChoice(); // the player lets go of the preview before its folder goes
             if (verdict == ProposalDialog.Verdict.TAKE) {
                 String what = offer.what();
+                offer.confirm(); // the dialog lets "Übernehmen" through only after the user ticked what the original loses
                 pieceChanged("Vorschlag übernommen. " + what, offer.accept());
             } else if (verdict == ProposalDialog.Verdict.AGAIN) {
                 append("Die KI schreibt den Vorschlag noch einmal, anders.");
