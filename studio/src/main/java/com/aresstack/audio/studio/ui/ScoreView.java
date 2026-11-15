@@ -50,6 +50,8 @@ final class ScoreView extends JComponent implements Scrollable {
     private static final int[] SHARP_PLACES = {8, 5, 9, 6, 3, 7, 4};
     private static final int[] FLAT_PLACES = {4, 7, 3, 6, 2, 5, 1};
     private static final int STAFF_STEP = 86;
+    /** From the upper to the lower system of a grand staff: closer than two parts are. */
+    private static final int GRAND_STEP = 62;
     private static final int SYSTEM_GAP = 46;
     private static final int TOP = 54;
     private static final Map<String, Path2D> GLYPHS = new HashMap<String, Path2D>();
@@ -122,6 +124,7 @@ final class ScoreView extends JComponent implements Scrollable {
     ScoreView() {
         setOpaque(true);
         setBackground(paper);
+        javax.swing.ToolTipManager.sharedInstance().registerComponent(this);
     }
 
     /** Shows a score; the order of the tracks gives each staff the colour of its channel. */
@@ -259,7 +262,53 @@ final class ScoreView extends JComponent implements Scrollable {
     }
 
     private int systemHeight() {
-        return Math.max(1, staves().size()) * STAFF_STEP + SYSTEM_GAP;
+        List<Score.Staff> staves = staves();
+        float[] tops = tops(staves);
+        return Math.round(staves.isEmpty() ? STAFF_STEP : tops[tops.length - 1] + STAFF_STEP) + SYSTEM_GAP;
+    }
+
+    /** Where each staff begins below the top of its line of the sheet: the two systems of a grand staff stand closer. */
+    private static float[] tops(List<Score.Staff> staves) {
+        float[] tops = new float[staves.size()];
+        for (int row = 1; row < tops.length; row++) {
+            tops[row] = tops[row - 1] + (upperOfGrand(staves, row - 1) ? GRAND_STEP : STAFF_STEP);
+        }
+        return tops;
+    }
+
+    /** Whether this staff is the upper system of a grand staff whose lower system follows it. */
+    private static boolean upperOfGrand(List<Score.Staff> staves, int row) {
+        return staves.get(row).system() == Score.Placement.UPPER && row + 1 < staves.size()
+                && staves.get(row + 1).system() == Score.Placement.LOWER
+                && staves.get(row + 1).trackId().equals(staves.get(row).trackId());
+    }
+
+    /** Whether this staff is the lower system of a grand staff whose upper system stands above it. */
+    private static boolean lowerOfGrand(List<Score.Staff> staves, int row) {
+        return row > 0 && upperOfGrand(staves, row - 1);
+    }
+
+    /** The voices of the staff under the mouse, where a staff has more than one or belongs to a grand staff. */
+    @Override
+    public String getToolTipText(java.awt.event.MouseEvent event) {
+        List<Score.Staff> staves = staves();
+        if (score == null || staves.isEmpty() || event.getY() < TOP - 20) {
+            return null;
+        }
+        float[] tops = tops(staves);
+        float within = (event.getY() - TOP) % (float) systemHeight();
+        for (int row = 0; row < staves.size(); row++) {
+            Score.Staff staff = staves.get(row);
+            if (within >= tops[row] - 2 * SPACE && within <= tops[row] + 6 * SPACE
+                    && (staff.voices() > 1 || staff.grand())) {
+                StringBuilder names = new StringBuilder(staff.trackId().replace('_', ' ')).append(" · ");
+                for (int voice = 0; voice < staff.voices(); voice++) {
+                    names.append(voice == 0 ? "" : ", ").append(staff.voiceName(voice));
+                }
+                return names.toString();
+            }
+        }
+        return null;
     }
 
     @Override
@@ -319,6 +368,7 @@ final class ScoreView extends JComponent implements Scrollable {
         final int beat = beamGroup();
         float barWidth = (right - left - LEAD) / perSystem;
         Rectangle visible = g.getClipBounds();
+        float[] tops = tops(staves);
 
         g.setColor(ink);
         g.setFont(new java.awt.Font(java.awt.Font.SERIF, java.awt.Font.ITALIC, 14));
@@ -333,7 +383,7 @@ final class ScoreView extends JComponent implements Scrollable {
             int firstBar = system * perSystem;
             int lastBar = Math.min(score.bars(), firstBar + perSystem);
             float systemRight = left + LEAD + (lastBar - firstBar) * barWidth;
-            float lowest = systemTop + (staves.size() - 1) * STAFF_STEP + 4 * SPACE;
+            float lowest = systemTop + tops[staves.size() - 1] + 4 * SPACE;
 
             // The line that joins the staves at the left, and the number of the first bar.
             g.setColor(lines);
@@ -382,19 +432,31 @@ final class ScoreView extends JComponent implements Scrollable {
 
             for (int row = 0; row < staves.size(); row++) {
                 Score.Staff staff = staves.get(row);
-                float top = systemTop + row * STAFF_STEP;
-                // Name and the colour of the channel.
-                int channel = Math.max(0, order.indexOf(staff.trackId()));
-                g.setColor(AudioStudioTheme.channel(channel));
-                g.fill(new Ellipse2D.Float(14, top + 2 * SPACE - 4, 8, 8));
-                g.setColor(ink);
-                g.setFont(new java.awt.Font(java.awt.Font.SERIF, java.awt.Font.PLAIN, 14));
-                FontMetrics metrics = g.getFontMetrics();
-                String name = staff.trackId().replace('_', ' ');
-                while (name.length() > 2 && metrics.stringWidth(name) > NAMES - 40) {
-                    name = name.substring(0, name.length() - 2) + "…";
+                float top = systemTop + tops[row];
+                boolean upper = upperOfGrand(staves, row);
+                boolean lower = lowerOfGrand(staves, row);
+                // The two systems of a grand staff are one instrument: one name between them, one
+                // brace before them, and the bar lines go through both.
+                float reach = upper ? systemTop + tops[row + 1] + 4 * SPACE : top + 4 * SPACE;
+                if (!lower) {
+                    // Name and the colour of the channel.
+                    float middle = (top + reach) / 2;
+                    int channel = Math.max(0, order.indexOf(staff.trackId()));
+                    g.setColor(AudioStudioTheme.channel(channel));
+                    g.fill(new Ellipse2D.Float(14, middle - 4, 8, 8));
+                    g.setColor(ink);
+                    g.setFont(new java.awt.Font(java.awt.Font.SERIF, java.awt.Font.PLAIN, 14));
+                    FontMetrics metrics = g.getFontMetrics();
+                    String name = staff.trackId().replace('_', ' ');
+                    while (name.length() > 2 && metrics.stringWidth(name) > NAMES - (upper ? 52 : 40)) {
+                        name = name.substring(0, name.length() - 2) + "…";
+                    }
+                    g.drawString(name, 28, middle + 5);
                 }
-                g.drawString(name, 28, top + 2 * SPACE + 5);
+                if (upper) {
+                    g.setColor(ink);
+                    brace(g, left - 3, top, reach);
+                }
 
                 // The five lines, the clef, the time on the first system, the bar lines.
                 g.setColor(lines);
@@ -421,26 +483,57 @@ final class ScoreView extends JComponent implements Scrollable {
                     boolean last = bar == score.bars() - 1;
                     g.setColor(lines);
                     g.setStroke(new BasicStroke(1.2f));
-                    g.draw(new Line2D.Float(barRight - (last ? 6 : 0), top, barRight - (last ? 6 : 0), top + 4 * SPACE));
+                    if (lower) {
+                        continue; // drawn with the upper system, through both
+                    }
+                    g.draw(new Line2D.Float(barRight - (last ? 6 : 0), top, barRight - (last ? 6 : 0), reach));
                     if (last) {
-                        g.fill(new Rectangle2D.Float(barRight - 3, top, 3.6f, 4 * SPACE));
+                        g.fill(new Rectangle2D.Float(barRight - 3, top, 3.6f, reach - top));
                     }
                 }
 
                 // The notes of this staff in this system, one voice after the other.
+                // Where the heads of earlier voices stand in each bar: a later voice steps aside from them.
+                Map<Integer, Map<Integer, List<Integer>>> heads = new HashMap<Integer, Map<Integer, List<Integer>>>();
                 for (int voice = 0; voice < staff.voices(); voice++) {
                     List<Placed> placed = new ArrayList<Placed>();
                     for (int bar = firstBar; bar < lastBar; bar++) {
                         float barLeft = left + LEAD + (bar - firstBar) * barWidth;
                         float inner = barWidth - 30;
-                        // Where both voices play in a bar, the upper one has its stems up and the lower
-                        // one down, and their rests move apart; a voice that rests the whole bar is left out.
-                        boolean both = staff.voices() == 2 && !staff.silent(0, bar) && !staff.silent(1, bar);
-                        if (staff.voices() == 2 && staff.silent(voice, bar)
-                                && (voice == 1 || !staff.silent(1, bar))) {
+                        // Where several voices play in a bar, each has its stems the way it asks (the
+                        // upper ones up, the lower ones down) and their rests move apart; a voice that
+                        // rests the whole bar is left out, and a bar where all rest shows one rest.
+                        int sounding = 0;
+                        for (int other = 0; other < staff.voices(); other++) {
+                            sounding += staff.silent(other, bar) ? 0 : 1;
+                        }
+                        if (staff.silent(voice, bar) && (voice > 0 || sounding > 0)) {
                             continue;
                         }
-                        Boolean forced = both ? Boolean.valueOf(voice == 0) : null;
+                        boolean several = sounding > 1;
+                        com.aresstack.audio.composition.Voice.Stem asked = staff.stem(voice);
+                        Boolean forced = !several ? null
+                                : asked == com.aresstack.audio.composition.Voice.Stem.UP ? Boolean.TRUE
+                                : asked == com.aresstack.audio.composition.Voice.Stem.DOWN ? Boolean.FALSE
+                                : staff.voices() > 1 ? Boolean.valueOf(voice == 0) : null;
+                        // Rests of the first upper and the first lower voice move a little, those of
+                        // further voices in the same direction move further out.
+                        int restShift = 0;
+                        if (several && forced != null) {
+                            int before = 0;
+                            for (int other = 0; other < voice; other++) {
+                                com.aresstack.audio.composition.Voice.Stem stem = staff.stem(other);
+                                boolean otherUp = stem == com.aresstack.audio.composition.Voice.Stem.UP
+                                        || stem == com.aresstack.audio.composition.Voice.Stem.AUTO && other == 0;
+                                before += otherUp == forced.booleanValue() && !staff.silent(other, bar) ? 1 : 0;
+                            }
+                            restShift = (forced.booleanValue() ? 1 : -1) * (4 + 3 * before);
+                        }
+                        Map<Integer, List<Integer>> taken = heads.get(bar);
+                        if (taken == null) {
+                            taken = new HashMap<Integer, List<Integer>>();
+                            heads.put(bar, taken);
+                        }
                         List<Score.Event> events = staff.bar(voice, bar);
                         List<Placed> inBar = new ArrayList<Placed>();
                         // A bar of nothing but rests is one whole rest in its middle, in every meter.
@@ -455,9 +548,31 @@ final class ScoreView extends JComponent implements Scrollable {
                             boolean wholeBar = silentBar;
                             float x = wholeBar ? barLeft + barWidth / 2 - 6
                                     : barLeft + 18 + inner * event.start() / barLength;
+                            if (!event.rest()) {
+                                // From the third voice on a head that would sit on or right beside a
+                                // head of an earlier voice at the same moment moves one head aside.
+                                List<Integer> there = taken.get(event.start());
+                                if (there == null) {
+                                    there = new ArrayList<Integer>();
+                                    taken.put(event.start(), there);
+                                }
+                                boolean collides = false;
+                                for (int i = 0; i < event.pitches().length; i++) {
+                                    int position = place(event, i, staff.clef());
+                                    for (int other : there) {
+                                        collides |= Math.abs(other - position) <= 1;
+                                    }
+                                }
+                                if (voice >= 2 && collides) {
+                                    x += 1.18f * SPACE + 1.5f;
+                                }
+                                for (int i = 0; i < event.pitches().length; i++) {
+                                    there.add(place(event, i, staff.clef()));
+                                }
+                            }
                             Placed place = new Placed(event, x, top,
                                     forced != null ? forced.booleanValue() : stemUp(event, staff.clef()));
-                            place.shift = !both ? 0 : voice == 0 ? 4 : -4;
+                            place.shift = restShift;
                             place.wholeBar = wholeBar;
                             inBar.add(place);
                             if (!event.rest()) {
@@ -544,6 +659,21 @@ final class ScoreView extends JComponent implements Scrollable {
             int position = (fifths > 0 ? SHARP_PLACES[i] : FLAT_PLACES[i]) - lower;
             glyph(g, fifths > 0 ? "sharp" : "flat", x + i * KEY_STEP, y(staffTop, position));
         }
+    }
+
+    /** The brace before the two systems of a grand staff, from the top line of the upper to the bottom line of the lower. */
+    private static void brace(Graphics2D g, float right, float top, float bottom) {
+        Path2D outline = GLYPHS.get("brace");
+        if (outline == null) {
+            return;
+        }
+        Rectangle2D bounds = outline.getBounds2D();
+        // The outline is made for one staff; stretched over two it is widened too, so that it stays a brace.
+        double wide = 1.1 * SPACE;
+        AffineTransform place = AffineTransform.getTranslateInstance(right - wide, top);
+        place.scale(wide / bounds.getWidth(), (bottom - top) / bounds.getHeight());
+        place.translate(-bounds.getX(), -bounds.getY());
+        g.fill(place.createTransformedShape(outline));
     }
 
     /** The meter: its two numbers above one another, centred on each other. */

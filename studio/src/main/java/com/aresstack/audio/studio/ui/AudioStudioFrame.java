@@ -2909,16 +2909,32 @@ public final class AudioStudioFrame extends JFrame {
                 there ? "" : "Noch nichts gerendert · Komponieren oder Demo laden");
         arrangementView.setMix(player.envelope(), soloTrack() == null ? "Mix" : "Solo", soloTrack(), player.length());
         trackTable.setAlone(soloTrack());
-        com.aresstack.audio.studio.score.Score written =
-                com.aresstack.audio.studio.score.Score.read(folder.resolve("arrangement.tsv"));
+        com.aresstack.audio.studio.score.Score written = scoreOf(folder);
         if (stagePanel != null) {
             stagePanel.setBars(written == null ? 8 : written.bars());
         }
-        scoreView.setScore(com.aresstack.audio.studio.score.Score.read(folder.resolve("arrangement.tsv")), ids,
+        scoreView.setScore(written, ids,
                 "Noch keine Noten: erst komponieren, dann steht hier die Partitur");
         showSections();
         lcd.setSource(selected == null ? "—" : playbackName(selected), there);
         lcd.setTime(0, player.length());
+    }
+
+    /**
+     * The score of the piece in a folder: from its model, which says the voices and the staff of
+     * every part, or from the arrangement file for a piece that has no model (yet). Only reads.
+     */
+    private com.aresstack.audio.studio.score.Score scoreOf(Path folder) {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> model = pieceModel.of(folder);
+        if (model.isPresent()) {
+            try {
+                return com.aresstack.audio.studio.score.Score.of(model.get().composition());
+            } catch (RuntimeException unreadable) {
+                append("WARN: Die Partitur ließ sich nicht aus dem Werkmodell lesen, sie kommt aus arrangement.tsv: "
+                        + unreadable.getMessage());
+            }
+        }
+        return com.aresstack.audio.studio.score.Score.read(folder.resolve("arrangement.tsv"));
     }
 
     /**
@@ -2988,7 +3004,7 @@ public final class AudioStudioFrame extends JFrame {
             ids.add(track.id());
         }
         arrangementView.setArrangement(shownArrangement(folder), withAudioLanes(ids), "");
-        scoreView.setScore(com.aresstack.audio.studio.score.Score.read(folder.resolve("arrangement.tsv")), ids,
+        scoreView.setScore(scoreOf(folder), ids,
                 "Noch keine Noten: erst komponieren, dann steht hier die Partitur");
     }
 
