@@ -185,7 +185,7 @@ public final class AlbumsPanelTest {
         assertEquals("3/4", cell(1, 5));
         assertEquals("5:00 (150 Takte)", cell(0, 7));
         assertEquals("300 s × 90 BPM ÷ 180", "5:00 (150 Takte)", cell(1, 7));
-        assertEquals("geplant", cell(2, 8));
+        assertEquals("geplant", cell(2, 9));
 
         // The list is changed in its cells and kept at once: a shorter, slower last title.
         onEvents(() -> {
@@ -223,9 +223,9 @@ public final class AlbumsPanelTest {
             return null;
         });
         until(() -> panel.status().contains("1 Titel fehlgeschlagen"));
-        assertEquals("fertig", cell(0, 8));
-        assertEquals("Fehler: Die KI hat keine Noten geliefert.", cell(1, 8));
-        assertEquals("fertig", cell(2, 8));
+        assertEquals("fertig", cell(0, 9));
+        assertEquals("Fehler: Die KI hat keine Noten geliefert.", cell(1, 9));
+        assertEquals("fertig", cell(2, 9));
         assertEquals("the real length of the finished piece", "0:16", cell(0, 7));
         AlbumProductionState kept = AlbumProductionState.load(new AlbumFiles(library).folder("christmas-memories"));
         assertEquals(Status.FAILED, kept.status("t2"));
