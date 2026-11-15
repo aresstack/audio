@@ -21,7 +21,7 @@ public final class AlbumTemplates {
     }
 
     /** Where what belongs to one title is kept; only a plain name is ever a title's folder. */
-    Path titleFolder(String albumId, String trackId) {
+    public Path titleFolder(String albumId, String trackId) {
         if (!AlbumTrack.isFolderName(trackId)) {
             throw new IllegalArgumentException("Keine Kennung eines Titels: " + trackId);
         }
