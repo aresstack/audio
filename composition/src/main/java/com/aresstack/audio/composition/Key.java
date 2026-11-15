@@ -11,11 +11,16 @@ import java.util.Locale;
  * spelling of every pitch ({@link #spell(int)}), so that D minor writes B flat and C sharp, not
  * A sharp and D flat.
  *
- * <p>Where two signatures are possible for a tonic (six sharps or six flats), the major key
- * takes the sharps (F sharp major) and the minor key the flats (E flat minor); the other
- * enharmonic keys get the signature with fewer accidentals (D flat major, not C sharp major).
+ * <p>Where two signatures are possible for a tonic (six sharps or six flats), the key says which
+ * one it is ({@code flats}): G flat major and F sharp major are the same pitches written apart, as
+ * are E flat minor and D sharp minor. Without saying, the major key takes the sharps (F sharp
+ * major) and the minor key the flats (E flat minor). The other enharmonic keys get the signature
+ * with fewer accidentals (D flat major, not C sharp major); for them {@code flats} follows from
+ * the tonic.
+ *
+ * @param flats for a tonic of six sharps or six flats, whether the key is written with the flats
  */
-public record Key(int tonic, Mode mode) {
+public record Key(int tonic, Mode mode, boolean flats) {
     public enum Mode { MAJOR, MINOR }
 
     /** C major, the key of every piece from before the model. */
@@ -38,6 +43,26 @@ public record Key(int tonic, Mode mode) {
         if (mode == null) {
             throw new IllegalArgumentException("A key needs a mode.");
         }
+        int sharps = sharps(tonic, mode);
+        if (sharps != 6) {
+            flats = sharps > 6;
+        }
+    }
+
+    /** The key of a tonic and mode, with six sharps for a major and six flats for a minor key where both are possible. */
+    public Key(int tonic, Mode mode) {
+        this(tonic, mode, mode == Mode.MINOR);
+    }
+
+    /** Whether the key has six sharps or six flats, and so could be written either way. */
+    public boolean enharmonicTie() {
+        return sharps(tonic, mode) == 6;
+    }
+
+    /** The sharps of the key counted round the circle of fifths, 0 to 11. */
+    private static int sharps(int tonic, Mode mode) {
+        int major = mode == Mode.MAJOR ? tonic : (tonic + 3) % 12;
+        return Math.floorMod(major * 7, 12);
     }
 
     /** A pitch as it is written: a letter (0 = C ... 6 = B), an alteration in semitones and an octave. */
@@ -74,15 +99,8 @@ public record Key(int tonic, Mode mode) {
      * sharp), flats negative (-3 = three flats), from -6 to 6.
      */
     public int fifths() {
-        int major = mode == Mode.MAJOR ? tonic : (tonic + 3) % 12;
-        int fifths = Math.floorMod(major * 7, 12); // 0..11 sharps
-        if (fifths > 6) {
-            fifths -= 12;
-        }
-        if (fifths == 6 && mode == Mode.MINOR) {
-            fifths = -6; // E flat minor rather than D sharp minor
-        }
-        return fifths;
+        int fifths = sharps(tonic, mode);
+        return fifths > 6 || (fifths == 6 && flats) ? fifths - 12 : fifths;
     }
 
     /** The alteration the key signature gives each letter, C to B: +1 sharp, -1 flat, 0 none. */
@@ -243,7 +261,12 @@ public record Key(int tonic, Mode mode) {
         if (mode == null) {
             mode = lowerCaseTonic && t.length() <= 3 && !t.contains("#") ? Mode.MINOR : Mode.MAJOR;
         }
-        return new Key(tonic, mode);
+        Key key = new Key(tonic, mode);
+        if (key.enharmonicTie()) {
+            // As written: "Gb major" has the flats, "D# minor" the sharps.
+            return new Key(tonic, mode, writtenFlat(t, text));
+        }
+        return key;
     }
 
     /** The pitch class of a tonic: English ({@code C#}, {@code Bb}) or German ({@code Cis}, {@code B}, {@code H}, {@code Es}). */
@@ -275,6 +298,14 @@ public record Key(int tonic, Mode mode) {
             default: throw new IllegalArgumentException("Not a key: \"" + text + "\".");
         }
         return Math.floorMod(base + alteration, 12);
+    }
+
+    /** Whether a tonic is written with a flat: {@code Gb}, {@code Ges}, {@code Es}, German {@code B}. */
+    private static boolean writtenFlat(String written, String text) {
+        String rest = written.trim().substring(1).toLowerCase(Locale.ROOT);
+        char first = Character.toUpperCase(written.trim().charAt(0));
+        return rest.startsWith("b") || rest.startsWith("es") || rest.equals("s") || rest.startsWith("flat")
+                || (first == 'B' && rest.isEmpty() && looksGerman(text));
     }
 
     private static boolean looksGerman(String text) {

@@ -97,27 +97,33 @@ public final class ContinuationComposer {
                                         int attempt, Path cacheDirectory, Progress progress) throws IOException {
         ContinuationTask task = ContinuationTask.of(piece, request, attempt);
         Files.createDirectories(cacheDirectory);
-        progress.update("Plane die Fortsetzung (" + request.bars() + " Takte, " + request.preset().label() + ") ...");
-        ContinuationPlan plan = planner.plan(task, piece, cacheDirectory);
+        progress.update((task.inserts() ? "Plane " + request.bars() + " eingefügte Takte vor Takt "
+                + request.insertBeforeBar() + " (" : "Plane die Fortsetzung (" + request.bars() + " Takte, ")
+                + request.preset().label() + ") ...");
+        // For an insertion everything is written into the piece with the room already made: the
+        // music after the room is where it will be once the patch has shifted it.
+        Composition room = task.room(piece);
+        ContinuationPlan plan = planner.plan(task, room, cacheDirectory);
         if (plan.bars() != request.bars()) {
             throw new IOException("Der Plan deckt " + plan.bars() + " statt " + request.bars() + " Takte ab.");
         }
         for (String repair : plan.repairs()) {
             progress.update("Plan: " + repair);
         }
-        List<VoiceFrame> frames = frames(task, plan, piece);
+        List<VoiceFrame> frames = frames(task, plan, room);
         List<ContinuationVoice> voices = new ArrayList<>();
         task.parts().forEach(part -> voices.add(ContinuationVoice.of(part)));
         plan.newParts().forEach(part -> voices.add(ContinuationVoice.of(part)));
 
-        Map<String, Written> written = write(piece, task, plan, frames, voices, cacheDirectory, progress);
-        ComposedContinuation result = assemble(piece, task, plan, frames, voices, written, new Fresh(piece, ids));
+        Map<String, Written> written = write(room, piece, task, plan, frames, voices, cacheDirectory, progress);
+        ComposedContinuation result = assemble(room, task, plan, frames, voices, written, new Fresh(room, ids),
+                task.inserts() ? holds(piece, task) : List.of());
         if (result.clips().stream().allMatch(c -> c.clip().notes().isEmpty())) {
             throw new IOException("Keine spielbaren Noten für die Fortsetzung; die Antworten bleiben im Cache zur "
                     + "Diagnose.");
         }
-        progress.update("Fortsetzung: " + result.noteCount() + " Noten in " + result.sections().size()
-                + " Abschnitt(en), " + result.newParts().size() + " neue Instrumente, " + result.corrections().size()
+        progress.update((task.inserts() ? "Einfügung: " : "Fortsetzung: ") + result.noteCount() + " Noten in "
+                + result.sections().size() + " Abschnitt(en), " + result.newParts().size() + " neue Instrumente, " + result.corrections().size()
                 + " Korrekturen.");
         return result;
     }
@@ -126,7 +132,8 @@ public final class ContinuationComposer {
     private record Written(Map<String, List<ShapedNote>> notes, List<String> corrections) {
     }
 
-    private Map<String, Written> write(Composition piece, ContinuationTask task, ContinuationPlan plan,
+    private Map<String, Written> write(Composition piece, Composition original, ContinuationTask task,
+                                       ContinuationPlan plan,
                                        List<VoiceFrame> frames, List<ContinuationVoice> voices, Path cache,
                                        Progress progress) throws IOException {
         ExecutorService pool = Executors.newFixedThreadPool(Math.min(threads, Math.max(1, voices.size())), runnable -> {
@@ -137,7 +144,8 @@ public final class ContinuationComposer {
         Map<String, Future<Written>> running = new LinkedHashMap<>();
         try {
             for (ContinuationVoice voice : voices) {
-                running.put(voice.key(), pool.submit(() -> writePart(piece, task, plan, frames, voice, cache, progress)));
+                running.put(voice.key(), pool.submit(() -> writePart(piece, original, task, plan, frames, voice, cache,
+                        progress)));
             }
             Map<String, Written> written = new HashMap<>();
             for (Map.Entry<String, Future<Written>> entry : running.entrySet()) {
@@ -158,11 +166,14 @@ public final class ContinuationComposer {
         }
     }
 
-    private Written writePart(Composition piece, ContinuationTask task, ContinuationPlan plan, List<VoiceFrame> frames,
+    private Written writePart(Composition piece, Composition original, ContinuationTask task, ContinuationPlan plan,
+                              List<VoiceFrame> frames,
                               ContinuationVoice voice, Path cache, Progress progress) throws IOException {
         VoiceNormalizer normalizer = new VoiceNormalizer(task.time(), voice.range(), voice.drums());
+        List<String> densities = new ArrayList<>();
         Map<String, List<ShapedNote>> notes = new LinkedHashMap<>();
-        String connection = voice.newPart() ? "" : before(piece, voice.key(), frames.get(0).startTick());
+        // From the original: a note that sounds across an insertion point is told with its full length.
+        String connection = voice.newPart() ? "" : before(original, voice.key(), frames.get(0).startTick());
         for (VoiceFrame frame : frames) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new IOException("Verlängern abgebrochen.");
@@ -176,6 +187,11 @@ public final class ContinuationComposer {
             progress.update("Komponiere " + voice.name() + " für " + frame.name() + " ...");
             GeneratedNotes generated = generator.generate(task, plan, voice, frame, connection, cache);
             List<ShapedNote> shaped = normalizer.shape(frame, generated, transition ? ringOut(task) : 0);
+            if (frame.intensity() != null) {
+                List<String> thinned = new ArrayList<>();
+                shaped = Dramaturgy.thin(frame, task.time(), frame.intensity(), voice.role(), shaped, thinned);
+                thinned.forEach(line -> densities.add(voice.key() + "\t" + line));
+            }
             if (shaped.isEmpty()) {
                 progress.update("WARN: keine spielbaren Noten für " + voice.name() + " in " + frame.name() + ".");
             }
@@ -184,6 +200,7 @@ public final class ContinuationComposer {
         }
         List<String> corrections = new ArrayList<>();
         normalizer.corrections().forEach(line -> corrections.add(voice.key() + "\t" + line));
+        corrections.addAll(densities);
         return new Written(notes, corrections);
     }
 
@@ -197,18 +214,26 @@ public final class ContinuationComposer {
 
     private static ComposedContinuation assemble(Composition piece, ContinuationTask task, ContinuationPlan plan,
                                                  List<VoiceFrame> frames, List<ContinuationVoice> voices,
-                                                 Map<String, Written> written, Fresh fresh) {
+                                                 Map<String, Written> written, Fresh fresh,
+                                                 List<ComposedContinuation.Hold> holds) {
         List<String> corrections = new ArrayList<>();
-        // The form: what is missing up to the continuation, then the planned sections.
+        // The form: for a continuation what is missing up to it, then the planned sections; for an
+        // insertion the form of the piece with the room, the planned sections in the room.
         List<Section> sections = new ArrayList<>();
-        long formEnd = piece.sections().isEmpty() ? 0 : piece.sections().get(piece.sections().size() - 1).endTick();
-        if (formEnd < task.newStart()) {
-            sections.add(new Section(fresh.next(), formEnd == 0 ? "Original" : "Ausklang", null, formEnd,
-                    task.newStart() - formEnd, null, List.of(), null));
+        List<Section> form;
+        if (task.inserts()) {
+            sections.addAll(plan.asSections(task, ids(plan, fresh)));
+            form = insertedForm(piece, task, sections, fresh);
+        } else {
+            long formEnd = piece.sections().isEmpty() ? 0 : piece.sections().get(piece.sections().size() - 1).endTick();
+            if (formEnd < task.newStart()) {
+                sections.add(new Section(fresh.next(), formEnd == 0 ? "Original" : "Ausklang", null, formEnd,
+                        task.newStart() - formEnd, null, List.of(), null));
+            }
+            sections.addAll(plan.asSections(task, ids(plan, fresh)));
+            form = new ArrayList<>(piece.sections());
+            form.addAll(sections);
         }
-        List<String> sectionIds = new ArrayList<>();
-        plan.sections().forEach(s -> sectionIds.add(fresh.next()));
-        sections.addAll(plan.asSections(task, sectionIds));
 
         List<Part> newParts = new ArrayList<>();
         List<Track> newTracks = new ArrayList<>();
@@ -274,8 +299,63 @@ public final class ContinuationComposer {
                         new MidiClip(fresh.next(), frame.startTick(), frame.lengthTicks(), clipPart, notes)));
             }
         }
+        hold(piece, task, holds, tail);
         joinOverhangs(piece, clips, tail, corrections);
-        return new ComposedContinuation(task, plan, sections, newParts, newTracks, clips, tail, corrections);
+        return new ComposedContinuation(task, plan, sections, form, newParts, newTracks, clips, tail, corrections,
+                holds);
+    }
+
+    private static List<String> ids(ContinuationPlan plan, Fresh fresh) {
+        List<String> ids = new ArrayList<>();
+        plan.sections().forEach(s -> ids.add(fresh.next()));
+        return ids;
+    }
+
+    /**
+     * The form after an insertion, on the piece with the room ({@code room}): a section the shift
+     * stretched over the room is cut in two at its edges, the second half under a new id with the
+     * rest of its chords; the planned sections fill the room; gaps the old form left before the
+     * room or behind it (where the original goes on) are filled with a section "Original".
+     */
+    static List<Section> insertedForm(Composition room, ContinuationTask task, List<Section> planned,
+                                      Supplier<String> ids) {
+        TimeMap time = task.time();
+        long start = task.newStart();
+        long end = task.newEnd();
+        List<Section> before = new ArrayList<>();
+        List<Section> after = new ArrayList<>();
+        for (Section s : room.sections()) {
+            if (s.endTick() <= start) {
+                before.add(s);
+            } else if (s.startTick() >= end) {
+                after.add(s);
+            } else {
+                int headBars = time.barOf(start) - time.barOf(s.startTick());
+                List<String> headChords = s.harmony().subList(0, Math.min(headBars, s.harmony().size()));
+                List<String> tailChords = s.harmony().subList(Math.min(headBars, s.harmony().size()), s.harmony().size());
+                if (start > s.startTick()) {
+                    before.add(new Section(s.id(), s.name(), s.function(), s.startTick(), start - s.startTick(),
+                            s.intensity(), headChords, s.instruction()));
+                }
+                if (s.endTick() > end) {
+                    after.add(new Section(start > s.startTick() ? ids.get() : s.id(), s.name(), s.function(), end,
+                            s.endTick() - end, s.intensity(), tailChords, s.instruction()));
+                }
+            }
+        }
+        List<Section> form = new ArrayList<>(before);
+        long formEnd = before.isEmpty() ? 0 : before.get(before.size() - 1).endTick();
+        if (formEnd < start) {
+            form.add(new Section(ids.get(), "Original", null, formEnd, start - formEnd, null, List.of(), null));
+        }
+        form.addAll(planned);
+        long goesOn = after.isEmpty() ? time.tickOfBar(Math.max(time.barOf(end), time.barsCovering(room.endTick())))
+                : after.get(0).startTick();
+        if (goesOn > end) {
+            form.add(new Section(ids.get(), "Original", null, end, goesOn - end, null, List.of(), null));
+        }
+        form.addAll(after);
+        return form;
     }
 
     /**
@@ -343,6 +423,85 @@ public final class ContinuationComposer {
                     added.getOrDefault(clip, List.of()), end == null ? 0 : end - start));
         }
         return changes;
+    }
+
+    /**
+     * The notes of the original that sound across the insertion point: in a MIDI clip across the
+     * point, beginning before it (and before the revised bars, whose notes are written anew) and
+     * ending after it. The shift cuts them at the point; {@link #hold} lets them sound on.
+     */
+    static List<ComposedContinuation.Hold> holds(Composition original, ContinuationTask task) {
+        long point = task.newStart();
+        List<ComposedContinuation.Hold> holds = new ArrayList<>();
+        for (Track track : original.tracks()) {
+            for (Clip clip : track.clips()) {
+                if (clip instanceof MidiClip midi && midi.startTick() < point && point < midi.endTick()) {
+                    for (Note note : midi.notes()) {
+                        long tick = midi.startTick() + note.tick();
+                        if (tick < task.tailStart() && tick + note.length() > point) {
+                            holds.add(new ComposedContinuation.Hold(track.partOf(midi), midi.id(), note.id(), tick,
+                                    note.length()));
+                        }
+                    }
+                }
+            }
+        }
+        return holds;
+    }
+
+    /**
+     * Lets the held notes of an insertion sound on: in the piece with the room ({@code room}) the
+     * first half of their clip ends at the insertion point and the note there; the note gets its
+     * length back, at most to the end of the room, and the clip grows with it. This becomes a
+     * {@link ComposedContinuation.TailChange} of the clip (merged with one of the revised
+     * transition), so that {@link #joinOverhangs} joins the new clips of the part into it.
+     */
+    static void hold(Composition room, ContinuationTask task, List<ComposedContinuation.Hold> holds,
+                     List<ComposedContinuation.TailChange> tail) {
+        Map<String, List<ComposedContinuation.Hold>> byClip = new LinkedHashMap<>();
+        for (ComposedContinuation.Hold hold : holds) {
+            byClip.computeIfAbsent(hold.clipId(), id -> new ArrayList<>()).add(hold);
+        }
+        Map<String, MidiClip> halves = new HashMap<>();
+        for (Track track : room.tracks()) {
+            for (Clip clip : track.clips()) {
+                if (byClip.containsKey(clip.id()) && clip instanceof MidiClip midi) {
+                    halves.put(midi.id(), midi);
+                }
+            }
+        }
+        for (Map.Entry<String, List<ComposedContinuation.Hold>> entry : byClip.entrySet()) {
+            MidiClip half = halves.get(entry.getKey());
+            List<String> removed = new ArrayList<>();
+            List<Note> added = new ArrayList<>();
+            long end = half.endTick();
+            for (ComposedContinuation.Hold hold : entry.getValue()) {
+                Note cut = half.notes().stream().filter(n -> n.id().equals(hold.noteId())).findFirst().orElseThrow();
+                long length = Math.min(hold.length(), task.newEnd() - hold.tick());
+                removed.add(cut.id());
+                added.add(new Note(cut.id(), cut.tick(), length, cut.pitch(), cut.velocity(), cut.voiceId()));
+                end = Math.max(end, hold.tick() + length);
+            }
+            long length = end - half.startTick();
+            int at = -1;
+            for (int i = 0; i < tail.size(); i++) {
+                if (tail.get(i).clipId().equals(half.id())) {
+                    at = i;
+                }
+            }
+            if (at < 0) {
+                tail.add(new ComposedContinuation.TailChange(half.id(), removed, added, length));
+            } else {
+                ComposedContinuation.TailChange change = tail.get(at);
+                List<String> allRemoved = new ArrayList<>(change.removed());
+                allRemoved.addAll(removed);
+                List<Note> allAdded = new ArrayList<>(change.added());
+                allAdded.addAll(added);
+                long base = change.lengthTicks() == 0 ? half.lengthTicks() : change.lengthTicks();
+                tail.set(at, new ComposedContinuation.TailChange(half.id(), allRemoved, allAdded,
+                        Math.max(base, length)));
+            }
+        }
     }
 
     /** Where the next clip after this one on its track begins; {@code Long.MAX_VALUE} if none follows. */
@@ -444,14 +603,14 @@ public final class ContinuationComposer {
     }
 
     /** The sound library most parts of the piece use: new instruments sound alike. */
-    private static String library(Composition piece) {
+    static String library(Composition piece) {
         Map<String, Integer> count = new LinkedHashMap<>();
         piece.parts().forEach(part -> count.merge(part.libraryId(), 1, Integer::sum));
         return count.entrySet().stream().max(Map.Entry.comparingByValue()).map(Map.Entry::getKey).orElse(null);
     }
 
     /** The notes a part played in the last bars before a tick, as connection. */
-    private static String before(Composition piece, String partId, long tick) {
+    static String before(Composition piece, String partId, long tick) {
         TimeMap time = piece.timeMap();
         int bar = time.barOf(Math.max(0, tick - 1));
         long from = time.tickOfBar(Math.max(0, bar + 1 - CONNECTION_BARS));
@@ -499,7 +658,7 @@ public final class ContinuationComposer {
     }
 
     /** Ids for new objects that the piece does not use yet, drawn in a fixed order. */
-    private static final class Fresh {
+    static final class Fresh implements Supplier<String> {
         private final Supplier<String> source;
         private final Set<String> used = new HashSet<>();
 
@@ -520,6 +679,11 @@ public final class ContinuationComposer {
                 }
             }
             piece.assets().forEach(a -> used.add(a.id()));
+        }
+
+        @Override
+        public String get() {
+            return next();
         }
 
         String next() {
