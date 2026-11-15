@@ -13,4 +13,11 @@ public interface SketchProgress extends TrackProgress {
      *                    without a note yet are left out
      */
     void sketch(List<String> arrangement);
+
+    /**
+     * How much of the answers of the model has arrived so far, over all tracks that are being
+     * composed: nothing while the service lets the requests wait, more with every piece of text.
+     */
+    default void arriving(long characters) {
+    }
 }
