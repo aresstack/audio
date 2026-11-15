@@ -107,6 +107,22 @@ final class StageDeck {
      */
     void openLive(Path arrangement, Path directory, SpatialScene scene, String only, float legacyFactor,
                   double at, boolean play, Consumer<Exception> ready) {
+        com.aresstack.audio.studio.application.StageMixService.Piece written = null;
+        try {
+            written = com.aresstack.audio.studio.application.StageMixService.Piece.written(arrangement);
+        } catch (Exception unreadable) {
+            // told below, as any other reason the stage cannot be played live
+        }
+        openLive(written, directory, scene, only, legacyFactor, at, play, ready);
+    }
+
+    /**
+     * As above, for the piece as the file mix takes it: the model of the open piece, or a written
+     * arrangement. {@code null} (nothing written, or not readable) is told through {@code ready}.
+     */
+    void openLive(com.aresstack.audio.studio.application.StageMixService.Piece piece, Path directory,
+                  SpatialScene scene, String only, float legacyFactor, double at, boolean play,
+                  Consumer<Exception> ready) {
         final int ticket = ++asked;
         loading = true;
         pending = live == null ? at : Double.NaN;
@@ -116,7 +132,10 @@ final class StageDeck {
             LiveDeck made = null;
             Exception problem = null;
             try {
-                made = LiveDeck.open(arrangement, directory, scene, only, legacyFactor, sinks, heardAs);
+                if (piece == null) {
+                    throw new java.io.IOException("Von diesem Stück ist noch nichts geschrieben.");
+                }
+                made = LiveDeck.open(piece, directory, scene, only, legacyFactor, sinks, heardAs);
             } catch (Exception failed) {
                 problem = failed;
             } catch (Error failed) {

@@ -141,7 +141,8 @@ public final class PieceExtension {
         Set<String> created = new HashSet<>();
         composed.newParts().stream().map(Part::id).forEach(created::add);
         List<String> differences = request.inserts()
-                ? InsertPassage.originalKept(base, made.result(), composed.task(), composed.fromTick(), goOn, created)
+                ? InsertPassage.originalKept(base, made.result(), composed.task(), composed.task().tailStart(), goOn,
+                created, InsertPassage.shortened(composed))
                 : AppendContinuation.originalKept(base, made.result(), composed.fromTick(), goOn, created);
         if (!differences.isEmpty()) {
             session.discard(made);

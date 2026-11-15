@@ -149,6 +149,19 @@ public final class PieceModel {
         }
     }
 
+    /**
+     * The model of the piece in this folder as it is saved, for work that only reads it
+     * (rendering). Nothing is taken over from the old files here. Empty if the folder is not the
+     * open piece or the piece has no model: then it works from its old files as before.
+     */
+    public synchronized Optional<ProjectSession> of(Path wanted) {
+        if (wanted == null || folder == null || session == null
+                || !wanted.toAbsolutePath().normalize().equals(folder.toAbsolutePath().normalize())) {
+            return Optional.empty();
+        }
+        return Optional.of(session);
+    }
+
     /** The model of the open piece, if it has one. */
     public synchronized Optional<ProjectSession> session() {
         return Optional.ofNullable(session);

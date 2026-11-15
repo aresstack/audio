@@ -1,7 +1,9 @@
 package com.aresstack.audio.studio.application;
 
+import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
-import com.aresstack.audio.studio.ai.KipitzChatClient;
+import com.aresstack.audio.studio.ai.ChatModel;
 import com.aresstack.audio.studio.progress.Progress;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
@@ -24,10 +26,10 @@ import java.util.TreeMap;
  */
 public final class MixDirector {
     public static final String FILE_NAME = "mix-proposal.json";
-    private final KipitzChatClient client;
+    private final ChatModel client;
     private final int maxTokens;
 
-    public MixDirector(KipitzChatClient client, int maxTokens) {
+    public MixDirector(ChatModel client, int maxTokens) {
         this.client = client;
         this.maxTokens = maxTokens;
     }
@@ -40,12 +42,26 @@ public final class MixDirector {
      */
     public SpatialScene direct(String description, Path arrangement, SpatialScene current, Path directory,
                                Progress progress) throws IOException {
-        progress.update("KI hört sich die Spuren an und schlägt eine Abmischung vor ...");
         List<MusicTrack> tracks = StageMixService.tracks(arrangement);
+        return direct(tracks, prompt(description, tracks, arrangement, current), directory, progress);
+    }
+
+    /**
+     * Asks for a mix of a piece with a model: what each part plays is read from the model, with
+     * its time map, and no written arrangement is needed.
+     */
+    public SpatialScene direct(String description, Composition model, SpatialScene current, Path directory,
+                               Progress progress) throws IOException {
+        List<MusicTrack> tracks = StageMixService.Piece.of(model).tracks();
+        return direct(tracks, prompt(description, tracks, model, current), directory, progress);
+    }
+
+    private SpatialScene direct(List<MusicTrack> tracks, String prompt, Path directory, Progress progress)
+            throws IOException {
+        progress.update("KI hört sich die Spuren an und schlägt eine Abmischung vor ...");
         Files.deleteIfExists(directory.resolve(FILE_NAME)); // asked anew each time; the answer is kept to be read
-        JsonObject response = client.generate("Return valid JSON only, no Markdown.",
-                prompt(description, tracks, arrangement, current), Math.min(maxTokens, 4096),
-                directory.resolve(FILE_NAME));
+        JsonObject response = client.generate("Return valid JSON only, no Markdown.", prompt,
+                Math.min(maxTokens, 4096), directory.resolve(FILE_NAME));
         try {
             return SpatialSceneStore.read(response).fitting(tracks);
         } catch (RuntimeException invalid) {
@@ -55,10 +71,31 @@ public final class MixDirector {
 
     static String prompt(String description, List<MusicTrack> tracks, Path arrangement, SpatialScene current)
             throws IOException {
-        Map<String, Summary> played = summaries(arrangement);
+        return prompt(description, tracks, StageMixService.tempo(arrangement), meterAndKey(arrangement),
+                summaries(arrangement), current);
+    }
+
+    /** The prompt for a piece with a model: tempo, meter and key at its start, and the notes of every part. */
+    static String prompt(String description, List<MusicTrack> tracks, Composition model, SpatialScene current) {
+        TimeMap time = model.timeMap();
+        Map<String, Summary> played = new LinkedHashMap<String, Summary>();
+        for (MusicTrack track : tracks) {
+            Summary summary = new Summary();
+            for (Composition.PlacedNote placed : model.notesOf(track.id())) {
+                summary.add(time.barOf(placed.tick()), placed.note().pitch(), placed.note().velocity());
+            }
+            played.put(track.id(), summary);
+        }
+        TimeMap.Meter meter = time.meterAt(0);
+        return prompt(description, tracks, (int) Math.round(time.tempoAt(0)),
+                meter.numerator() + "/" + meter.denominator() + ", " + time.keyAt(0).name(), played, current);
+    }
+
+    private static String prompt(String description, List<MusicTrack> tracks, int tempo, String meterAndKey,
+                                 Map<String, Summary> played, SpatialScene current) {
         StringBuilder text = new StringBuilder("You are the mixing engineer of this instrumental piece: ")
-                .append(description).append("\nTempo ").append(StageMixService.tempo(arrangement))
-                .append(" BPM, ").append(meterAndKey(arrangement)).append(". The tracks and what they play:\n");
+                .append(description).append("\nTempo ").append(tempo)
+                .append(" BPM, ").append(meterAndKey).append(". The tracks and what they play:\n");
         for (MusicTrack track : tracks) {
             Summary summary = played.get(track.id());
             text.append("- ").append(track.id()).append(" (").append(track.role()).append(", General MIDI program ")
@@ -106,13 +143,7 @@ public final class MixDirector {
                 summary = new Summary();
                 played.put(note.trackId(), summary);
             }
-            int bar = (int) (note.tick() / barTicks);
-            summary.notes++;
-            summary.lowest = Math.min(summary.lowest, note.pitch());
-            summary.highest = Math.max(summary.highest, note.pitch());
-            summary.velocity += note.velocity();
-            Integer before = summary.bars.get(bar);
-            summary.bars.put(bar, before == null ? 1 : before + 1);
+            summary.add((int) (note.tick() / barTicks), note.pitch(), note.velocity());
         }
         return played;
     }
@@ -123,6 +154,15 @@ public final class MixDirector {
         private int highest;
         private int velocity;
         private final TreeMap<Integer, Integer> bars = new TreeMap<Integer, Integer>();
+
+        private void add(int bar, int pitch, int loudness) {
+            notes++;
+            lowest = Math.min(lowest, pitch);
+            highest = Math.max(highest, pitch);
+            velocity += loudness;
+            Integer before = bars.get(bar);
+            bars.put(bar, before == null ? 1 : before + 1);
+        }
 
         private String perBar() {
             List<String> counts = new ArrayList<String>();
