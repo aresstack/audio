@@ -55,6 +55,15 @@ public final class ContinuationComposer {
         this.threads = threads;
     }
 
+    /**
+     * A composer whose plan comes from the arranging role (follows planning) and whose notes come
+     * from the rework role (follows composition), four parts at a time.
+     */
+    public static ContinuationComposer with(ModelLineup models) {
+        return new ContinuationComposer(new ChatContinuationPlanner(models.model(ModelRoles.ARRANGING), 4096),
+                new ChatSectionGenerator(models.model(ModelRoles.REWORK), 16384), 4);
+    }
+
     /** A composer that asks a model for plan and notes, four parts at a time. */
     public static ContinuationComposer with(ChatModel model) {
         return new ContinuationComposer(new ChatContinuationPlanner(model, 4096), new ChatSectionGenerator(model, 16384),
