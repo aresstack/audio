@@ -1,0 +1,6 @@
+stems.tsv:
+melody	melody.wav
+harmony	harmony.wav
+bass	bass.wav
+drums	drums.wav
+mix	arrangement-instruments.wav	0197fa85380fd61928da298fab7b483c12fe3db8f5c26f24f09d4283e170b0bc

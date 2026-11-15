@@ -1,0 +1,16 @@
+demo-arrangement: tempo 108, ticks 15360, bars 8
+  melody 41
+  harmony 24
+  bass 16
+  drums 64
+district-dawn: tempo 108, ticks 15360, bars 8
+  melody 40
+  harmony 30
+  bass 20
+  drums 59
+edge-cases: tempo 96, ticks 15360, bars 8
+  lead 5
+  pad 5
+  double 2
+  low 4
+  kit 7

@@ -61,6 +61,8 @@ public final class GemmaMusicComposerTest {
         Assert.assertTrue(content.contains("note\tbass\t15240\t120\t47\t70"));
         Assert.assertTrue(content.contains("track\tdrums\t0\t9"));
         Assert.assertTrue(content.contains("note\tmelody\t14160\t1200\t84\t70"));
+        // F0 safety net: the whole arrangement the composer writes from these answers, not only parts of it.
+        com.aresstack.audio.studio.golden.Golden.assertMatches("compose/offline-fixture.tsv", content);
         String corrections = new String(Files.readAllBytes(
                 output.resolve("note-corrections.tsv")), StandardCharsets.UTF_8);
         Assert.assertTrue(corrections.contains("melody\t9\tduration\t4.0\t2.5"));

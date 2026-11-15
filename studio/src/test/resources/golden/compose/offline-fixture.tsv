@@ -1,0 +1,39 @@
+tempo	108
+track	melody	10	0	melody
+note	melody	0	480	72	70
+note	melody	1920	480	72	70
+note	melody	3840	480	72	70
+note	melody	5760	480	72	70
+note	melody	7680	480	72	70
+note	melody	9600	480	72	70
+note	melody	11520	480	72	70
+note	melody	13440	480	72	70
+note	melody	14160	1200	84	70
+track	harmony	48	1	harmony
+note	harmony	0	480	52	70
+note	harmony	1920	480	50	70
+note	harmony	3840	480	52	70
+note	harmony	5760	480	53	70
+note	harmony	7680	480	52	70
+note	harmony	9600	480	50	70
+note	harmony	11520	480	53	70
+note	harmony	13440	480	50	70
+track	bass	32	2	bass
+note	bass	0	480	48	70
+note	bass	1920	480	47	70
+note	bass	3840	480	48	70
+note	bass	5760	480	48	70
+note	bass	7680	480	48	70
+note	bass	9600	480	47	70
+note	bass	11520	480	48	70
+note	bass	12960	480	45	70
+note	bass	15240	120	47	70
+track	drums	0	9	drums
+note	drums	0	480	36	70
+note	drums	1920	480	38	70
+note	drums	3840	480	42	70
+note	drums	5760	480	46	70
+note	drums	7680	480	36	70
+note	drums	9600	480	38	70
+note	drums	11520	480	42	70
+note	drums	13440	480	46	70
