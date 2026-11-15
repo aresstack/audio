@@ -22,6 +22,10 @@ public final class ProjectFolder {
     public static final String SONG = "song.properties";
     public static final String SCENE = "spatial-scene.json";
     public static final String STEMS = "stems.tsv";
+    /** Lasting full copies of the piece, one file each (work package F3). */
+    public static final String REVISIONS = "revisions";
+    /** Proposals not taken over yet, one folder each; nothing in it is ever the truth. */
+    public static final String PREVIEW = "preview";
 
     /**
      * The old files that the import reads or that the studio may write again while the model is
@@ -79,6 +83,9 @@ public final class ProjectFolder {
             Files.deleteIfExists(folder.resolve(name));
         }
         Files.deleteIfExists(StemManifest.file(folder));
+        // Previews were never the truth. The revisions stay: they are the history of the model and
+        // its original, which is never deleted; opening the piece again starts a new model.
+        deleteTree(folder.resolve(PREVIEW));
         for (String name : LEGACY_FILES) {
             Path kept = legacy.resolve(name);
             if (Files.isRegularFile(kept)) {
@@ -92,7 +99,7 @@ public final class ProjectFolder {
         return true;
     }
 
-    private static void deleteTree(Path path) throws IOException {
+    static void deleteTree(Path path) throws IOException {
         if (!Files.exists(path)) {
             return;
         }

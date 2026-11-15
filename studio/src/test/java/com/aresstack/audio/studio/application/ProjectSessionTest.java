@@ -153,7 +153,10 @@ public final class ProjectSessionTest {
 
         Map<String, byte[]> restored = contents(piece);
         assertTrue("legacy/ stays", restored.keySet().stream().anyMatch(name -> name.startsWith("legacy/")));
-        restored.keySet().removeIf(name -> name.startsWith("legacy/") || name.startsWith("render/"));
+        // revisions/ stays too: it holds the history of the model with its original, which is never
+        // deleted (work package F3); the old studio does not read it.
+        restored.keySet().removeIf(name -> name.startsWith("legacy/") || name.startsWith("render/")
+                || name.startsWith(ProjectFolder.REVISIONS + "/"));
         Map<String, byte[]> expected = new TreeMap<>(original);
         // Renaming moved the rendered files; they are not source files, and the way back leaves them alone.
         for (String moved : List.of("bass.wav")) {

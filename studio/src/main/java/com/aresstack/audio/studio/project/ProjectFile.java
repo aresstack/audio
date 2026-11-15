@@ -16,7 +16,7 @@ import java.util.TreeMap;
 
 /**
  * {@code project.json}: the version of the format the folder is written in, the current
- * revision (none before work package F3), and what the import of the old files reported.
+ * revision (see {@link RevisionStore}), and what the import of the old files reported.
  *
  * @param warnings what the import of the old files could not take over as it was written
  * @param sources  the SHA-256 of each file the old pipeline still writes, as the model last took it
@@ -35,6 +35,11 @@ public record ProjectFile(int formatVersion, String currentRevision, String impo
 
     public ProjectFile withSources(Map<String, String> changed) {
         return new ProjectFile(formatVersion, currentRevision, importedFrom, warnings, changed);
+    }
+
+    /** The same file naming another revision as the current one (work package F3). */
+    public ProjectFile withCurrentRevision(String revisionId) {
+        return new ProjectFile(formatVersion, revisionId, importedFrom, warnings, sources);
     }
 
     /** The SHA-256 of each of these files in a folder that is there. */
