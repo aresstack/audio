@@ -47,6 +47,9 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
     @Override
     public Album plan(Album album, Path cache, Progress progress) throws IOException {
         AlbumConcept concept = album.concept();
+        if (concept.original()) {
+            return rebuild(album, cache, progress);
+        }
         List<AlbumTrack> kept = new ArrayList<AlbumTrack>();
         for (AlbumTrack track : album.tracks()) {
             if (track.hasPiece()) {
@@ -115,6 +118,118 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         }
         progress.update("Trackliste bereit: " + tracks.size() + " Titel.");
         return album.withTracks(tracks);
+    }
+
+    /**
+     * "Original nachbilden": first the movements of the work are found, as many as the work has
+     * (not as many as the album asked for), then every movement is planned in a request of its
+     * own, with its real title, key, meter, tempo, length and form. Each planned movement is shown
+     * as soon as it is there. A title that has a piece already stays, at the place of the
+     * movement of the same name, or after the movements.
+     */
+    private Album rebuild(Album album, Path cache, Progress progress) throws IOException {
+        AlbumConcept concept = album.concept();
+        progress.update("KI ermittelt die Sätze des Werks für „" + album.title() + "“ ...");
+        Path listed = cache == null ? null : cache.resolve("album-movements.json");
+        if (listed != null) {
+            Files.deleteIfExists(listed);
+        }
+        JsonObject said = model.generate(INSTRUCTION, movementsPrompt(album), maxTokens, listed);
+        List<String> movements = new ArrayList<String>();
+        JsonArray named = said != null && said.has("movements") && said.get("movements").isJsonArray()
+                ? said.getAsJsonArray("movements") : new JsonArray();
+        for (JsonElement element : named) {
+            String title = element.isJsonObject() ? AlbumFiles.text(element.getAsJsonObject(), "title")
+                    : element.isJsonPrimitive() ? element.getAsString().trim() : "";
+            if (!title.isBlank() && movements.size() < AlbumConcept.MAX_TRACKS) {
+                movements.add(title);
+            }
+        }
+        if (movements.isEmpty()) {
+            throw new IOException("Die KI hat keine Sätze des Werks genannt; bitte das Werk im Text genauer nennen.");
+        }
+        progress.update("Das Werk hat " + movements.size() + " Sätze; jeder wird einzeln geplant.");
+        List<AlbumTrack> kept = new ArrayList<AlbumTrack>();
+        for (AlbumTrack track : album.tracks()) {
+            if (track.hasPiece()) {
+                kept.add(track);
+            }
+        }
+        List<String> ids = new ArrayList<String>();
+        for (AlbumTrack track : kept) {
+            ids.add(track.id());
+        }
+        List<AlbumTrack> tracks = new ArrayList<AlbumTrack>();
+        for (int i = 0; i < movements.size(); i++) {
+            String title = movements.get(i);
+            AlbumTrack same = null;
+            for (AlbumTrack track : kept) {
+                if (track.title().equalsIgnoreCase(title)) {
+                    same = track;
+                }
+            }
+            if (same != null) {
+                tracks.add(same);
+                kept.remove(same);
+                continue;
+            }
+            progress.update("KI plant Satz " + (i + 1) + " von " + movements.size() + ": " + title + " ...");
+            Path answer = cache == null ? null : cache.resolve("album-movement-" + (i + 1) + ".json");
+            if (answer != null) {
+                Files.deleteIfExists(answer);
+            }
+            JsonObject entry = model.generate(INSTRUCTION, movementPrompt(album, movements, i), maxTokens, answer);
+            entry = entry == null ? new JsonObject() : entry;
+            if (AlbumFiles.text(entry, "title").isBlank()) {
+                entry.addProperty("title", title);
+            }
+            String id = freshId(ids);
+            ids.add(id);
+            tracks.add(track(id, entry, i + 1, concept));
+            if (watcher != null) {
+                List<AlbumTrack> seen = new ArrayList<AlbumTrack>(tracks);
+                seen.addAll(kept);
+                watcher.accept(seen);
+            }
+        }
+        tracks.addAll(kept);
+        progress.update("Trackliste bereit: " + tracks.size() + " Sätze des Originals.");
+        AlbumConcept counted = new AlbumConcept(concept.description(), concept.style(), Math.max(1, tracks.size()),
+                concept.minSeconds(), concept.maxSeconds(), true);
+        return album.withConcept(counted).withTracks(tracks);
+    }
+
+    static String movementsPrompt(Album album) {
+        AlbumConcept concept = album.concept();
+        return "List the movements of the existing work this album rebuilds, in their original order.\n"
+                + "{\"album\":\"" + escape(album.title()) + "\",\"wish\":\"" + escape(concept.description())
+                + "\",\"style\":\"" + escape(concept.style()) + "\"}\n"
+                + "Name every movement (or every piece, for a collection) the work has, as many as it has, with its "
+                + "real title, e.g. \"Spring – I. Allegro\", in the language of the wish. Invent nothing.\n"
+                + "Return one JSON object: {\"movements\": [{\"title\": \"...\"}, ...]}.";
+    }
+
+    static String movementPrompt(Album album, List<String> movements, int index) {
+        AlbumConcept concept = album.concept();
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Plan ONE track of an album that rebuilds an existing work: movement ").append(index + 1)
+                .append(" of ").append(movements.size()).append(", \"").append(escape(movements.get(index)))
+                .append("\".\n");
+        prompt.append("{\"album\":\"").append(escape(album.title())).append("\",\"wish\":\"")
+                .append(escape(concept.description())).append("\",\"style\":\"").append(escape(concept.style()))
+                .append("\"}\n");
+        prompt.append("All movements of the work: ");
+        for (int i = 0; i < movements.size(); i++) {
+            prompt.append(i == 0 ? "" : "; ").append(i + 1).append(". ").append(escape(movements.get(i)));
+        }
+        prompt.append("\nLook up this movement as the original has it and invent nothing: ")
+                .append(com.aresstack.audio.studio.application.OriginalWork.GUIDANCE).append('\n');
+        prompt.append("Return one JSON object with: title (the real title of the movement), mood (a few words), "
+                + "tempoBpm (the original tempo, 40-200), key (the original key, like \"E major\" or \"C# minor\"), "
+                + "meter (the original meter, like \"3/4\" or \"12/8\"), instrumentation (the original players), "
+                + "form (the original sections and themes in order), targetSeconds (the length of a usual "
+                + "performance of this movement).");
+        return prompt.toString();
     }
 
     /**
