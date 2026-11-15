@@ -254,7 +254,61 @@ public record ContinuationPerformance(List<TimeMap.Tempo> tempos, List<Dynamics.
                 allPins.add(pin);
             }
         }
+        if (!goesOn) {
+            // A piece that is lengthened goes on without a jump; inserted bars may set off on purpose.
+            smoothJoin(room, dynamics, from, to, allMarks, allPins, said);
+        }
         return new Dynamics(allMarks, allPins, dynamics.scale(), dynamics.articulations());
+    }
+
+    /**
+     * A level the new bars begin with that differs from the level the piece has at the join is
+     * reached by a hairpin over the first bar instead of a sudden jump: the old bars end at their
+     * level, and the new ones grow or fade into theirs. Only a mark in the first new bar, for
+     * which no other mark or hairpin of the new bars already shapes that bar.
+     */
+    private void smoothJoin(Composition room, Dynamics dynamics, long from, long to, List<Dynamics.Mark> allMarks,
+                            List<Dynamics.Hairpin> allPins, List<String> said) {
+        long bar = room.timeMap().meterAt(from).barTicks();
+        long firstBarEnd = Math.min(to, from + bar);
+        for (Dynamics.Mark mark : marks) {
+            if (mark.tick() >= firstBarEnd) {
+                continue;
+            }
+            List<String> parts = mark.partId() == null ? partIds(room) : List.of(mark.partId());
+            Dynamics.Level before = null;
+            boolean same = true;
+            for (String part : parts) {
+                Dynamics.Level level = levelOf(dynamics, dynamics.levelVelocity(part, from));
+                same &= level != null && (before == null || before == level);
+                before = level;
+            }
+            if (!same || before == null || before == mark.level()) {
+                continue; // no clear level to come from, or no change at all
+            }
+            boolean shaped = marks.stream().anyMatch(other -> other != mark && other.tick() < firstBarEnd
+                    && overlapsPart(other.partId(), mark.partId()));
+            if (shaped) {
+                continue;
+            }
+            long end = mark.tick() > from ? mark.tick() : firstBarEnd;
+            Dynamics.Hairpin glide = new Dynamics.Hairpin(from, end, mark.level(), mark.partId());
+            if (allPins.stream().anyMatch(other -> overlaps(glide, other))) {
+                continue; // a hairpin of the new bars already leads there
+            }
+            allPins.add(glide);
+            if (mark.tick() < end) {
+                allMarks.remove(mark);
+                allMarks.add(new Dynamics.Mark(end, mark.level(), mark.partId()));
+            }
+            said.add("Lautstärke an der Naht geglättet: " + before.symbol() + " → " + mark.level().symbol()
+                    + " über den ersten neuen Takt statt eines Sprungs"
+                    + (mark.partId() == null ? "" : " (" + mark.partId() + ")") + ".");
+        }
+    }
+
+    private static boolean overlapsPart(String a, String b) {
+        return a == null || b == null || a.equals(b);
     }
 
     /**
