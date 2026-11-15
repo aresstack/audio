@@ -178,21 +178,84 @@ public final class AudioStudioFrame extends JFrame {
      * The same assignment on the album page, with the model that plans the album in front: an
      * album needs that one beside those that plan and compose its pieces.
      */
-    private final ModelChoicePanel albumModelChoices = new ModelChoicePanel(
-            java.util.List.of(com.aresstack.audio.studio.album.AlbumRoles.ALBUM,
-                    com.aresstack.audio.studio.ai.ModelRoles.PLANNING,
-                    com.aresstack.audio.studio.ai.ModelRoles.COMPOSITION),
+    private final ModelChoicePanel albumModelChoices = new ModelChoicePanel(ALBUM_MODEL_ROLES,
             () -> modelsChosen(true), () -> loadModelNames(false));
 
-    /** A model was chosen on one of the two pages: the other shows the same, and it is kept. */
+    /**
+     * A model was chosen. On the album page it belongs to the album shown alone, kept in its folder;
+     * on the settings page it is the standard, and the album page shows it where the album has none.
+     */
     private void modelsChosen(boolean onAlbumPage) {
         if (onAlbumPage) {
-            modelChoices.setAssignment(albumModelChoices.assignment());
+            keepAlbumModels(albumShown, albumModelChoices.assignment());
         } else {
-            albumModelChoices.setAssignment(modelChoices.assignment());
+            saveSettings(false);
+            albumModelChoices.setAssignment(albumAssignment(albumShown));
         }
-        saveSettings(false);
     }
+
+    /** The album the album page shows, whose models it shows. */
+    private String albumShown;
+
+    /** The file in the folder of an album with the models chosen for it. */
+    private Path albumModelsFile(String albumId) {
+        return albumMembers.albums().folder(albumId).resolve("models.properties");
+    }
+
+    /** The models of an album: the standard of the settings, with what was chosen for the album over it. */
+    private com.aresstack.audio.studio.ai.ModelAssignment albumAssignment(String albumId) {
+        com.aresstack.audio.studio.ai.ModelAssignment assignment = currentAssignment();
+        if (albumId == null) {
+            return assignment;
+        }
+        Path file = albumModelsFile(albumId);
+        if (!Files.isRegularFile(file)) {
+            return assignment;
+        }
+        Properties own = new Properties();
+        try (java.io.Reader reader = Files.newBufferedReader(file, java.nio.charset.StandardCharsets.UTF_8)) {
+            own.load(reader);
+        } catch (IOException | RuntimeException unreadable) {
+            append("Die Modelle des Albums ließen sich nicht lesen: " + unreadable.getMessage());
+            return assignment;
+        }
+        for (String key : own.stringPropertyNames()) {
+            com.aresstack.audio.studio.ai.ModelRole role = com.aresstack.audio.studio.ai.ModelRoles.byKey(key);
+            String chosen = own.getProperty(key, "").trim();
+            if (role != null && !chosen.isEmpty()) {
+                assignment = assignment.with(role, chosen);
+            }
+        }
+        return assignment;
+    }
+
+    /** Keeps the models shown on the album page with the album, for its plans and productions. */
+    private void keepAlbumModels(String albumId, com.aresstack.audio.studio.ai.ModelAssignment shown) {
+        if (albumId == null) {
+            return;
+        }
+        // What differs from the standard of the settings is the album's own; the rest follows the standard.
+        com.aresstack.audio.studio.ai.ModelAssignment standard = currentAssignment();
+        Properties own = new Properties();
+        for (com.aresstack.audio.studio.ai.ModelRole role : com.aresstack.audio.studio.ai.ModelRoles.all()) {
+            String model = shown.modelFor(role);
+            if (!model.equals(standard.modelFor(role))) {
+                own.setProperty(role.key(), model);
+            }
+        }
+        try (java.io.Writer writer = Files.newBufferedWriter(albumModelsFile(albumId),
+                java.nio.charset.StandardCharsets.UTF_8)) {
+            own.store(writer, "Models of this album");
+        } catch (IOException failed) {
+            append("Die Modelle des Albums ließen sich nicht speichern: " + failed.getMessage());
+        }
+    }
+
+    /** The roles the album page shows models for. */
+    private static final java.util.List<com.aresstack.audio.studio.ai.ModelRole> ALBUM_MODEL_ROLES =
+            java.util.List.of(com.aresstack.audio.studio.album.AlbumRoles.ALBUM,
+                    com.aresstack.audio.studio.ai.ModelRoles.PLANNING,
+                    com.aresstack.audio.studio.ai.ModelRoles.COMPOSITION);
     private String preferredKeePassEntry = "";
     // The desk: display, transport, waveform, master meters, and the pages behind the keys under the display.
     private final StageDeck player = new StageDeck();
@@ -1606,6 +1669,12 @@ public final class AudioStudioFrame extends JFrame {
     private JPanel albumsPage() {
         AlbumsPanel albums = new AlbumsPanel(new AlbumsPanel.Host() {
             @Override
+            public void albumShown(String id) {
+                albumShown = id;
+                albumModelChoices.setAssignment(albumAssignment(id));
+            }
+
+            @Override
             public void albumChosen(String id) {
                 currentAlbum = id;
                 refreshSongs();
@@ -1621,7 +1690,7 @@ public final class AudioStudioFrame extends JFrame {
 
             @Override
             public com.aresstack.audio.studio.ai.ModelLineup models() {
-                return startModels(); // the models of the settings, one per role
+                return startModels(albumAssignment(albumShown)); // the models of the album shown
             }
 
             @Override
@@ -2491,11 +2560,16 @@ public final class AudioStudioFrame extends JFrame {
      * answers kept before origins were written down count as the base model's.
      */
     private com.aresstack.audio.studio.ai.ModelLineup startModels() {
+        return startModels(currentAssignment());
+    }
+
+    /** The models of this assignment, each with the connection of the settings. */
+    private com.aresstack.audio.studio.ai.ModelLineup startModels(
+            final com.aresstack.audio.studio.ai.ModelAssignment fixed) {
         final String url = endpoint.getText().trim();
         if (url.isEmpty()) {
             throw new IllegalArgumentException("Trage unter 3 · Einstellungen die KIPITZ-URL ein.");
         }
-        final com.aresstack.audio.studio.ai.ModelAssignment fixed = currentAssignment();
         char[] secret = apiKey.getPassword();
         final String key = new String(secret);
         Arrays.fill(secret, (char) 0);
@@ -4300,7 +4374,7 @@ public final class AudioStudioFrame extends JFrame {
             showAccess();
             model.setText(saved.getProperty("model", model.getText()));
             modelChoices.setAssignment(com.aresstack.audio.studio.settings.ModelSettings.read(saved));
-            albumModelChoices.setAssignment(modelChoices.assignment());
+            albumModelChoices.setAssignment(albumAssignment(albumShown));
             tokenLimit.setValue(AiDefaults.maxTokens(saved));
             sectionBars.setValue(AiDefaults.sectionBars(saved));
             detailedLog.setSelected(Boolean.parseBoolean(saved.getProperty("detailedLog", "false")));

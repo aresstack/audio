@@ -145,6 +145,10 @@ final class AlbumsPanel extends JPanel {
         }
 
         /** The user chose this album in the list of the page; the window's choice of the album follows. */
+        /** The page shows this album now ({@code null}: none): its own models are shown beside it. */
+        default void albumShown(String id) {
+        }
+
         default void albumChosen(String id) {
         }
 
@@ -532,6 +536,7 @@ final class AlbumsPanel extends JPanel {
         readTemplates();
         tracks.fireTableDataChanged();
         say(chosen == null ? "Noch kein Album. „Neues Album“ legt eines an." : summary());
+        host.albumShown(chosen == null ? null : chosen.id());
         keys();
         // Showing an album asks the AI nothing: proposals come when the user asks for them (opening
         // a list, typing) or for an album just made, not when a title is produced or the page opened.
@@ -594,7 +599,8 @@ final class AlbumsPanel extends JPanel {
         }
         plan.setEnabled(free);
         if (beside != null) {
-            beside.setEnabled(!other && !busy); // no model is chosen while the models are at work
+            // Each album has models of its own: those of an album being produced stay as they are.
+            beside.setEnabled(there && !running && !busy);
         }
         add.setEnabled(free);
         remove.setEnabled(free && selected != null);
