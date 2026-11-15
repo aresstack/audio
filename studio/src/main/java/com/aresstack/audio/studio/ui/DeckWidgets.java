@@ -208,16 +208,21 @@ final class DeckWidgets {
     }
 
     /**
-     * A key that chooses a page of the desk, as the keys under the display of a player: a
-     * block with slightly rounded corners that stands out of the panel, and a light along
-     * its upper edge that is lit while its page is shown. Pressed, it sits lower.
+     * A small round key in the upper corner of the desk for a page that is needed now and then
+     * (the settings behind a gear, the sound banks behind a stack of discs). Not a page key: the
+     * keys under the display belong to the work on the piece. Each has its own colour while its
+     * page is shown.
      */
-    /**
-     * The small round key in the corner of the desk that opens the settings: a gear, not a page
-     * key, because the keys under the display belong to the work on the piece.
-     */
-    static final class GearKey extends JToggleButton {
-        GearKey(String tip) {
+    static final class CornerKey extends JToggleButton {
+        /** What the key shows. */
+        enum Sign { GEAR, BANK }
+
+        private final Sign sign;
+        private final Color lit;
+
+        CornerKey(Sign sign, String tip, Color lit) {
+            this.sign = sign;
+            this.lit = lit;
             setToolTipText(tip);
             getAccessibleContext().setAccessibleName(tip);
             setContentAreaFilled(false);
@@ -238,31 +243,52 @@ final class DeckWidgets {
             float x = (getWidth() - size) / 2f;
             float y = (getHeight() - size) / 2f;
             java.awt.geom.Ellipse2D body = new java.awt.geom.Ellipse2D.Float(x, y, size, size);
-            Color light = new Color(chosen ? 0x40323C : getModel().isRollover() ? 0x4A4E5C : 0x3F434F);
-            Color dark = new Color(chosen ? 0x2A2029 : 0x23252D);
+            Color light = new Color(getModel().isRollover() ? 0x4A4E5C : 0x3F434F);
+            Color dark = new Color(0x23252D);
             g.setPaint(new GradientPaint(0, y, light, 0, y + size, dark));
             g.fill(body);
-            g.setColor(chosen ? AudioStudioTheme.ACCENT : new Color(0x15161B));
+            g.setColor(chosen ? lit : new Color(0x15161B));
             g.draw(body);
-            // The gear: eight teeth around a ring.
             float cx = getWidth() / 2f;
             float cy = getHeight() / 2f;
-            float ring = size * 0.24f;
-            g.setColor(chosen ? AudioStudioTheme.ACCENT_SOFT : getModel().isRollover() ? AudioStudioTheme.TEXT
-                    : AudioStudioTheme.TEXT_DIM);
-            g.setStroke(new java.awt.BasicStroke(size * 0.12f, java.awt.BasicStroke.CAP_BUTT,
-                    java.awt.BasicStroke.JOIN_MITER));
-            for (int tooth = 0; tooth < 8; tooth++) {
-                double angle = tooth * Math.PI / 4;
-                g.draw(new java.awt.geom.Line2D.Double(cx + Math.cos(angle) * ring, cy + Math.sin(angle) * ring,
-                        cx + Math.cos(angle) * ring * 1.55, cy + Math.sin(angle) * ring * 1.55));
+            g.setColor(chosen ? lit : getModel().isRollover() ? AudioStudioTheme.TEXT : AudioStudioTheme.TEXT_DIM);
+            if (sign == Sign.GEAR) {
+                // Eight teeth around a ring.
+                float ring = size * 0.24f;
+                g.setStroke(new java.awt.BasicStroke(size * 0.12f, java.awt.BasicStroke.CAP_BUTT,
+                        java.awt.BasicStroke.JOIN_MITER));
+                for (int tooth = 0; tooth < 8; tooth++) {
+                    double angle = tooth * Math.PI / 4;
+                    g.draw(new java.awt.geom.Line2D.Double(cx + Math.cos(angle) * ring, cy + Math.sin(angle) * ring,
+                            cx + Math.cos(angle) * ring * 1.55, cy + Math.sin(angle) * ring * 1.55));
+                }
+                g.setStroke(new java.awt.BasicStroke(size * 0.11f));
+                g.draw(new java.awt.geom.Ellipse2D.Float(cx - ring, cy - ring, 2 * ring, 2 * ring));
+            } else {
+                // A bank: three discs one on the other, seen from the side and a little from above.
+                float half = size * 0.27f;
+                float flat = size * 0.09f;
+                float step = size * 0.17f;
+                g.setStroke(new java.awt.BasicStroke(size * 0.075f));
+                float top = cy - step - flat;
+                g.draw(new java.awt.geom.Ellipse2D.Float(cx - half, top, 2 * half, 2 * flat));
+                for (int disc = 1; disc <= 3; disc++) {
+                    g.draw(new java.awt.geom.Arc2D.Float(cx - half, top + disc * step * 0.8f, 2 * half, 2 * flat,
+                            180, 180, java.awt.geom.Arc2D.OPEN));
+                }
+                float bottom = top + 3 * step * 0.8f + flat;
+                g.draw(new java.awt.geom.Line2D.Float(cx - half, top + flat, cx - half, bottom));
+                g.draw(new java.awt.geom.Line2D.Float(cx + half, top + flat, cx + half, bottom));
             }
-            g.setStroke(new java.awt.BasicStroke(size * 0.11f));
-            g.draw(new java.awt.geom.Ellipse2D.Float(cx - ring, cy - ring, 2 * ring, 2 * ring));
             g.dispose();
         }
     }
 
+    /**
+     * A key that chooses a page of the desk, as the keys under the display of a player: a
+     * block with slightly rounded corners that stands out of the panel, and a light along
+     * its upper edge that is lit while its page is shown. Pressed, it sits lower.
+     */
     static final class PageKey extends JToggleButton {
         PageKey(String text) {
             super(text);
