@@ -390,7 +390,14 @@ final class ArrangementView extends JComponent {
         int lastBar = barAt(Math.max(x1, x2), bars);
         int firstLane = laneNear(Math.min(y1, y2));
         int lastLane = laneNear(Math.max(y1, y2));
-        mark(new Range(order.subList(firstLane, lastLane + 1), firstBar, lastBar));
+        // A passage is notes to write anew: an audio lane between the marked rows is not part of it.
+        List<String> tracks = new ArrayList<String>();
+        for (String id : order.subList(firstLane, lastLane + 1)) {
+            if (!isAudioLane(id)) {
+                tracks.add(id);
+            }
+        }
+        mark(tracks.isEmpty() ? null : new Range(tracks, firstBar, lastBar));
     }
 
     /** Draws the mark on to where the pointer is: from the ruler across every track, else across the lanes passed. */

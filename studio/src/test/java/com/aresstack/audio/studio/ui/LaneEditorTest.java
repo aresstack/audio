@@ -250,6 +250,9 @@ public final class LaneEditorTest {
         List<String> noteLanes = new ArrayList<String>(order);
         noteLanes.remove(lane);
         assertEquals(noteLanes, view.noteLanes());
+        view.mark(0, ArrangementView.RULER, 200, view.laneTop(order.size() - 1) + 5);
+        assertEquals("a marked passage leaves the audio lane out", noteLanes, view.marked().trackIds());
+        view.mark(null);
         int band = view.laneTop(index) + ArrangementView.CLIP_BAND - 1;
         int x = (int) view.xOf(box.start);
         drag(x, band, (int) view.xOf(box.start + 480), band);
