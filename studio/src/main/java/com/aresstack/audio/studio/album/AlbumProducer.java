@@ -160,7 +160,12 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
                 state = AlbumProductionState.load(folder);
                 for (AlbumTrack track : album.tracks()) {
                     if (only != null && !only.equals(track.id())) {
-                        continue; // another title of the album: left as it is
+                        // Another title of the album: left as it is, but a "running" left from a run
+                        // that ended without it is not true now (no run of this album goes on): it waits.
+                        if (state.of(track.id()).status() == Status.RUNNING) {
+                            state = state.with(track.id(), Status.QUEUED);
+                        }
+                        continue;
                     }
                     AlbumProductionState.Entry entry = state.of(track.id());
                     boolean there = pieceThere(track);

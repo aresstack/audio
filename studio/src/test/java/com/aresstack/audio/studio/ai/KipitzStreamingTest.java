@@ -200,9 +200,9 @@ public final class KipitzStreamingTest {
             client(server).generate("Return JSON", "Compose", 2048, folder.getRoot().toPath().resolve("melody.json"));
             Assert.fail("a cut answer is no answer");
         } catch (IOException cutOff) {
-            Assert.assertEquals("asked three times: 2048, 4096, 8192", 3, asked.size());
+            Assert.assertEquals("asked four times: 2048, 4096, 8192, 16384", 4, asked.size());
             Assert.assertTrue(cutOff.getMessage(), cutOff.getMessage().contains("finish_reason=length")
-                    && cutOff.getMessage().contains("8192"));
+                    && cutOff.getMessage().contains("16384"));
         } finally {
             server.stop(0);
         }
