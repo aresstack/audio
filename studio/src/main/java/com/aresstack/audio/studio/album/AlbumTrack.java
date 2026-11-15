@@ -17,9 +17,14 @@ import com.aresstack.audio.studio.application.CompositionSpec;
  * @param form            how it is built, e.g. "intro, theme, variation, middle part, reprise, outro"
  * @param targetSeconds   about how long it is meant to be
  * @param piece           the name of the folder of the piece in the library, or empty before it exists
+ * @param given           whether the user gave this title (and its mood, if any): planning keeps
+ *                        both and only fills in the rest
+ * @param theme           how the main theme of the album appears in this piece, in words, or empty
+ *                        if it does not appear
  */
 public record AlbumTrack(String id, String title, String mood, int bpm, String key, String meter,
-                         String instrumentation, String form, int targetSeconds, String piece) {
+                         String instrumentation, String form, int targetSeconds, String piece, boolean given,
+                         String theme) {
     /** A piece may be this share longer or shorter than asked before the list says so. */
     public static final double LENGTH_TOLERANCE = 0.10;
 
@@ -32,6 +37,7 @@ public record AlbumTrack(String id, String title, String mood, int bpm, String k
         instrumentation = instrumentation == null ? "" : instrumentation.trim();
         form = form == null ? "" : form.trim();
         piece = piece == null ? "" : piece.trim();
+        theme = theme == null ? "" : theme.trim();
         if (!piece.isEmpty() && !isFolderName(piece)) {
             throw new IllegalArgumentException("Kein Ordnername eines Stücks in der Bibliothek: " + piece);
         }
@@ -61,17 +67,75 @@ public record AlbumTrack(String id, String title, String mood, int bpm, String k
         return true;
     }
 
+    /** A title planned by the AI, without a part of the main theme. */
+    public AlbumTrack(String id, String title, String mood, int bpm, String key, String meter,
+                      String instrumentation, String form, int targetSeconds, String piece) {
+        this(id, title, mood, bpm, key, meter, instrumentation, form, targetSeconds, piece, false, "");
+    }
+
+    /** A title the user gives: only its name and, if said, its mood; planning fills in the rest. */
+    public static AlbumTrack given(String id, String title, String mood) {
+        return new AlbumTrack(id, title, mood, 100, "", "", "", "", 180, "", true, "");
+    }
+
     /** Whether the piece of this title exists (it may still be unfinished). */
     public boolean hasPiece() {
         return !piece.isEmpty();
     }
 
     public AlbumTrack withPiece(String folderName) {
-        return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, form, targetSeconds, folderName);
+        return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, form, targetSeconds, folderName,
+                given, theme);
     }
 
     public AlbumTrack withTitle(String changed) {
-        return new AlbumTrack(id, changed, mood, bpm, key, meter, instrumentation, form, targetSeconds, piece);
+        return new AlbumTrack(id, changed, mood, bpm, key, meter, instrumentation, form, targetSeconds, piece,
+                given, theme);
+    }
+
+    public AlbumTrack withMood(String changed) {
+        return new AlbumTrack(id, title, changed, bpm, key, meter, instrumentation, form, targetSeconds, piece,
+                given, theme);
+    }
+
+    public AlbumTrack withBpm(int changed) {
+        return new AlbumTrack(id, title, mood, changed, key, meter, instrumentation, form, targetSeconds, piece,
+                given, theme);
+    }
+
+    public AlbumTrack withKey(String changed) {
+        return new AlbumTrack(id, title, mood, bpm, changed, meter, instrumentation, form, targetSeconds, piece,
+                given, theme);
+    }
+
+    public AlbumTrack withMeter(String changed) {
+        return new AlbumTrack(id, title, mood, bpm, key, changed, instrumentation, form, targetSeconds, piece,
+                given, theme);
+    }
+
+    public AlbumTrack withInstrumentation(String changed) {
+        return new AlbumTrack(id, title, mood, bpm, key, meter, changed, form, targetSeconds, piece, given, theme);
+    }
+
+    public AlbumTrack withForm(String changed) {
+        return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, changed, targetSeconds, piece,
+                given, theme);
+    }
+
+    public AlbumTrack withSeconds(int changed) {
+        return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, form, changed, piece, given, theme);
+    }
+
+    /** The title as given by the user, or no longer: planning keeps a given title and its mood. */
+    public AlbumTrack withGiven(boolean changed) {
+        return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, form, targetSeconds, piece,
+                changed, theme);
+    }
+
+    /** How the main theme of the album appears in this piece; empty if it does not. */
+    public AlbumTrack withTheme(String changed) {
+        return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, form, targetSeconds, piece,
+                given, changed);
     }
 
     /**

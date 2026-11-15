@@ -1552,7 +1552,8 @@ final class AlbumsPanel extends JPanel {
                 default:
                     String notes = templateNames.containsKey(track.id())
                             ? "  · Noten: " + templateNames.get(track.id()) : "";
-                    return stateOf(track, entry) + notes;
+                    String theme = track.theme().isEmpty() ? "" : "  · Hauptthema: " + track.theme();
+                    return stateOf(track, entry) + notes + theme;
             }
         }
 
@@ -1573,7 +1574,7 @@ final class AlbumsPanel extends JPanel {
                     // "wartet" only while a production of this album goes on; else it is open.
                     return shownRunning() ? "wartet" : "offen";
                 default:
-                    return track.hasPiece() ? "eigenes Stück" : "geplant";
+                    return track.hasPiece() ? "eigenes Stück" : track.given() ? "vorgegeben" : "geplant";
             }
         }
 
@@ -1585,31 +1586,26 @@ final class AlbumsPanel extends JPanel {
                 AlbumTrack changed;
                 switch (column) {
                     case 1:
-                        changed = t.withTitle(text);
+                        // A title typed in is given: planning keeps it and only fills in the rest.
+                        changed = t.withTitle(text).withGiven(t.given() || !t.hasPiece());
                         break;
                     case 2:
-                        changed = new AlbumTrack(t.id(), t.title(), text, t.bpm(), t.key(), t.meter(),
-                                t.instrumentation(), t.form(), t.targetSeconds(), t.piece());
+                        changed = t.withMood(text).withGiven(t.given() || !t.hasPiece());
                         break;
                     case 3:
-                        changed = new AlbumTrack(t.id(), t.title(), t.mood(), Integer.parseInt(text), t.key(),
-                                t.meter(), t.instrumentation(), t.form(), t.targetSeconds(), t.piece());
+                        changed = t.withBpm(Integer.parseInt(text));
                         break;
                     case 4:
-                        changed = new AlbumTrack(t.id(), t.title(), t.mood(), t.bpm(), text, t.meter(),
-                                t.instrumentation(), t.form(), t.targetSeconds(), t.piece());
+                        changed = t.withKey(text);
                         break;
                     case 5:
-                        changed = new AlbumTrack(t.id(), t.title(), t.mood(), t.bpm(), t.key(), text,
-                                t.instrumentation(), t.form(), t.targetSeconds(), t.piece());
+                        changed = t.withMeter(text);
                         break;
                     case 6:
-                        changed = new AlbumTrack(t.id(), t.title(), t.mood(), t.bpm(), t.key(), t.meter(), text,
-                                t.form(), t.targetSeconds(), t.piece());
+                        changed = t.withInstrumentation(text);
                         break;
                     case 7:
-                        changed = new AlbumTrack(t.id(), t.title(), t.mood(), t.bpm(), t.key(), t.meter(),
-                                t.instrumentation(), t.form(), seconds(text), t.piece());
+                        changed = t.withSeconds(seconds(text));
                         break;
                     default:
                         return;

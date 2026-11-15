@@ -12,9 +12,11 @@ import java.util.List;
  * @param title   what the album is called
  * @param concept what the user said about the whole album
  * @param tracks  its titles in order
+ * @param theme   its main theme, which comes back in several pieces; {@link AlbumTheme#NONE} if it has none
  */
-public record Album(String id, String title, AlbumConcept concept, List<AlbumTrack> tracks) {
+public record Album(String id, String title, AlbumConcept concept, List<AlbumTrack> tracks, AlbumTheme theme) {
     public Album {
+        theme = theme == null ? AlbumTheme.NONE : theme;
         if (!isId(id)) {
             throw new IllegalArgumentException("Keine Kennung eines Albums: " + id);
         }
@@ -41,16 +43,25 @@ public record Album(String id, String title, AlbumConcept concept, List<AlbumTra
         return id != null && id.length() <= 80 && id.matches("[a-z0-9][a-z0-9-]*");
     }
 
+    /** An album without a main theme. */
+    public Album(String id, String title, AlbumConcept concept, List<AlbumTrack> tracks) {
+        this(id, title, concept, tracks, AlbumTheme.NONE);
+    }
+
     public Album withTracks(List<AlbumTrack> changed) {
-        return new Album(id, title, concept, changed);
+        return new Album(id, title, concept, changed, theme);
     }
 
     public Album withTitle(String changed) {
-        return new Album(id, changed, concept, tracks);
+        return new Album(id, changed, concept, tracks, theme);
     }
 
     public Album withConcept(AlbumConcept changed) {
-        return new Album(id, title, changed, tracks);
+        return new Album(id, title, changed, tracks, theme);
+    }
+
+    public Album withTheme(AlbumTheme changed) {
+        return new Album(id, title, concept, tracks, changed);
     }
 
     /** The title with this id, or {@code null}. */
@@ -112,6 +123,9 @@ public record Album(String id, String title, AlbumConcept concept, List<AlbumTra
         } else {
             text.append(". Fill its whole length with this form; develop and vary the ideas instead of repeating a short one.");
         }
+        if (!theme.isEmpty() && !own.theme().isEmpty()) {
+            text.append("\n").append(themeBrief(own));
+        }
         if (tracks.size() > 1) {
             text.append("\nThe other tracks of the album, so that this one fits in and differs from them:");
             for (AlbumTrack other : tracks) {
@@ -122,6 +136,29 @@ public record Album(String id, String title, AlbumConcept concept, List<AlbumTra
                 }
             }
         }
+        return text.toString();
+    }
+
+    /**
+     * What a piece is told about the main theme of the album: the theme as notes and how it
+     * appears in this piece. Only for a piece the theme appears in.
+     */
+    String themeBrief(AlbumTrack own) {
+        StringBuilder text = new StringBuilder("The main theme of the album");
+        if (!theme.name().isEmpty()) {
+            text.append(", \"").append(theme.name()).append('"');
+        }
+        if (!theme.description().isEmpty()) {
+            text.append(": ").append(theme.description());
+        }
+        text.append(". Its notes");
+        if (!theme.key().isEmpty()) {
+            text.append(" (in ").append(theme.key()).append(')');
+        }
+        text.append(", beats in quarters from its start, MIDI pitches: ").append(theme.notesText()).append('.')
+                .append("\nIn this track the theme appears so: ").append(own.theme())
+                .append(". Quote it recognisably, with its rhythm and intervals, transposed to the key of this track "
+                        + "and varied as said, at least once in the melody; develop it further in the piece.");
         return text.toString();
     }
 

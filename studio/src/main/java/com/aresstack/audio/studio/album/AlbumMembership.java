@@ -216,7 +216,8 @@ public final class AlbumMembership {
             }
             AlbumTrack now = trackOf(track.id(), piece, track.targetSeconds());
             now = new AlbumTrack(now.id(), now.title(), now.mood(), now.bpm(), now.key(), now.meter(),
-                    track.instrumentation(), track.form(), now.targetSeconds(), now.piece());
+                    track.instrumentation(), track.form(), now.targetSeconds(), now.piece(), track.given(),
+                    track.theme());
             if (!now.equals(track)) {
                 albums.save(album.with(now));
                 return true;
@@ -256,7 +257,8 @@ public final class AlbumMembership {
         left.remove(at);
         List<AlbumTrack> into = new ArrayList<AlbumTrack>(to.tracks());
         AlbumTrack arriving = new AlbumTrack(to.freshTrackId(), moved.title(), moved.mood(), moved.bpm(), moved.key(),
-                moved.meter(), moved.instrumentation(), moved.form(), moved.targetSeconds(), moved.piece());
+                moved.meter(), moved.instrumentation(), moved.form(), moved.targetSeconds(), moved.piece(),
+                moved.given(), moved.theme());
         into.removeIf(track -> moved.hasPiece() && moved.piece().equals(track.piece()));
         into.add(index < 0 || index > into.size() ? into.size() : index, arriving);
         // First the album that takes it, so that the piece is never in no album.
