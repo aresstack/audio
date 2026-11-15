@@ -390,7 +390,8 @@ public final class AudioStudioFrame extends JFrame {
         // The album is the frame of its pieces, so it comes first; the studio still opens on the piece.
         String[][] entries = {{"albums", "Alben"}, {"song", "Komposition"}, {"deck", "Arrangement"},
                 {"stage", "Bühne"},
-                {"library", "Soundbänke"}, {"settings", "Einstellungen"}, {"console", "Protokoll"}};
+                // The log says what the studio is doing, so it stands before the settings.
+                {"library", "Soundbänke"}, {"console", "Protokoll"}, {"settings", "Einstellungen"}};
         for (final String[] entry : entries) {
             DeckWidgets.PageKey key = new DeckWidgets.PageKey(entry[1]);
             key.addActionListener(event -> pages.show(pageHolder, entry[0]));
