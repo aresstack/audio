@@ -8,12 +8,14 @@ import com.aresstack.audio.composition.Track;
 import java.util.List;
 
 /**
- * A continuation as the AI wrote it, repaired, but not yet part of the piece: the new sections of
+ * A continuation or an insertion as the AI wrote it, repaired, but not yet part of the piece: the new sections of
  * the form, the new parts with their (empty) tracks, the new clips, and with a revised transition
  * the notes taken out of and put into the last bars of the original. Turning it into a patch is
  * the application's business.
  *
- * @param sections    the sections that follow the existing ones, in order
+ * @param sections    the new sections, in order: for a continuation those that follow the existing
+ *                    ones, for an insertion those that fill the room
+ * @param form        the whole form of the piece after the change, without gap
  * @param newParts    the new instruments of the plan that play somewhere
  * @param newTracks   the new tracks: one per new part, and one for an existing part without a track
  * @param clips       the new clips, each with the track it goes on
@@ -22,7 +24,7 @@ import java.util.List;
  *                    part's key first
  */
 public record ComposedContinuation(ContinuationTask task, ContinuationPlan plan, List<Section> sections,
-                                   List<Part> newParts, List<Track> newTracks, List<PlacedClip> clips,
+                                   List<Section> form, List<Part> newParts, List<Track> newTracks, List<PlacedClip> clips,
                                    List<TailChange> tail, List<String> corrections) {
     /** A new clip and the track it goes on. */
     public record PlacedClip(String trackId, MidiClip clip) {
@@ -50,6 +52,7 @@ public record ComposedContinuation(ContinuationTask task, ContinuationPlan plan,
 
     public ComposedContinuation {
         sections = List.copyOf(sections);
+        form = List.copyOf(form);
         newParts = List.copyOf(newParts);
         newTracks = List.copyOf(newTracks);
         clips = List.copyOf(clips);
@@ -68,7 +71,7 @@ public record ComposedContinuation(ContinuationTask task, ContinuationPlan plan,
 
     /** A neutral reference to the run, for the revision: what, which attempt, which context. */
     public String runId() {
-        return "extend/" + task.attempt() + "/" + task.context().shortDigest();
+        return (task.inserts() ? "insert/" : "extend/") + task.attempt() + "/" + task.context().shortDigest();
     }
 
     /** The notes of the new bars and of the revised transition. */

@@ -32,7 +32,8 @@ public final class ChatSectionGenerator implements SectionGenerator {
         ContinuationRequest request = task.request();
         boolean transition = SectionGenerator.TRANSITION.equals(frame.sectionId());
         StringBuilder prompt = new StringBuilder(task.context().text());
-        prompt.append("\n# PLAN OF THE CONTINUATION (bars ").append(task.firstNewBar() + 1).append('-')
+        prompt.append(task.inserts() ? "\n# PLAN OF THE INSERTED BARS (bars " : "\n# PLAN OF THE CONTINUATION (bars ")
+                .append(task.firstNewBar() + 1).append('-')
                 .append(task.firstNewBar() + request.bars()).append(")\n");
         for (ContinuationPlan.PlannedSection section : plan.sections()) {
             int first = task.firstNewBar() + plan.firstBarOf(section) + 1;
@@ -67,8 +68,9 @@ public final class ChatSectionGenerator implements SectionGenerator {
                             + "other part and every earlier bar stays exactly as given. A note in the last bar may ring up "
                     + "to one bar into the continuation.\n");
         } else {
-            prompt.append("Write the notes of ONE part for one section of the continuation. The other parts are "
-                    + "written after the same plan; do not write, repeat or change their notes.\n");
+            prompt.append("Write the notes of ONE part for one section of the ")
+                    .append(task.inserts() ? "inserted bars" : "continuation").append(". The other parts are "
+                            + "written after the same plan; do not write, repeat or change their notes.\n");
         }
         prompt.append("Part: ").append(voice.describe()).append('\n');
         if (voice.newPart()) {
@@ -83,6 +85,7 @@ public final class ChatSectionGenerator implements SectionGenerator {
         if (frame.intensity() != null) {
             prompt.append("Intensity: ").append(ContextBuilder.number(frame.intensity())).append(" (0 = very quiet and "
                     + "sparse, 1 = full and dense; let it shape density, register and velocity)\n");
+            prompt.append(Dramaturgy.guidance(frame.intensity(), voice.role())).append('\n');
         }
         if (!frame.harmony().isEmpty()) {
             prompt.append("Chords by bar: ").append(String.join(" | ", frame.harmony())).append('\n');
@@ -90,11 +93,16 @@ public final class ChatSectionGenerator implements SectionGenerator {
         if (frame.instruction() != null && !frame.instruction().isEmpty()) {
             prompt.append(transition ? "Leads into: " : "Idea: ").append(frame.instruction()).append('\n');
         }
-        prompt.append("Kind of continuation: ").append(request.preset().brief()).append('\n');
+        prompt.append(task.inserts() ? "Kind of inserted passage: " : "Kind of continuation: ")
+                .append(request.preset().brief()).append('\n');
         if (!request.instruction().isEmpty()) {
             prompt.append("User instruction: ").append(request.instruction()).append('\n');
         }
-        if (frame.endTick() == task.newEnd()) {
+        if (frame.endTick() == task.newEnd() && task.inserts()) {
+            prompt.append("This is the last inserted section: lead seamlessly into bar ").append(task.barAfter())
+                    .append(", where this part goes on as listed under AFTER THE INSERTED BARS (or rests there if it "
+                            + "is not listed); no notes held over into that bar.\n");
+        } else if (frame.endTick() == task.newEnd()) {
             prompt.append("This is the last section. Ending: ").append(request.ending().brief()).append('\n');
         }
         prompt.append(connection.isEmpty() ? "The part rests before these bars.\n"
