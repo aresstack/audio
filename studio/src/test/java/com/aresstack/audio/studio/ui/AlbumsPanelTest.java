@@ -45,8 +45,8 @@ public final class AlbumsPanelTest {
 
     private final AlbumsPanel.Host host = new AlbumsPanel.Host() {
         @Override
-        public ChatModel model() {
-            return new FakeChatModel((instruction, prompt) -> {
+        public com.aresstack.audio.studio.ai.ModelLineup models() {
+            return com.aresstack.audio.studio.ai.ModelLineup.of(new FakeChatModel((instruction, prompt) -> {
                 asked.add(prompt);
                 return "{\"tracks\":[{\"title\":\"Christmas Overture\",\"mood\":\"festive\",\"tempoBpm\":120,"
                         + "\"key\":\"D major\",\"meter\":\"4/4\",\"instrumentation\":\"orchestra\",\"targetSeconds\":300},"
@@ -54,7 +54,7 @@ public final class AlbumsPanelTest {
                         + "\"meter\":\"3/4\",\"instrumentation\":\"strings\",\"targetSeconds\":300},"
                         + "{\"title\":\"Silent Winter Night\",\"mood\":\"calm\",\"tempoBpm\":60,\"key\":\"F major\","
                         + "\"meter\":\"4/4\",\"instrumentation\":\"piano\",\"targetSeconds\":300}]}";
-            });
+            }));
         }
 
         @Override
