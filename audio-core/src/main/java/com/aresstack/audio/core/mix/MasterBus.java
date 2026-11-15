@@ -166,6 +166,11 @@ public final class MasterBus implements AudioProcessor {
         limiter.process(block);
     }
 
+    /** Forgets the sound the limiter holds, for a jump in the material; the gain stays. Audio thread only. */
+    public void reset() {
+        limiter.reset();
+    }
+
     @Override
     public int latencyFrames() {
         return limiter.latencyFrames();

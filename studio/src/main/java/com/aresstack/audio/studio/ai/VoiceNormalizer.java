@@ -25,9 +25,13 @@ public final class VoiceNormalizer {
     /**
      * A repaired note.
      *
-     * @param tick ticks from the start of the frame
+     * @param tick  ticks from the start of the frame
+     * @param voice the voice the model named for the note, as written, or {@code null}
      */
-    public record ShapedNote(long tick, long length, int pitch, int velocity) {
+    public record ShapedNote(long tick, long length, int pitch, int velocity, String voice) {
+        public ShapedNote(long tick, long length, int pitch, int velocity) {
+            this(tick, length, pitch, velocity, null);
+        }
     }
 
     private final TimeMap time;
@@ -112,7 +116,7 @@ public final class VoiceNormalizer {
                 corrections.add(where + "\t" + index + "\tpitch\t" + pitch + "\t" + pitch + "\tleiterfremd in "
                         + ContextBuilder.key(time.keyAt(tick)) + " (nicht verändert)");
             }
-            shaped.add(new ShapedNote(tick - frame.startTick(), length, pitch, velocity));
+            shaped.add(new ShapedNote(tick - frame.startTick(), length, pitch, velocity, raw.voice()));
         }
         return shaped;
     }

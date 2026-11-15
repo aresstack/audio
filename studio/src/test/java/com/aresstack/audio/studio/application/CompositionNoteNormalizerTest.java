@@ -90,4 +90,28 @@ public final class CompositionNoteNormalizerTest {
         // An unknown symbol is no chord: the scale of the key applies, D stays.
         assertEquals(62, normalizer.normalize(note(12, 1, 62), "harmony", "harmony", 4).pitch());
     }
+
+    /** S1: on a grand staff each hand has its range, whatever the role; a single staff keeps the range of its role. */
+    @Test
+    public void aGrandStaffHasTheRangeOfEachHand() {
+        for (boolean snap : new boolean[]{false, true}) {
+            CompositionNoteNormalizer normalizer = new CompositionNoteNormalizer(m -> { },
+                    D_MINOR.withSnapToHarmony(snap), CHORDS);
+            int[] left = CompositionNoteNormalizer.range("harmony", true, "lh");
+            int[] right = CompositionNoteNormalizer.range("harmony", true, "rh2");
+            int[] both = CompositionNoteNormalizer.range("harmony", true, null);
+            // D2 and A2 in the left hand of a piano stay; on a single harmony staff they move up an octave.
+            assertEquals("snap " + snap, 38, normalizer.normalize(note(0, 4, 38), "piano", "harmony", 1, 0, 24, left).pitch());
+            assertEquals(45, normalizer.normalize(note(0, 4, 45), "piano", "harmony", 2, 0, 24, both).pitch());
+            assertEquals(50, normalizer.normalize(note(0, 4, 38), "strings", "harmony", 3).pitch());
+            // High in the right hand: D6 stays on the piano, a harmony staff brings it down.
+            assertEquals(86, normalizer.normalize(note(0, 4, 86), "piano", "harmony", 4, 0, 24, right).pitch());
+            assertEquals(74, normalizer.normalize(note(0, 4, 86), "strings", "harmony", 5).pitch());
+            // A note the left hand cannot reach comfortably is moved by octaves into its range.
+            assertTrue(normalizer.normalize(note(0, 4, 86), "piano", "harmony", 6, 0, 24, left).pitch() <= left[1]);
+            assertTrue(normalizer.normalize(note(0, 4, 26), "piano", "harmony", 7, 0, 24, right).pitch() >= right[0]);
+        }
+        assertEquals(List.of(48, 76), java.util.Arrays.stream(CompositionNoteNormalizer.range("harmony", false, "lh"))
+                .boxed().toList());
+    }
 }
