@@ -127,7 +127,7 @@ public final class OrchestrationComposer {
         Map<String, Future<Written>> running = new LinkedHashMap<>();
         final EditSketch sketch = EditSketch.of(piece, progress);
         int atOnce = Math.min(threads, Math.max(1, voices.size()));
-        progress.update(voices.size() + " Stimmen, " + atOnce + " davon gleichzeitig (Einstellung „Parallel“: höchstens "
+        progress.detail(voices.size() + " Stimmen, " + atOnce + " davon gleichzeitig (Einstellung „Parallel“: höchstens "
                 + threads + "); jede Stimme schreibt ihre Abschnitte nacheinander.");
         try {
             for (ContinuationVoice voice : voices) {
@@ -169,7 +169,7 @@ public final class OrchestrationComposer {
                 connection = "";
                 continue;
             }
-            progress.update("Angefragt: " + voice.name() + " für " + frame.name() + " ...");
+            progress.update("Orchestriere " + voice.name() + " für " + frame.name() + " ...");
             long asked = System.currentTimeMillis();
             GeneratedNotes generated;
             try (Listening.Scope watching = Listening.to(sketch == null ? null
@@ -180,7 +180,7 @@ public final class OrchestrationComposer {
             if (sketch != null) {
                 sketch.written(voice.key(), voice.program(), voice.role(), frame, generated);
             }
-            progress.update("Orchestriert: " + voice.name() + " für " + frame.name() + " (" + generated.notes().size()
+            progress.detail("Orchestriert: " + voice.name() + " für " + frame.name() + " (" + generated.notes().size()
                     + " Noten, " + (System.currentTimeMillis() - asked + 500) / 1000 + " s)");
             List<ShapedNote> shaped = normalizer.shape(frame, generated);
             List<String> thinned = new ArrayList<>();

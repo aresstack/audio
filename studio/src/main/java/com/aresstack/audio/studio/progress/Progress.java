@@ -7,4 +7,11 @@ package com.aresstack.audio.studio.progress;
 @FunctionalInterface
 public interface Progress {
     void update(String message);
+
+    /**
+     * A line only a detailed protocol shows: how many requests run at once, when an answer came
+     * and how long it took. Left out unless a listener asks for it.
+     */
+    default void detail(String message) {
+    }
 }

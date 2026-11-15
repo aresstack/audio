@@ -105,6 +105,7 @@ public final class AudioStudioFrame extends JFrame {
     /** How many bars a long piece begins with and grows by per step of the continuation. */
     private final JSpinner growBars = new JSpinner(new SpinnerNumberModel(PieceAutopilot.GROW_BARS,
             PieceAutopilot.MIN_GROW_BARS, PieceAutopilot.MAX_GROW_BARS, 1));
+    private final javax.swing.JCheckBox detailedLog = new javax.swing.JCheckBox("Erweitertes Protokoll");
     private final JTextField proxyHost = new JTextField(16);
     private final JTextField proxyPort = new JTextField("", 5);
     private final JComboBox<String> proxyMode = new JComboBox<String>(new String[]{
@@ -1615,6 +1616,10 @@ public final class AudioStudioFrame extends JFrame {
         growBars.addChangeListener(event -> specFields.suggestBars((Integer) growBars.getValue()));
         addRow(ai, row++, "Parallel",
                 line(parallelRequests, note("Anfragen gleichzeitig; höchstens so viele wie Spuren.")));
+        detailedLog.setOpaque(false);
+        detailedLog.setToolTipText("Zeigt im Protokoll zusätzlich, wie viele Stimmen gleichzeitig laufen und wann welche"
+                + " Antwort mit wie vielen Noten nach wie vielen Sekunden kam");
+        addRow(ai, row++, "Protokoll", detailedLog);
         addRow(ai, row, "", note("Der API-Key wird lokal im Klartext gespeichert (studio.properties im Benutzerordner)."));
 
         JPanel network = form();
@@ -3847,6 +3852,7 @@ public final class AudioStudioFrame extends JFrame {
             albumModelChoices.setAssignment(modelChoices.assignment());
             tokenLimit.setValue(AiDefaults.maxTokens(saved));
             sectionBars.setValue(AiDefaults.sectionBars(saved));
+            detailedLog.setSelected(Boolean.parseBoolean(saved.getProperty("detailedLog", "false")));
             growBars.setValue(AiDefaults.growBars(saved));
             specFields.suggestBars((Integer) growBars.getValue());
             proxyHost.setText(saved.getProperty("proxyHost", ""));
@@ -3906,6 +3912,7 @@ public final class AudioStudioFrame extends JFrame {
             com.aresstack.audio.studio.settings.ModelSettings.write(saved, currentAssignment());
             saved.setProperty("maxTokens", tokenLimit.getValue().toString());
             saved.setProperty("sectionBars", sectionBars.getValue().toString());
+            saved.setProperty("detailedLog", Boolean.toString(detailedLog.isSelected()));
             saved.setProperty("pieceBars", growBars.getValue().toString());
             saved.setProperty("proxyHost", proxyHost.getText().trim());
             saved.setProperty("proxyPort", proxyPort.getText().trim());
@@ -4006,6 +4013,13 @@ public final class AudioStudioFrame extends JFrame {
                     @Override
                     public void update(String update) {
                         publish(update);
+                    }
+
+                    @Override
+                    public void detail(String line) {
+                        if (detailedLog.isSelected()) {
+                            publish(line);
+                        }
                     }
 
                     @Override
