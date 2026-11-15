@@ -1,7 +1,7 @@
 package com.aresstack.audio.studio.score;
 
+import com.aresstack.audio.music.arrangement.ArrangementFile;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -154,7 +154,7 @@ public final class Score {
             return null;
         }
         try {
-            return of(Files.readAllLines(arrangement, StandardCharsets.UTF_8));
+            return of(ArrangementFile.read(arrangement));
         } catch (IOException | RuntimeException unreadable) {
             return null;
         }
@@ -162,33 +162,34 @@ public final class Score {
 
     /** The score of the lines of an arrangement: tempo, tracks and notes. */
     public static Score of(List<String> lines) {
-        int tempo = 108;
+        return of(ArrangementFile.parse(lines));
+    }
+
+    /** The score of a read arrangement; a note counts only after the line that names its track. */
+    public static Score of(ArrangementFile arrangement) {
         Map<String, Boolean> drums = new LinkedHashMap<String, Boolean>();
         Map<String, TreeMap<Integer, List<int[]>>> sounding = new LinkedHashMap<String, TreeMap<Integer, List<int[]>>>();
         int end = 0;
-        for (String line : lines) {
-            String[] fields = line.split("\\t");
-            if (fields.length == 2 && "tempo".equals(fields[0])) {
-                tempo = Math.max(20, Math.min(400, Integer.parseInt(fields[1].trim())));
-            } else if (fields.length >= 4 && "track".equals(fields[0])) {
-                drums.put(fields[1], "9".equals(fields[3].trim())
-                        || (fields.length >= 5 && "drums".equals(fields[4].trim())));
-                sounding.put(fields[1], new TreeMap<Integer, List<int[]>>());
-            } else if (fields.length >= 6 && "note".equals(fields[0]) && sounding.containsKey(fields[1])) {
-                long startTicks = Long.parseLong(fields[2].trim());
-                long lengthTicks = Long.parseLong(fields[3].trim());
+        for (ArrangementFile.Entry entry : arrangement.entries()) {
+            if (entry instanceof ArrangementFile.Track line) {
+                drums.put(line.id(), line.onDrumChannel() || (line.role() != null && "drums".equals(line.role().trim())));
+                sounding.put(line.id(), new TreeMap<Integer, List<int[]>>());
+            } else if (entry instanceof ArrangementFile.Note note && sounding.containsKey(note.trackId())) {
+                long startTicks = note.tick();
+                long lengthTicks = note.length();
                 int start = (int) Math.round(startTicks / (double) TICKS_PER_SIXTEENTH);
                 int stop = Math.max(start + 1, (int) Math.round((startTicks + lengthTicks) / (double) TICKS_PER_SIXTEENTH));
-                TreeMap<Integer, List<int[]>> track = sounding.get(fields[1]);
+                TreeMap<Integer, List<int[]>> track = sounding.get(note.trackId());
                 List<int[]> together = track.get(start);
                 if (together == null) {
                     together = new ArrayList<int[]>();
                     track.put(start, together);
                 }
-                together.add(new int[]{Integer.parseInt(fields[4].trim()), stop});
+                together.add(new int[]{note.pitch(), stop});
                 end = Math.max(end, stop);
             }
         }
+        int tempo = arrangement.tempoOrDefault();
         int bars = Math.max(1, (end + BAR - 1) / BAR);
         List<Staff> staves = new ArrayList<Staff>();
         for (Map.Entry<String, TreeMap<Integer, List<int[]>>> track : sounding.entrySet()) {

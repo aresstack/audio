@@ -1,12 +1,12 @@
 package com.aresstack.audio.studio.application;
 
+import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.ai.KipitzChatClient;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
 import com.aresstack.audio.studio.stage.SpatialSceneStore;
 import com.google.gson.JsonObject;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -90,27 +90,19 @@ public final class MixDirector {
 
     private static Map<String, Summary> summaries(Path arrangement) throws IOException {
         Map<String, Summary> played = new LinkedHashMap<String, Summary>();
-        for (String line : Files.readAllLines(arrangement, StandardCharsets.UTF_8)) {
-            String[] fields = line.split("\\t");
-            if (fields.length == 6 && "note".equals(fields[0])) {
-                try {
-                    Summary summary = played.get(fields[1]);
-                    if (summary == null) {
-                        summary = new Summary();
-                        played.put(fields[1], summary);
-                    }
-                    int bar = Integer.parseInt(fields[2].trim()) / (480 * 4);
-                    int pitch = Integer.parseInt(fields[4].trim());
-                    summary.notes++;
-                    summary.lowest = Math.min(summary.lowest, pitch);
-                    summary.highest = Math.max(summary.highest, pitch);
-                    summary.velocity += Integer.parseInt(fields[5].trim());
-                    Integer before = summary.bars.get(bar);
-                    summary.bars.put(bar, before == null ? 1 : before + 1);
-                } catch (NumberFormatException odd) {
-                    // a line that is no note after all
-                }
+        for (ArrangementFile.Note note : ArrangementFile.read(arrangement).notes()) {
+            Summary summary = played.get(note.trackId());
+            if (summary == null) {
+                summary = new Summary();
+                played.put(note.trackId(), summary);
             }
+            int bar = (int) (note.tick() / (480 * 4));
+            summary.notes++;
+            summary.lowest = Math.min(summary.lowest, note.pitch());
+            summary.highest = Math.max(summary.highest, note.pitch());
+            summary.velocity += note.velocity();
+            Integer before = summary.bars.get(bar);
+            summary.bars.put(bar, before == null ? 1 : before + 1);
         }
         return played;
     }

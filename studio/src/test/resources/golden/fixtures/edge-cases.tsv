@@ -1,0 +1,33 @@
+# Covers what the two shipped pieces do not: comments, blank lines, roles in the fifth
+# column, two tracks sharing a MIDI channel, drums, a tempo other than 108.
+tempo	96
+
+track	lead	73	0	melody
+track	pad	89	1	harmony
+track	double	71	0	melody
+track	low	33	2	bass
+track	kit	0	9	drums
+# notes
+note	lead	0	480	72	90
+note	lead	480	240	74	90
+note	lead	720	1680	76	80
+note	lead	2400	960	79	100
+note	lead	3360	1440	77	70
+note	pad	0	1920	60	60
+note	pad	0	1920	64	60
+note	pad	0	1920	67	60
+note	pad	1920	3840	57	60
+note	pad	1920	3840	65	60
+note	double	960	960	64	75
+note	double	2880	480	65	75
+note	low	0	960	36	100
+note	low	960	960	43	100
+note	low	1920	1920	41	100
+note	low	13440	1920	36	100
+note	kit	0	120	36	110
+note	kit	480	120	38	100
+note	kit	240	120	42	70
+note	kit	720	120	46	70
+note	kit	960	120	36	110
+note	kit	1440	120	38	100
+note	kit	15240	120	49	90

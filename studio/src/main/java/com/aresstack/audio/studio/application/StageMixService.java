@@ -1,5 +1,6 @@
 package com.aresstack.audio.studio.application;
 
+import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
@@ -140,17 +141,8 @@ public final class StageMixService {
     public static void rename(Path directory, String from, String to) throws IOException {
         Path arrangement = directory.resolve("arrangement.tsv");
         if (Files.isRegularFile(arrangement)) {
-            List<String> lines = new ArrayList<String>();
-            for (String line : Files.readAllLines(arrangement, StandardCharsets.UTF_8)) {
-                String[] fields = line.split("\\t", -1);
-                if (fields.length >= 2 && ("track".equals(fields[0]) || "note".equals(fields[0]))
-                        && fields[1].equals(from)) {
-                    fields[1] = to;
-                    line = String.join("\t", fields);
-                }
-                lines.add(line);
-            }
-            Files.write(arrangement, lines, StandardCharsets.UTF_8);
+            Files.write(arrangement, ArrangementFile.renameTrack(
+                    Files.readAllLines(arrangement, StandardCharsets.UTF_8), from, to), StandardCharsets.UTF_8);
         }
         for (String ending : new String[]{".wav", "-sampled.wav", "-isolated.mid"}) {
             Path old = directory.resolve(from + ending);
@@ -177,20 +169,12 @@ public final class StageMixService {
     /** The tracks of a written arrangement with their roles; an arrangement without roles gets them from its names. */
     public static List<MusicTrack> tracks(Path arrangement) throws IOException {
         List<MusicTrack> tracks = new ArrayList<MusicTrack>();
-        for (String line : Files.readAllLines(arrangement, StandardCharsets.UTF_8)) {
-            String[] fields = line.split("\\t");
-            if (fields.length >= 4 && "track".equals(fields[0])) {
-                String role = fields.length >= 5 && MusicTrack.ROLES.contains(fields[4].trim()) ? fields[4].trim()
-                        : "9".equals(fields[3].trim()) ? MusicTrack.DRUMS
-                        : MusicTrack.ROLES.contains(fields[1].trim()) ? fields[1].trim() : MusicTrack.HARMONY;
-                int program;
-                try {
-                    program = Math.max(0, Math.min(127, Integer.parseInt(fields[2].trim())));
-                } catch (NumberFormatException odd) {
-                    program = 0;
-                }
-                tracks.add(new MusicTrack(fields[1], role, fields[1], program, "builtin"));
-            }
+        for (ArrangementFile.Track track : ArrangementFile.read(arrangement).tracks()) {
+            String role = track.role() != null && MusicTrack.ROLES.contains(track.role().trim()) ? track.role().trim()
+                    : track.onDrumChannel() ? MusicTrack.DRUMS
+                    : MusicTrack.ROLES.contains(track.id().trim()) ? track.id().trim() : MusicTrack.HARMONY;
+            int program = Math.max(0, Math.min(127, track.programNumber().orElse(0)));
+            tracks.add(new MusicTrack(track.id(), role, track.id(), program, "builtin"));
         }
         if (tracks.isEmpty()) {
             throw new IllegalArgumentException("Arrangement must contain at least one track.");
@@ -198,17 +182,8 @@ public final class StageMixService {
         return tracks;
     }
 
+    /** The tempo of a written arrangement, kept within 20..400; 108 if it names none that can be read. */
     public static int tempo(Path arrangement) throws IOException {
-        for (String line : Files.readAllLines(arrangement, StandardCharsets.UTF_8)) {
-            String[] fields = line.split("\\t");
-            if (fields.length == 2 && "tempo".equals(fields[0])) {
-                try {
-                    return Math.max(20, Math.min(400, Integer.parseInt(fields[1].trim())));
-                } catch (NumberFormatException odd) {
-                    return 108;
-                }
-            }
-        }
-        return 108;
+        return ArrangementFile.read(arrangement).tempoOrDefault();
     }
 }
