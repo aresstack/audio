@@ -1,11 +1,13 @@
 package com.aresstack.audio.studio.application;
 
 import com.aresstack.audio.instruments.InstrumentLibrary;
-import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.instruments.InstrumentRegistry;
+import com.aresstack.audio.music.arrangement.ArrangementFile;
+import com.aresstack.audio.studio.progress.Progress;
+import com.aresstack.audio.studio.progress.TrackProgress;
 import com.aresstack.audio.studio.render.ExternalProcessRunner;
-import com.aresstack.audio.studio.render.InstrumentSampleRenderer;
 import com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine;
+import com.aresstack.audio.studio.render.InstrumentSampleRenderer;
 import com.aresstack.audio.studio.render.MidiStemExporter;
 import com.aresstack.audio.studio.render.SamplerUnavailableException;
 import java.io.File;
@@ -35,7 +37,7 @@ public final class StudioMusicRenderer {
 
     public Path render(Path arrangement, Path directory, Map<String, InstrumentLibrary> assignments,
                        String fluidSynthExecutable, String sfizzExecutable,
-                       GemmaMusicComposer.Progress progress) throws Exception {
+                       Progress progress) throws Exception {
         return render(arrangement, directory, assignments, java.util.Collections.<String, Integer>emptyMap(),
                 Sf2Engine.GERVILL, fluidSynthExecutable, sfizzExecutable, progress);
     }
@@ -43,7 +45,7 @@ public final class StudioMusicRenderer {
     public Path render(Path arrangement, Path directory, Map<String, InstrumentLibrary> assignments,
                        Map<String, Integer> programOverrides,
                        String fluidSynthExecutable, String sfizzExecutable,
-                       GemmaMusicComposer.Progress progress) throws Exception {
+                       Progress progress) throws Exception {
         return render(arrangement, directory, assignments, programOverrides,
                 Sf2Engine.GERVILL, fluidSynthExecutable, sfizzExecutable, progress);
     }
@@ -51,7 +53,7 @@ public final class StudioMusicRenderer {
     public Path render(Path arrangement, Path directory, Map<String, InstrumentLibrary> assignments,
                        Map<String, Integer> programOverrides, Sf2Engine sf2Engine,
                        String fluidSynthExecutable, String sfizzExecutable,
-                       GemmaMusicComposer.Progress progress) throws Exception {
+                       Progress progress) throws Exception {
         Files.createDirectories(directory);
         progress.update("Creating reference MIDI and Java-synthesis WAVs ...");
         String executable = javaExecutable();
@@ -78,8 +80,8 @@ public final class StudioMusicRenderer {
                 throw new IllegalArgumentException("Register an installed " + library.format()
                         + " file for " + library.name() + " before rendering " + track + ".");
             }
-            GemmaMusicComposer.tell(progress, track, GemmaMusicComposer.Stage.RENDER,
-                    GemmaMusicComposer.State.WAITING, "");
+            TrackProgress.tell(progress, track, TrackProgress.Stage.RENDER,
+                    TrackProgress.State.WAITING, "");
             jobs.add(new java.util.concurrent.Callable<Void>() {
                 @Override
                 public Void call() throws Exception {
@@ -120,14 +122,14 @@ public final class StudioMusicRenderer {
     private Path renderStem(String track, InstrumentLibrary library, Path bank, Path directory,
                             Map<String, Integer> programOverrides, Sf2Engine sf2Engine,
                             String fluidSynthExecutable, String sfizzExecutable,
-                            GemmaMusicComposer.Progress progress) throws Exception {
+                            Progress progress) throws Exception {
         String engineName = library.format() == InstrumentLibrary.Format.SF2
                 && sf2Engine == Sf2Engine.GERVILL ? "Java/Gervill"
                 : library.format() == InstrumentLibrary.Format.SFZ ? "sfizz" : "FluidSynth";
         progress.update("Rendering " + track + " with " + library.name()
                 + " using " + engineName + " ...");
-        GemmaMusicComposer.tell(progress, track, GemmaMusicComposer.Stage.RENDER,
-                GemmaMusicComposer.State.WORKING, engineName);
+        TrackProgress.tell(progress, track, TrackProgress.Stage.RENDER,
+                TrackProgress.State.WORKING, engineName);
         try {
             boolean generalMidi = library.id().equals("generaluser")
                     || library.id().startsWith("generaluser::")
@@ -143,8 +145,8 @@ public final class StudioMusicRenderer {
             try {
                 sampler.render(library, bank, trackMidi, stem, sf2Engine,
                         fluidSynthExecutable, sfizzExecutable);
-                GemmaMusicComposer.tell(progress, track, GemmaMusicComposer.Stage.RENDER,
-                        GemmaMusicComposer.State.DONE, library.name());
+                TrackProgress.tell(progress, track, TrackProgress.Stage.RENDER,
+                        TrackProgress.State.DONE, library.name());
                 return stem;
             } catch (SamplerUnavailableException unavailable) {
                 String engine = library.format() == InstrumentLibrary.Format.SFZ
@@ -154,13 +156,13 @@ public final class StudioMusicRenderer {
                         + unavailable.executable() + "'). Using the built-in Java sound for "
                         + track + " instead. Install the sampler and configure its path under "
                         + "Einstellungen to hear " + library.name() + ".");
-                GemmaMusicComposer.tell(progress, track, GemmaMusicComposer.Stage.RENDER,
-                        GemmaMusicComposer.State.DONE, "Java sound");
+                TrackProgress.tell(progress, track, TrackProgress.Stage.RENDER,
+                        TrackProgress.State.DONE, "Java sound");
                 return directory.resolve(track + ".wav");
             }
         } catch (Exception failed) {
-            GemmaMusicComposer.tell(progress, track, GemmaMusicComposer.Stage.RENDER,
-                    GemmaMusicComposer.State.FAILED, String.valueOf(failed.getMessage()));
+            TrackProgress.tell(progress, track, TrackProgress.Stage.RENDER,
+                    TrackProgress.State.FAILED, String.valueOf(failed.getMessage()));
             throw failed;
         }
     }

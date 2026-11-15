@@ -1,6 +1,7 @@
 package com.aresstack.audio.studio.application;
 
 import com.aresstack.audio.studio.ai.KipitzChatClient;
+import com.aresstack.audio.studio.progress.Progress;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -47,12 +48,12 @@ public final class InstrumentProposalService {
             + "stage is balanced, and put what leads in front.";
 
     public TrackArrangement propose(String description, Path directory,
-                                    GemmaMusicComposer.Progress progress) throws IOException {
+                                    Progress progress) throws IOException {
         return proposeStaged(description, directory, progress).tracks();
     }
 
     public Staged proposeStaged(String description, Path directory,
-                                GemmaMusicComposer.Progress progress) throws IOException {
+                                Progress progress) throws IOException {
         progress.update("KI entwirft eine Instrumentenbesetzung ...");
         String prompt = "Suggest an ORIGINAL instrumental arrangement for this music description: "
                 + description
