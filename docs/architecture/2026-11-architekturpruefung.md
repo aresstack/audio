@@ -1,10 +1,12 @@
 # Architekturprüfung: Weiterentwicklung AresStack Audio Studio
 
-**Stand:** 15. November 2026, Fassung 2 · **Geprüfter Code:** `aresstack/audio` `main` `e60793f`; `aresstack/askai` `develop` `5b788e2`; `aresstack/3d4j` `main` `62ce975` · **Status:** fachlich bestätigt mit Präzisierungen (Abschnitt 8); freigegeben sind F0 bis F3, danach C1
+**Stand:** 15. November 2026, Fassung 3 · **Geprüfter Code:** `aresstack/audio` `main` `e60793f`; `aresstack/askai` `develop` `5b788e2`; `aresstack/3d4j` `main` `62ce975` · **Status:** vom Product Owner fachlich bestätigt (Abschnitt 8); keine offenen Anforderungen an die Planung. Über Reihenfolge und Beauftragung der Arbeitspakete entscheidet das Projektmanagement
 
 Dieses Dokument beantwortet den Architekturbericht vom 15. November 2026 (Abschnitte 16 und 17) auf Grundlage einer erneuten Prüfung des Repositorys. Es liefert Ist-Architektur, Zielarchitektur, Abweichungsanalyse, Architekturentscheidungen, Migrationskonzept, Umsetzungsplan und Abnahmekonzept.
 
 **Grenzen der Prüfung.** `aresstack/audio` wurde vollständig gelesen. In AskAI wurden gezielt die Module `audio-dsp` und `audio-openal` sowie der Build geprüft, in 3d4j der Build, die Paketstruktur und die Dokumentation; beide nicht Zeile für Zeile. Aussagen zu externen Bibliotheken stammen aus allgemeinem Kenntnisstand und sind vor einer Entscheidung (Version, Lizenz, Abhängigkeiten) zu verifizieren. Der Build wurde für diese Prüfung nicht ausgeführt; die CI für `e60793f` gilt laut Bericht als grün.
+
+**Änderungen in Fassung 3.** O5 ist entschieden. Die Reihenfolge in 6.3 ist als Empfehlung der Architektur an das Projektmanagement gekennzeichnet, nicht als Vorgabe des Product Owners.
 
 **Änderungen in Fassung 2.** Eingearbeitet sind die Entscheidungen des Product Owners zu O1 bis O4 samt Bedingungen, die Bestandsaufnahme von AskAI und 3d4j (E8, neuer Abschnitt 4a), die geänderte Empfehlung zu FFT und Limiter, die Behandlung von `INSERT` in der Änderungsprüfung (E5), die verbindliche KI-Unabhängigkeit des Werkmodells (2.1) sowie drei Korrekturen aus dem Review des PR (Altdateien in `legacy/`, Länge der Java-Synthese, Rolle im Cache-Schlüssel).
 
@@ -564,7 +566,7 @@ Nicht zwingend, obwohl es so wirkt: Der Audio-Kern hängt vom Werkmodell nur üb
 
 ### Ort und Auslieferung des Kerns
 
-Drei Verbraucher liegen in drei Repositories. AskAI bezieht AresStack-Bibliotheken bereits als Maven-Central-Artefakte. Empfehlung: `audio-core` entsteht als Modul in `aresstack/audio`, weil hier der zu zerlegende Mixer und seine Tests liegen, und wird nach D1 als `com.aresstack:audio-core` veröffentlicht. Die Umstellung von AskAI auf den Kern ist kein Teil dieses Plans. Dieser Punkt ist noch zu bestätigen (O5).
+Drei Verbraucher liegen in drei Repositories. AskAI bezieht AresStack-Bibliotheken bereits als Maven-Central-Artefakte. Empfehlung: `audio-core` entsteht als Modul in `aresstack/audio`, weil hier der zu zerlegende Mixer und seine Tests liegen, und wird nach D1 als `com.aresstack:audio-core` veröffentlicht. Die Umstellung von AskAI auf den Kern ist kein Teil dieses Plans. Diese Empfehlung ist bestätigt (O5). Maßgeblich sind die Wiederverwendbarkeit durch Audio Studio, AskAI und 3d4j, die Unabhängigkeit von den Anwendungen und die nachweisbare Einhaltung der Qualitätsanforderungen; die technische Ausgestaltung, die Veröffentlichung und die Einbindung in die Verbraucher liegen bei Architektur und Projektmanagement.
 
 ---
 
@@ -662,14 +664,16 @@ F0 ─► D0 ─► D1a ─► D1b ─► D2 ─► D4
                └─► D3
 ```
 
-### 6.3 Freigegebene Reihenfolge
+### 6.3 Empfohlene Reihenfolge
 
-Freigegeben durch den Product Owner sind **F0, F1, F2, F3 und danach C1**. C1 (neue Stimme hinzukomponieren) ist bewusst die erste sichtbare KI-Funktion: eine kleine, musikalisch sinnvolle Änderung, an der sich Änderungskern, Kontextaufbau und Vorschau prüfen lassen, bevor die deutlich schwierigere Verlängerung (C3) folgt.
+Die Reihenfolge ist eine **Empfehlung der Architektur an das Projektmanagement**. Der Product Owner bestätigt Anforderungen und Abnahmekriterien; welche Arbeitspakete wann umgesetzt werden, entscheidet der Projektmanager. Technisch zwingend sind nur die Abhängigkeiten aus 6.2.
+
+Empfohlen wird **F0, F1, F2, F3 und danach C1**. C1 (neue Stimme hinzukomponieren) ist bewusst die erste sichtbare KI-Funktion: eine kleine, musikalisch sinnvolle Änderung, an der sich Änderungskern, Kontextaufbau und Vorschau prüfen lassen, bevor die deutlich schwierigere Verlängerung (C3) folgt.
 
 1. **F0 + F1** als erste Lieferung: unsichtbar, aber danach ist jedes Stück ein Werk mit IDs.
 2. **F2**: das erste sichtbare Ergebnis (24 Takte, 96 BPM, d-Moll, korrekte Vorzeichnung).
 3. **F3 + C1**: Trompete hinzukomponieren mit Vorschau und Verwerfen. Damit ist das Kernprinzip des Berichts („die KI ändert gezielt Teile") erstmals vollständig erlebbar.
-4. Danach, nach erneuter Freigabe, zwei bis drei Stränge parallel: B1 (Editor), C2/C3 (KI), D1a (Audio-Kern).
+4. Danach zwei bis drei Stränge parallel: B1 (Editor), C2/C3 (KI), D1a (Audio-Kern).
 
 ### 6.4 Risiken
 
@@ -750,12 +754,7 @@ Entschieden am 15. November 2026 durch den Product Owner. Die Bedingungen sind i
 | O4 | Zugang zu AskAI, Java-Niveau | geklärt | Java 21 ohne Preview-Funktionen; vorhandene FFT aus AskAI vor einer Eigenentwicklung prüfen; `LimiterProcessor` nicht übernehmen | E8, 4a |
 | A | `INSERT` gegen Hash-Prüfung | präzisiert | genehmigte, deterministische Verschiebung von unerlaubter Änderung unterscheiden | E5 |
 | B | Werkmodell unabhängig vom KI-Generator | verbindlich | — | 2.1 |
-| — | Reihenfolge | F0 bis F3, danach C1 freigegeben | — | 6.3 |
+| O5 | Ort und Auslieferung von `audio-core` | Modul in `aresstack/audio`, später `com.aresstack:audio-core` auf Maven Central | Ausgestaltung, Veröffentlichung und Einbindung liegen bei Architektur und Projektmanagement | 4a |
+| — | Reihenfolge der Arbeitspakete | keine Vorgabe des Product Owners; Entscheidung des Projektmanagers | — | 6.3 |
 
-**Noch offen**
-
-| Nr. | Frage | Empfehlung |
-|---|---|---|
-| O5 | Wo entsteht `audio-core` und wie wird es ausgeliefert? | als Modul in `aresstack/audio`, nach D1 als `com.aresstack:audio-core` auf Maven Central |
-
-O5 muss erst vor D1a entschieden sein und berührt die freigegebenen Pakete nicht.
+Damit bestehen vonseiten des Product Owners keine offenen Anforderungen an diese Planung. Die fachliche Abnahme der Implementierungen erfolgt je Arbeitspaket anhand von Abschnitt 7.
