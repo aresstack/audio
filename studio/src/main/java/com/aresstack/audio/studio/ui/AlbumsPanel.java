@@ -396,7 +396,6 @@ final class AlbumsPanel extends JPanel {
                 keys();
             }
         });
-        concept.add(original, c);
         c.gridx = 5;
         c.weightx = 1;
         concept.add(javax.swing.Box.createHorizontalGlue(), c);
@@ -457,10 +456,18 @@ final class AlbumsPanel extends JPanel {
             headKeys.add(key);
         }
         status.setForeground(AudioStudioTheme.TEXT_DIM);
-        JPanel bottom = new JPanel(new BorderLayout(16, 0));
+        JPanel bottom = new JPanel(new BorderLayout(0, 8));
         bottom.setOpaque(false);
-        bottom.add(status, BorderLayout.CENTER);
-        bottom.add(playerOptions(), BorderLayout.EAST);
+        // Below the list: what the page says at the left, settings of the album and its player at the right.
+        JPanel foot = new JPanel(new BorderLayout(12, 0));
+        foot.setOpaque(false);
+        foot.add(status, BorderLayout.CENTER);
+        JPanel settings = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 12, 0));
+        settings.setOpaque(false);
+        settings.add(playerOptions());
+        settings.add(original);
+        foot.add(settings, BorderLayout.EAST);
+        bottom.add(foot, BorderLayout.SOUTH);
 
         JPanel right = new JPanel(new BorderLayout(0, 12));
         right.setOpaque(false);
