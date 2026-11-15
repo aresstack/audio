@@ -8,6 +8,7 @@ import com.aresstack.audio.studio.project.StemManifest;
 import com.aresstack.audio.studio.render.BuiltinStemRenderer;
 import com.aresstack.audio.studio.render.InstrumentSampleRenderer;
 import com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine;
+import com.aresstack.audio.studio.render.ArticulationSounds;
 import com.aresstack.audio.studio.render.PartMidi;
 import com.aresstack.audio.studio.render.RenderLimits;
 import com.aresstack.audio.studio.render.SamplerUnavailableException;
@@ -45,8 +46,17 @@ public final class RenderService {
      * @param renderer  the engine
      * @param soundbank the sound bank file, or {@code null} for the built-in sound
      * @param program   the program to write to the part's MIDI, or {@link PartMidi#OWN_PROGRAM}
+     * @param articulations the articulation samples of the sound bank, reached by keyswitch or program
      */
-    public record Voicing(StemRenderer renderer, Path soundbank, int program) {
+    public record Voicing(StemRenderer renderer, Path soundbank, int program, ArticulationSounds articulations) {
+        /** A voicing without articulation samples. */
+        public Voicing(StemRenderer renderer, Path soundbank, int program) {
+            this(renderer, soundbank, program, ArticulationSounds.NONE);
+        }
+
+        public Voicing {
+            articulations = articulations == null ? ArticulationSounds.NONE : articulations;
+        }
     }
 
     /** Decides how each part is played. */
@@ -104,7 +114,7 @@ public final class RenderService {
             int program = InstrumentSampleRenderer.generalMidi(library)
                     ? programs.getOrDefault(part.id(), PartMidi.OWN_PROGRAM) : 0;
             return new Voicing(samplers.select(library, sf2Engine, fluidSynthExecutable, sfizzExecutable), bank,
-                    program);
+                    program, ArticulationSounds.beside(bank));
         };
     }
 
@@ -164,7 +174,7 @@ public final class RenderService {
     }
 
     private Planned plan(StemCache cache, Composition composition, Part part, Voicing voicing) throws Exception {
-        byte[] midi = PartMidi.bytes(composition, part, voicing.program());
+        byte[] midi = PartMidi.bytes(composition, part, voicing.program(), voicing.articulations());
         Path midiFile = cache.midi(part.id(), midi);
         StemJob job = new StemJob(composition, part, midiFile, voicing.soundbank(), limits);
         StemRenderer renderer = voicing.renderer();

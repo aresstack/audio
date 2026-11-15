@@ -47,6 +47,18 @@ public final class PartMidi {
      * @param program the program to write, or {@link #OWN_PROGRAM} for the part's own
      */
     public static byte[] bytes(Composition composition, Part part, int program) throws IOException {
+        return bytes(composition, part, program, ArticulationSounds.NONE);
+    }
+
+    /**
+     * The bytes of the MIDI file of one part, played with the articulation samples of its sound
+     * bank: before a note whose articulation the bank has samples for, the keyswitch or program
+     * that selects them; before a plain note again the normal sound.
+     *
+     * @param program the program to write, or {@link #OWN_PROGRAM} for the part's own
+     */
+    public static byte[] bytes(Composition composition, Part part, int program, ArticulationSounds sounds)
+            throws IOException {
         try {
             TimeMap time = composition.timeMap();
             Sequence sequence = new Sequence(Sequence.PPQ, TimeMap.PPQ);
@@ -70,7 +82,14 @@ public final class PartMidi {
                 // Held notes swell and fade with the hairpins of the part (controller 11, expression).
                 midi(notes, ShortMessage.CONTROL_CHANGE, channel, EXPRESSION, point.value(), point.tick());
             }
-            for (Composition.PlacedNote placed : composition.notesOf(part.id())) {
+            int own = program == OWN_PROGRAM ? part.program() : program;
+            ArticulationSounds.Sound current = null;
+            java.util.List<Composition.PlacedNote> placedNotes = new java.util.ArrayList<>(composition.notesOf(part.id()));
+            placedNotes.sort(java.util.Comparator.comparingLong(Composition.PlacedNote::tick));
+            for (Composition.PlacedNote placed : placedNotes) {
+                if (!sounds.isEmpty()) {
+                    current = select(notes, channel, own, sounds, current, placed);
+                }
                 midi(notes, ShortMessage.NOTE_ON, channel, placed.note().pitch(), composition.playedVelocity(placed),
                         placed.tick());
                 midi(notes, ShortMessage.NOTE_OFF, channel, placed.note().pitch(), 0,
@@ -85,6 +104,43 @@ public final class PartMidi {
             throw new IOException("The part " + part.id() + " cannot be written as MIDI: " + invalid.getMessage(),
                     invalid);
         }
+    }
+
+    /**
+     * Selects the samples a note needs, if they are not selected already: its articulation's own,
+     * or the normal sound for a plain note or an articulation the bank has none for. Returns what
+     * is selected afterwards.
+     */
+    private static ArticulationSounds.Sound select(Track track, int channel, int own, ArticulationSounds sounds,
+                                                   ArticulationSounds.Sound current, Composition.PlacedNote placed)
+            throws InvalidMidiDataException {
+        ArticulationSounds.Sound wanted = sounds.of(placed.note().articulation());
+        if (wanted == null) {
+            wanted = sounds.normal();
+        }
+        long tick = placed.tick();
+        if (wanted == null) {
+            // no normal sound named: a program of an articulation gives way to the part's own again
+            if (current != null && current.kind() == ArticulationSounds.Kind.PROGRAM && channel != 9) {
+                midi(track, ShortMessage.PROGRAM_CHANGE, channel, own, 0, tick);
+                return null;
+            }
+            return current;
+        }
+        if (wanted.equals(current)) {
+            return current;
+        }
+        if (wanted.kind() == ArticulationSounds.Kind.KEYSWITCH) {
+            if (current != null && current.kind() == ArticulationSounds.Kind.PROGRAM && channel != 9) {
+                midi(track, ShortMessage.PROGRAM_CHANGE, channel, own, 0, tick);
+            }
+            long pressed = Math.max(0, tick - sounds.leadTicks());
+            midi(track, ShortMessage.NOTE_ON, channel, wanted.value(), sounds.velocity(), pressed);
+            midi(track, ShortMessage.NOTE_OFF, channel, wanted.value(), 0, Math.max(pressed, tick));
+        } else if (channel != 9) {
+            midi(track, ShortMessage.PROGRAM_CHANGE, channel, wanted.value(), 0, tick);
+        }
+        return wanted;
     }
 
     private static void midi(Track track, int command, int channel, int data1, int data2, long tick)
