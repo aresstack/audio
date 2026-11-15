@@ -5501,10 +5501,10 @@ public final class AudioStudioFrame extends JFrame {
                 return; // could not be opened (said)
             }
             play();
-        } else if (player.ready()) {
+        } else if (player.ready() && !("albums".equals(shownPage) && player.live())) {
             player.play();
         } else {
-            play();
+            play(); // on the album page the finished mix, not a live stage paused elsewhere
         }
     }
 
@@ -5512,6 +5512,14 @@ public final class AudioStudioFrame extends JFrame {
     private void playOnPlayerPage(Path current) {
         String album = playerAlbum(current);
         Path chosen = current;
+        if (album != null && !inAlbum(album, current)) {
+            // Another album was chosen in the tree: it begins with its first title that has a mix.
+            chosen = nextAlbumPiece(album, current);
+            if (chosen == null && !playerPanel.onlyNew()) {
+                message("In diesem Album ist noch kein Titel fertig gemischt.");
+                return;
+            }
+        }
         if (playerPanel.onlyNew()) {
             java.util.List<Path> fresh = newPieces(album);
             chosen = among(fresh, current) ? current : fresh.isEmpty() ? null : fresh.get(0);
@@ -5533,6 +5541,12 @@ public final class AudioStudioFrame extends JFrame {
             playAlbumTitle(0);
         }
         armAlbumPlay();
+    }
+
+    /** Whether the piece is a title of the album. */
+    private boolean inAlbum(String albumId, Path piece) {
+        Album album = albumMembers.albums().album(albumId).orElse(null);
+        return album != null && albumMembers.pieces(album).stream().anyMatch(song -> same(song.folder(), piece));
     }
 
     private static boolean same(Path one, Path other) {
