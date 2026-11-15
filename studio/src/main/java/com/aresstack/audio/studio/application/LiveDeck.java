@@ -5,7 +5,6 @@ import com.aresstack.audio.core.live.LivePlayback;
 import com.aresstack.audio.core.live.LiveSink;
 import com.aresstack.audio.core.mix.MasterBus;
 import com.aresstack.audio.studio.mix.LiveStage;
-import com.aresstack.audio.studio.mix.MixLevel;
 import com.aresstack.audio.studio.mix.MixOutcome;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
 import com.aresstack.audio.studio.mix.StageSound;
@@ -24,9 +23,10 @@ import java.util.List;
  * user moves on the stage is handed over with {@link #stage} and heard from the next block on,
  * gliding; no file is mixed for it.
  *
- * <p>A live deck is made for one room and one way of setting the level. Another room, or a piece
- * switched between the peak and the fixed level, needs a new deck ({@link #fits}); the window
- * makes one in the background and goes on at the place that was heard.
+ * <p>A live deck is made for one room. Another room needs a new deck ({@link #fits}); the window
+ * makes one in the background and goes on at the place that was heard. Its level is the one of
+ * the file ("export old, live new"): the factor the last file mix found as a fixed gain, with
+ * the live limiter behind it ({@link LiveStage#master}).
  *
  * <p>Thread use: {@link #open} reads the tracks and belongs off the event thread. Everything else
  * may be called from any thread; it only hands numbers to the audio thread.
@@ -44,7 +44,6 @@ public final class LiveDeck implements AutoCloseable {
 
     private final LiveStage stage;
     private final LivePlayback playback;
-    private final boolean fixedLevel;
     /** Where the mix document of the piece lies, and the piece its movements are read along. */
     private final Path directory;
     private final StageMixService.Piece piece;
@@ -63,7 +62,6 @@ public final class LiveDeck implements AutoCloseable {
         this.stage = stage;
         this.playback = playback;
         this.scene = scene;
-        this.fixedLevel = scene.fixedLevel();
         this.legacyFactor = legacyFactor;
         this.legacyMasterDb = scene.masterDb();
         for (SoundSourcePlacement placement : scene.placements()) {
@@ -124,7 +122,7 @@ public final class LiveDeck implements AutoCloseable {
             throw new IOException("Von diesem Stück ist noch keine Spur gerendert.");
         }
         float factor = legacyFactor;
-        if (!fitting.fixedLevel() && !(factor > 0 && Float.isFinite(factor))) {
+        if (!(factor > 0 && Float.isFinite(factor))) {
             factor = measuredFactor(piece, directory, fitting, only, heardAs);
         }
         // How the tracks move with the piece (place and room share) comes from its mix document, as for the file.
@@ -159,8 +157,8 @@ public final class LiveDeck implements AutoCloseable {
             scratch = Files.createTempFile(directory, "live-level-", ".part");
             StageMixService mixing = new StageMixService();
             mixing.setSound(sound);
-            mixing.export(piece, directory, measured, scratch, 16, null);
-            return mixing.outcome().legacyFactor();
+            mixing.export(piece, directory, measured, scratch, 16);
+            return mixing.legacyFactor();
         } catch (Exception unmixed) {
             return Float.NaN;
         } finally {
@@ -179,11 +177,11 @@ public final class LiveDeck implements AutoCloseable {
         return only == null ? placement : placement.withMuted(!only.equals(placement.trackId()));
     }
 
-    /** Whether this deck can play a stage: the same room and the same way of setting the level. */
+    /** Whether this deck can play a stage: the same room. */
     public boolean fits(SpatialScene wanted) {
         AcousticRoom mine = stage.room();
         AcousticRoom theirs = wanted.room();
-        return wanted.fixedLevel() == fixedLevel && mine.kind().equals(theirs.kind())
+        return mine.kind().equals(theirs.kind())
                 && mine.reverbSeconds() == theirs.reverbSeconds() && mine.amount() == theirs.amount();
     }
 
@@ -276,7 +274,7 @@ public final class LiveDeck implements AutoCloseable {
      * @param masterDb the master level of the stage that was mixed
      */
     public void legacyFactor(float factor, double masterDb) {
-        if (fixedLevel || !(factor > 0 && Float.isFinite(factor))) {
+        if (!(factor > 0 && Float.isFinite(factor))) {
             return;
         }
         legacyFactor = factor;
@@ -290,17 +288,22 @@ public final class LiveDeck implements AutoCloseable {
     }
 
     private static MasterBus.Settings master(SpatialScene wanted, float factor, double legacyMasterDb) {
-        if (wanted.fixedLevel()) {
-            return LiveStage.master(StageMixService.level(wanted, null).live(), Float.NaN);
-        }
         float moved = factor > 0 && Float.isFinite(factor)
                 ? (float) (factor * Math.pow(10, (wanted.masterDb() - legacyMasterDb) / 20)) : Float.NaN;
-        return LiveStage.master(MixLevel.legacy(wanted.masterDb()), moved);
+        return LiveStage.master(moved, wanted.masterDb());
     }
 
     /** How this deck is heard: loudspeakers or headphones, which room. */
     public StageSound sound() {
         return stage.sound();
+    }
+
+    /**
+     * How far the limiter of live playback turns the sound down right now, as a gain: 1 while it
+     * rests. One number the audio thread publishes; safe to read from any thread.
+     */
+    public float limiterGain() {
+        return playback.master().limiter().gain();
     }
 
     public LiveStage liveStage() {

@@ -35,11 +35,11 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         }
         // Beside these, the stage page shows the movements the model holds and keeps a curve the user
         // drew there (work package D3): an edit of the mix on purpose, which takes over no old file.
-        assertEquals("opening loads the model, composing and renaming bring it in step, a drawn movement is kept,"
-                        + " the switch of the level is noted, rendering reads it; nothing else reaches it",
-                new java.util.TreeSet<String>(List.of("composeIntoPiece", "levelSwitched",
-                        "loadArrangementForCurrentDirectory", "loadDemo", "movementChanged", "pieceToEdit", "renamed",
-                        "renderArrangement", "savedPiece", "showMovements")), users);
+        assertEquals("opening loads the model, composing and renaming bring it in step, rendering reads it,"
+                        + " a drawn movement is kept; nothing else reaches it",
+                new java.util.TreeSet<String>(List.of("composeIntoPiece", "loadArrangementForCurrentDirectory",
+                        "loadDemo", "movementChanged", "pieceToEdit", "renamed", "renderArrangement", "savedPiece",
+                        "showMovements")), users);
         assertEquals("only a curve the user drew is written into the mix of the model", List.of("movementChanged"),
                 callers(source, "pieceModel\\.move\\("));
         assertTrue("showing the movements only reads the model",
@@ -48,8 +48,6 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         assertTrue("a curve is kept only once it has settled, and never brings old files into the model",
                 bodyOf(source, "private void movementChanged(").indexOf("synchronize") < 0
                         && bodyOf(source, "private void movementChanged(").contains("if (!settled) {"));
-        assertEquals("the switch of the level writes only the level mode", List.of("levelSwitched"),
-                callers(source, "pieceModel\\.levelFixed\\("));
         assertTrue("loading the demo replaces the piece on the user's word, through the one place that"
                         + " protects a model the demo cannot replace",
                 bodyOf(source, "private void loadDemo() {").contains("DemoIntoPiece.load(input, folder, pieceModel)"));

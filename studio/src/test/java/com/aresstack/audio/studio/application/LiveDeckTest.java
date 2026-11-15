@@ -71,14 +71,13 @@ public final class LiveDeckTest {
     }
 
     @Test
-    public void theLiveStageIsAsLoudAndAsPlacedAsItsFileInBothWaysOfSettingTheLevel() throws Exception {
+    public void theLiveStageIsAsLoudAndAsPlacedAsItsFileAtEveryMasterLevel() throws Exception {
         Path song = piece();
         Path arrangement = song.resolve("arrangement.tsv");
         StageMixService service = new StageMixService();
         SpatialScene usual = service.scene(arrangement, song);
         usual = usual.with(usual.placement("melody").at(-0.8, 0.2)).with(usual.placement("bass").withLevel(-4));
-        for (SpatialScene scene : new SpatialScene[]{usual, usual.withMaster(-6),
-                usual.withFixedLevel(true).withMaster(-3)}) {
+        for (SpatialScene scene : new SpatialScene[]{usual, usual.withMaster(-6), usual.withMaster(-3)}) {
             SpatialStemMixer.Signal file = SpatialStemMixer.read(service.mix(arrangement, song, scene, message -> { }));
             Tape tape = new Tape();
             tape.allow(Integer.MAX_VALUE);
@@ -88,7 +87,7 @@ public final class LiveDeckTest {
                 deck.play();
                 awaitEnd(deck);
                 int late = deck.playback().master().latencyFrames();
-                // The file has 16 bits; the limiter of the fixed level looks ahead, so live comes that much later.
+                // The file has 16 bits; the live limiter looks ahead, so live comes that much later.
                 for (int i = 0; i < file.left.length; i += 7) {
                     Assert.assertEquals("left at " + i, file.left[i], tape.left[i + late], 2e-4f);
                     Assert.assertEquals("right at " + i, file.right[i], tape.right[i + late], 2e-4f);
@@ -103,7 +102,7 @@ public final class LiveDeckTest {
         Path song = piece();
         Path arrangement = song.resolve("arrangement.tsv");
         // A dry room and the master well below the limiter, so that a fader is heard as what it is.
-        SpatialScene scene = new StageMixService().scene(arrangement, song).withFixedLevel(true).withMaster(-14)
+        SpatialScene scene = new StageMixService().scene(arrangement, song).withMaster(-14)
                 .inRoom(AcousticRoom.STUDIO.withAmount(0));
         scene = scene.with(scene.placement("melody").at(-1, 0)).with(scene.placement("bass").withMuted(true));
         Tape tape = new Tape();
@@ -168,7 +167,7 @@ public final class LiveDeckTest {
     public void aJumpGlidesAcrossTheStageAndADragIsTakenAtOnce() throws Exception {
         Path song = piece();
         Path arrangement = song.resolve("arrangement.tsv");
-        SpatialScene scene = new StageMixService().scene(arrangement, song).withFixedLevel(true).withMaster(-14)
+        SpatialScene scene = new StageMixService().scene(arrangement, song).withMaster(-14)
                 .inRoom(AcousticRoom.STUDIO.withAmount(0));
         scene = scene.with(scene.placement("melody").at(-1, 0));
         Tape tape = new Tape();
@@ -199,10 +198,10 @@ public final class LiveDeckTest {
     }
 
     @Test
-    public void anotherRoomOrAnotherWayOfSettingTheLevelNeedsANewLiveStage() throws Exception {
+    public void anotherRoomNeedsANewLiveStage() throws Exception {
         Path song = piece();
         Path arrangement = song.resolve("arrangement.tsv");
-        SpatialScene scene = new StageMixService().scene(arrangement, song).withFixedLevel(true);
+        SpatialScene scene = new StageMixService().scene(arrangement, song);
         Tape tape = new Tape();
         tape.allow(Integer.MAX_VALUE);
         try (LiveDeck deck = LiveDeck.open(arrangement, song, scene, null, Float.NaN, () -> tape)) {
@@ -211,7 +210,6 @@ public final class LiveDeckTest {
             Assert.assertFalse(deck.fits(scene.inRoom(AcousticRoom.CATHEDRAL)));
             Assert.assertFalse(deck.fits(scene.inRoom(scene.room().withAmount(scene.room().amount() / 2))));
             Assert.assertFalse(deck.fits(scene.inRoom(scene.room().withReverbSeconds(5))));
-            Assert.assertFalse(deck.fits(scene.withFixedLevel(false)));
             Assert.assertFalse("a stage that does not fit changes nothing",
                     deck.stage(scene.inRoom(AcousticRoom.CATHEDRAL), null));
         }
@@ -221,7 +219,7 @@ public final class LiveDeckTest {
     public void aTrackAloneIsHeardLiveEvenIfItIsMutedInTheMixAndAJumpIsShownAtOnce() throws Exception {
         Path song = piece();
         Path arrangement = song.resolve("arrangement.tsv");
-        SpatialScene scene = new StageMixService().scene(arrangement, song).withFixedLevel(true);
+        SpatialScene scene = new StageMixService().scene(arrangement, song);
         scene = scene.with(scene.placement("bass").at(1, 0).withMuted(true)).with(scene.placement("melody").at(-1, 0));
         Tape tape = new Tape();
         tape.allow(Integer.MAX_VALUE);
@@ -269,7 +267,6 @@ public final class LiveDeckTest {
         SpatialStemMixer.Signal file = SpatialStemMixer.read(service.solo(arrangement, song, scene, "bass"));
         float whole = LiveDeck.measuredFactor(StageMixService.Piece.written(arrangement), song, scene, null, com.aresstack.audio.studio.mix.StageSound.LOUDSPEAKERS);
         float alone = LiveDeck.measuredFactor(StageMixService.Piece.written(arrangement), song, scene, "bass", com.aresstack.audio.studio.mix.StageSound.LOUDSPEAKERS);
-        Assert.assertEquals(service.outcome().legacyFactor(), alone, 0f);
         Assert.assertTrue("alone the bass is raised further than within the mix", alone > 1.2f * whole);
         Tape tape = new Tape();
         tape.allow(Integer.MAX_VALUE);
@@ -287,7 +284,7 @@ public final class LiveDeckTest {
     public void aJumpAfterThePieceEndedIsWherePlayGoesOn() throws Exception {
         Path song = piece();
         Path arrangement = song.resolve("arrangement.tsv");
-        SpatialScene scene = new StageMixService().scene(arrangement, song).withFixedLevel(true);
+        SpatialScene scene = new StageMixService().scene(arrangement, song);
         Tape tape = new Tape();
         tape.allow(Integer.MAX_VALUE);
         try (LiveDeck deck = LiveDeck.open(arrangement, song, scene, null, Float.NaN, () -> tape)) {
@@ -325,7 +322,7 @@ public final class LiveDeckTest {
     public void movementsOfTheMixDocumentAreHeardLiveAlsoWhenSavedWhilePlaying() throws Exception {
         Path song = piece();
         Path arrangement = song.resolve("arrangement.tsv");
-        SpatialScene scene = new StageMixService().scene(arrangement, song).withFixedLevel(true).withMaster(-14)
+        SpatialScene scene = new StageMixService().scene(arrangement, song).withMaster(-14)
                 .inRoom(AcousticRoom.STUDIO.withAmount(0));
         scene = scene.with(scene.placement("melody").at(-1, 0)).with(scene.placement("bass").withMuted(true));
         // The piece says: the melody stands far right, whatever its disc says.
@@ -377,7 +374,7 @@ public final class LiveDeckTest {
         again.open(song);
         Assert.assertEquals(java.util.List.of(new StageMovements.Point(0, 1)), again.movements().of("melody", "x"));
         StageMixService service = new StageMixService();
-        SpatialScene scene = service.scene(arrangement, song).withFixedLevel(true).withMaster(-14)
+        SpatialScene scene = service.scene(arrangement, song).withMaster(-14)
                 .inRoom(AcousticRoom.STUDIO.withAmount(0));
         scene = scene.with(scene.placement("melody").at(-1, 0)).with(scene.placement("bass").withMuted(true));
 
@@ -424,7 +421,7 @@ public final class LiveDeckTest {
         Files.delete(song.resolve("arrangement.tsv"));
         StageMixService.Piece piece = StageMixService.Piece.of(slower);
         StageMixService service = new StageMixService();
-        SpatialScene scene = service.scene(piece, song).withFixedLevel(true).withMaster(-14)
+        SpatialScene scene = service.scene(piece, song).withMaster(-14)
                 .inRoom(AcousticRoom.STUDIO.withAmount(0));
         // Loud through the first bar, then down by 18 dB over the second: until 5 s, not until 4 s.
         scene = scene.with(scene.placement("melody").at(-0.6, 0.1).withDynamics(java.util.List.of(
@@ -478,7 +475,7 @@ public final class LiveDeckTest {
         Files.write(song.resolve("arrangement.tsv"), Arrays.asList("tempo\t120", "track\tmelody\t73\t0\tmelody",
                 "track\tbass\t32\t1\tbass", "track\tchoir\t52\t2\ttexture"), StandardCharsets.UTF_8);
         Path arrangement = song.resolve("arrangement.tsv");
-        SpatialScene scene = new StageMixService().scene(arrangement, song).withFixedLevel(true);
+        SpatialScene scene = new StageMixService().scene(arrangement, song);
         Tape tape = new Tape();
         try {
             LiveDeck.open(arrangement, song, scene, null, Float.NaN, () -> tape).close();

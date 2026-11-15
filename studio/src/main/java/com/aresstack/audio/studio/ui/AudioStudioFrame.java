@@ -712,19 +712,6 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
-            public boolean confirmFixedLevel() {
-                return JOptionPane.showConfirmDialog(AudioStudioFrame.this,
-                        "Dieses Stück auf festen Pegel umstellen?\n\n"
-                                + "Bisher wird die Mischung am Ende voll ausgesteuert. Mit festem Pegel gilt der\n"
-                                + "Master-Pegel so, wie er eingestellt ist, und ein Limiter hält die Spitzen bei −1 dBFS.\n"
-                                + "Das Stück klingt danach anders laut als bisher. Beim Speichern als WAV lässt sich\n"
-                                + "dann auf Spitze oder Lautheit normalisieren.\n\n"
-                                + "Die Umstellung gilt nur für dieses Stück und lässt sich hier wieder zurücknehmen.",
-                        "Fester Pegel", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE)
-                        == JOptionPane.OK_OPTION;
-            }
-
-            @Override
             public void movementChanged(com.aresstack.audio.studio.application.StageMovements movements,
                                         String trackId, String parameter, boolean settled) {
                 AudioStudioFrame.this.movementChanged(movements, trackId, parameter, settled);
@@ -869,7 +856,6 @@ public final class AudioStudioFrame extends JFrame {
      */
     private void sceneChanged(com.aresstack.audio.studio.stage.SpatialScene changed, boolean settled,
                               boolean fromMixer) {
-        boolean levelSwitched = scene != null && changed.fixedLevel() != scene.fixedLevel();
         scene = changed;
         if (fromMixer) {
             showStage();
@@ -881,14 +867,6 @@ public final class AudioStudioFrame extends JFrame {
             saveScene();
             remixTimer.restart();
         }
-        if (levelSwitched) {
-            levelSwitched(changed.fixedLevel());
-        }
-    }
-
-    /** The user's switch of the level is noted in the model of the piece too, and nothing else with it. */
-    private void levelSwitched(boolean fixed) {
-        pieceModel.levelFixed(fixed);
     }
 
     private void showStage() {
@@ -1045,21 +1023,19 @@ public final class AudioStudioFrame extends JFrame {
                 problem = String.valueOf(failed.getMessage());
             }
             final String said = problem;
-            final com.aresstack.audio.studio.mix.MixOutcome outcome = mixing.outcome();
-            if (problem == null && outcome != null) {
-                final float factor = outcome.legacyFactor();
+            final float factor = mixing.legacyFactor();
+            if (problem == null && factor > 0 && Float.isFinite(factor)) {
                 SwingUtilities.invokeLater(() -> mixFactorFound(folder, ticket, factor, mixed.masterDb()));
             }
-            final String limiter = com.aresstack.audio.studio.application.MixReport.limiterShort(mixing.outcome());
             final double seconds = (System.nanoTime() - began) / 1e9;
-            SwingUtilities.invokeLater(() -> mixedAgain(folder, ticket, said, seconds, limiter));
+            SwingUtilities.invokeLater(() -> mixedAgain(folder, ticket, said, seconds));
         });
     }
 
     /**
-     * The file mix of the stage found the factor it brought the mix to its peak with (not a
-     * number for a piece with the fixed level). Live playback takes it, so that it is as loud as
-     * the file; kept for the next time the stage is played live.
+     * The file mix of the stage found the factor it brought the mix to its peak with. Live
+     * playback takes it, so that it is as loud as the file; kept for the next time the stage is
+     * played live.
      */
     private void mixFactorFound(Path folder, int ticket, float factor, double masterDb) {
         if (ticket != mixWanted || !folder.equals(Paths.get(directory.getText().trim()))) {
@@ -1073,8 +1049,7 @@ public final class AudioStudioFrame extends JFrame {
         }
     }
 
-    /** @param limiter what the limiter did in this mix, or {@code null} for a piece that is mixed to its peak */
-    private void mixedAgain(Path folder, int ticket, String problem, double seconds, String limiter) {
+    private void mixedAgain(Path folder, int ticket, String problem, double seconds) {
         if (!folder.equals(Paths.get(directory.getText().trim()))) {
             return; // another piece is open by now
         }
@@ -1083,9 +1058,8 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         if (ticket == mixWanted && stagePanel.proposal() == null) {
-            // With the fixed level the line shows what the limiter did: how far it turned the loudest place down.
-            stagePanel.setStatus(String.format(java.util.Locale.GERMANY, "Neu gemischt in %.1f s · ", seconds)
-                    + (limiter == null ? "ohne KI, ohne Synthese" : limiter));
+            stagePanel.setStatus(String.format(java.util.Locale.GERMANY,
+                    "Neu gemischt in %.1f s · ohne KI, ohne Synthese", seconds));
         }
         String selected = (String) playbackSelection.getSelectedItem();
         if (selected == null) {
@@ -1106,13 +1080,7 @@ public final class AudioStudioFrame extends JFrame {
         lcd.setSource(playbackName(selected), true);
     }
 
-    /** What the last export was normalized to; offered again for the next one. */
-    private com.aresstack.audio.core.mix.ExportNormalization exportNormalization;
-
-    /**
-     * Writes the mix on the stage to a WAV file of the user's choice, with 24 bits. A piece with
-     * the fixed level may be normalized to a peak or a loudness; that is chosen beside the file.
-     */
+    /** Writes the mix on the stage to a WAV file of the user's choice, with 24 bits, as loud as the mixed file. */
     private void exportMix() {
         final com.aresstack.audio.studio.application.StageMixService.Piece arrangement = pieceToMix();
         if (arrangement == null) {
@@ -1121,8 +1089,6 @@ public final class AudioStudioFrame extends JFrame {
         }
         javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
         chooser.setDialogTitle("Mischung als WAV speichern (24 Bit)");
-        ExportLevelChoice levelChoice = new ExportLevelChoice(scene.fixedLevel(), exportNormalization);
-        chooser.setAccessory(levelChoice);
         chooser.setSelectedFile(new java.io.File(songs.name(Paths.get(directory.getText().trim()))
                 .replaceAll("[^\\p{L}\\p{N} _-]", "").trim() + ".wav"));
         if (chooser.showSaveDialog(this) != javax.swing.JFileChooser.APPROVE_OPTION) {
@@ -1131,22 +1097,10 @@ public final class AudioStudioFrame extends JFrame {
         Path chosen = chooser.getSelectedFile().toPath();
         final Path target = chosen.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".wav")
                 ? chosen : chosen.resolveSibling(chosen.getFileName() + ".wav");
-        final com.aresstack.audio.core.mix.ExportNormalization wanted = levelChoice.chosen();
-        if (scene.fixedLevel()) {
-            exportNormalization = wanted;
-        }
         try {
             com.aresstack.audio.studio.application.StageMixService mixing = stageMixing();
-            mixing.export(arrangement, Paths.get(directory.getText().trim()), scene, target, 24,
-                    com.aresstack.audio.studio.application.StageMixService.level(scene, wanted));
+            mixing.export(arrangement, Paths.get(directory.getText().trim()), scene, target, 24);
             append("Mischung gespeichert (24 Bit, 44,1 kHz): " + target);
-            for (String found : new String[]{
-                    com.aresstack.audio.studio.application.MixReport.limiter(mixing.outcome()),
-                    com.aresstack.audio.studio.application.MixReport.normalization(mixing.outcome(), wanted)}) {
-                if (found != null) {
-                    append("  " + found);
-                }
-            }
         } catch (Exception failed) {
             message("Die Mischung ließ sich nicht speichern: " + failed.getMessage());
         }
@@ -3047,13 +3001,7 @@ public final class AudioStudioFrame extends JFrame {
         Path raw = com.aresstack.audio.studio.application.StageMixService.stem(folder, selected);
         if (arrangement != null && Files.isRegularFile(raw)) {
             try {
-                com.aresstack.audio.studio.application.StageMixService mixing = stageMixing();
-                Path alone = mixing.solo(arrangement, folder, scene, selected);
-                if (mixing.outcome() != null) {
-                    // A track alone is brought to its own peak: live playback of it follows that factor.
-                    player.legacyFactor(mixing.outcome().legacyFactor(), scene.masterDb());
-                }
-                return alone;
+                return stageMixing().solo(arrangement, folder, scene, selected);
             } catch (Exception failed) {
                 return raw; // then the track as it was rendered
             }
@@ -3362,6 +3310,9 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     /** Thirty times a second: the display, the place in the waveform and the meters follow the playback. */
+    private final com.aresstack.audio.studio.application.LimiterReadout limiterReadout =
+            new com.aresstack.audio.studio.application.LimiterReadout();
+
     private void tick() {
         boolean playing = player.playing();
         double second = player.seconds();
@@ -3375,6 +3326,10 @@ public final class AudioStudioFrame extends JFrame {
         masterRight.setLevel(player.level(true));
         if (trackTable != null) {
             trackTable.pulse();
+        }
+        if (stagePanel != null) {
+            // Live only: a file and an export are mixed as before and have no limiter to show.
+            stagePanel.setLimiter(limiterReadout.read(player.limiterGain(), System.nanoTime()));
         }
         if (stagePanel != null && stagePanel.isShowing()) {
             // On the stage every disc glows as loud as its track is right now.
