@@ -1,0 +1,198 @@
+package com.aresstack.audio.studio.ai;
+
+import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.Part;
+import com.aresstack.audio.composition.Role;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * The planning step of a continuation, one call of a {@link ChatModel}: sections with bars,
+ * function, intensity, chords per bar and the parts that play, and the new instruments that come
+ * in. The answer is read leniently and completed to a plan that covers exactly the new bars
+ * ({@link ContinuationPlan#complete}); an answer without a usable section gives the plan of the
+ * preset ({@link ContinuationPlan#fallback}). Every repair is recorded in the plan.
+ */
+public final class ChatContinuationPlanner implements ContinuationPlanner {
+    /** The standing instruction of the call. */
+    public static final String INSTRUCTION = "You are the composer and arranger planning the continuation of an "
+            + "existing piece. Return valid JSON only, no Markdown.";
+    private final ChatModel model;
+    private final int maxTokens;
+
+    public ChatContinuationPlanner(ChatModel model, int maxTokens) {
+        this.model = model;
+        this.maxTokens = maxTokens;
+    }
+
+    /** The prompt of the planning step: the context, then the task. */
+    public static String prompt(ContinuationTask task) {
+        ContinuationRequest request = task.request();
+        int first = task.firstNewBar() + 1;
+        int last = task.firstNewBar() + request.bars();
+        StringBuilder prompt = new StringBuilder(task.context().text());
+        prompt.append("\n# TASK\nPlan the continuation of this piece: ").append(request.bars()).append(" new bars, bars ")
+                .append(first).append('-').append(last).append(" of the piece (the original has ")
+                .append(task.firstNewBar()).append(" bars). The continuation must grow out of the existing music: its "
+                        + "themes, motifs, harmony, rhythm and the way the parts complement each other.\n");
+        prompt.append("Kind of continuation: ").append(request.preset().brief()).append('\n');
+        if (!request.instruction().isEmpty()) {
+            prompt.append("User instruction: ").append(request.instruction()).append('\n');
+        }
+        prompt.append("Ending: ").append(request.ending().brief()).append('\n');
+        if (task.revisesTail()) {
+            prompt.append("Transition: the last ").append(request.tailBars()).append(" bars of the original (bars ")
+                    .append(task.firstTailBar() + 1).append('-').append(task.firstNewBar()).append(") will be rewritten "
+                            + "together with the continuation so that the join is natural; everything before stays.\n");
+        } else {
+            prompt.append("Transition: every note of bars 1-").append(task.firstNewBar()).append(" stays exactly as it "
+                    + "is; the continuation joins seamlessly at bar ").append(first).append(".\n");
+        }
+        prompt.append("Tempo, meter and key stay as they are.\n");
+        prompt.append("Parts that go on (use their ids):\n");
+        for (Part part : task.parts()) {
+            prompt.append("  ").append(ContinuationTask.describe(part)).append('\n');
+        }
+        if (request.newParts() > 0) {
+            prompt.append("You may bring in up to ").append(request.newParts()).append(" NEW instruments where the "
+                    + "dramaturgy needs them; name them new1, new2, ... and list them in newParts. Bring in none if the "
+                    + "existing parts suffice.\n");
+        } else {
+            prompt.append("Do not add new instruments; newParts stays empty.\n");
+        }
+        prompt.append("Return one JSON object: {\"sections\":[{\"name\":\"<name>\",\"function\":\"<for example "
+                + "variation, build, climax, outro>\",\"bars\":<n>,\"intensity\":<0 to 1>,\"chords\":[\"<one chord "
+                + "symbol per bar>\"],\"idea\":\"<what happens musically>\",\"parts\":[\"<ids of the parts that play, "
+                + "new keys included>\"]}],\"newParts\":[{\"key\":\"new1\",\"name\":\"<name>\",\"instrument\":\"<instrument>\","
+                + "\"program\":<General MIDI program 0-127>,\"role\":\"melody|harmony|bass|drums|texture\",\"idea\":\"<its job>\"}],"
+                + "\"motifs\":\"<which motifs of the piece come back and how>\",\"arc\":\"<the dramaturgy in one sentence>\"}. "
+                + "The bars of all sections add up to exactly ").append(request.bars()).append(". Sections have 4 to ")
+                .append(ContinuationPlan.MAX_SECTION_BARS).append(" bars. Chords are symbols such as C, Dm, G7, F#m, Bb. "
+                        + "No notes yet.").append(task.take());
+        return prompt.toString();
+    }
+
+    @Override
+    public ContinuationPlan plan(ContinuationTask task, Composition piece, Path cacheDirectory) throws IOException {
+        String prompt = prompt(task);
+        Path cache = cacheDirectory.resolve("plan-" + ContextBuilder.sha256(prompt).substring(0, 12) + ".json");
+        return read(model.generate(INSTRUCTION, prompt, maxTokens, cache), task, piece);
+    }
+
+    /** Reads and completes a planning answer; see the class comment. */
+    public static ContinuationPlan read(JsonObject answer, ContinuationTask task, Composition piece) {
+        List<String> repairs = new ArrayList<>();
+        Map<String, String> renamed = new HashMap<>();
+        List<ContinuationPlan.NewPart> newParts = new ArrayList<>();
+        for (JsonObject given : objects(answer, "newParts")) {
+            String name = text(given, "name");
+            String key = text(given, "key");
+            Integer program = integer(given, "program");
+            if (name == null || name.isBlank() || program == null || program < 0 || program > 127) {
+                repairs.add("Neues Instrument " + (name == null ? key : name) + " ohne Namen oder gültiges Programm "
+                        + "verworfen.");
+                if (key != null) {
+                    renamed.put(key, "verworfen:" + key); // its mentions must not name a later new part
+                }
+                continue;
+            }
+            String role = text(given, "role");
+            if (!Role.ALL.contains(role)) {
+                repairs.add("Neues Instrument " + name + ": unbekannte Rolle " + role + ", als texture übernommen.");
+                role = Role.TEXTURE;
+            }
+            String fixed = "new" + (newParts.size() + 1);
+            if (key != null) {
+                renamed.put(key, fixed);
+            }
+            newParts.add(new ContinuationPlan.NewPart(fixed, name, text(given, "instrument"), program, role,
+                    text(given, "idea")));
+        }
+        List<ContinuationPlan.PlannedSection> sections = new ArrayList<>();
+        int index = 0;
+        for (JsonObject given : objects(answer, "sections")) {
+            index++;
+            String name = text(given, "name");
+            String where = "Abschnitt " + (name == null ? index : name);
+            Integer bars = integer(given, "bars");
+            if (bars == null || bars < 1) {
+                repairs.add(where + " ohne gültige Taktzahl verworfen.");
+                continue;
+            }
+            Double intensity = number(given, "intensity");
+            double level;
+            if (intensity == null || !Double.isFinite(intensity)) {
+                level = task.request().preset().startIntensity();
+                repairs.add(where + ": keine Intensität, " + level + " angenommen.");
+            } else {
+                level = Math.max(0, Math.min(1, intensity));
+                if (level != intensity) {
+                    repairs.add(where + ": Intensität " + intensity + " auf " + level + " begrenzt.");
+                }
+            }
+            List<String> chords = ContinuationPlan.chords(texts(given, "chords"), bars, where, repairs);
+            List<String> parts = new ArrayList<>();
+            for (String part : texts(given, "parts")) {
+                parts.add(renamed.getOrDefault(part, part));
+            }
+            sections.add(new ContinuationPlan.PlannedSection("s" + (sections.size() + 1), name, text(given, "function"),
+                    bars, level, chords, text(given, "idea"), parts));
+        }
+        return ContinuationPlan.complete(sections, newParts, text(answer, "motifs"), text(answer, "arc"), task, piece,
+                repairs);
+    }
+
+    private static List<JsonObject> objects(JsonObject object, String name) {
+        List<JsonObject> found = new ArrayList<>();
+        JsonElement value = object.get(name);
+        if (value != null && value.isJsonArray()) {
+            for (JsonElement element : value.getAsJsonArray()) {
+                if (element.isJsonObject()) {
+                    found.add(element.getAsJsonObject());
+                }
+            }
+        }
+        return found;
+    }
+
+    private static List<String> texts(JsonObject object, String name) {
+        List<String> found = new ArrayList<>();
+        JsonElement value = object.get(name);
+        if (value != null && value.isJsonArray()) {
+            JsonArray array = value.getAsJsonArray();
+            for (JsonElement element : array) {
+                found.add(element.isJsonPrimitive() ? element.getAsString() : null);
+            }
+        }
+        return found;
+    }
+
+    private static String text(JsonObject object, String name) {
+        JsonElement value = object.get(name);
+        return value == null || value.isJsonNull() || !value.isJsonPrimitive() ? null : value.getAsString();
+    }
+
+    private static Integer integer(JsonObject object, String name) {
+        Double value = number(object, name);
+        return value == null || value != Math.rint(value) || Math.abs(value) > 100_000 ? null : value.intValue();
+    }
+
+    private static Double number(JsonObject object, String name) {
+        JsonElement value = object.get(name);
+        if (value == null || !value.isJsonPrimitive()) {
+            return null;
+        }
+        try {
+            return value.getAsDouble();
+        } catch (RuntimeException notANumber) {
+            return null;
+        }
+    }
+}

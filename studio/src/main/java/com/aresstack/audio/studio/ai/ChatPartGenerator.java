@@ -78,8 +78,9 @@ public final class ChatPartGenerator implements PartGenerator {
                 frame.sectionId());
     }
 
-    private static String rules(String role) {
-        return switch (role) {
+    /** What a part of a role should do, in words for the model; a part without a role counts as texture. */
+    static String rules(String role) {
+        return switch (role == null ? "texture" : role) {
             case "melody" -> "Role melody: a singable line or counter-melody that answers the existing melody instead "
                     + "of doubling it, with rests where the other melody is busy.";
             case "harmony" -> "Role harmony: chord tones with smooth voice leading, supporting the given chords.";
