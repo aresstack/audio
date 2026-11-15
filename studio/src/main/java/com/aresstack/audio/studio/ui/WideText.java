@@ -69,6 +69,24 @@ final class WideText extends JPanel {
         (wanted ? area : shown.getComponent(0)).requestFocusInWindow();
     }
 
+    /**
+     * A long text must not make the form wider: the field asks for little room and takes what the
+     * form gives it, so that the names of the fields beside it stay readable.
+     */
+    @Override
+    public java.awt.Dimension getPreferredSize() {
+        java.awt.Dimension size = super.getPreferredSize();
+        return new java.awt.Dimension(Math.min(size.width, NARROW), size.height);
+    }
+
+    @Override
+    public java.awt.Dimension getMinimumSize() {
+        return new java.awt.Dimension(NARROW / 2, super.getPreferredSize().height);
+    }
+
+    /** The width the field asks for, whatever text it holds. */
+    static final int NARROW = 240;
+
     boolean isOpen() {
         return open;
     }

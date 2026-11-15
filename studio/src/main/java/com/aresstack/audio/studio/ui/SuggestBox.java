@@ -58,6 +58,18 @@ final class SuggestBox extends JComboBox<String> {
         setPrototypeDisplayValue("A proposal of usual length");
     }
 
+    /** A long text in the field must not make the form wider, see {@link WideText#getPreferredSize}. */
+    @Override
+    public java.awt.Dimension getPreferredSize() {
+        java.awt.Dimension size = super.getPreferredSize();
+        return new java.awt.Dimension(Math.min(size.width, WideText.NARROW), size.height);
+    }
+
+    @Override
+    public java.awt.Dimension getMinimumSize() {
+        return new java.awt.Dimension(WideText.NARROW / 2, super.getPreferredSize().height);
+    }
+
     /** Shows these proposals in the list; what stands in the field stays. */
     void proposals(List<String> proposals) {
         String typed = field.getText();
