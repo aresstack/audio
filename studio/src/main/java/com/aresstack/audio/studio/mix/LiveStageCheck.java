@@ -20,39 +20,42 @@ import java.util.stream.Stream;
  * the audio thread needed and whether a block came late.
  *
  * <pre>
- * java -cp audio-studio.jar com.aresstack.audio.studio.mix.LiveStageCheck &lt;folder or WAV files&gt; [seconds] [room] [loop]
+ * java -cp audio-studio.jar com.aresstack.audio.studio.mix.LiveStageCheck &lt;folder or WAV files&gt; [seconds] [room] [loop] [puffer=frames]
  * </pre>
  *
  * The room is one of {@code studio}, {@code chamber} (default), {@code hall}, {@code cathedral};
- * {@code loop} (or {@code schleife}) starts the piece again whenever it ends, for short stems.
+ * {@code loop} (or {@code schleife}) plays the music over and over without a gap, for short stems;
+ * {@code puffer=<frames>} sets the line buffer. At the end it also prints how often the sound card
+ * ran empty, which a late block alone does not show.
  */
 public final class LiveStageCheck {
     private LiveStageCheck() {
     }
 
-    /** Whether playback goes on; in a loop a piece that ended starts again. */
-    private static boolean running(LivePlayback playback, boolean loop) {
-        if (loop && playback.state() == LivePlayback.State.ENDED) {
-            playback.play();
-        }
-        return playback.state() == LivePlayback.State.PLAYING;
+    /** When the check ends, by the clock. */
+    private static long until;
+
+    /** Whether the check goes on: playing, and its time not yet over. */
+    private static boolean running(LivePlayback playback) {
+        return playback.state() == LivePlayback.State.PLAYING && System.nanoTime() < until;
     }
 
-    private static void pause(LivePlayback playback, boolean loop, long millis) throws InterruptedException {
-        for (long waited = 0; waited < millis && running(playback, loop); waited += 50) {
+    private static void pause(LivePlayback playback, long millis) throws InterruptedException {
+        for (long waited = 0; waited < millis && running(playback); waited += 50) {
             Thread.sleep(50);
         }
     }
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
-            System.err.println("Aufruf: LiveStageCheck <Ordner mit WAV-Stems oder WAV-Dateien> [Sekunden] [studio|chamber|hall|cathedral] [schleife]");
+            System.err.println("Aufruf: LiveStageCheck <Ordner mit WAV-Stems oder WAV-Dateien> [Sekunden] [studio|chamber|hall|cathedral] [schleife] [puffer=4096]");
             System.exit(2);
         }
         List<Path> files = new ArrayList<Path>();
         double seconds = 25;
         AcousticRoom room = AcousticRoom.CHAMBER;
         boolean loop = false;
+        int buffer = com.aresstack.audio.core.line.LineSink.DEFAULT_BUFFER_FRAMES;
         for (String arg : args) {
             Path path = Paths.get(arg);
             if (Files.isDirectory(path)) {
@@ -62,6 +65,8 @@ public final class LiveStageCheck {
                 }
             } else if (Files.isRegularFile(path)) {
                 files.add(path);
+            } else if (arg.toLowerCase(Locale.ROOT).startsWith("puffer=")) {
+                buffer = Integer.parseInt(arg.substring("puffer=".length()));
             } else if (arg.equalsIgnoreCase("loop") || arg.equalsIgnoreCase("schleife")) {
                 loop = true;
             } else if (AcousticRoom.known(arg)) {
@@ -81,42 +86,46 @@ public final class LiveStageCheck {
         }
         System.out.println("Lade " + files.size() + " Spuren, Raum: " + room.name() + " ...");
         try (LiveStage stage = LiveStage.load(files, placements, room, 2);
-             LivePlayback playback = stage.playOnLine(LiveStage.master(MixLevel.fixed(0), Float.NaN))) {
+             LivePlayback playback = stage.playOnLine(LiveStage.master(Float.NaN, 0), buffer)) {
+            // a loop plays the music over and over without a gap; the room rings from the end into the start
+            stage.loop(loop);
             playback.play();
-            long until = System.nanoTime() + (long) (seconds * 1e9);
+            until = System.nanoTime() + (long) (seconds * 1e9);
             SoundSourcePlacement home = placements.get(0);
             double[][] corners = {{-1, 0.1}, {1, 0.1}, {1, 0.9}, {-1, 0.9}};
-            while (System.nanoTime() < until && running(playback, loop)) {
+            while (running(playback)) {
                 // 1. Dragging: a new place every 16 ms, as the mouse delivers it, once around the stage in 6 s.
                 System.out.printf(Locale.GERMANY, "%6.2f s  1) Ziehen: die erste Spur kreist langsam über die Bühne%n",
                         playback.heardSeconds());
                 long started = System.nanoTime();
-                while (System.nanoTime() - started < 6_000_000_000L && running(playback, loop)) {
+                while (System.nanoTime() - started < 6_000_000_000L && running(playback)) {
                     double turn = (System.nanoTime() - started) / 6e9 * 2 * Math.PI;
                     stage.move(0, home.at(-Math.cos(turn), 0.5 - 0.4 * Math.sin(turn)));
                     Thread.sleep(16);
                 }
                 // 2. Jumps that glide on the stage for 600 ms.
-                for (int i = 0; i < corners.length && running(playback, loop); i++) {
+                for (int i = 0; i < corners.length && running(playback); i++) {
                     double[] corner = corners[i];
                     System.out.printf(Locale.GERMANY, "%6.2f s  2) Gleitsprung (600 ms) nach x=%+.0f, Tiefe=%.1f%n",
                             playback.heardSeconds(), corner[0], corner[1]);
                     stage.glide(0, home.at(corner[0], corner[1]), 600);
-                    pause(playback, loop, 2000);
+                    pause(playback, 2000);
                 }
                 // 3. For comparison: hard jumps (the channel glides only 20 ms).
-                for (int i = 0; i < corners.length && running(playback, loop); i++) {
+                for (int i = 0; i < corners.length && running(playback); i++) {
                     double[] corner = corners[i];
                     System.out.printf(Locale.GERMANY, "%6.2f s  3) harter Sprung (20 ms) nach x=%+.0f, Tiefe=%.1f%n",
                             playback.heardSeconds(), corner[0], corner[1]);
                     stage.move(0, home.at(corner[0], corner[1]));
-                    pause(playback, loop, 2000);
+                    pause(playback, 2000);
                 }
             }
             playback.pause();
             System.out.printf(Locale.GERMANY, "Blöcke: %d, mittlere Last: %.1f %%, längster Block: %.2f ms von %.2f ms, zu spät: %d%n",
                     playback.blocks(), playback.averageLoad() * 100, playback.worstBlockNanos() / 1e6,
                     playback.blockBudgetNanos() / 1e6, playback.overruns());
+            System.out.printf(Locale.GERMANY, "Leitungspuffer: %d Frames, leergelaufen: %d, knappster Füllstand: %d Frames%n",
+                    buffer, playback.underruns(), playback.lowestBufferedFrames());
             if (playback.failure() != null) {
                 playback.failure().printStackTrace();
             }

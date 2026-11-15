@@ -8,7 +8,6 @@ import com.aresstack.audio.core.live.LiveChannel;
 import com.aresstack.audio.core.live.LiveGraph;
 import com.aresstack.audio.core.live.LivePlayback;
 import com.aresstack.audio.core.live.LiveSink;
-import com.aresstack.audio.core.mix.LevelMode;
 import com.aresstack.audio.core.mix.MasterBus;
 import com.aresstack.audio.core.stream.ArraySource;
 import com.aresstack.audio.core.stream.LinearResampler;
@@ -39,6 +38,8 @@ public final class LiveStage implements AutoCloseable {
     private final double secondsPerBar;
     private final List<String> trackIds;
     private final LiveGraph graph;
+    /** How long the music is, without the ring of the room at the end. */
+    private final long musicFrames;
     /** Where each track stands as last handed to its channel, for glides that start from there. */
     private final SoundSourcePlacement[] current;
     /** The running glide of each track, so that a new move or glide replaces it. */
@@ -73,6 +74,7 @@ public final class LiveStage implements AutoCloseable {
         this.trackIds = List.copyOf(ids);
         this.current = placements.toArray(new SoundSourcePlacement[0]);
         this.glides = new java.util.concurrent.Future<?>[placements.size()];
+        this.musicFrames = length;
         this.graph = new LiveGraph(channels, SpatialStemMixer.reverb(room), (float) room.amount(),
                 length + SpatialStemMixer.tail(length, room));
     }
@@ -145,6 +147,14 @@ public final class LiveStage implements AutoCloseable {
         ChannelParameters parameters = SpatialStemMixer.parameters(placement,
                 movements.of(placement.trackId()), room, secondsPerBar);
         return placement.muted() ? parameters.toBuilder().level(0).build() : parameters;
+    }
+
+    /**
+     * Plays the music over and over without a gap (the room rings from the end into the start);
+     * {@code false} lets it end with the ring of the room.
+     */
+    public void loop(boolean on) {
+        graph.setLoop(on ? musicFrames : 0);
     }
 
     public LiveGraph graph() {
@@ -303,18 +313,12 @@ public final class LiveStage implements AutoCloseable {
     }
 
     /**
-     * The master bus for live playback with this level strategy. In {@link LevelMode#FIXED} the
-     * same gain and limiter as the file; in the compatibility mode the factor the last file mix
-     * found ({@link MixOutcome#legacyFactor()}), so that live playback is as loud as the file. A
-     * legacy piece that was never mixed (factor not a number) plays at the master level alone.
+     * The master bus for live playback ("export old, live new"): the factor the last file mix of
+     * the piece found ({@link MixOutcome#legacyFactor()}) as a fixed gain with the live limiter, so
+     * live sounds like the file; see {@link MixLevel#liveMaster(float, double)}.
      */
-    public static MasterBus.Settings master(MixLevel level, float legacyFactor) {
-        if (level.mode() == LevelMode.FIXED) {
-            return level.master();
-        }
-        float factor = Float.isFinite(legacyFactor) && legacyFactor > 0 ? legacyFactor
-                : (float) Math.pow(10, level.masterDb() / 20);
-        return MasterBus.Settings.legacy(factor);
+    public static MasterBus.Settings master(float legacyFactor, double masterDb) {
+        return MixLevel.liveMaster(legacyFactor, masterDb);
     }
 
     /** Live playback of this stage into a sink (a sound card, or a test), paused at the start. */
@@ -325,8 +329,12 @@ public final class LiveStage implements AutoCloseable {
 
     /** Live playback of this stage on the default sound card, paused at the start. */
     public LivePlayback playOnLine(MasterBus.Settings master) throws LineUnavailableException {
-        return playback(master, LineSink.open(SpatialStemMixer.RATE, SpatialStemMixer.BLOCK,
-                LineSink.DEFAULT_BUFFER_FRAMES));
+        return playOnLine(master, LineSink.DEFAULT_BUFFER_FRAMES);
+    }
+
+    /** Live playback on the default sound card with a line buffer of this many frames. */
+    public LivePlayback playOnLine(MasterBus.Settings master, int bufferFrames) throws LineUnavailableException {
+        return playback(master, LineSink.open(SpatialStemMixer.RATE, SpatialStemMixer.BLOCK, bufferFrames));
     }
 
     @Override

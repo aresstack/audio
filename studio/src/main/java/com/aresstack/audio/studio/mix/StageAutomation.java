@@ -36,9 +36,16 @@ public final class StageAutomation {
      * @param x      the place between -1 (left) and +1 (right)
      * @param depth  the place between 0 (front edge) and 1 (back wall)
      * @param reverb the share sent to the room, 0 to 1
+     * @param trimDb dB added to the fixed level of the placement: what a mix document says beyond
+     *               the range a {@link SoundSourcePlacement} can hold, otherwise 0
      */
-    public record Lanes(AutomationCurve level, AutomationCurve x, AutomationCurve depth, AutomationCurve reverb) {
-        static final Lanes STILL = new Lanes(null, null, null, null);
+    public record Lanes(AutomationCurve level, AutomationCurve x, AutomationCurve depth, AutomationCurve reverb,
+                        double trimDb) {
+        static final Lanes STILL = new Lanes(null, null, null, null, 0);
+
+        public Lanes(AutomationCurve level, AutomationCurve x, AutomationCurve depth, AutomationCurve reverb) {
+            this(level, x, depth, reverb, 0);
+        }
 
         /** Whether the track changes its place or its share of the room over time. */
         public boolean moves() {
@@ -73,7 +80,8 @@ public final class StageAutomation {
         }
         joined.replaceAll((track, none) -> {
             Lanes moving = movements.of(track);
-            return new Lanes(of(track).level(), moving.x(), moving.depth(), moving.reverb());
+            Lanes own = of(track);
+            return new Lanes(own.level(), moving.x(), moving.depth(), moving.reverb(), own.trimDb());
         });
         return new StageAutomation(joined);
     }
@@ -106,8 +114,37 @@ public final class StageAutomation {
     }
 
     /**
-     * The automation of a mix document, for the tracks named as the owners of their channels (a
-     * part or an audio track). Lanes of the master, lanes without points and lanes of parameters
+     * The level curves of the stage for a piece whose tempo or meter changes: the points are in
+     * bars, counted from 0, and each lies where the time map has that bar; within a bar the place
+     * is taken in proportion to its ticks.
+     */
+    public static StageAutomation of(List<SoundSourcePlacement> placements, TimeMap time) {
+        Map<String, Lanes> tracks = new LinkedHashMap<>();
+        for (SoundSourcePlacement placement : placements) {
+            List<SoundSourcePlacement.LevelPoint> points = placement.dynamics();
+            if (points.isEmpty() || tracks.containsKey(placement.trackId())) {
+                continue;
+            }
+            double[] seconds = new double[points.size()];
+            double[] db = new double[points.size()];
+            for (int i = 0; i < points.size(); i++) {
+                double bar = Math.max(0, points.get(i).bar());
+                int whole = (int) Math.floor(bar);
+                long from = time.tickOfBar(whole);
+                long tick = from + Math.round((bar - whole) * (time.tickOfBar(whole + 1) - from));
+                seconds[i] = time.seconds(tick);
+                db[i] = points.get(i).db();
+            }
+            tracks.put(placement.trackId(), new Lanes(
+                    AutomationCurve.of(seconds, db, SpatialStemMixer.RATE), null, null, null));
+        }
+        return new StageAutomation(tracks);
+    }
+
+    /**
+     * The automation of a mix document, for the tracks named after the owners of their channels
+     * ({@link #trackId(MixChannel.Owner)}). A channel level beyond what a placement can hold comes
+     * as {@link Lanes#trimDb()}. Lanes of the master, lanes without points and lanes of parameters
      * the studio does not know are not heard.
      */
     public static StageAutomation of(MixScene mix, TimeMap time) {
@@ -117,8 +154,10 @@ public final class StageAutomation {
             AutomationCurve x = curve(mix.lane(channel.id(), AutomationLane.X), time);
             AutomationCurve depth = curve(mix.lane(channel.id(), AutomationLane.DEPTH), time);
             AutomationCurve reverb = curve(mix.lane(channel.id(), AutomationLane.REVERB), time);
-            if (level != null || x != null || depth != null || reverb != null) {
-                tracks.putIfAbsent(channel.owner().id(), new Lanes(level, x, depth, reverb));
+            double trim = channel.levelDb() - Math.max(SoundSourcePlacement.MIN_LEVEL,
+                    Math.min(SoundSourcePlacement.MAX_LEVEL, channel.levelDb()));
+            if (level != null || x != null || depth != null || reverb != null || trim != 0) {
+                tracks.putIfAbsent(trackId(channel.owner()), new Lanes(level, x, depth, reverb, trim));
             }
         }
         return new StageAutomation(tracks);
@@ -126,16 +165,26 @@ public final class StageAutomation {
 
     /**
      * The stage of a mix document as the mixer takes it: one placement per channel, named after
-     * its owner, in the order of the channels. Its level curves come with {@link #of(MixScene,
+     * its owner ({@link #trackId(MixChannel.Owner)}), in the order of the channels; a placement
+     * keeps its level within its range, and the rest comes as {@link Lanes#trimDb()}. Its level curves come with {@link #of(MixScene,
      * TimeMap)}, not with the placements.
      */
     public static List<SoundSourcePlacement> placements(MixScene mix) {
         List<SoundSourcePlacement> placements = new ArrayList<>();
         for (MixChannel channel : mix.channels()) {
-            placements.add(new SoundSourcePlacement(channel.owner().id(), channel.x(), channel.depth(),
+            placements.add(new SoundSourcePlacement(trackId(channel.owner()), channel.x(), channel.depth(),
                     channel.levelDb(), channel.width(), channel.reverb(), channel.muted(), channel.locked(), null));
         }
         return placements;
+    }
+
+    /**
+     * The name under which the mixer knows the channel of an owner: a part by its id, as the stage
+     * has always named its tracks, an audio track by its id with a prefix, so that a part and an
+     * audio track of the same id stay two tracks.
+     */
+    public static String trackId(MixChannel.Owner owner) {
+        return owner.kind() == MixChannel.Owner.Kind.PART ? owner.id() : "audio-track:" + owner.id();
     }
 
     /** A lane in seconds of the piece, with a point of its own at every change of tempo it spans. */

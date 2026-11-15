@@ -134,6 +134,12 @@ public final class LiveChannel {
         }
     }
 
+    /** Starts the source again from its first frame, as at the end of a loop; filters and echoes ring on. */
+    void rewind() {
+        source.seek(0);
+        realign = true;
+    }
+
     /** Goes on at this frame of the mix; called by the graph on the audio thread. */
     void seek(long frame) {
         source.seek(Math.min(frame, frames));

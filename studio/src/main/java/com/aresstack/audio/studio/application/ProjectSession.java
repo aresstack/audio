@@ -16,7 +16,6 @@ import com.aresstack.audio.composition.edit.Proposal;
 import com.aresstack.audio.composition.edit.Revision;
 import com.aresstack.audio.composition.edit.TimeShift;
 import com.aresstack.audio.composition.mix.AutomationLane;
-import com.aresstack.audio.composition.mix.LevelMode;
 import com.aresstack.audio.composition.mix.MixChannel;
 import com.aresstack.audio.composition.mix.MixScene;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
@@ -468,27 +467,6 @@ public final class ProjectSession {
         PreviewFolder.delete(folder, proposal.id());
     }
 
-    /**
-     * Sets how the level of the mix is made, on the user's explicit switch, and writes it to
-     * {@code mix.json}. Nothing else of the piece changes and nothing is taken from the old
-     * files. The mode is a setting of the piece, not a step of its history: undo, redo and a
-     * restored revision keep it as it is now. Returns whether it changed.
-     */
-    public boolean setLevelMode(LevelMode mode) throws IOException {
-        if (mode == null || mix == null || mix.levelMode() == mode) {
-            return false;
-        }
-        MixScene switched = inMode(mix, mode);
-        MixJson.save(folder, switched);
-        mix = switched;
-        return true;
-    }
-
-    private static MixScene inMode(MixScene mix, LevelMode mode) {
-        return mix == null || mode == null || mix.levelMode() == mode ? mix
-                : new MixScene(mix.room(), mix.masterDb(), mode, mix.channels(), mix.automation());
-    }
-
     public boolean canUndo() {
         return history.canUndo();
     }
@@ -561,8 +539,7 @@ public final class ProjectSession {
     private ChangeSet become(State state) throws IOException {
         ChangeSet changes = ChangeSet.between(composition, state.composition());
         composition = state.composition();
-        // How the level is made is the user's switch and stays, whatever the state said then.
-        mix = inMode(state.mix(), mix == null ? null : mix.levelMode());
+        mix = state.mix();
         Set<String> stale = changes.staleStems();
         if (!stale.isEmpty()) {
             List<StemManifest.Entry> kept = new ArrayList<>();
@@ -675,9 +652,8 @@ public final class ProjectSession {
      * The mix after a new import: the channels of parts that stayed keep what the mix says of
      * them, a new part gets the seat the import gives it, a part that went loses its channel and
      * its automation. Only a changed {@code spatial-scene.json} sets places, levels, room and
-     * level curves anew (lanes of place and room share, which the old file cannot hold, stay), and
-     * with them how the level is set ({@code levelMode}), which the stage file says since a piece
-     * can be switched to the fixed level; otherwise that stays as the mix has it.
+     * level curves anew (lanes of place and room share, which the old file cannot hold, stay); how the level is set ({@code levelMode}) is never said by the old files
+     * and stays as the mix has it.
      */
     private static MixScene keepingMix(MixScene imported, MixScene model, Composition composition, boolean stage) {
         if (model == null) {
@@ -714,7 +690,7 @@ public final class ProjectSession {
                     automation.add(lane);
                 }
             }
-            return new MixScene(imported.room(), imported.masterDb(), imported.levelMode(), channels, automation);
+            return new MixScene(imported.room(), imported.masterDb(), model.levelMode(), channels, automation);
         }
         List<MixChannel> channels = new ArrayList<>();
         List<String> kept = new ArrayList<>();

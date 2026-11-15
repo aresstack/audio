@@ -69,7 +69,7 @@ public final class StageDeckTest {
         Path song = piece();
         Path arrangement = song.resolve("arrangement.tsv");
         StageMixService service = new StageMixService();
-        SpatialScene scene = service.scene(arrangement, song).withFixedLevel(true);
+        SpatialScene scene = service.scene(arrangement, song);
         Path mixed = service.mix(arrangement, song, scene, message -> { });
         Card.OPEN.set(0);
         StageDeck deck = new StageDeck(Card::new);
@@ -149,7 +149,7 @@ public final class StageDeckTest {
         Path song = piece();
         Path arrangement = song.resolve("arrangement.tsv");
         StageMixService service = new StageMixService();
-        SpatialScene scene = service.scene(arrangement, song).withFixedLevel(true);
+        SpatialScene scene = service.scene(arrangement, song);
         Path mixed = service.mix(arrangement, song, scene, message -> { });
         CountDownLatch mayOpen = new CountDownLatch(1);
         StageDeck deck = new StageDeck(() -> {
@@ -194,7 +194,7 @@ public final class StageDeckTest {
         Path song = piece();
         Path arrangement = song.resolve("arrangement.tsv");
         StageMixService service = new StageMixService();
-        SpatialScene scene = service.scene(arrangement, song).withFixedLevel(true);
+        SpatialScene scene = service.scene(arrangement, song);
         Path mixed = service.mix(arrangement, song, scene, message -> { });
         StageDeck deck = new StageDeck(() -> {
             throw new javax.sound.sampled.LineUnavailableException("keine Tonausgabe");

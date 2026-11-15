@@ -158,4 +158,61 @@ public final class LiveStageMotionTest {
                     SpatialStemMixer.parameters(RIGHT, DRY, 2).toLeft(), 0f);
         }
     }
+
+    /** The place on a circle around the stage, once round in 6 s, as LiveStageCheck drags it. */
+    private static SoundSourcePlacement onCircle(int frame) {
+        double turn = (double) frame / (6.0 * RATE) * 2 * Math.PI;
+        return LEFT.at(-Math.cos(turn), 0.5 - 0.4 * Math.sin(turn));
+    }
+
+    private static float[][] render(IntFunction<SoundSourcePlacement> placeAt, int frames, AcousticRoom room)
+            throws Exception {
+        float[] tone = new float[frames];
+        for (int i = 0; i < frames; i++) {
+            tone[i] = (float) (0.2 * Math.sin(2 * Math.PI * 330 * i / RATE));
+        }
+        try (LiveStage stage = LiveStage.of(List.of(new SpatialStemMixer.Signal(tone, tone, RATE)),
+                List.of(placeAt.apply(0)), room, 2)) {
+            LiveGraph graph = stage.graph();
+            float[][] out = {new float[frames], new float[frames]};
+            AudioBlock block = new AudioBlock(353);
+            graph.prepare(RATE, 353);
+            for (int at = 0; at + 353 <= frames; at += 353) {
+                if (at % 706 < 353) {
+                    stage.move(0, placeAt.apply(at));
+                }
+                block.setFrames(353);
+                graph.read(block);
+                System.arraycopy(block.left, 0, out[0], at, 353);
+                System.arraycopy(block.right, 0, out[1], at, 353);
+            }
+            return out;
+        }
+    }
+
+    private static double level(float[][] out, int from) {
+        double sum = 0;
+        for (int i = from; i < from + 220; i++) {
+            sum += out[0][i] * (double) out[0][i] + out[1][i] * (double) out[1][i];
+        }
+        return 10 * Math.log10(sum / 220);
+    }
+
+    /**
+     * Listening report "short drop-outs while it travels": a held tone dragged round the hall. Its
+     * level per 5 ms changes as the place changes (the walls' echoes and the direct sound add up
+     * differently at every place, as in a real room), but moving adds no hole of its own: at each
+     * point of the way it is as loud as a tone that stands still at that place.
+     */
+    @Test
+    public void movingAddsNoHolesBeyondWhatThePlaceItselfSoundsLike() throws Exception {
+        float[][] moving = render(LiveStageMotionTest::onCircle, 6 * RATE, AcousticRoom.HALL);
+        for (int t = RATE; t < 5 * RATE; t += RATE / 2) {
+            int at = t;
+            float[][] standing = render(frame -> onCircle(at), RATE, AcousticRoom.HALL);
+            double difference = level(moving, t) - level(standing, RATE - 2000);
+            Assert.assertTrue("at " + t / (double) RATE + " s moving differs by " + difference + " dB",
+                    Math.abs(difference) < 2);
+        }
+    }
 }

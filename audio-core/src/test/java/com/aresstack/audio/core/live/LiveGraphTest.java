@@ -297,4 +297,90 @@ public final class LiveGraphTest {
             Assert.assertEquals(0f, block.right[i], 0f);
         }
     }
+
+    @Test
+    public void aLoopStartsAgainWithoutAGap() throws Exception {
+        int frames = 1000;
+        float[] ramp = new float[frames];
+        for (int i = 0; i < frames; i++) {
+            ramp[i] = 0.1f + i * 0.0005f;
+        }
+        LiveGraph graph = new LiveGraph(List.of(new LiveChannel(new ArraySource(ramp, ramp.clone(), RATE), frames,
+                ChannelParameters.builder().build(), 0, null)), null, 0, frames + 500);
+        graph.setLoop(frames);
+        AudioBlock block = new AudioBlock(300);
+        graph.prepare(RATE, 300);
+        float[] out = new float[3600];
+        for (int at = 0; at < out.length; at += 300) {
+            block.setFrames(300);
+            Assert.assertEquals("a loop never ends", 300, graph.read(block));
+            System.arraycopy(block.left, 0, out, at, 300);
+        }
+        for (int i = 0; i < out.length; i++) {
+            Assert.assertEquals("frame " + i, ramp[i % frames], out[i], 1e-6f);
+        }
+        graph.setLoop(0);
+        int got;
+        long total = graph.position();
+        do {
+            block.setFrames(300);
+            got = graph.read(block);
+            total += got;
+        } while (got == 300);
+        Assert.assertEquals("without the loop it ends with the ring", frames + 500, total);
+    }
+
+    @Test
+    public void aLoopShorterThanABlockWrapsAsOftenAsItHasTo() throws Exception {
+        int frames = 100;
+        float[] ramp = new float[frames];
+        for (int i = 0; i < frames; i++) {
+            ramp[i] = 0.1f + i * 0.005f;
+        }
+        LiveGraph graph = new LiveGraph(List.of(new LiveChannel(new ArraySource(ramp, ramp.clone(), RATE), frames,
+                ChannelParameters.builder().build(), 0, null)), null, 0, frames);
+        graph.setLoop(frames);
+        AudioBlock block = new AudioBlock(512);
+        graph.prepare(RATE, 512);
+        float[] out = new float[512 * 4];
+        for (int at = 0; at < out.length; at += 512) {
+            block.setFrames(512);
+            Assert.assertEquals("a loop never ends", 512, graph.read(block));
+            System.arraycopy(block.left, 0, out, at, 512);
+        }
+        for (int i = 0; i < out.length; i++) {
+            Assert.assertEquals("frame " + i, ramp[i % frames], out[i], 1e-6f);
+        }
+    }
+
+    @Test
+    public void smallEchoDelayChangesGlideAndDoNotCancelATone() throws Exception {
+        // A tone and one strong echo; the echo's delay creeps by 2 frames every 10 ms, as when dragging.
+        // Gliding the delay moves the comb of tone and echo smoothly; it never mixes the echo with a
+        // shifted copy of itself, so the level only follows the slowly moving interference.
+        int frames = 2 * RATE;
+        float[] tone = TestSignals.sine(frames, 330, RATE, 0.3);
+        ChannelParameters base = ChannelParameters.builder().pan(0, 0)
+                .echoes(new int[]{500}, new float[]{0.5f}, new float[]{0.5f}).build();
+        LiveChannel channel = new LiveChannel(new ArraySource(tone, tone.clone(), RATE), frames, base, 4000, WALLS);
+        LiveGraph graph = new LiveGraph(List.of(channel), null, 0, frames);
+        AudioBlock block = new AudioBlock(441);
+        graph.prepare(RATE, 441);
+        float[] out = new float[frames];
+        for (int at = 0, step = 0; at + 441 <= frames; at += 441, step++) {
+            channel.set(base.toBuilder().echoes(new int[]{500 + 2 * step}, new float[]{0.5f}, new float[]{0.5f}).build());
+            block.setFrames(441);
+            graph.read(block);
+            System.arraycopy(block.left, 0, out, at, 441);
+        }
+        // level per 5 ms against its neighbours: no short holes
+        double[] level = new double[frames / 220];
+        for (int w = 0; w < level.length; w++) {
+            level[w] = 10 * Math.log10(TestSignals.rms(out, w * 220, (w + 1) * 220) + 1e-9) * 2;
+        }
+        for (int w = 20; w < level.length - 2; w++) {
+            double around = (level[w - 2] + level[w + 2]) / 2;
+            Assert.assertTrue("hole of " + (level[w] - around) + " dB at window " + w, level[w] > around - 1);
+        }
+    }
 }

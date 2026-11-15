@@ -358,9 +358,9 @@ public final class SpatialStemMixer {
      */
     static ChannelParameters parameters(SoundSourcePlacement placement, StageAutomation.Lanes movements,
                                         AcousticRoom room, double secondsPerBar) {
-        AutomationCurve level = StageAutomation.of(List.of(placement), secondsPerBar).of(placement.trackId()).level();
-        return parameters(placement, new StageAutomation.Lanes(level, movements.x(), movements.depth(),
-                movements.reverb()), room);
+        StageAutomation.Lanes own = StageAutomation.of(List.of(placement), secondsPerBar).of(placement.trackId());
+        return parameters(placement, new StageAutomation.Lanes(own.level(), movements.x(), movements.depth(),
+                movements.reverb(), own.trimDb()), room);
     }
 
     /**
@@ -374,7 +374,7 @@ public final class SpatialStemMixer {
                                         AcousticRoom room) {
         boolean rings = rings(room);
         // Level, also over time, and width: the middle stays, the difference of the sides is scaled.
-        float level = (float) Math.pow(10, placement.levelDb() / 20);
+        float level = (float) Math.pow(10, (placement.levelDb() + lanes.trimDb()) / 20);
         float width = (float) placement.width();
         StereoStrip.LevelCurve curve = lanes.level() == null ? null
                 : frame -> (float) Math.pow(10, lanes.level().valueAt(frame) / 20);
@@ -385,10 +385,9 @@ public final class SpatialStemMixer {
         // Where it stands when nothing moves: the same formulas as for a moving source.
         float[] seat = new float[ChannelMotion.GAINS];
         seat(placement.x(), placement.depth(), placement.reverb(), rings, seat);
-        StereoPanner panner = new StereoPanner(pan(placement), near(distance));
         ChannelParameters.Builder parameters = ChannelParameters.builder()
                 .strip(level, width, curve)
-                .pan(panner.toLeft(), panner.toRight())
+                .pan(seat[ChannelMotion.TO_LEFT], seat[ChannelMotion.TO_RIGHT])
                 .send(seat[ChannelMotion.SEND_LEFT], seat[ChannelMotion.SEND_RIGHT])
                 .shelf(shelf);
         if (lanes.moves()) {

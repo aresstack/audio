@@ -184,6 +184,12 @@ final class StageDeck {
         }
     }
 
+    /** The gain of the limiter of live playback now; 1 while it rests or while a file plays. */
+    float limiterGain() {
+        LiveDeck deck = live;
+        return deck != null && deck.playing() ? deck.limiterGain() : 1f;
+    }
+
     // ---- transport, whatever plays ----
 
     boolean playing() {

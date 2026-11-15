@@ -7,6 +7,7 @@ import com.aresstack.audio.composition.mix.MixScene;
 import com.aresstack.audio.composition.mix.Room;
 import com.aresstack.audio.core.AudioBlock;
 import com.aresstack.audio.core.live.LiveGraph;
+import com.aresstack.audio.core.dsp.LookaheadLimiter;
 import com.aresstack.audio.core.mix.LevelMode;
 import com.aresstack.audio.core.mix.MasterBus;
 import com.aresstack.audio.studio.stage.AcousticRoom;
@@ -226,16 +227,14 @@ public final class LiveStageTest {
     }
 
     @Test
-    public void liveMasterIsTheFileLevel() {
-        MixLevel fixed = MixLevel.fixed(-2);
-        MasterBus.Settings live = LiveStage.master(fixed, Float.NaN);
-        Assert.assertEquals(LevelMode.FIXED, live.mode());
-        Assert.assertEquals(fixed.master().gain(), live.gain(), 0f);
-        MasterBus.Settings legacy = LiveStage.master(MixLevel.legacy(-3), 2.5f);
-        Assert.assertEquals(LevelMode.LEGACY_PEAK, legacy.mode());
-        Assert.assertEquals(2.5f, legacy.gain(), 0f);
-        // never mixed: the master level alone
-        Assert.assertEquals((float) Math.pow(10, -3 / 20.0), LiveStage.master(MixLevel.legacy(-3), Float.NaN).gain(), 0f);
+    public void liveMasterIsTheFileLevelWithTheLiveLimiter() {
+        MasterBus.Settings mixed = LiveStage.master(2.5f, -3);
+        Assert.assertEquals(LevelMode.FIXED, mixed.mode());
+        Assert.assertEquals(2.5f, mixed.gain(), 0f);
+        Assert.assertSame(LookaheadLimiter.Settings.LIVE, mixed.limiter());
+        // never mixed: the make-up gain and the master level
+        Assert.assertEquals((float) Math.pow(10, (MixLevel.MAKEUP_DB - 3) / 20), LiveStage.master(Float.NaN, -3).gain(),
+                0f);
     }
 
     private static float[][] drain(LiveGraph graph, int blockFrames) {

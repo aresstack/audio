@@ -132,21 +132,16 @@ public final class PieceModel {
     }
 
     /**
-     * The user switched how the level of the mix is made. The model notes exactly that in
-     * {@code mix.json} and takes nothing else from the files. A piece without a model yet gets
-     * the mode from its stage file when it is taken into the model.
+     * The model of the piece in this folder as it is saved, for work that only reads it
+     * (rendering). Nothing is taken over from the old files here. Empty if the folder is not the
+     * open piece or the piece has no model: then it works from its old files as before.
      */
-    public synchronized void levelFixed(boolean fixed) {
-        if (session == null) {
-            return;
+    public synchronized Optional<ProjectSession> of(Path wanted) {
+        if (wanted == null || folder == null || session == null
+                || !wanted.toAbsolutePath().normalize().equals(folder.toAbsolutePath().normalize())) {
+            return Optional.empty();
         }
-        try {
-            session.setLevelMode(fixed ? com.aresstack.audio.composition.mix.LevelMode.FIXED
-                    : com.aresstack.audio.composition.mix.LevelMode.LEGACY_PEAK);
-        } catch (IOException | RuntimeException failed) {
-            session = null;
-            log.accept("WARN: Die Umstellung des Pegels ließ sich nicht ins Werkmodell schreiben: " + said(failed));
-        }
+        return Optional.of(session);
     }
 
     /** The model of the open piece, if it has one. */

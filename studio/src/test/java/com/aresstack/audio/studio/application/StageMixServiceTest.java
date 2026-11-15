@@ -133,83 +133,34 @@ public final class StageMixServiceTest {
         }
     }
 
-    /** A piece of one second: its arrangement and a tone as the sound of the melody and of the bass. */
     @Test
-    public void aPieceKeepsItsOldLevelUntilItIsSwitchedAndTheSwitchIsKeptWithItsStage() throws Exception {
+    public void theExportIsBitIdenticalToBefore() throws Exception {
+        // Decision of the product owner, "export old, live new": files and exports keep the old
+        // peak normalization, byte for byte as the mixer from before the level strategy wrote them.
         Path song = piece("tempo\t120", "track\tmelody\t73\t0\tmelody", "track\tbass\t32\t1\tbass");
-        StageMixService service = new StageMixService();
-        SpatialSceneStore store = new SpatialSceneStore();
         Path arrangement = song.resolve("arrangement.tsv");
-        SpatialScene scene = service.scene(arrangement, song);
-        Assert.assertFalse("no piece is switched by itself", scene.fixedLevel());
-
-        // As before: brought to its peak, and nothing in the saved stage says anything new.
-        store.save(song, scene);
-        byte[] oldStage = Files.readAllBytes(song.resolve(SpatialSceneStore.FILE_NAME));
-        Assert.assertFalse(new String(oldStage, StandardCharsets.UTF_8).contains("fixed"));
-        byte[] before = Files.readAllBytes(service.mix(arrangement, song, message -> { }));
-        Assert.assertEquals(com.aresstack.audio.core.mix.LevelMode.LEGACY_PEAK, service.outcome().mode());
-        Assert.assertNull(MixReport.limiter(service.outcome()));
-        double usualPeak = peak(SpatialStemMixer.read(arrangement.resolveSibling(StageMixService.MIX_FILE)));
-        Assert.assertEquals("brought to full level as always", 0.92, usualPeak, 0.01);
-
-        // Switched: kept through a change of the stage, saved, read again, and heard in every mix.
-        // Far down, so that the fixed make-up gain of this mode does not hide that the master level counts.
-        SpatialScene fixed = scene.withFixedLevel(true).withMaster(-30).with(scene.placement("bass").withLevel(-3));
-        store.save(song, fixed);
-        Assert.assertTrue(store.load(song).fixedLevel());
-        Assert.assertTrue(service.scene(arrangement, song).fixedLevel());
-        byte[] after = Files.readAllBytes(service.mix(arrangement, song, message -> { }));
-        Assert.assertEquals(com.aresstack.audio.core.mix.LevelMode.FIXED, service.outcome().mode());
-        Assert.assertNotNull(MixReport.limiter(service.outcome()));
-        Assert.assertTrue(MixReport.limiterShort(service.outcome()).startsWith("Limiter "));
-        Assert.assertFalse(Arrays.equals(before, after));
-        Assert.assertTrue("the fixed mix is not brought to full level",
-                peak(SpatialStemMixer.read(arrangement.resolveSibling(StageMixService.MIX_FILE))) < usualPeak / 1.5);
-
-        // And back: the piece sounds as it did, and its stage file is the old one again.
-        store.save(song, store.load(song).withFixedLevel(false).withMaster(0).with(scene.placement("bass")));
-        Assert.assertArrayEquals(oldStage, Files.readAllBytes(song.resolve(SpatialSceneStore.FILE_NAME)));
-        Assert.assertArrayEquals(before, Files.readAllBytes(service.mix(arrangement, song, message -> { })));
-    }
-
-    @Test
-    public void anExportOfASwitchedPieceReachesTheChosenPeakOrLoudness() throws Exception {
-        Path song = piece("tempo\t120", "track\tmelody\t73\t0\tmelody", "track\tbass\t32\t1\tbass");
         StageMixService service = new StageMixService();
-        Path arrangement = song.resolve("arrangement.tsv");
-        SpatialScene fixed = service.scene(arrangement, song).withFixedLevel(true).withMaster(-12);
-
-        com.aresstack.audio.core.mix.ExportNormalization peak = com.aresstack.audio.core.mix.ExportNormalization.peak(-3);
-        Path file = service.export(arrangement, song, fixed, song.resolve("peak.wav"), 24, StageMixService.level(fixed, peak));
-        Assert.assertEquals(-3, 20 * Math.log10(peak(SpatialStemMixer.read(file))), 0.01);
-        Assert.assertTrue(MixReport.normalization(service.outcome(), peak), MixReport.normalization(service.outcome(), peak)
-                .startsWith("Spitze auf -3,0 dBFS gebracht"));
-
-        com.aresstack.audio.core.mix.ExportNormalization loud =
-                com.aresstack.audio.core.mix.ExportNormalization.loudness(-23);
-        service.export(arrangement, song, fixed, song.resolve("loud.wav"), 24, StageMixService.level(fixed, loud));
-        com.aresstack.audio.core.mix.OfflineMix.Result result = service.outcome().fixed();
-        Assert.assertEquals(-23, result.loudnessBeforeNormalization() + 20 * Math.log10(result.normalizationGain()), 0.1);
-        Assert.assertTrue(MixReport.normalization(service.outcome(), loud).startsWith("Lautheit auf -23,0 LUFS gebracht"));
-
-        // A piece that was not switched is never normalized, whatever was chosen: it keeps its sound.
-        SpatialScene old = fixed.withFixedLevel(false).withMaster(0);
-        byte[] usual = Files.readAllBytes(service.export(arrangement, song, old, song.resolve("old.wav"), 24));
-        byte[] chosen = Files.readAllBytes(service.export(arrangement, song, old, song.resolve("old-chosen.wav"), 24,
-                StageMixService.level(old, loud)));
-        Assert.assertArrayEquals(usual, chosen);
-        Assert.assertNull(MixReport.normalization(service.outcome(), loud));
-    }
-
-    private static double peak(SpatialStemMixer.Signal signal) {
-        double peak = 0;
-        for (int i = 0; i < signal.left.length; i++) {
-            peak = Math.max(peak, Math.max(Math.abs(signal.left[i]), Math.abs(signal.right[i])));
+        Assert.assertTrue("no factor before the first mix", Float.isNaN(service.legacyFactor()));
+        for (com.aresstack.audio.studio.stage.AcousticRoom room : new com.aresstack.audio.studio.stage.AcousticRoom[]{
+                com.aresstack.audio.studio.stage.AcousticRoom.STUDIO, com.aresstack.audio.studio.stage.AcousticRoom.HALL}) {
+            for (double masterDb : new double[]{0, -6}) {
+                SpatialScene scene = new SpatialScene(room, service.scene(arrangement, song).placements(), masterDb);
+                scene = scene.with(scene.placement("bass").at(0.7, 0));
+                Path exported = service.export(arrangement, song, scene, song.resolve("export.wav"), 16);
+                SpatialScene fitting = scene.fitting(StageMixService.tracks(arrangement));
+                Path old = song.resolve("old.wav");
+                new com.aresstack.audio.studio.mix.legacy.LegacySpatialStemMixer().mix(
+                        Arrays.asList(song.resolve("melody.wav"), song.resolve("bass.wav")),
+                        Arrays.asList(fitting.placement("melody"), fitting.placement("bass")), fitting.room(),
+                        StageMixService.secondsPerBar(arrangement), fitting.masterDb(), old, 16);
+                Assert.assertArrayEquals(room.name() + ", " + masterDb + " dB", Files.readAllBytes(old),
+                        Files.readAllBytes(exported));
+                Assert.assertTrue("live playback gets the factor of the file", service.legacyFactor() > 0);
+            }
         }
-        return peak;
     }
 
+    /** A piece of one second: its arrangement and a tone as the sound of the melody and of the bass. */
     private Path piece(String... lines) throws Exception {
         Path song = folder.newFolder().toPath();
         Files.write(song.resolve("arrangement.tsv"), Arrays.asList(lines), StandardCharsets.UTF_8);

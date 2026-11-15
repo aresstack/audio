@@ -42,11 +42,6 @@ public final class StagePanelCourseTest {
         }
 
         @Override
-        public boolean confirmFixedLevel() {
-            return true;
-        }
-
-        @Override
         public void askDirector() {
         }
     }
@@ -140,6 +135,27 @@ public final class StagePanelCourseTest {
                 field.paint(graphics);
                 graphics.dispose();
             }
+        });
+    }
+
+    /** "Export old, live new": what the live limiter does stands at the end of the status line, and only while it acts. */
+    @Test
+    public void theStatusLineSaysWhatTheLiveLimiterDoesAndKeepsWhatWasSaid() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            if (javax.swing.UIManager.getFont("defaultFont") == null) {
+                javax.swing.UIManager.put("defaultFont", new java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.PLAIN, 12));
+            }
+            StagePanel panel = new StagePanel(new Told());
+            panel.setStatus("Neu gemischt in 0,4 s");
+            panel.setLimiter("Limiter −2,3 dB");
+            Assert.assertEquals("Neu gemischt in 0,4 s · Limiter −2,3 dB", panel.statusLine());
+            panel.setStatus("Mische neu …");
+            Assert.assertEquals("Mische neu … · Limiter −2,3 dB", panel.statusLine());
+            panel.setLimiter("");
+            Assert.assertEquals("Mische neu …", panel.statusLine());
+            panel.setStatus(null);
+            panel.setLimiter("Limiter −0,5 dB");
+            Assert.assertEquals("Limiter −0,5 dB", panel.statusLine());
         });
     }
 

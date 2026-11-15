@@ -5,7 +5,6 @@ import com.aresstack.audio.core.live.LivePlayback;
 import com.aresstack.audio.core.live.LiveSink;
 import com.aresstack.audio.core.mix.MasterBus;
 import com.aresstack.audio.studio.mix.LiveStage;
-import com.aresstack.audio.studio.mix.MixLevel;
 import com.aresstack.audio.studio.mix.MixOutcome;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
 import com.aresstack.audio.studio.stage.AcousticRoom;
@@ -23,9 +22,10 @@ import java.util.List;
  * user moves on the stage is handed over with {@link #stage} and heard from the next block on,
  * gliding; no file is mixed for it.
  *
- * <p>A live deck is made for one room and one way of setting the level. Another room, or a piece
- * switched between the peak and the fixed level, needs a new deck ({@link #fits}); the window
- * makes one in the background and goes on at the place that was heard.
+ * <p>A live deck is made for one room. Another room needs a new deck ({@link #fits}); the window
+ * makes one in the background and goes on at the place that was heard. Its level is the one of
+ * the file ("export old, live new"): the factor the last file mix found as a fixed gain, with
+ * the live limiter behind it ({@link LiveStage#master}).
  *
  * <p>Thread use: {@link #open} reads the tracks and belongs off the event thread. Everything else
  * may be called from any thread; it only hands numbers to the audio thread.
@@ -43,11 +43,10 @@ public final class LiveDeck implements AutoCloseable {
 
     private final LiveStage stage;
     private final LivePlayback playback;
-    private final boolean fixedLevel;
     /** Where the mix document of the piece lies, and the tempo its stems were rendered at. */
     private final Path directory;
     private final int tempo;
-    /** In the compatibility mode: the factor of the last file mix, and the master level it was found with. */
+    /** The factor of the last file mix, and the master level it was found with. */
     private volatile float legacyFactor;
     private volatile double legacyMasterDb;
     private volatile SpatialScene scene;
@@ -62,7 +61,6 @@ public final class LiveDeck implements AutoCloseable {
         this.stage = stage;
         this.playback = playback;
         this.scene = scene;
-        this.fixedLevel = scene.fixedLevel();
         this.legacyFactor = legacyFactor;
         this.legacyMasterDb = scene.masterDb();
         for (SoundSourcePlacement placement : scene.placements()) {
@@ -76,7 +74,7 @@ public final class LiveDeck implements AutoCloseable {
      * the file mix does.
      *
      * @param only         the track that is heard alone, or {@code null} for the whole mix
-     * @param legacyFactor in the compatibility mode the factor the last file mix of this stage
+     * @param legacyFactor the factor the last file mix of this stage
      *                     found ({@link MixOutcome#legacyFactor()}), of the whole mix or of the
      *                     track alone, as {@code only} says; if it is not known (not a number),
      *                     it is measured here, so that live playback is as loud as the file
@@ -104,7 +102,7 @@ public final class LiveDeck implements AutoCloseable {
             throw new IOException("Von diesem Stück ist noch keine Spur gerendert.");
         }
         float factor = legacyFactor;
-        if (!fitting.fixedLevel() && !(factor > 0 && Float.isFinite(factor))) {
+        if (!(factor > 0 && Float.isFinite(factor))) {
             factor = measuredFactor(arrangement, directory, fitting, only);
         }
         // How the tracks move with the piece (place and room share) comes from its mix document, as for the file.
@@ -121,7 +119,7 @@ public final class LiveDeck implements AutoCloseable {
     }
 
     /**
-     * The factor a file mix of this stage is brought to its peak with (compatibility mode), for
+     * The factor a file mix of this stage is brought to its peak with, for
      * the whole mix or for the track that is heard alone, as the file of each is. The mix is
      * measured into a file of its own that is thrown away: the mixed file of the piece belongs to
      * the window, which may have mixed a newer stage by now. Not a number if it cannot be mixed;
@@ -136,8 +134,8 @@ public final class LiveDeck implements AutoCloseable {
         try {
             scratch = Files.createTempFile(directory, "live-level-", ".part");
             StageMixService mixing = new StageMixService();
-            mixing.export(arrangement, directory, measured, scratch, 16, null);
-            return mixing.outcome().legacyFactor();
+            mixing.export(arrangement, directory, measured, scratch, 16);
+            return mixing.legacyFactor();
         } catch (Exception unmixed) {
             return Float.NaN;
         } finally {
@@ -156,11 +154,11 @@ public final class LiveDeck implements AutoCloseable {
         return only == null ? placement : placement.withMuted(!only.equals(placement.trackId()));
     }
 
-    /** Whether this deck can play a stage: the same room and the same way of setting the level. */
+    /** Whether this deck can play a stage: the same room. */
     public boolean fits(SpatialScene wanted) {
         AcousticRoom mine = stage.room();
         AcousticRoom theirs = wanted.room();
-        return wanted.fixedLevel() == fixedLevel && mine.kind().equals(theirs.kind())
+        return mine.kind().equals(theirs.kind())
                 && mine.reverbSeconds() == theirs.reverbSeconds() && mine.amount() == theirs.amount();
     }
 
@@ -246,13 +244,13 @@ public final class LiveDeck implements AutoCloseable {
     }
 
     /**
-     * The file of the stage was mixed again in the compatibility mode: live playback takes the
+     * The file of the stage was mixed again: live playback takes the
      * factor it found, so that it stays as loud as the file.
      *
      * @param masterDb the master level of the stage that was mixed
      */
     public void legacyFactor(float factor, double masterDb) {
-        if (fixedLevel || !(factor > 0 && Float.isFinite(factor))) {
+        if (!(factor > 0 && Float.isFinite(factor))) {
             return;
         }
         legacyFactor = factor;
@@ -260,18 +258,23 @@ public final class LiveDeck implements AutoCloseable {
         playback.master().setSettings(master(scene));
     }
 
-    /** The master bus for a stage: the fixed level, or the factor of the file mix moved with the master fader. */
+    /** The master bus for a stage: the factor of the file mix, moved with the master fader, and the live limiter. */
     private MasterBus.Settings master(SpatialScene wanted) {
         return master(wanted, legacyFactor, legacyMasterDb);
     }
 
     private static MasterBus.Settings master(SpatialScene wanted, float factor, double legacyMasterDb) {
-        if (wanted.fixedLevel()) {
-            return LiveStage.master(StageMixService.level(wanted, null).live(), Float.NaN);
-        }
         float moved = factor > 0 && Float.isFinite(factor)
                 ? (float) (factor * Math.pow(10, (wanted.masterDb() - legacyMasterDb) / 20)) : Float.NaN;
-        return LiveStage.master(MixLevel.legacy(wanted.masterDb()), moved);
+        return LiveStage.master(moved, wanted.masterDb());
+    }
+
+    /**
+     * How far the limiter of live playback turns the sound down right now, as a gain: 1 while it
+     * rests. One number the audio thread publishes; safe to read from any thread.
+     */
+    public float limiterGain() {
+        return playback.master().limiter().gain();
     }
 
     public LiveStage liveStage() {
