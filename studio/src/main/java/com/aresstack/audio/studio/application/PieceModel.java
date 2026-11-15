@@ -9,7 +9,7 @@ import java.util.function.Consumer;
 /**
  * Keeps the model of the piece that is open in the studio in step with what the studio still
  * writes the old way. The window calls it when a piece is opened, after composing and after a
- * track was renamed; it never stops the studio: whatever goes wrong is said as a warning, and
+ * track was renamed, from the window's thread or from the one that composes; it never stops the studio: whatever goes wrong is said as a warning, and
  * the piece goes on working from its old files as before.
  *
  * <p>Opening a piece that has a model never changes that model: old files that differ from it
@@ -72,52 +72,40 @@ public final class PieceModel {
 
     /**
      * Takes into the model what was just written the old way: a composed arrangement or a renamed
-     * track. A piece that was composed for the first time gets its model here. A model that
-     * says more than {@code arrangement.tsv} can is not replaced; that is a warning.
+     * track. Only these two call it. Rendering, playing, mixing and proposals of the AI never do:
+     * they must not change the saved piece, and a file changed behind the model's back stays out.
+     * A piece that was composed for the first time gets its model here. A model that says more
+     * than {@code arrangement.tsv} can is not replaced; that is a warning.
      */
     public synchronized void synchronize() {
-        follow();
-    }
-
-    /**
-     * The model of the piece in this folder, brought in step with what was just written the old
-     * way, for work that goes on from the model (rendering). Empty if the folder is not the open
-     * piece, if it has no model, or if the model could not follow its files: then the piece
-     * works from its old files as before.
-     */
-    public synchronized Optional<ProjectSession> inStep(Path wanted) {
-        if (wanted == null || folder == null
-                || !wanted.toAbsolutePath().normalize().equals(folder.toAbsolutePath().normalize())) {
-            return Optional.empty();
-        }
-        return follow() ? Optional.of(session) : Optional.empty();
-    }
-
-    /** Returns whether the model now says what the files say. */
-    private boolean follow() {
         if (session == null) {
             // Nothing in memory: the piece is new, or the last attempt failed. A piece without a
             // model is imported from the files as they are now, which already is the new state.
-            if (folder == null) {
-                return false;
-            }
-            if (load(folder)) {
-                return true;
-            }
-            if (session == null) {
-                return false;
+            if (folder == null || load(folder) || session == null) {
+                return;
             }
         }
         try {
             session.synchronize();
-            return true;
         } catch (IOException | RuntimeException failed) {
             // What is in memory may be ahead of what was written; the next attempt starts from the
             // saved model again, so that a write that failed is tried once more.
             session = null;
             log.accept("WARN: Das Werkmodell ließ sich nicht nachführen: " + said(failed));
-            return false;
         }
+    }
+
+    /**
+     * The model of the piece in this folder as it is saved, for work that only reads it
+     * (rendering). Nothing is taken over from the old files here. Empty if the folder is not the
+     * open piece or the piece has no model: then it works from its old files as before.
+     */
+    public synchronized Optional<ProjectSession> of(Path wanted) {
+        if (wanted == null || folder == null || session == null
+                || !wanted.toAbsolutePath().normalize().equals(folder.toAbsolutePath().normalize())) {
+            return Optional.empty();
+        }
+        return Optional.of(session);
     }
 
     /** The model of the open piece, if it has one. */

@@ -160,7 +160,7 @@ public final class AudioStudioMain {
         com.aresstack.audio.studio.application.PieceRendering rendering =
                 new com.aresstack.audio.studio.application.PieceRendering(registry);
         java.util.Map<String, Integer> programs = new HashMap<String, Integer>();
-        com.aresstack.audio.studio.application.PieceRendering.Outcome first = rendering.render(session,
+        com.aresstack.audio.studio.application.PieceRendering.Outcome first = rendering.render(session, null,
                 com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine.GERVILL, "fluidsynth",
                 "sfizz_render", programs, message -> { });
         if (!Files.isRegularFile(first.mix()) || Files.size(first.mix()) < 1000
@@ -168,7 +168,7 @@ public final class AudioStudioMain {
                 || !Files.isRegularFile(folder.resolve("arrangement.mid"))) {
             throw new IllegalStateException("The piece was not rendered from its model.");
         }
-        com.aresstack.audio.studio.application.PieceRendering.Outcome second = rendering.render(session,
+        com.aresstack.audio.studio.application.PieceRendering.Outcome second = rendering.render(session, null,
                 com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine.GERVILL, "fluidsynth",
                 "sfizz_render", programs, message -> { });
         if (!second.stems().rendered().isEmpty()) {
