@@ -31,9 +31,13 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         while (use.find()) {
             users.add(methodAround(source, use.start()));
         }
-        assertEquals("opening loads the model, composing and renaming bring it in step; nothing else reaches it",
+        assertEquals("opening loads the model, composing and renaming bring it in step, rendering reads it;"
+                        + " nothing else reaches it",
                 new java.util.TreeSet<String>(List.of("composeIntoPiece", "loadArrangementForCurrentDirectory",
-                        "renamed")), users);
+                        "renamed", "renderArrangement")), users);
+        assertEquals("rendering only reads the saved model", List.of("renderArrangement"),
+                callers(source, "pieceModel\\.of\\("));
+        assertEquals(1, callers(source, "pieceModel\\.").stream().filter("renderArrangement"::equals).count());
         assertEquals("renaming synchronizes itself, right after its files were written", List.of("renamed"),
                 callers(source, "pieceModel\\.synchronize\\(\\)"));
         assertEquals("opening only opens", List.of("loadArrangementForCurrentDirectory"),
