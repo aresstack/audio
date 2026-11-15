@@ -85,7 +85,7 @@ Bestätigt aus dem Bericht: alle in Abschnitt 2.1 genannten Funktionen sind vorh
 |---|---|---|---|
 | F1 | Die TSV ist Wahrheit und wird aus KI-Caches regeneriert | `GemmaMusicComposer.assemble` schreibt `arrangement.tsv` immer neu | Manuelle Änderungen gehen beim nächsten KI-Lauf verloren. Blockiert A9, A10, A11. |
 | F2 | Sechs unabhängige TSV-Parser | `MultiTrackMusicRenderer.parseArrangement`, `StageMixService.tracks/tempo/rename`, `MixDirector.summaries`, `StudioMusicRenderer.readTrackIds`, `Score.of`, `ArrangementView.Arrangement` | Jede Formaterweiterung muss sechsmal nachgezogen werden; die Parser sind unterschiedlich streng. |
-| F3 | Die Acht-Takt-Grenze sitzt auch im MIDI-Schreiber | `MultiTrackMusicRenderer`: `note.tick + note.length > PPQ * 4 * 8` wird abgelehnt; Tempo nur 60–180 | Die Mischgrenze von zehn Minuten ist wirkungslos, solange dieser Schritt davor liegt. |
+| F3 | Die Acht-Takt-Grenze sitzt auch im MIDI-Schreiber | `MultiTrackMusicRenderer`: `note.tick + note.length > PPQ * 4 * 8` wird abgelehnt; Tempo nur 60–180; `renderAudio` legt die Puffer der Java-Synthese fest für `8 * 4` Schläge an und schneidet Späteres stumm ab | Die Mischgrenze von zehn Minuten ist wirkungslos, solange dieser Schritt davor liegt. Auch nach Aufheben der Prüfung blieben Spuren ohne Soundbank nach acht Takten stumm. |
 | F4 | Vier unabhängige Laufzeitgrenzen | Gervill 3 min (`MAX_DURATION_MICROS`), `ExternalProcessRunner` und `SoundFontMidiRenderer` je 5 min Prozesslaufzeit, Mixer 10 min (`MAX_SECONDS`), dazu 256 Noten je KI-Antwort | A14 |
 | F5 | `trackId` ist gleichzeitig Identität, Anzeigename, Dateiname, Cache-Schlüssel, MIDI-Spurname und Bühnenschlüssel | `MusicTrack.requireId`, `StageMixService.rename`, `cachedResponse`, `SoundSourcePlacement.trackId` | Umbenennen schreibt Dateien um; ein Instrumentenwechsel in einer Bahn ist nicht darstellbar. |
 | F6 | Der Normalizer verändert Tonhöhen fachlich | `normalizePitch`: Melodie und Textur werden auf die C-Dur-Leiter, Harmonie und Bass auf Akkordtöne der festen Akkordfolge gezogen | In anderen Tonarten würde er korrekte Noten verfälschen; Variation und Chromatik sind ausgeschlossen. |
@@ -397,7 +397,7 @@ Die Typisierung ist eine Regel des Validators, keine Struktur des Formats: `Clip
     midi/  stems/  mix/  manifest.json
   arrangement.tsv           Export (übergangsweise bei jedem Speichern)
   arrangement.mid           Export
-  (Altdateien bleiben unangetastet liegen)
+  legacy/                   unveränderte Kopie der Altdateien vom Zeitpunkt des Imports
 ```
 
 **Begründung.** JSON ist bereits das Format aller Stores, lesbar, mit Versionsfeld migrierbar, ohne neue Abhängigkeit. Vollabbilder als Revision sind einfach und klein: ein zehnminütiges Stück mit 30 Parts liegt in der Größenordnung von wenigen Megabyte unkomprimiert. `mix.json` bleibt ein eigenes Dokument, damit eine Pegeländerung das Werk nicht berührt und keine Noten-Caches entwertet (A12).
@@ -412,7 +412,7 @@ Die Typisierung ist eine Regel des Validators, keine Struktur des Formats: `Clip
 
 1. **MIDI direkt aus dem Modell**, je Part, ohne Umweg über TSV und ohne Kind-JVM. Die Schreiblogik aus `MultiTrackMusicRenderer.writeMidi` wird als Bibliotheksklasse herausgelöst; das CLI bleibt als dünne Hülle.
 2. **`StemRenderer` als Schnittstelle** mit den vier vorhandenen Backends. Die Auswahl bleibt, wo sie ist (`InstrumentSampleRenderer`), wird aber über die Schnittstelle erweiterbar.
-3. **Inhaltsadressierter Stem-Cache.** Schlüssel = Hash aus Noten des Parts, Programm, Soundbank (ID, Größe, Änderungszeit), Engine, `TimeMap`, Abtastrate. Ein Part wird nur neu gerendert, wenn sich sein Schlüssel ändert. `stems.tsv` geht im `manifest.json` auf.
+3. **Inhaltsadressierter Stem-Cache.** Schlüssel = Hash aus Noten des Parts, Programm, Soundbank (ID, Größe, Änderungszeit), Engine, `TimeMap`, Abtastrate und der vollständigen Konfiguration des jeweiligen Backends. Bei der eingebauten Java-Synthese gehört die **Rolle** dazu, weil sie Wellenform, Hüllkurve, Ausklang und Pegel bestimmt. Ein Part wird nur neu gerendert, wenn sich sein Schlüssel ändert. `stems.tsv` geht im `manifest.json` auf.
 4. **Eine Grenze statt vier.** Ein `RenderLimits`-Objekt (maximale Dauer, daraus abgeleitete Prozesslaufzeit) wird an MIDI-Schreiber, Gervill, Prozessstarter und Mixer durchgereicht (F3, F4).
 5. **Audio-Clips** werden nicht gerendert, sondern vom Mixer an ihrer Zeitposition gelesen.
 6. **Mischen** über den Graphen des Audio-Kerns, blockweise in eine Datei gestreamt.
@@ -479,8 +479,8 @@ Nicht zwingend, obwohl es so wirkt: Der Audio-Kern hängt vom Werkmodell nur üb
 
 ### 5.1 Grundsätze
 
-- Altdateien werden **gelesen, nie verändert, nie gelöscht**.
-- Die Umstellung eines Stücks geschieht beim ersten Öffnen, ohne Rückfrage, und ist wiederholbar (Löschen von `composition.json` stellt den Altzustand her).
+- Der Altzustand bleibt erhalten: beim Import werden alle Altdateien unverändert nach `legacy/` kopiert. Diese Kopie wird **nie verändert und nie gelöscht**. Das ist nötig, weil `arrangement.tsv` in den Phasen M1 bis M3 als erzeugte Sicht überschrieben wird.
+- Die Umstellung eines Stücks geschieht beim ersten Öffnen, ohne Rückfrage, und ist umkehrbar: `composition.json` löschen und die Dateien aus `legacy/` zurückkopieren stellt den Altzustand her. Ein erneuter Import liest immer aus `legacy/`, sobald der Ordner existiert.
 - Vorhandene gerenderte Stems werden übernommen; ein altes Stück darf beim Öffnen nicht neu rendern müssen.
 
 ### 5.2 Import eines Altbestands
@@ -508,7 +508,7 @@ Fehlende Dateien sind zulässig (ein Ordner nur mit `arrangement.tsv` ist ein g�
 | M3 Änderungskern | „Spur neu komponieren" läuft als Patch mit Vorschau | `composition.json` + Revisionen |
 | M4 Ablösung | Renderer, Partitur, Bahnen, MixDirector lesen das Modell direkt; TSV nur noch Export | `composition.json` |
 
-In M1 bis M3 wird die TSV bei jedem Speichern aus dem Modell erzeugt. Dadurch laufen Renderer, Partitur und Mixer unverändert weiter, und der Umstieg der Leser (M4) kann einzeln erfolgen.
+In M1 bis M3 wird die TSV bei jedem Speichern aus dem Modell erzeugt; das Original liegt unverändert in `legacy/` (5.1). Dadurch laufen Renderer, Partitur und Mixer unverändert weiter, und der Umstieg der Leser (M4) kann einzeln erfolgen.
 
 ### 5.4 Formatversionen
 
@@ -532,7 +532,7 @@ Größe: S ≈ Tage, M ≈ ein bis zwei Wochen, L ≈ mehrere Wochen. Das sind E
 |---|---|---|---|---|
 | F0 | Sicherheitsnetz: Golden-Tests für TSV → MIDI, Mix-Hash, Partitur; **ein** `ArrangementFile`-Leser ersetzt die sechs Parser; `Progress` in neutrales Package | S | — | keine Verhaltensänderung, F2 und F8 erledigt |
 | F1 | Modul `composition`: Modell Stufe 1, `TimeMap`, IDs; Import nach 5.2; TSV-/MIDI-Export; Projektordner und `ProjectSession`; `stage` entkoppeln (F7) | M | F0 | jedes alte Stück lädt, TSV-Rundreise identisch |
-| F2 | Parametrische Zeit und Tonart: `CompositionSpec` in Oberfläche und Prompts; feste Werte aus Composer, Normalizer, MIDI-Schreiber, MixDirector entfernen; `RenderLimits`; `Key.spell`, Vorzeichnung und Taktart in der Partitur; abschnittsweise Generierung | M–L | F1 | A1, A14 |
+| F2 | Parametrische Zeit und Tonart: `CompositionSpec` in Oberfläche und Prompts; feste Werte aus Composer, Normalizer, MIDI-Schreiber, Java-Synthese (Pufferlänge aus dem Stück) und MixDirector entfernen; `RenderLimits`; `Key.spell`, Vorzeichnung und Taktart in der Partitur; abschnittsweise Generierung | M–L | F1 | A1, A14 |
 | F3 | Änderungskern: Patch, `EditScope`, Validator, `Proposal`, Revisionen, Undo; „Spur neu komponieren" als erster Nutzer mit Vorschau | M | F1 | A11; Grundlage für A4, A5, A9, A10 |
 
 **Parallel nach F3** (Audio-Kern bereits nach F0)
@@ -605,10 +605,10 @@ F0 ─► D0 ─► D1 ─► D2 ─► D4
 | AP | Automatisiert | Fachlich |
 |---|---|---|
 | F0 | Golden: Demo-TSV → identische MIDI-Bytes vor und nach dem Umbau; identischer Mix-Hash; `ScoreTest` unverändert grün | Demo klingt und sieht aus wie zuvor |
-| F1 | Rundreise TSV → Modell → TSV zeilengleich für alle Beispiele; Import mit fehlenden Dateien; Stems werden nicht neu gerendert (Manifest „übernommen") | A15: drei echte Alt-Stücke öffnen, vergleichen |
-| F2 | Parametrisierte Tests: Taktzahl, Tempo, Tonart, Taktart → MIDI-Länge, Tempo-/Taktart-/Tonart-Meta-Ereignisse; `Key.spell` für alle 24 Tonarten; Normalizer verändert keine korrekten Noten in d-Moll; 12-Minuten-MIDI durchläuft alle Renderer ohne Grenzfehler | A1, A14 |
+| F1 | Rundreise TSV → Modell → TSV zeilengleich für alle Beispiele; `legacy/` nach Import und nach Speichern bytegleich zum Original; Rückweg stellt den Altzustand her; Import mit fehlenden Dateien; Stems werden nicht neu gerendert (Manifest „übernommen") | A15: drei echte Alt-Stücke öffnen, vergleichen |
+| F2 | Parametrisierte Tests: Taktzahl, Tempo, Tonart, Taktart → MIDI-Länge, Tempo-/Taktart-/Tonart-Meta-Ereignisse; `Key.spell` für alle 24 Tonarten; Normalizer verändert keine korrekten Noten in d-Moll; 12-Minuten-MIDI durchläuft alle Renderer ohne Grenzfehler; die WAV der Java-Synthese ist so lang wie das Stück und im letzten Takt nicht stumm | A1, A14 |
 | F3 | Jede Operation innerhalb und außerhalb des Bereichs; `hashOutside` konstant; Undo/Redo über 100 zufällige Patches ergibt Ausgangszustand; Revision laden = gespeicherter Zustand | A11 |
-| R1 | Änderung an einem Part rendert genau einen Stem; Änderung an `mix.json` rendert keinen | A12 |
+| R1 | Änderung an einem Part rendert genau einen Stem; Änderung an `mix.json` rendert keinen; reine Rollenänderung rendert den Stem der Java-Synthese neu | A12 |
 | C1 | Kontext ist für gleiches Werk und gleichen Bereich bytegleich; `ADD_TRACK` verändert keinen bestehenden Part; Antwort mit fremdem Part wird abgelehnt | A4 |
 | C2 | Bereich Takte 5–8 eines Parts: Noten außerhalb identisch; gehaltene Noten über die Grenze bleiben; Antwort mit Noten in Takt 9 wird beschnitten und protokolliert | A5, A6 |
 | C3 | Plan deckt genau die neuen Takte ab; Modus „Original schützen": Hash der Takte 1–8 gleich; Modus „Übergang": nur die letzten n Takte dürfen abweichen | A2, A3 (Hörprüfung) |
