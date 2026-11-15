@@ -438,6 +438,27 @@ public final class AudioStudioFrame extends JFrame {
         c.gridx = 1;
         c.insets = new Insets(0, 0, 0, 0);
         master.add(masterRight, c);
+        // Under the meters: what the play key plays, the mix on the stage or one track alone.
+        c.gridx = 0;
+        c.gridy = 3;
+        c.gridwidth = 2;
+        c.insets = new Insets(10, 0, 5, 0);
+        master.add(DeckWidgets.lettering("Wiedergabe"), c);
+        c.gridy = 4;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.insets = new Insets(0, 0, 0, 0);
+        // As wide as the meters with their letters: the layout stretches it, it asks for no width of its own.
+        playbackSelection.setPreferredSize(new Dimension(60, 26));
+        playbackSelection.setToolTipText("Wiedergabe: was die Play-Taste abspielt, der Mix auf der Bühne oder eine Spur allein");
+        playbackSelection.setRenderer(new javax.swing.DefaultListCellRenderer() {
+            @Override
+            public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list, Object value, int index,
+                                                                   boolean selected, boolean focused) {
+                return super.getListCellRendererComponent(list, value == null ? "" : playbackLabel(String.valueOf(value)),
+                        index, selected, focused);
+            }
+        });
+        master.add(playbackSelection, c);
 
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 18, 0));
         right.setOpaque(false);
@@ -502,17 +523,9 @@ public final class AudioStudioFrame extends JFrame {
     private JPanel deckPage() {
         JPanel sourceChoice = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         sourceChoice.setOpaque(false);
-        sourceChoice.add(DeckWidgets.lettering("Wiedergabe"));
-        playbackSelection.setPreferredSize(new Dimension(230, 28));
-        playbackSelection.setRenderer(new javax.swing.DefaultListCellRenderer() {
-            @Override
-            public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list, Object value, int index,
-                                                                   boolean selected, boolean focused) {
-                return super.getListCellRendererComponent(list, value == null ? "" : playbackLabel(String.valueOf(value)),
-                        index, selected, focused);
-            }
-        });
-        sourceChoice.add(playbackSelection);
+        // The choice of the playback is in the transport, under the master meters; here, beside
+        // the menu of the piece, is the key that takes the last change back.
+        sourceChoice.add(undoKey);
 
         trackTable = new TrackLanes(registry, this::tracksChanged, new TrackLanes.Solo() {
             @Override
@@ -579,8 +592,6 @@ public final class AudioStudioFrame extends JFrame {
                 this::reworkRegion));
         pieceActions.add(pieceAction("Umorchestrieren …",
                 "Die KI verteilt das Material markierter Takte neu auf die Stimmen", this::reorchestrate));
-        pieceActions.add(javax.swing.Box.createHorizontalStrut(12));
-        pieceActions.add(undoKey);
         undoKey.setToolTipText("Nimmt die letzte Änderung am Stück zurück (Strg+Z)");
         undoKey.setFocusable(false);
         undoKey.setEnabled(false);
