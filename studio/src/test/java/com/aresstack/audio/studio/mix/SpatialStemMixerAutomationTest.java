@@ -120,6 +120,38 @@ public final class SpatialStemMixerAutomationTest {
         assertEquals(0.5, none.left[RATE / 2], 1e-4);
     }
 
+    @Test
+    public void aChannelLevelBeyondTheRangeOfThePlacementIsHeardAsTheDocumentSaysIt() throws Exception {
+        MixChannel quiet = new MixChannel("melody-ch", MixChannel.Owner.part("melody"), 0, 0, -60, 1, 0, false, false);
+        MixScene document = new MixScene(new Room("studio", 0.3, 0), 0, LevelMode.FIXED, List.of(quiet), List.of());
+        SpatialStemMixer.Mix mix = mix(document, TimeMap.of(120), List.of(steady(RATE)), DRY);
+        assertEquals(0.5 * Math.pow(10, -60 / 20.0), mix.left[RATE / 2], 1e-6);
+    }
+
+    @Test
+    public void aPartAndAnAudioTrackOfTheSameIdStayTwoTracks() throws Exception {
+        MixChannel part = new MixChannel("part-ch", MixChannel.Owner.part("melody"), 0, 0.1, 0, 1, 0, false, false);
+        MixChannel audio = new MixChannel("audio-ch",
+                new MixChannel.Owner(MixChannel.Owner.Kind.AUDIO_TRACK, "melody"), 0, 0.1, 0, 1, 0, false, false);
+        MixScene document = new MixScene(new Room("studio", 0.3, 0), 0, LevelMode.FIXED, List.of(part, audio), List.of(
+                lane("part-ch", AutomationLane.X, new long[] {0}, new double[] {-1}),
+                lane("audio-ch", AutomationLane.X, new long[] {0}, new double[] {1})));
+        List<SoundSourcePlacement> placements = StageAutomation.placements(document);
+        assertEquals(List.of("melody", "audio-track:melody"),
+                placements.stream().map(SoundSourcePlacement::trackId).toList());
+        SpatialStemMixer.Mix leftOnly = mix(document, TimeMap.of(120),
+                List.of(noise(RATE / 2, 4), new SpatialStemMixer.Signal(new float[RATE / 2], new float[RATE / 2], RATE)),
+                DRY);
+        double[] sides = power(leftOnly, 0, RATE / 2);
+        assertTrue("the part stands left, the audio track right: " + Arrays.toString(sides), sides[0] > 4 * sides[1]);
+        // And the other way round: the audio track gets its own lane, never the part's.
+        SpatialStemMixer.Mix rightOnly = mix(document, TimeMap.of(120),
+                List.of(new SpatialStemMixer.Signal(new float[RATE / 2], new float[RATE / 2], RATE), noise(RATE / 2, 4)),
+                DRY);
+        double[] other = power(rightOnly, 0, RATE / 2);
+        assertTrue("the audio track stands right: " + Arrays.toString(other), other[1] > 4 * other[0]);
+    }
+
     private static double[] power(SpatialStemMixer.Mix mix, int from, int to) {
         double left = 0;
         double right = 0;

@@ -372,7 +372,10 @@ public final class SpatialStemMixer {
                 : frame -> (float) Math.pow(10, lanes.level().valueAt(frame) / 20);
         if (!lanes.moves() && !sound.headphones()) {
             ChannelParameters p = parameters(placement, room, curve);
-            StereoStrip strip = new StereoStrip(new StereoStrip.Settings(p.level(), p.width(), p.curve()));
+            // What the mix document says beyond the range of the placement (D3) goes into the strip.
+            float level = lanes.trimDb() == 0 ? p.level()
+                    : (float) Math.pow(10, (placement.levelDb() + lanes.trimDb()) / 20);
+            StereoStrip strip = new StereoStrip(new StereoStrip.Settings(level, p.width(), p.curve()));
             StereoBiquad shelf = p.shelf() != null ? new StereoBiquad(p.shelf()) : null;
             EarlyReflections reflections = null;
             if (p.echoes() > 0) {
@@ -385,7 +388,8 @@ public final class SpatialStemMixer {
             StereoPanner panner = StereoPanner.ofGains(p.toLeft(), p.toRight());
             return new StemChannel(source, length, strip, p.sendLeft(), p.sendRight(), shelf, panner, reflections);
         }
-        StereoStrip strip = new StereoStrip(new StereoStrip.Settings((float) Math.pow(10, placement.levelDb() / 20),
+        StereoStrip strip = new StereoStrip(new StereoStrip.Settings(
+                (float) Math.pow(10, (placement.levelDb() + lanes.trimDb()) / 20),
                 (float) placement.width(), curve));
         int walls = walls(room, sound);
         // Where the track stands when nothing moves, with exactly the numbers of a standing track.
