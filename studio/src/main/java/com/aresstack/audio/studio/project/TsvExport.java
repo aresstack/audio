@@ -1,6 +1,7 @@
 package com.aresstack.audio.studio.project;
 
 import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.Key;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.Role;
 import com.aresstack.audio.composition.TimeMap;
@@ -15,9 +16,11 @@ import java.util.Map;
  * understands: a tempo line, then for each part its track line and its notes. A part is a track
  * of the file, under the id of the part.
  *
- * <p>The format can only say what the first stage of the model says: one tempo, four quarters
- * to the bar, whole-number tempo. Anything more is refused with {@link NotExpressible}; then
- * {@code arrangement.mid} is the format to exchange the piece in.
+ * <p>The format can only say what the first stage of the model says: one whole-number tempo,
+ * one meter and one key for the whole piece (meter, key and a length beyond the notes only
+ * since F2, and only where they differ from what every older piece was). Anything more is
+ * refused with {@link NotExpressible}; then {@code arrangement.mid} is the format to exchange
+ * the piece in.
  */
 public final class TsvExport {
     /** The composition says something the TSV format cannot. */
@@ -33,13 +36,14 @@ public final class TsvExport {
     /** The lines of the file, without line ends. */
     public static List<String> lines(Composition composition) {
         TimeMap time = composition.timeMap();
-        if (time.tempos().size() != 1 || time.meters().size() != 1) {
-            throw new NotExpressible("arrangement.tsv knows one tempo and one meter only");
+        if (time.tempos().size() != 1 || time.meters().size() != 1 || time.keys().size() != 1) {
+            throw new NotExpressible("arrangement.tsv knows one tempo, one meter and one key only");
         }
         TimeMap.Meter meter = time.meters().get(0);
-        if (meter.numerator() != 4 || meter.denominator() != 4) {
-            throw new NotExpressible("arrangement.tsv knows four quarters to the bar only");
+        if (meter.numerator() > 32 || meter.denominator() > 32) {
+            throw new NotExpressible("arrangement.tsv knows meters up to 32/32 only");
         }
+        Key key = time.keys().get(0).key();
         double bpm = time.tempos().get(0).bpm();
         if (bpm != Math.rint(bpm)) {
             throw new NotExpressible("arrangement.tsv knows whole-number tempos only: " + bpm);
@@ -47,6 +51,23 @@ public final class TsvExport {
         Map<String, Integer> channels = channels(composition);
         List<String> lines = new ArrayList<>();
         lines.add("tempo\t" + (long) bpm);
+        boolean fourFour = meter.numerator() == 4 && meter.denominator() == 4;
+        if (!fourFour) {
+            lines.add("meter\t" + meter.numerator() + "\t" + meter.denominator());
+        }
+        if (!key.equals(Key.C_MAJOR)) {
+            lines.add("key\t" + key.tonicName() + "\t" + (key.mode() == Key.Mode.MAJOR ? "major" : "minor"));
+        }
+        long notesEnd = 0;
+        for (Part part : composition.parts()) {
+            for (Composition.PlacedNote placed : composition.notesOf(part.id())) {
+                notesEnd = Math.max(notesEnd, placed.endTick());
+            }
+        }
+        int bars = time.barsCovering(composition.endTick());
+        if (ArrangementFile.needsBarsLine(bars, time.barsCovering(notesEnd), fourFour)) {
+            lines.add("bars\t" + bars);
+        }
         for (Part part : composition.parts()) {
             lines.add("track\t" + part.id() + "\t" + part.program() + "\t" + channels.get(part.id())
                     + (part.role() == null ? "" : "\t" + part.role()));
@@ -126,6 +147,18 @@ public final class TsvExport {
         }
         if (tempo != null) {
             lines.add(tempo);
+        }
+        // Since F2: meter, key and length, as the last line of each says them.
+        arrangement.meter().ifPresent(meter -> lines.add(meter.text()));
+        arrangement.key().ifPresent(key -> lines.add(key.text()));
+        String bars = null;
+        for (ArrangementFile.Entry entry : arrangement.entries()) {
+            if (entry instanceof ArrangementFile.Bars line) {
+                bars = line.text();
+            }
+        }
+        if (bars != null) {
+            lines.add(bars);
         }
         Map<String, List<String>> tracks = new LinkedHashMap<>();
         for (ArrangementFile.Entry entry : arrangement.entries()) {

@@ -1,5 +1,6 @@
 package com.aresstack.audio.studio.score;
 
+import com.aresstack.audio.composition.Key;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -21,9 +22,15 @@ import java.util.TreeMap;
  * voices, an upper and a lower one, as in printed music; only what even two voices
  * cannot say is written with a held note repeated in the next chord and tied.
  * The score knows nothing of how it is drawn.
+ *
+ * <p>Since work package F2 the score follows the meter and the key the arrangement names: a
+ * bar has as many sixteenths as its meter says ({@link #barLength()}), every note is spelled in
+ * the key ({@link Event#spelling(int)}, B flat and C sharp in D minor), and accidentals are set
+ * as printed music sets them ({@link Event#accidental(int)}): against the key signature, and
+ * valid to the end of the bar.
  */
 public final class Score {
-    /** Sixteenths in a bar of four quarters. */
+    /** Sixteenths in a bar of four quarters; {@link #barLength()} is the length of a bar of this score. */
     public static final int BAR = 16;
     private static final int TICKS_PER_SIXTEENTH = 120;
     /** The lengths a single note can have, in sixteenths: whole, dotted half, half, dotted quarter, and so on. */
@@ -32,19 +39,35 @@ public final class Score {
 
     public enum Clef { TREBLE, BASS, PERCUSSION }
 
+    /** The sign in front of a note head. */
+    public enum Accidental { NONE, SHARP, FLAT, NATURAL, DOUBLE_SHARP, DOUBLE_FLAT }
+
     /** A chord (one note or several) or, without pitches, a rest. */
     public static final class Event {
         private final int start;
         private final int length;
         private final int[] pitches;
         private final boolean[] ties;
+        private Key.Spelling[] spellings;
+        private Accidental[] accidentals;
 
         Event(int start, int length, int[] pitches, boolean[] ties) {
             this.start = start;
             this.length = length;
             this.pitches = pitches;
             this.ties = ties;
+            this.accidentals = new Accidental[pitches.length];
+            java.util.Arrays.fill(accidentals, Accidental.NONE);
         }
+
+        /**
+         * How the note at this place of {@link #pitches()} is written in the key of the piece;
+         * {@code null} on a percussion staff.
+         */
+        public Key.Spelling spelling(int index) { return spellings == null ? null : spellings[index]; }
+
+        /** The sign in front of the note at this place of {@link #pitches()}, if it needs one in its bar. */
+        public Accidental accidental(int index) { return accidentals[index]; }
 
         /** Where in its bar the event begins, in sixteenths from 0. */
         public int start() { return start; }
@@ -107,17 +130,48 @@ public final class Score {
     private final int tempo;
     private final int bars;
     private final List<Staff> staves;
+    private final Key key;
+    private final int numerator;
+    private final int denominator;
 
-    private Score(int tempo, int bars, List<Staff> staves) {
+    private Score(int tempo, int bars, List<Staff> staves, Key key, int numerator, int denominator) {
         this.tempo = tempo;
         this.bars = bars;
         this.staves = Collections.unmodifiableList(staves);
+        this.key = key;
+        this.numerator = numerator;
+        this.denominator = denominator;
     }
 
     public int tempo() { return tempo; }
     public int bars() { return bars; }
     public List<Staff> staves() { return staves; }
-    public double secondsPerBar() { return 4 * 60.0 / tempo; }
+    public double secondsPerBar() { return numerator * 4.0 / denominator * 60.0 / tempo; }
+
+    /** The key of the piece: C major for pieces from before F2. */
+    public Key key() { return key; }
+
+    /** The key signature: sharps positive, flats negative (-1 = one flat, as in D minor). */
+    public int keySignature() { return key.fifths(); }
+
+    /** The upper number of the time signature. */
+    public int meterNumerator() { return numerator; }
+
+    /** The lower number of the time signature. */
+    public int meterDenominator() { return denominator; }
+
+    /** The length of a bar in sixteenths: 16 in 4/4, 12 in 3/4 and 6/8, 14 in 7/8. */
+    public int barLength() { return barLength(numerator, denominator); }
+
+    /** Sixteenths in a bar of a meter; a meter of thirty-seconds that is no whole number of sixteenths counts as 4/4. */
+    private static int barLength(int numerator, int denominator) {
+        return numerator * 16 % denominator == 0 ? numerator * 16 / denominator : BAR;
+    }
+
+    /** Where a written note sits on a staff: 0 is the lowest line, as {@link #position(int, Clef)}. */
+    public static int position(Key.Spelling spelling, Clef clef) {
+        return spelling.diatonic() - (clef == Clef.BASS ? 18 : 30);
+    }
 
     /** Where a pitch sits on a staff: 0 is the lowest line, 2 the next line, 8 the top line; odd numbers are spaces. */
     public static int position(int pitch, Clef clef) {
@@ -137,7 +191,11 @@ public final class Score {
         return diatonic - (clef == Clef.BASS ? 18 : 30); // lowest line: G2 in the bass clef, E4 in the treble clef
     }
 
-    /** Whether a pitch is written with a sharp (the piece is in C major, so every black key is). */
+    /**
+     * Whether a pitch is written with a sharp, as the studio wrote every black key before F2.
+     * Since then {@link Event#spelling(int)} and {@link Event#accidental(int)} say how a note is
+     * written in the key of the piece.
+     */
     public static boolean sharp(int pitch) {
         int tone = pitch % 12;
         return tone == 1 || tone == 3 || tone == 6 || tone == 8 || tone == 10;
@@ -190,14 +248,105 @@ public final class Score {
             }
         }
         int tempo = arrangement.tempoOrDefault();
-        int bars = Math.max(1, (end + BAR - 1) / BAR);
+        int numerator = arrangement.meter().map(ArrangementFile.Meter::numerator).orElse(4);
+        int denominator = arrangement.meter().map(ArrangementFile.Meter::denominator).orElse(4);
+        if (barLength(numerator, denominator) == BAR && !(numerator * 16 % denominator == 0)) {
+            numerator = 4;
+            denominator = 4;
+        }
+        int bar = barLength(numerator, denominator);
+        Key key = Key.C_MAJOR;
+        if (arrangement.key().isPresent()) {
+            try {
+                key = Key.parse(arrangement.key().get().name());
+            } catch (IllegalArgumentException odd) {
+                key = Key.C_MAJOR;
+            }
+        }
+        int bars = Math.max(1, (end + bar - 1) / bar);
+        if (arrangement.bars().isPresent()) {
+            bars = Math.max(bars, Math.min(4096, arrangement.bars().getAsInt()));
+        }
         List<Staff> staves = new ArrayList<Staff>();
         for (Map.Entry<String, TreeMap<Integer, List<int[]>>> track : sounding.entrySet()) {
             boolean kit = drums.get(track.getKey());
-            staves.add(new Staff(track.getKey(), kit ? Clef.PERCUSSION : clef(track.getValue()),
-                    voices(track.getValue(), bars, kit)));
+            Staff staff = new Staff(track.getKey(), kit ? Clef.PERCUSSION : clef(track.getValue()),
+                    voices(track.getValue(), bars, kit, bar));
+            if (!kit) {
+                spell(staff, key, bars);
+            }
+            staves.add(staff);
         }
-        return new Score(tempo, bars, staves);
+        return new Score(tempo, bars, staves, key, numerator, denominator);
+    }
+
+    /**
+     * Spells every note of a staff in the key and sets the accidentals bar by bar, as printed music
+     * does: a note needs a sign when its letter in its octave is altered otherwise than the key
+     * signature or an earlier note of the same bar (of either voice) says; the sign holds to the
+     * end of the bar. A note tied over from the bar before keeps its sound and gets no sign.
+     */
+    private static void spell(Staff staff, Key key, int bars) {
+        int[] signature = key.signature();
+        // The events of each voice in order, to see which notes are tied over from the one before.
+        List<List<Event>> sequences = new ArrayList<List<Event>>();
+        for (List<List<Event>> voice : staff.voices) {
+            List<Event> sequence = new ArrayList<Event>();
+            for (List<Event> bar : voice) {
+                sequence.addAll(bar);
+            }
+            sequences.add(sequence);
+        }
+        java.util.Map<Event, Event> before = new java.util.IdentityHashMap<Event, Event>();
+        for (List<Event> sequence : sequences) {
+            for (int i = 1; i < sequence.size(); i++) {
+                before.put(sequence.get(i), sequence.get(i - 1));
+            }
+        }
+        for (int bar = 0; bar < bars; bar++) {
+            List<Event> events = new ArrayList<Event>();
+            for (List<List<Event>> voice : staff.voices) {
+                events.addAll(voice.get(bar));
+            }
+            events.sort((a, b) -> Integer.compare(a.start, b.start)); // stable: the upper voice first
+            java.util.Map<Integer, Integer> altered = new java.util.HashMap<Integer, Integer>();
+            for (Event event : events) {
+                event.spellings = new Key.Spelling[event.pitches.length];
+                for (int i = 0; i < event.pitches.length; i++) {
+                    Key.Spelling spelling = key.spell(event.pitches[i]);
+                    event.spellings[i] = spelling;
+                    int place = spelling.diatonic();
+                    Event previous = before.get(event);
+                    boolean tiedOver = false;
+                    if (previous != null) {
+                        for (int j = 0; j < previous.pitches.length; j++) {
+                            tiedOver |= previous.pitches[j] == event.pitches[i] && previous.ties[j];
+                        }
+                    }
+                    int current = altered.containsKey(place) ? altered.get(place) : signature[spelling.letter()];
+                    if (tiedOver) {
+                        if (event.start > 0) {
+                            altered.put(place, spelling.alteration()); // held within the bar: still sounds so
+                        }
+                        continue;
+                    }
+                    if (current != spelling.alteration()) {
+                        event.accidentals[i] = accidental(spelling.alteration());
+                        altered.put(place, spelling.alteration());
+                    }
+                }
+            }
+        }
+    }
+
+    private static Accidental accidental(int alteration) {
+        switch (alteration) {
+            case -2: return Accidental.DOUBLE_FLAT;
+            case -1: return Accidental.FLAT;
+            case 1: return Accidental.SHARP;
+            case 2: return Accidental.DOUBLE_SHARP;
+            default: return Accidental.NATURAL;
+        }
     }
 
     /** The clef in which most of a track lies: below the A under middle C it is the bass clef. */
@@ -247,7 +396,11 @@ public final class Score {
      * given, cut at the end of the last bar; a struck note ends when the next one comes.
      */
     private static List<int[]> sounding(TreeMap<Integer, List<int[]>> track, int bars, boolean struck) {
-        int end = bars * BAR;
+        return sounding(track, bars, struck, BAR);
+    }
+
+    private static List<int[]> sounding(TreeMap<Integer, List<int[]>> track, int bars, boolean struck, int bar) {
+        int end = bars * bar;
         List<int[]> notes = new ArrayList<int[]>(); // pitch, start, stop, index
         for (Map.Entry<Integer, List<int[]>> together : track.entrySet()) {
             for (int[] note : together.getValue()) {
@@ -270,15 +423,16 @@ public final class Score {
      *
      * @param struck whether the track is struck, not held (drums): a hit ends when the next one comes
      */
-    private static List<List<List<Event>>> voices(TreeMap<Integer, List<int[]>> track, int bars, boolean struck) {
-        List<int[]> notes = sounding(track, bars, struck);
+    private static List<List<List<Event>>> voices(TreeMap<Integer, List<int[]>> track, int bars, boolean struck,
+                                                  int bar) {
+        List<int[]> notes = sounding(track, bars, struck, bar);
         List<List<List<Event>>> written = new ArrayList<List<List<Event>>>();
         List<List<int[]>> parts = struck ? null : separate(notes);
         if (parts == null) {
-            written.add(write(notes, bars));
+            written.add(write(notes, bars, bar));
         } else {
-            written.add(write(parts.get(0), bars));
-            written.add(write(parts.get(1), bars));
+            written.add(write(parts.get(0), bars, bar));
+            written.add(write(parts.get(1), bars, bar));
         }
         return written;
     }
@@ -360,13 +514,13 @@ public final class Score {
     }
 
     /** Writes the notes of one voice into bars. */
-    private static List<List<Event>> write(List<int[]> notes, int bars) {
+    private static List<List<Event>> write(List<int[]> notes, int bars, int barLength) {
         List<List<Event>> written = new ArrayList<List<Event>>();
         for (int bar = 0; bar < bars; bar++) {
             written.add(new ArrayList<Event>());
         }
         // Every beginning and every end of a note is a place where what sounds changes.
-        int end = bars * BAR;
+        int end = bars * barLength;
         TreeMap<Integer, Boolean> changes = new TreeMap<Integer, Boolean>();
         changes.put(0, Boolean.TRUE);
         changes.put(end, Boolean.TRUE);
@@ -392,7 +546,7 @@ public final class Score {
                     pitches[place] = pitch.getKey();
                     held[place++] = pitch.getValue();
                 }
-                fill(written, from, to, pitches, held);
+                fill(written, from, to, pitches, held, barLength);
             }
             from = to;
         }
@@ -403,15 +557,16 @@ public final class Score {
      * Writes one sound (or silence, for no pitches) from a sixteenth to another as notes of written
      * lengths, tied to one another; the last of them is tied on for the notes that are held beyond.
      */
-    private static void fill(List<List<Event>> written, int from, int to, int[] pitches, boolean[] held) {
+    private static void fill(List<List<Event>> written, int from, int to, int[] pitches, boolean[] held,
+                             int barLength) {
         boolean rest = pitches.length == 0;
         boolean[] all = new boolean[pitches.length];
         java.util.Arrays.fill(all, true);
         int at = from;
         while (at < to) {
-            int bar = at / BAR;
-            int inBar = at % BAR;
-            int left = Math.min(to, (bar + 1) * BAR) - at;
+            int bar = at / barLength;
+            int inBar = at % barLength;
+            int left = Math.min(to, (bar + 1) * barLength) - at;
             int value = 1;
             for (int candidate : rest ? REST_VALUES : NOTE_VALUES) {
                 if (candidate <= left && fits(candidate, inBar, rest)) {
