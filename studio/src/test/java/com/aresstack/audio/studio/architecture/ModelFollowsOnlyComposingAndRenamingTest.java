@@ -34,9 +34,14 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         assertEquals("opening loads the model, composing and renaming bring it in step, rendering reads it;"
                         + " nothing else reaches it",
                 new java.util.TreeSet<String>(List.of("composeIntoPiece", "loadArrangementForCurrentDirectory",
-                        "renamed", "renderArrangement")), users);
-        assertEquals("rendering only reads the saved model", List.of("renderArrangement"),
-                callers(source, "pieceModel\\.of\\("));
+                        "renamed", "renderArrangement", "savedPiece")), users);
+        assertEquals("rendering only reads the saved model; the changes the user asks for by name"
+                        + " (a proposal taken, undo, redo, revisions) get it from one place",
+                List.of("renderArrangement", "savedPiece"), callers(source, "pieceModel\\.of\\("));
+        assertEquals("only what the user asks for by name changes the saved piece",
+                new java.util.TreeSet<String>(List.of("composeAgain", "pieceChanged", "showRevisions", "undoPiece",
+                        "popupMenuWillBecomeVisible", "savedPiece" /* its own header */)),
+                new java.util.TreeSet<String>(callers(source, "savedPiece\\(\\)")));
         assertEquals(1, callers(source, "pieceModel\\.").stream().filter("renderArrangement"::equals).count());
         assertEquals("renaming synchronizes itself, right after its files were written", List.of("renamed"),
                 callers(source, "pieceModel\\.synchronize\\(\\)"));
@@ -47,7 +52,9 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
     @Test
     public void everyComposingOfThePieceGoesThroughTheOnePlaceThatSynchronizes() throws Exception {
         String source = new String(Files.readAllBytes(WINDOW), StandardCharsets.UTF_8);
-        assertEquals(List.of("composeIntoPiece"), callers(source, "\\.compose\\("));
+        assertEquals("the piece itself is composed in one place; a proposal is composed aside, into its own folder",
+                List.of("composeIntoPiece", "composeAside"), callers(source, "\\.compose\\("));
+        assertTrue(!bodyOf(source, "private Path composeAside(").contains("pieceModel"));
         assertTrue("composing hands the model to the one order that keeps it whole",
                 bodyOf(source, "private Path composeIntoPiece(").contains("ComposingIntoPiece.run("));
         assertTrue("the worker's end, which every operation passes, does not touch the model",

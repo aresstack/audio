@@ -439,6 +439,68 @@ public final class AudioStudioFrame extends JFrame {
 
         // The piece: which one, and what it shall be. What is seldom needed is in the menu "Mehr".
         final javax.swing.JPopupMenu moreMenu = new javax.swing.JPopupMenu();
+        // Bearbeiten: the changes of the piece that can be taken back, and its revisions.
+        final javax.swing.JMenuItem undoItem = new javax.swing.JMenuItem("Rückgängig");
+        undoItem.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Z,
+                java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
+        undoItem.addActionListener(event -> undoPiece(false));
+        final javax.swing.JMenuItem redoItem = new javax.swing.JMenuItem("Wiederholen");
+        redoItem.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Y,
+                java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
+        redoItem.addActionListener(event -> undoPiece(true));
+        final javax.swing.JMenuItem revisionsItem = new javax.swing.JMenuItem("Revisionen …");
+        revisionsItem.setToolTipText("Frühere Stände des Stücks ansehen, einen zurückholen oder den jetzigen festhalten");
+        revisionsItem.addActionListener(event -> showRevisions());
+        moreMenu.add(undoItem);
+        moreMenu.add(redoItem);
+        moreMenu.add(revisionsItem);
+        moreMenu.addSeparator();
+        moreMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+            @Override
+            public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent event) {
+                java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+                EditMenu.Labels labels = EditMenu.labels(piece.isPresent() && piece.get().canUndo(),
+                        piece.isPresent() ? piece.get().undoDescription() : null,
+                        piece.isPresent() && piece.get().canRedo(),
+                        piece.isPresent() ? piece.get().redoDescription() : null);
+                undoItem.setText(labels.undo());
+                undoItem.setEnabled(labels.canUndo());
+                redoItem.setText(labels.redo());
+                redoItem.setEnabled(labels.canRedo());
+                revisionsItem.setEnabled(piece.isPresent());
+            }
+
+            @Override
+            public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent event) {
+            }
+
+            @Override
+            public void popupMenuCanceled(javax.swing.event.PopupMenuEvent event) {
+            }
+        });
+        // The same from the keyboard, but not while a text is being written: there the keys belong to the text.
+        javax.swing.Action undoKey = new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent event) {
+                if (!(java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner()
+                        instanceof javax.swing.text.JTextComponent)) {
+                    undoPiece(false);
+                }
+            }
+        };
+        javax.swing.Action redoKey = new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent event) {
+                if (!(java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner()
+                        instanceof javax.swing.text.JTextComponent)) {
+                    undoPiece(true);
+                }
+            }
+        };
+        getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(undoItem.getAccelerator(), "piece-undo");
+        getRootPane().getActionMap().put("piece-undo", undoKey);
+        getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(redoItem.getAccelerator(), "piece-redo");
+        getRootPane().getActionMap().put("piece-redo", redoKey);
         javax.swing.JMenuItem newSong = new javax.swing.JMenuItem("Neue Komposition …");
         newSong.setToolTipText("Ein neues, leeres Stück anlegen");
         newSong.addActionListener(event -> createNewComposition());
@@ -1057,6 +1119,13 @@ public final class AudioStudioFrame extends JFrame {
 
     /** Has the AI compose one track anew: its kept answer is put aside, the other tracks stay as they are. */
     private void composeAgain(String trackId) {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (piece.isPresent() && piece.get().composition().part(trackId) != null) {
+            if (!busy()) {
+                proposeAgain(trackId, piece.get()); // a piece with a model is changed only by a proposal that is taken
+            }
+            return;
+        }
         Path folder = Paths.get(directory.getText().trim());
         java.util.regex.Pattern kept = java.util.regex.Pattern.compile(
                 java.util.regex.Pattern.quote(trackId) + "(-[0-9a-f]{12})?\\.json");
@@ -1542,13 +1611,8 @@ public final class AudioStudioFrame extends JFrame {
             java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece =
                     pieceModel.of(destination);
             if (piece.isPresent()) {
-                Map<String, String> libraries = new HashMap<String, String>();
-                for (String track : settings.programs.keySet()) {
-                    InstrumentLibrary bank = settings.assignments.get(track);
-                    libraries.put(track, bank == null ? "builtin" : bank.id());
-                }
                 return new com.aresstack.audio.studio.application.PieceRendering(registry).render(piece.get(),
-                        libraries, settings.sf2Engine, settings.fluidSynthExecutable, settings.sfizzExecutable,
+                        librariesOf(settings), settings.sf2Engine, settings.fluidSynthExecutable, settings.sfizzExecutable,
                         settings.programs, progress).mix();
             }
         }
@@ -1556,6 +1620,271 @@ public final class AudioStudioFrame extends JFrame {
         return new StudioMusicRenderer(registry).render(source, destination, settings.assignments,
                 settings.programs, settings.sf2Engine,
                 settings.fluidSynthExecutable, settings.sfizzExecutable, progress);
+    }
+
+    /** The sound bank chosen in the table for each track; "builtin" is the Java sound. */
+    private static Map<String, String> librariesOf(RenderSettings settings) {
+        Map<String, String> libraries = new HashMap<String, String>();
+        for (String track : settings.programs.keySet()) {
+            InstrumentLibrary bank = settings.assignments.get(track);
+            libraries.put(track, bank == null ? "builtin" : bank.id());
+        }
+        return libraries;
+    }
+
+    /**
+     * The saved model of the open piece, for the changes the user asks for by name: taking a
+     * proposal, undo, redo, and the revisions. Empty for a piece without a model.
+     */
+    private java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> savedPiece() {
+        String chosen = directory.getText().trim();
+        return chosen.isEmpty()
+                ? java.util.Optional.<com.aresstack.audio.studio.application.ProjectSession>empty()
+                : pieceModel.of(Paths.get(chosen));
+    }
+
+    private boolean busy() {
+        if (worker != null && !worker.isDone()) {
+            message("Erst den laufenden Vorgang beenden oder abbrechen.");
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Has the AI compose one track anew as a proposal: the composer writes into a folder of its
+     * own, the result is rendered there to be heard, and the piece changes only if the user takes it.
+     */
+    private void proposeAgain(final String trackId,
+                              final com.aresstack.audio.studio.application.ProjectSession piece) {
+        final TrackArrangement chosen;
+        final KipitzChatClient client;
+        final RenderSettings settings;
+        try {
+            chosen = trackTable.arrangement();
+            client = createAiClient();
+            settings = captureRenderSettings(chosen);
+        } catch (Exception invalid) {
+            message(invalid.getMessage());
+            return;
+        }
+        final String prompt = description.getText().trim();
+        final int tokens = (Integer) tokenLimit.getValue();
+        final int parallel = (Integer) parallelRequests.getValue();
+        if (!saveSettings(false)) {
+            return;
+        }
+        final String runId = "ki-" + Long.toString(System.currentTimeMillis(), 36);
+        append("Spur " + trackId + " wird als Vorschlag neu komponiert; das Stück bleibt, wie es ist, bis der "
+                + "Vorschlag übernommen wird.");
+        activeClient = client;
+        start(new Operation() {
+            @Override
+            public Path execute(Progress progress) throws Exception {
+                com.aresstack.audio.studio.application.RecompositionOffer offer = null;
+                try {
+                    offer = com.aresstack.audio.studio.application.RecompositionOffer.stage(piece, trackId, runId);
+                    composeAside(new GemmaMusicComposer(client, tokens, parallel), prompt, offer.staging(), chosen,
+                            progress);
+                    Path preview = offer.propose(runId);
+                    progress.update("Der Vorschlag wird zum Anhören gerendert ...");
+                    final Path heard = new com.aresstack.audio.studio.application.PieceRendering(registry).render(
+                            preview, offer.proposal().result(), librariesOf(settings), settings.sf2Engine,
+                            settings.fluidSynthExecutable, settings.sfizzExecutable, settings.programs, progress)
+                            .mix();
+                    final com.aresstack.audio.studio.application.RecompositionOffer ready = offer;
+                    afterWork = () -> decide(ready, heard);
+                    return null;
+                } catch (com.aresstack.audio.studio.application.EditRefusedException refused) {
+                    offer.discard();
+                    throw new IOException("Der Vorschlag wurde nicht angenommen, weil er mehr als die Spur "
+                            + trackId + " geändert hätte: " + refused.violations());
+                } catch (Exception failed) {
+                    if (offer != null) {
+                        offer.discard();
+                    }
+                    throw failed;
+                } finally {
+                    activeClient = null;
+                }
+            }
+        });
+    }
+
+    /**
+     * Composes into a folder beside the piece, for a proposal. Nothing of the piece is written
+     * and its model is not touched; see {@link #composeIntoPiece} for composing the piece itself.
+     */
+    private Path composeAside(GemmaMusicComposer composer, String prompt, Path staging, TrackArrangement tracks,
+                              Progress progress) throws Exception {
+        return composer.compose(prompt, staging, tracks, progress);
+    }
+
+    /** The proposal is ready: the user hears it and takes it or throws it away. */
+    private void decide(final com.aresstack.audio.studio.application.RecompositionOffer offer, final Path heard) {
+        try {
+            if (!offer.changesSomething()) {
+                offer.discard();
+                append("Die KI hat die Spur " + offer.trackId() + " so geschrieben, wie sie schon ist; "
+                        + "es gibt nichts zu übernehmen.");
+                return;
+            }
+            boolean take = new ProposalDialog(this, "Vorschlag der KI",
+                    "Die KI hat die Spur „" + offer.trackId() + "“ neu komponiert.", new ProposalDialog.Listening() {
+                        @Override
+                        public void proposal() {
+                            listenTo(heard, "VORSCHLAG · " + offer.trackId().toUpperCase(java.util.Locale.ROOT));
+                        }
+
+                        @Override
+                        public void current() {
+                            playbackSelection.setSelectedItem("Mixed sampled arrangement");
+                            play();
+                        }
+
+                        @Override
+                        public void stop() {
+                            stopPlayback();
+                        }
+                    }).ask();
+            stopPlayback();
+            showPlaybackChoice(); // the player lets go of the preview before its folder goes
+            if (take) {
+                com.aresstack.audio.composition.edit.ChangeSet changes = offer.accept();
+                pieceChanged("Vorschlag übernommen: Spur " + offer.trackId() + " neu komponiert.", changes);
+            } else {
+                offer.discard();
+                append("Vorschlag verworfen; das Stück ist unverändert.");
+            }
+        } catch (Exception failed) {
+            message("Der Vorschlag ließ sich nicht abschließen: " + failed.getMessage());
+        }
+    }
+
+    /** Plays a file that is not one of the playback choices: the preview of a proposal. */
+    private void listenTo(Path file, String name) {
+        try {
+            player.open(file);
+            arrangementView.setMix(player.envelope(), "Vorschlag", null, player.length());
+            lcd.setSource(name, true);
+            player.play();
+        } catch (Exception error) {
+            message("Der Vorschlag lässt sich nicht abspielen: " + error.getMessage());
+        }
+    }
+
+    /**
+     * The saved piece was changed on the user's word (a proposal taken, undo, redo, a revision
+     * brought back): the tracks, the notes and the sound follow. Only the parts that sound
+     * different are rendered; the others come from the stem cache.
+     */
+    private void pieceChanged(String said, com.aresstack.audio.composition.edit.ChangeSet changes) {
+        append(said);
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent()) {
+            return;
+        }
+        final Path folder = piece.get().folder();
+        showTracksOf(piece.get().composition());
+        arrangementFile.setText(folder.resolve("arrangement.tsv").toString());
+        showPlaybackChoice();
+        if (changes == null || changes.isEmpty()) {
+            return;
+        }
+        final RenderSettings settings;
+        try {
+            settings = captureRenderSettings();
+        } catch (RuntimeException invalid) {
+            append("WARN: Nicht neu gerendert: " + invalid.getMessage());
+            return;
+        }
+        start(new Operation() {
+            @Override
+            public Path execute(Progress progress) throws Exception {
+                return renderArrangement(folder.resolve("arrangement.tsv"), folder, settings, progress);
+            }
+        });
+    }
+
+    /**
+     * Shows the tracks the model has, if they are not the ones in the table: a track the table
+     * knows keeps what was chosen for it there, a track it does not know comes as the model has it.
+     */
+    private void showTracksOf(com.aresstack.audio.composition.Composition composition) {
+        Map<String, MusicTrack> shown = new HashMap<String, MusicTrack>();
+        List<String> ids = new ArrayList<String>();
+        for (MusicTrack track : trackTable.tracks()) {
+            shown.put(track.id(), track);
+            ids.add(track.id());
+        }
+        List<MusicTrack> wanted = new ArrayList<MusicTrack>();
+        List<String> wantedIds = new ArrayList<String>();
+        for (com.aresstack.audio.composition.Part part : composition.parts()) {
+            MusicTrack known = shown.get(part.id());
+            wanted.add(known != null ? known : new MusicTrack(part.id(), part.role(), part.instrument(),
+                    part.program(), part.libraryId() == null ? "builtin" : part.libraryId()));
+            wantedIds.add(part.id());
+        }
+        if (wanted.isEmpty() || wantedIds.equals(ids)) {
+            return;
+        }
+        try {
+            trackTable.setArrangement(new TrackArrangement(wanted));
+            tracksChanged();
+        } catch (RuntimeException invalid) {
+            append("WARN: Die Spuren des Stücks ließen sich nicht anzeigen: " + invalid.getMessage());
+        }
+    }
+
+    /** Takes back the last change of the piece, or does it again. */
+    private void undoPiece(boolean again) {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent() || !(again ? piece.get().canRedo() : piece.get().canUndo()) || busy()) {
+            return;
+        }
+        try {
+            String what = again ? piece.get().redoDescription() : piece.get().undoDescription();
+            stopPlayback();
+            pieceChanged((again ? "Wiederholt: " : "Rückgängig: ") + what,
+                    again ? piece.get().redo() : piece.get().undo());
+        } catch (Exception failed) {
+            message((again ? "Das ließ sich nicht wiederholen: " : "Das ließ sich nicht zurücknehmen: ")
+                    + failed.getMessage());
+        }
+    }
+
+    /** The list of revisions: one can be brought back, the piece as it is can be kept as a new one. */
+    private void showRevisions() {
+        final java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent()) {
+            message("Dieses Stück hat noch keine Revisionen: erst komponieren.");
+            return;
+        }
+        if (busy()) {
+            return;
+        }
+        com.aresstack.audio.composition.edit.Revision chosen = new RevisionsDialog(this, new RevisionsDialog.Piece() {
+            @Override
+            public List<com.aresstack.audio.composition.edit.Revision> revisions() throws Exception {
+                return piece.get().revisions();
+            }
+
+            @Override
+            public void mark(String words) throws Exception {
+                piece.get().markRevision(words);
+                append("Stand gemerkt: " + words);
+            }
+        }).ask();
+        if (chosen == null) {
+            return;
+        }
+        try {
+            stopPlayback();
+            pieceChanged("Revision " + chosen.sequence() + " wiederhergestellt (" + chosen.description() + ").",
+                    piece.get().restoreRevision(chosen.id()));
+        } catch (Exception failed) {
+            message("Die Revision ließ sich nicht wiederherstellen: " + failed.getMessage());
+        }
     }
 
     private void createNewComposition() {
@@ -1848,6 +2177,11 @@ public final class AudioStudioFrame extends JFrame {
                     // What was rendered is there to be seen and heard at once.
                     showPlaybackChoice();
                     refreshStems();
+                    Runnable next = afterWork;
+                    afterWork = null;
+                    if (next != null) {
+                        next.run(); // what the work asked to be shown once it is over: a proposal to decide on
+                    }
                 }
             }
         };
@@ -2341,6 +2675,9 @@ public final class AudioStudioFrame extends JFrame {
         showPlaybackChoice();
         refreshStems();
     }
+
+    /** What a background operation wants done in the window once it has ended. */
+    private volatile Runnable afterWork;
 
     private interface Operation {
         Path execute(Progress progress) throws Exception;
