@@ -175,7 +175,7 @@ public final class ContinuationComposer {
             }
             progress.update("Komponiere " + voice.name() + " für " + frame.name() + " ...");
             GeneratedNotes generated = generator.generate(task, plan, voice, frame, connection, cache);
-            List<ShapedNote> shaped = normalizer.shape(frame, generated);
+            List<ShapedNote> shaped = normalizer.shape(frame, generated, transition ? ringOut(task) : 0);
             if (shaped.isEmpty()) {
                 progress.update("WARN: keine spielbaren Noten für " + voice.name() + " in " + frame.name() + ".");
             }
@@ -185,6 +185,14 @@ public final class ContinuationComposer {
         List<String> corrections = new ArrayList<>();
         normalizer.corrections().forEach(line -> corrections.add(voice.key() + "\t" + line));
         return new Written(notes, corrections);
+    }
+
+    /**
+     * How far a note of the revised transition may sound into the new bars: one bar. The clip of
+     * the original that holds it grows for it (a {@code ResizeClip} in the patch).
+     */
+    static long ringOut(ContinuationTask task) {
+        return task.time().meterAt(task.newStart()).barTicks();
     }
 
     private static ComposedContinuation assemble(Composition piece, ContinuationTask task, ContinuationPlan plan,
@@ -266,24 +274,30 @@ public final class ContinuationComposer {
                         new MidiClip(fresh.next(), frame.startTick(), frame.lengthTicks(), clipPart, notes)));
             }
         }
+        joinOverhangs(piece, clips, tail, corrections);
         return new ComposedContinuation(task, plan, sections, newParts, newTracks, clips, tail, corrections);
     }
 
     /**
      * The changes in the revised bars for an existing part: its notes that begin there leave their
-     * clips, the new ones enter the clip of the part that holds their tick, cut at its end. A new
-     * note no clip of the part holds is left out and recorded.
+     * clips, the new ones enter the clip of the part that holds their tick. A note that sounds past
+     * the end of that clip lets the clip grow (up to the next clip on its track, where it is cut);
+     * {@link #joinOverhangs} then makes room for it among the new clips. A new note no clip of the
+     * part holds is left out and recorded.
      */
     private static List<ComposedContinuation.TailChange> tail(Composition piece, ContinuationTask task, Part part,
                                                              String voiceId, List<ShapedNote> shaped, Fresh fresh,
                                                              List<String> corrections) {
         Map<String, List<String>> removed = new LinkedHashMap<>();
         Map<String, List<Note>> added = new LinkedHashMap<>();
+        Map<String, Long> ends = new HashMap<>();
         List<MidiClip> owned = new ArrayList<>();
+        Map<String, Long> limits = new HashMap<>();
         for (Track track : piece.tracks()) {
             for (Clip clip : track.clips()) {
                 if (clip instanceof MidiClip midi && part.id().equals(track.partOf(midi))) {
                     owned.add(midi);
+                    limits.put(midi.id(), nextStart(track, midi));
                     for (Note note : midi.notes()) {
                         long tick = midi.startTick() + note.tick();
                         if (tick >= task.tailStart() && tick < task.newStart()) {
@@ -307,11 +321,14 @@ public final class ContinuationComposer {
                         + "der Stimme bei Takt " + (task.time().barOf(tick) + 1));
                 continue;
             }
-            long length = Math.min(n.length(), home.endTick() - tick);
+            long length = Math.min(n.length(), limits.get(home.id()) - tick);
             if (length != n.length()) {
                 corrections.add(part.id() + "\t" + SectionGenerator.TRANSITION + "\t-\tduration\t"
                         + ContextBuilder.quarters(n.length()) + "\t" + ContextBuilder.quarters(length)
-                        + "\tam Clipende abgeschnitten");
+                        + "\tvor dem nächsten Clip der Spur abgeschnitten");
+            }
+            if (tick + length > home.endTick()) {
+                ends.merge(home.id(), tick + length, Math::max);
             }
             added.computeIfAbsent(home.id(), id -> new ArrayList<>()).add(new Note(fresh.next(), tick - home.startTick(),
                     length, n.pitch(), n.velocity(), voiceId));
@@ -320,10 +337,90 @@ public final class ContinuationComposer {
         Set<String> clips = new java.util.LinkedHashSet<>(removed.keySet());
         clips.addAll(added.keySet());
         for (String clip : clips) {
+            long start = owned.stream().filter(c -> c.id().equals(clip)).findFirst().orElseThrow().startTick();
+            Long end = ends.get(clip);
             changes.add(new ComposedContinuation.TailChange(clip, removed.getOrDefault(clip, List.of()),
-                    added.getOrDefault(clip, List.of())));
+                    added.getOrDefault(clip, List.of()), end == null ? 0 : end - start));
         }
         return changes;
+    }
+
+    /** Where the next clip after this one on its track begins; {@code Long.MAX_VALUE} if none follows. */
+    private static long nextStart(Track track, Clip clip) {
+        long next = Long.MAX_VALUE;
+        for (Clip other : track.clips()) {
+            if (other != clip && other.startTick() > clip.startTick() && other.startTick() < next) {
+                next = other.startTick();
+            }
+        }
+        return next;
+    }
+
+    /**
+     * Makes room for clips of the original that grow in the transition: a new clip on the same
+     * track that would overlap such a clip, and belongs to the same part, joins it (its notes move
+     * over, the grown clip reaches to its end). A new clip of another part stops the growth at its
+     * start, and the transition notes are cut there.
+     */
+    static void joinOverhangs(Composition piece, List<ComposedContinuation.PlacedClip> clips,
+                              List<ComposedContinuation.TailChange> tail, List<String> corrections) {
+        for (int i = 0; i < tail.size(); i++) {
+            ComposedContinuation.TailChange change = tail.get(i);
+            if (change.lengthTicks() == 0) {
+                continue;
+            }
+            Track track = null;
+            MidiClip home = null;
+            for (Track t : piece.tracks()) {
+                for (Clip c : t.clips()) {
+                    if (c.id().equals(change.clipId()) && c instanceof MidiClip midi) {
+                        track = t;
+                        home = midi;
+                    }
+                }
+            }
+            String part = track.partOf(home);
+            long end = home.startTick() + change.lengthTicks();
+            List<Note> added = new ArrayList<>(change.added());
+            List<ComposedContinuation.PlacedClip> ordered = new ArrayList<>(clips);
+            ordered.sort(Comparator.comparingLong(p -> p.clip().startTick()));
+            for (ComposedContinuation.PlacedClip placed : ordered) {
+                MidiClip clip = placed.clip();
+                if (!placed.trackId().equals(track.id()) || clip.startTick() >= end) {
+                    continue;
+                }
+                String owner = clip.partId() == null ? track.defaultPartId() : clip.partId();
+                if (part.equals(owner)) {
+                    long offset = clip.startTick() - home.startTick();
+                    for (Note note : clip.notes()) {
+                        added.add(new Note(note.id(), note.tick() + offset, note.length(), note.pitch(), note.velocity(),
+                                note.voiceId()));
+                    }
+                    end = Math.max(end, clip.endTick());
+                    clips.remove(placed);
+                } else {
+                    end = clip.startTick();
+                    List<Note> cut = new ArrayList<>();
+                    for (Note note : added) {
+                        long stop = end - home.startTick();
+                        if (note.tick() + note.length() > stop) {
+                            corrections.add(part + "\t" + SectionGenerator.TRANSITION + "\t-\tduration\t"
+                                    + ContextBuilder.quarters(note.length()) + "\t"
+                                    + ContextBuilder.quarters(stop - note.tick()) + "\tvor dem Clip von " + owner
+                                    + " abgeschnitten");
+                            note = new Note(note.id(), note.tick(), stop - note.tick(), note.pitch(), note.velocity(),
+                                    note.voiceId());
+                        }
+                        cut.add(note);
+                    }
+                    added = cut;
+                    break;
+                }
+            }
+            long length = end - home.startTick();
+            tail.set(i, new ComposedContinuation.TailChange(change.clipId(), change.removed(), added,
+                    length > home.lengthTicks() ? length : 0));
+        }
     }
 
     /** The track the new clips of an existing part go on: its own, else the one of its last clip. */
