@@ -425,10 +425,10 @@ public final class AudioStudioFrame extends JFrame {
                 try {
                     com.aresstack.audio.studio.application.StageMixService.rename(
                             Paths.get(directory.getText().trim()), from, to);
+                    pieceModel.synchronize(); // the files were written: the model follows them to the new name
                 } catch (IOException failed) {
                     append("WARN: Die Dateien der Spur ließen sich nicht umbenennen: " + failed.getMessage());
                 }
-                pieceModel.synchronize(); // the model follows the files to the new name
                 if (from.equals(playbackSelection.getSelectedItem())) {
                     playbackSelection.setSelectedItem("Mixed sampled arrangement");
                 }
