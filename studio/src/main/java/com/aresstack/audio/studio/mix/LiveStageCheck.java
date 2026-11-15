@@ -20,11 +20,13 @@ import java.util.stream.Stream;
  * the audio thread needed and whether a block came late.
  *
  * <pre>
- * java -cp audio-studio.jar com.aresstack.audio.studio.mix.LiveStageCheck &lt;folder or WAV files&gt; [seconds] [room] [loop]
+ * java -cp audio-studio.jar com.aresstack.audio.studio.mix.LiveStageCheck &lt;folder or WAV files&gt; [seconds] [room] [loop] [puffer=frames]
  * </pre>
  *
  * The room is one of {@code studio}, {@code chamber} (default), {@code hall}, {@code cathedral};
- * {@code loop} (or {@code schleife}) plays the music over and over without a gap, for short stems.
+ * {@code loop} (or {@code schleife}) plays the music over and over without a gap, for short stems;
+ * {@code puffer=<frames>} sets the line buffer. At the end it also prints how often the sound card
+ * ran empty, which a late block alone does not show.
  */
 public final class LiveStageCheck {
     private LiveStageCheck() {
@@ -46,13 +48,14 @@ public final class LiveStageCheck {
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
-            System.err.println("Aufruf: LiveStageCheck <Ordner mit WAV-Stems oder WAV-Dateien> [Sekunden] [studio|chamber|hall|cathedral] [schleife]");
+            System.err.println("Aufruf: LiveStageCheck <Ordner mit WAV-Stems oder WAV-Dateien> [Sekunden] [studio|chamber|hall|cathedral] [schleife] [puffer=4096]");
             System.exit(2);
         }
         List<Path> files = new ArrayList<Path>();
         double seconds = 25;
         AcousticRoom room = AcousticRoom.CHAMBER;
         boolean loop = false;
+        int buffer = com.aresstack.audio.core.line.LineSink.DEFAULT_BUFFER_FRAMES;
         for (String arg : args) {
             Path path = Paths.get(arg);
             if (Files.isDirectory(path)) {
@@ -62,6 +65,8 @@ public final class LiveStageCheck {
                 }
             } else if (Files.isRegularFile(path)) {
                 files.add(path);
+            } else if (arg.toLowerCase(Locale.ROOT).startsWith("puffer=")) {
+                buffer = Integer.parseInt(arg.substring("puffer=".length()));
             } else if (arg.equalsIgnoreCase("loop") || arg.equalsIgnoreCase("schleife")) {
                 loop = true;
             } else if (AcousticRoom.known(arg)) {
@@ -81,7 +86,7 @@ public final class LiveStageCheck {
         }
         System.out.println("Lade " + files.size() + " Spuren, Raum: " + room.name() + " ...");
         try (LiveStage stage = LiveStage.load(files, placements, room, 2);
-             LivePlayback playback = stage.playOnLine(LiveStage.master(MixLevel.fixed(0), Float.NaN))) {
+             LivePlayback playback = stage.playOnLine(LiveStage.master(MixLevel.fixed(0), Float.NaN), buffer)) {
             // a loop plays the music over and over without a gap; the room rings from the end into the start
             stage.loop(loop);
             playback.play();
@@ -119,6 +124,8 @@ public final class LiveStageCheck {
             System.out.printf(Locale.GERMANY, "Blöcke: %d, mittlere Last: %.1f %%, längster Block: %.2f ms von %.2f ms, zu spät: %d%n",
                     playback.blocks(), playback.averageLoad() * 100, playback.worstBlockNanos() / 1e6,
                     playback.blockBudgetNanos() / 1e6, playback.overruns());
+            System.out.printf(Locale.GERMANY, "Leitungspuffer: %d Frames, leergelaufen: %d, knappster Füllstand: %d Frames%n",
+                    buffer, playback.underruns(), playback.lowestBufferedFrames());
             if (playback.failure() != null) {
                 playback.failure().printStackTrace();
             }
