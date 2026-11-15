@@ -23,6 +23,9 @@ public final class EffectsTest {
         for (Effect effect : Effects.all()) {
             assertTrue("one key per effect: " + effect.key(), keys.add(effect.key()));
             BufferedImage image = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+            Graphics2D ground = image.createGraphics();
+            Effect.clear(ground, 320, 200, GROUND);
+            ground.dispose();
             SoundPicture picture = loud();
             for (int frame = 0; frame < 5; frame++) {
                 picture.seconds = frame / 30.0;
@@ -54,6 +57,7 @@ public final class EffectsTest {
                 new TrackLight("laut", 1, 0.6, 0.3, 0, 1f));
         BufferedImage image = new BufferedImage(400, 240, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = image.createGraphics();
+        Effect.clear(g, 400, 240, GROUND); // as the visualizer starts every picture: on its ground
         stage.paint(g, 400, 240, picture, PALETTE, VisualSettings.DEFAULTS);
         g.dispose();
         int quiet = litPixels(image.getSubimage(0, 0, 200, 240));
