@@ -33,6 +33,7 @@ public final class LivePlayback implements AutoCloseable {
 
     private final LiveGraph graph;
     private final MasterBus master;
+    private long jumpsSeen;
     private final LiveSink sink;
     private final PeakMeter meter = new PeakMeter();
     private final int sampleRate;
@@ -73,6 +74,7 @@ public final class LivePlayback implements AutoCloseable {
         graph.prepare(sampleRate, blockFrames);
         master.prepare(sampleRate, blockFrames);
         meter.prepare(sampleRate, blockFrames);
+        jumpsSeen = graph.jumps();
         thread = new Thread(this::run, "live-playback");
         thread.setDaemon(true);
         thread.setPriority(Thread.MAX_PRIORITY);
@@ -248,6 +250,12 @@ public final class LivePlayback implements AutoCloseable {
                 block.setFrames(blockFrames);
                 int count = graph.read(block);
                 block.setFrames(count);
+                long jumped = graph.jumps();
+                if (jumped != jumpsSeen) {
+                    // a seek (or a pause, which lands where the listener was): nothing from before it may leak out
+                    jumpsSeen = jumped;
+                    master.reset();
+                }
                 master.process(block);
                 meter.process(block);
                 long took = System.nanoTime() - started;
