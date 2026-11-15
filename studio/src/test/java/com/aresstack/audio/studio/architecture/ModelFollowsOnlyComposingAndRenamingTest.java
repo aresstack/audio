@@ -24,28 +24,43 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
             "ui", "AudioStudioFrame.java");
 
     @Test
-    public void theWindowSynchronizesTheModelOnlyAfterComposingAndRenaming() throws Exception {
+    public void theWindowTouchesTheModelOnlyWhereAPieceIsOpenedComposedOrRenamed() throws Exception {
         String source = new String(Files.readAllBytes(WINDOW), StandardCharsets.UTF_8);
-        List<String> callers = new ArrayList<String>();
-        Matcher call = Pattern.compile("pieceModel\\.synchronize\\(\\)").matcher(source);
-        while (call.find()) {
-            callers.add(methodAround(source, call.start()));
+        java.util.Set<String> users = new java.util.TreeSet<String>();
+        Matcher use = Pattern.compile("pieceModel\\b(?! =)").matcher(source);
+        while (use.find()) {
+            users.add(methodAround(source, use.start()));
         }
-        assertEquals("only composing and renaming bring the model in step with the old files",
-                List.of("renamed", "composeIntoPiece"), callers);
+        assertEquals("opening loads the model, composing and renaming bring it in step, rendering reads it;"
+                        + " nothing else reaches it",
+                new java.util.TreeSet<String>(List.of("composeIntoPiece", "loadArrangementForCurrentDirectory",
+                        "renamed", "renderArrangement")), users);
+        assertEquals("rendering only reads the saved model", List.of("renderArrangement"),
+                callers(source, "pieceModel\\.of\\("));
+        assertEquals(1, callers(source, "pieceModel\\.").stream().filter("renderArrangement"::equals).count());
+        assertEquals("renaming synchronizes itself, right after its files were written", List.of("renamed"),
+                callers(source, "pieceModel\\.synchronize\\(\\)"));
+        assertEquals("opening only opens", List.of("loadArrangementForCurrentDirectory"),
+                callers(source, "pieceModel\\.open\\("));
     }
 
     @Test
     public void everyComposingOfThePieceGoesThroughTheOnePlaceThatSynchronizes() throws Exception {
         String source = new String(Files.readAllBytes(WINDOW), StandardCharsets.UTF_8);
-        Matcher compose = Pattern.compile("\\.compose\\(").matcher(source);
-        List<String> callers = new ArrayList<String>();
-        while (compose.find()) {
-            callers.add(methodAround(source, compose.start()));
-        }
-        assertEquals(List.of("composeIntoPiece"), callers);
+        assertEquals(List.of("composeIntoPiece"), callers(source, "\\.compose\\("));
+        assertTrue("composing hands the model to the one order that keeps it whole",
+                bodyOf(source, "private Path composeIntoPiece(").contains("ComposingIntoPiece.run("));
         assertTrue("the worker's end, which every operation passes, does not touch the model",
                 !bodyOf(source, "protected void done()").contains("pieceModel"));
+    }
+
+    private static List<String> callers(String source, String pattern) {
+        List<String> callers = new ArrayList<String>();
+        Matcher call = Pattern.compile(pattern).matcher(source);
+        while (call.find()) {
+            callers.add(methodAround(source, call.start()));
+        }
+        return callers;
     }
 
     /** The name of the method whose body holds this place: the last method header before it. */
