@@ -412,6 +412,11 @@ public final class SpatialStemMixer {
         return mix;
     }
 
+    /** Writes a signal at the rate of the mix as a WAV file with 16 or 24 bits, as {@link #write(Mix, Path, int)}. */
+    public static void write(Signal signal, Path output, int bits) throws IOException {
+        write(new Mix(signal.left, signal.right), output, bits);
+    }
+
     /** Writes a mix as a WAV of 16 or 24 bits. */
     public static void write(Mix mix, Path output, int bits) throws IOException {
         if (bits != 16 && bits != 24) {

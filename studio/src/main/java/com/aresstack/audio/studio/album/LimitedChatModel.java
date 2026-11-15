@@ -48,6 +48,18 @@ public final class LimitedChatModel implements ChatModel {
         }
     }
 
+    /** The name of the model behind the limit, so that kept answers stay those of that model. */
+    @Override
+    public String name() {
+        return model.name();
+    }
+
+    /** Asked without waiting for a free place: looking for a kept answer asks the service nothing. */
+    @Override
+    public boolean hasAnswer(String instruction, String prompt, int maxTokens, Path cache) {
+        return model.hasAnswer(instruction, prompt, maxTokens, cache);
+    }
+
     @Override
     public void cancel() {
         model.cancel();
