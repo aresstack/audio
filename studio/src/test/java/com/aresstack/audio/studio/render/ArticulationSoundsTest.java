@@ -117,4 +117,18 @@ public final class ArticulationSoundsTest {
         assertEquals(4, sounds.leadTicks());
         assertEquals(2, sounds.sounds().size());
     }
+
+    @Test
+    public void whatTheSettingsPageSavesIsReadBackAndEmptyRemovesTheFile() throws Exception {
+        Path bank = temporary.newFile("Orchestra.sf2").toPath();
+        ArticulationSounds sounds = new ArticulationSounds(
+                java.util.Map.of(Articulation.STACCATO, new ArticulationSounds.Sound(ArticulationSounds.Kind.PROGRAM, 45),
+                        Articulation.ACCENT, new ArticulationSounds.Sound(ArticulationSounds.Kind.KEYSWITCH, 30)),
+                new ArticulationSounds.Sound(ArticulationSounds.Kind.KEYSWITCH, 24), 90, 3);
+        sounds.saveBeside(bank);
+        assertEquals(sounds, ArticulationSounds.beside(bank));
+        ArticulationSounds.NONE.saveBeside(bank);
+        assertTrue(!Files.exists(ArticulationSounds.fileOf(bank)));
+        assertSame(ArticulationSounds.NONE, ArticulationSounds.beside(bank));
+    }
 }
