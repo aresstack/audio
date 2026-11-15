@@ -194,9 +194,18 @@ public final class GemmaMusicComposer {
                     + "instruments share the work, section by section)."
                     + "\nKeep tempoBpm, key, timeSignature and bars exactly as given. No notes yet. Return only JSON.";
         }
+        final SketchProgress watched = progress instanceof SketchProgress ? (SketchProgress) progress : null;
+        final String step = "Die KI plant Struktur und Harmonien";
+        if (watched != null) {
+            watched.preparing(step, 0);
+        }
         JsonObject plan = planner.generate("Return valid JSON only, no Markdown.", prompt,
-                Math.min(spec.isLegacy() ? 2048 : 4096, maxTokens), directory.resolve("composition-plan.json"));
+                Math.min(spec.isLegacy() ? 2048 : 4096, maxTokens), directory.resolve("composition-plan.json"),
+                watched == null ? null : text -> watched.preparing(step, text.length()));
         validatePlan(plan, spec, progress);
+        if (watched != null) {
+            watched.planned(chords(plan, spec));
+        }
         return plan;
     }
 

@@ -20,4 +20,18 @@ public interface SketchProgress extends TrackProgress {
      */
     default void arriving(long characters) {
     }
+
+    /**
+     * What the AI does before the first note: choosing the instruments, planning form and
+     * harmonies. Told when the step begins and again while its answer arrives.
+     *
+     * @param what       the step, as the studio says it
+     * @param characters how much of the answer has arrived so far
+     */
+    default void preparing(String what, long characters) {
+    }
+
+    /** The plan is there: the chords of the piece, bar by bar. The notes come next. */
+    default void planned(List<String> chords) {
+    }
 }

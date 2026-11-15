@@ -3499,6 +3499,16 @@ public final class AudioStudioFrame extends JFrame {
                     }
 
                     @Override
+                    public void preparing(final String what, final long characters) {
+                        SwingUtilities.invokeLater(() -> showPreparing(what, characters));
+                    }
+
+                    @Override
+                    public void planned(final List<String> chords) {
+                        SwingUtilities.invokeLater(() -> showPlanned(chords));
+                    }
+
+                    @Override
                     public void arriving(final long characters) {
                         SwingUtilities.invokeLater(() -> {
                             if (worker == null || worker.isDone()) {
@@ -3936,6 +3946,78 @@ public final class AudioStudioFrame extends JFrame {
         showTrackWork();
     }
 
+    /** What the AI does before the first note, or {@code null}; shown with the seconds it takes. */
+    private String preparing;
+    private long preparingSince;
+    private long preparingArrived;
+    private final javax.swing.Timer preparingClock = new javax.swing.Timer(1000, event -> sayPreparing());
+
+    /**
+     * The steps before the first note (instruments, plan) take a while and were silent: the
+     * empty paper and the status line now say which step runs, for how long, and how much of its
+     * answer is there.
+     */
+    private void showPreparing(String what, long characters) {
+        if (worker == null || worker.isDone()) {
+            return;
+        }
+        if (!what.equals(preparing)) {
+            preparing = what;
+            preparingSince = System.currentTimeMillis();
+        }
+        preparingArrived = characters;
+        if (!preparingClock.isRunning()) {
+            preparingClock.start();
+        }
+        sayPreparing();
+    }
+
+    private void sayPreparing() {
+        if (preparing == null || worker == null || worker.isDone()) {
+            preparing = null;
+            preparingClock.stop();
+            return;
+        }
+        long seconds = (System.currentTimeMillis() - preparingSince) / 1000;
+        String line = preparing + " · " + seconds + " s · " + (preparingArrived == 0
+                ? "noch kein Text angekommen (das Modell überlegt oder wartet)"
+                : preparingArrived + " Zeichen angekommen");
+        setStatus(line);
+        sayOnPaper(line);
+    }
+
+    /** The plan is there: the chords are said until the first notes arrive. */
+    private void showPlanned(List<String> chords) {
+        if (worker == null || worker.isDone()) {
+            return;
+        }
+        preparing = null;
+        preparingClock.stop();
+        StringBuilder said = new StringBuilder("Plan steht · Akkorde: ");
+        for (int i = 0; i < chords.size() && i < 16; i++) {
+            said.append(i == 0 ? "" : " | ").append(chords.get(i));
+        }
+        if (chords.size() > 16) {
+            said.append(" … (").append(chords.size()).append(" Takte)");
+        }
+        append(said.toString());
+        setStatus(said.toString());
+        sayOnPaper(said + " · gleich kommen die Noten");
+    }
+
+    /** A line on the paper of the score while it has no notes yet. */
+    private void sayOnPaper(String line) {
+        try {
+            List<String> ids = new ArrayList<String>();
+            for (MusicTrack track : trackTable.tracks()) {
+                ids.add(track.id());
+            }
+            scoreView.setScore(null, ids, line);
+        } catch (RuntimeException undrawn) {
+            // the status line says it as well
+        }
+    }
+
     /**
      * The piece while the AI writes it: the score on the page of the composition grows with every
      * note that arrives. Only shown; the saved piece is shown again when the work is over.
@@ -3944,6 +4026,8 @@ public final class AudioStudioFrame extends JFrame {
         if (worker == null || worker.isDone()) {
             return; // a late picture after the work ended: the score shows the piece itself again
         }
+        preparing = null;
+        preparingClock.stop();
         try {
             List<String> ids = new ArrayList<String>();
             for (MusicTrack track : trackTable.tracks()) {

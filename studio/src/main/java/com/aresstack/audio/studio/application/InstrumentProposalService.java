@@ -68,9 +68,17 @@ public final class InstrumentProposalService {
                 + "Use the GM drum kit on channel 10 for drums, with program=0. "
                 + STAGE_FORMAT
                 + " Do not include libraryId, channel numbers, notes or commentary. Return only JSON.";
+        final com.aresstack.audio.studio.progress.SketchProgress watched =
+                progress instanceof com.aresstack.audio.studio.progress.SketchProgress
+                        ? (com.aresstack.audio.studio.progress.SketchProgress) progress : null;
+        final String step = "Die KI wählt die Instrumente";
+        if (watched != null) {
+            watched.preparing(step, 0);
+        }
         JsonObject response = client.generate("Return valid JSON only, no Markdown.",
                 prompt, Math.min(maxTokens, 4096),
-                directory.resolve("instrument-proposal.json"));
+                directory.resolve("instrument-proposal.json"),
+                watched == null ? null : text -> watched.preparing(step, text.length()));
         try {
             JsonArray options = response.getAsJsonArray("tracks");
             if (options.size() < 1) {
