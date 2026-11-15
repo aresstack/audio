@@ -16,4 +16,8 @@ public record Meta(String title, String genre, String mood, String brief, String
     public Meta withTitle(String newTitle) {
         return new Meta(newTitle, genre, mood, brief, plannedFrom, remarks);
     }
+
+    public Meta withGenre(String newGenre) {
+        return new Meta(title, newGenre, mood, brief, plannedFrom, remarks);
+    }
 }

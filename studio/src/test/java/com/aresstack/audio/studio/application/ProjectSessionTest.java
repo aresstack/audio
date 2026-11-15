@@ -234,6 +234,70 @@ public final class ProjectSessionTest {
         }
     }
 
+    @Test
+    public void whatOnlyTheModelKnowsSurvivesReopeningAndChangesOfTheOldFiles() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        Composition withGenre = session.composition().withMeta(session.composition().meta().withGenre("Stadtmusik"));
+        CompositionJson.save(piece, withGenre);
+        com.aresstack.audio.composition.mix.MixScene fixed = new com.aresstack.audio.composition.mix.MixScene(
+                session.mix().room(), session.mix().masterDb(), com.aresstack.audio.composition.mix.LevelMode.FIXED,
+                session.mix().channels(), session.mix().automation());
+        MixJson.save(piece, fixed);
+
+        ProjectSession reopened = ProjectSession.open(piece).orElseThrow();
+        assertEquals(withGenre, reopened.composition());
+        assertEquals(fixed, reopened.mix());
+
+        // The composer changes one note: the model takes it, and keeps the rest of what it knows.
+        List<String> lines = new ArrayList<>(Files.readAllLines(piece.resolve(ProjectFolder.ARRANGEMENT)));
+        int at = lines.indexOf(lines.stream().filter(l -> l.startsWith("note\tbass\t")).findFirst().orElseThrow());
+        lines.set(at, lines.get(at).replaceFirst("\t(\\d+)$", "\t1"));
+        Files.write(piece.resolve(ProjectFolder.ARRANGEMENT), lines, StandardCharsets.UTF_8);
+        assertTrue(reopened.synchronize());
+        assertEquals("Stadtmusik", reopened.composition().meta().genre());
+        assertEquals(fixed, reopened.mix());
+        assertEquals(withGenre.part("melody"), reopened.composition().part("melody"));
+        assertNotEquals(withGenre.track("bass"), reopened.composition().track("bass"));
+    }
+
+    @Test
+    public void savingRewritesAnArrangementWithLinesTheRendererRefuses() throws Exception {
+        Path folder = temporary.newFolder("odd-line").toPath();
+        Files.write(folder.resolve(ProjectFolder.ARRANGEMENT), List.of("tempo\t100", "track\tpiano\t0\t0\tharmony",
+                "volume\tpiano\t3", "note\tpiano\t0\t480\t60\t80"), StandardCharsets.UTF_8);
+        ProjectSession.open(folder).orElseThrow().save();
+        assertEquals(List.of("tempo\t100", "track\tpiano\t0\t0\tharmony", "note\tpiano\t0\t480\t60\t80"),
+                Files.readAllLines(folder.resolve(ProjectFolder.ARRANGEMENT)));
+        assertEquals("the original stays in legacy/", 4,
+                Files.readAllLines(folder.resolve(ProjectFolder.LEGACY).resolve(ProjectFolder.ARRANGEMENT)).size());
+    }
+
+    @Test
+    public void goingBackToAnEarlierArrangementGivesNoIdTwice() throws Exception {
+        Path folder = temporary.newFolder("three-notes").toPath();
+        List<String> original = List.of("tempo\t100", "track\tpiano\t0\t0\tharmony", "note\tpiano\t0\t480\t60\t80",
+                "note\tpiano\t480\t480\t62\t80", "note\tpiano\t960\t480\t64\t80");
+        Files.write(folder.resolve(ProjectFolder.ARRANGEMENT), original, StandardCharsets.UTF_8);
+        ProjectSession session = ProjectSession.open(folder).orElseThrow();
+        List<String> changed = new ArrayList<>(original);
+        changed.set(3, "note\tpiano\t480\t480\t65\t80");
+        changed.set(4, "note\tpiano\t960\t480\t67\t80");
+        Files.write(folder.resolve(ProjectFolder.ARRANGEMENT), changed, StandardCharsets.UTF_8);
+        assertTrue(session.synchronize());
+        Files.write(folder.resolve(ProjectFolder.ARRANGEMENT), original, StandardCharsets.UTF_8);
+        assertTrue(session.synchronize());
+        assertEquals(List.of(), com.aresstack.audio.composition.CompositionValidator.validate(session.composition()));
+    }
+
+    @Test
+    public void aChangeOfTempoMeansTheTakenOverStemsNoLongerFit() throws Exception {
+        Composition composition = ProjectSession.open(piece).orElseThrow().composition();
+        Composition slower = new Composition(composition.meta(), com.aresstack.audio.composition.TimeMap.of(60),
+                composition.sections(), composition.parts(), composition.tracks(), composition.assets());
+        assertNotEquals(StemManifest.digest(composition, "melody"), StemManifest.digest(slower, "melody"));
+        assertEquals(List.of(), StemManifest.current(StemManifest.load(piece), slower));
+    }
+
     private static List<Note> notes(Composition composition, String trackId) {
         return ((MidiClip) composition.track(trackId).clips().get(0)).notes();
     }

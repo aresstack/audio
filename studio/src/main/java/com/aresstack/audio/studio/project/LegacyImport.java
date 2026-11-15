@@ -106,6 +106,7 @@ public final class LegacyImport {
 
     private Result run(byte[] tsv) throws IOException {
         ids = Ids.seeded(seed(tsv));
+        reserve();
         ArrangementFile file = ArrangementFile.parse(new String(tsv, StandardCharsets.UTF_8).lines().toList());
         for (ArrangementFile.Problem problem : file.problems()) {
             warn("arrangement.tsv, Zeile " + problem.line() + " übergangen (" + problem.reason() + "): " + problem.text());
@@ -232,11 +233,11 @@ public final class LegacyImport {
         for (int i = 0; i < written.size(); i++) {
             ArrangementFile.Note line = written.get(i);
             Deque<String> reuse = oldNotes.get(key(line.tick(), line.length(), line.pitch(), line.velocity()));
-            String noteId = reuse != null && !reuse.isEmpty() ? reuse.poll() : ids.next();
+            String noteId = reuse != null && !reuse.isEmpty() ? reuse.poll() : fresh();
             notes.add(new Note(noteId, line.tick(), line.length(), line.pitch(), line.velocity(),
                     part.voices().get(voiceOf[i]).id()));
         }
-        String clipId = oldClip != null ? oldClip.id() : ids.next();
+        String clipId = oldClip != null ? oldClip.id() : fresh();
         return new Track(id, before == null ? id : before.name(), Track.Kind.MIDI, part.id(),
                 List.of(new MidiClip(clipId, 0, length, null, notes)));
     }
@@ -294,7 +295,7 @@ public final class LegacyImport {
         for (SoundSourcePlacement placement : fitted.placements()) {
             MixChannel.Owner owner = MixChannel.Owner.part(placement.trackId());
             MixChannel before = previousMix == null ? null : previousMix.channelOf(owner);
-            MixChannel channel = new MixChannel(before == null ? ids.next() : before.id(), owner, placement.x(),
+            MixChannel channel = new MixChannel(before == null ? fresh() : before.id(), owner, placement.x(),
                     placement.depth(), placement.levelDb(), placement.width(), placement.reverb(), placement.muted(),
                     placement.locked());
             channels.add(channel);
@@ -311,7 +312,7 @@ public final class LegacyImport {
                         }
                     }
                 }
-                automation.add(new AutomationLane(laneId == null ? ids.next() : laneId, channel.id(),
+                automation.add(new AutomationLane(laneId == null ? fresh() : laneId, channel.id(),
                         AutomationLane.LEVEL, points));
             }
         }
@@ -436,11 +437,47 @@ public final class LegacyImport {
     }
 
     private String voiceId(Part before, int index) {
-        return before != null && before.voices().size() > index ? before.voices().get(index).id() : ids.next();
+        return before != null && before.voices().size() > index ? before.voices().get(index).id() : fresh();
     }
 
     private String previousSectionId() {
-        return previous != null && !previous.sections().isEmpty() ? previous.sections().get(0).id() : ids.next();
+        return previous != null && !previous.sections().isEmpty() ? previous.sections().get(0).id() : fresh();
+    }
+
+    /**
+     * A new id that no object of the earlier model has: the seeded sequence starts again from the
+     * beginning on every import, so an id kept from before could otherwise come round a second time.
+     */
+    private String fresh() {
+        String id = ids.next();
+        while (!taken.add(id)) {
+            id = ids.next();
+        }
+        return id;
+    }
+
+    /** Every id of the earlier model and the earlier mix, and every id given out since. */
+    private final java.util.Set<String> taken = new java.util.HashSet<>();
+
+    private void reserve() {
+        if (previous != null) {
+            previous.sections().forEach(section -> taken.add(section.id()));
+            for (Part part : previous.parts()) {
+                part.voices().forEach(voice -> taken.add(voice.id()));
+            }
+            for (Track track : previous.tracks()) {
+                for (com.aresstack.audio.composition.Clip clip : track.clips()) {
+                    taken.add(clip.id());
+                    if (clip instanceof MidiClip midi) {
+                        midi.notes().forEach(note -> taken.add(note.id()));
+                    }
+                }
+            }
+        }
+        if (previousMix != null) {
+            previousMix.channels().forEach(channel -> taken.add(channel.id()));
+            previousMix.automation().forEach(lane -> taken.add(lane.id()));
+        }
     }
 
     private void warn(String warning) {

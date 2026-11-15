@@ -41,12 +41,15 @@ public final class StemManifest {
         return folder.resolve(ProjectFolder.RENDER).resolve(FILE_NAME);
     }
 
-    /** The hash of what sounds of a part: its line and its notes as {@code arrangement.tsv} writes them. */
+    /**
+     * The hash of what sounds of a part: the time map (a tempo change moves every note in time),
+     * and its line and its notes as {@code arrangement.tsv} writes them.
+     */
     public static String digest(Composition composition, String partId) {
         try {
             MessageDigest sha = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(sha.digest(
-                    String.join("\n", TsvExport.linesOf(composition, partId)).getBytes(StandardCharsets.UTF_8)));
+            String sounding = composition.timeMap() + "\n" + String.join("\n", TsvExport.linesOf(composition, partId));
+            return HexFormat.of().formatHex(sha.digest(sounding.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
         }
