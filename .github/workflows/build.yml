@@ -208,7 +208,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="latest"
-          notes="Rolling build from main commit $GITHUB_SHA. Contains the Swing Audio Studio (Java 21, started by a launcher that also runs on Java 8), music, sound effect, and FluidSynth SoundFont renderer JARs. District Dawn is the exact Gemma composition in two timbres: simple Java synthesis vs. GeneralUser GS 2.0.3/FluidSynth at 44.1 kHz. SoundFont: S. Christian Collins, GeneralUser GS License v2.0; only rendered original music is published."
+          notes="Rolling build from main commit $GITHUB_SHA. Contains one runnable JAR: the Swing Audio Studio (Java 21, started by a launcher that also runs on Java 8). The command-line renderers (music, sounds, SoundFont) are built by Gradle but no longer published. District Dawn is the exact Gemma composition in two timbres: simple Java synthesis vs. GeneralUser GS 2.0.3/FluidSynth at 44.1 kHz. SoundFont: S. Christian Collins, GeneralUser GS License v2.0; only rendered original music is published."
 
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" --target "$GITHUB_SHA" --title "Audio – current build" --notes "$notes"
@@ -218,6 +218,13 @@ jobs:
             gh release edit "$tag" --title "Audio – current build" --notes "$notes"
           fi
 
-          gh release upload "$tag" release/audio-studio.jar release/music-renderer.jar release/music-soundfont-renderer.jar release/sounds-renderer.jar \
+          # Only the one runnable studio JAR is published. Remove renderer JARs that older builds uploaded.
+          for stale in music-renderer.jar music-soundfont-renderer.jar sounds-renderer.jar; do
+            if gh release view "$tag" --json assets --jq '.assets[].name' | grep -qx "$stale"; then
+              gh release delete-asset "$tag" "$stale" --yes
+            fi
+          done
+
+          gh release upload "$tag" release/audio-studio.jar \
             release/district-dawn.mid release/district-dawn-synth.wav release/district-dawn-generaluser.wav \
             release/district-dawn-synth.mp3 release/district-dawn-generaluser.mp3 --clobber

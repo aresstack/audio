@@ -16,17 +16,16 @@ All Java sources compile for **Java 21**. Only the small launcher of the studio 
 
 Every successful build on `main` updates the existing [latest release](https://github.com/aresstack/audio/releases/tag/latest); binaries are published under **stable names and URLs**:
 
-- [audio-studio.jar](https://github.com/aresstack/audio/releases/download/latest/audio-studio.jar) — Swing-based Gemma composer and SF2/SF3/SFZ instrument test bench
-- [music-renderer.jar](https://github.com/aresstack/audio/releases/download/latest/music-renderer.jar)
-- [sounds-renderer.jar](https://github.com/aresstack/audio/releases/download/latest/sounds-renderer.jar)
-- [music-soundfont-renderer.jar](https://github.com/aresstack/audio/releases/download/latest/music-soundfont-renderer.jar) — renders an existing MIDI file through an installed FluidSynth and a user-supplied SoundFont
+- [audio-studio.jar](https://github.com/aresstack/audio/releases/download/latest/audio-studio.jar) — Swing-based Gemma composer and SF2/SF3/SFZ instrument test bench; this is the only published JAR
+
+The command-line renderers `music-renderer.jar`, `sounds-renderer.jar` and `music-soundfont-renderer.jar` are no longer published. Build them locally with `bash ./gradlew :music:jar :music:soundFontJar :sounds:jar` if needed (see [Build](#build)).
 
 **Same Gemma composition, different instrument sounds:**
 - [District Dawn – GeneralUser GS (MP3)](https://github.com/aresstack/audio/releases/download/latest/district-dawn-generaluser.mp3)
 - [District Dawn – original Java synthesis (MP3)](https://github.com/aresstack/audio/releases/download/latest/district-dawn-synth.mp3)
 - [GeneralUser WAV (44.1 kHz)](https://github.com/aresstack/audio/releases/download/latest/district-dawn-generaluser.wav) · [Original WAV](https://github.com/aresstack/audio/releases/download/latest/district-dawn-synth.wav) · [MIDI](https://github.com/aresstack/audio/releases/download/latest/district-dawn.mid)
 
-Both are runnable with `java -jar` and a JDK/JRE 8 or newer. The `sounds` JAR includes Gson; neither program needs KIPITZ to render an existing plan. Only the original generated *District Dawn* comparison music is published as audio files; these are not binary dependencies. The 32 MB SoundFont is not redistributed.
+Only the original generated *District Dawn* comparison music is published as audio files; these are not binary dependencies. The 32 MB SoundFont is not redistributed.
 
 ## Build
 
@@ -56,7 +55,7 @@ Both renderer JARs are self-contained for their CLI use cases; the sound rendere
 
 Legacy PowerShell scripts reside in `music/experiments/` and `sounds/experiments/`. Both assume **`$ApiKey` and `$CompletionsUrl` are already defined in the current PowerShell session**. Never commit credentials or API responses containing secrets.
 
-- `music/experiments/kipitz-gemma-multitrack.ps1`: sends one composition-plan request and four instrument-part requests to `google/gemma-4-31B-it`; saves JSON and TSV; uses the compiled `music/build/libs/music-renderer.jar` to generate MIDI and WAV files. Build `:music:jar` first using the wrapper (or download the rolling-release JAR into `music/build/libs`). Previously saved model answers are reused on restart; pass `-Regenerate` to request every step again. The PowerShell script is self-contained and also works when pasted into an interactive session (it downloads the release renderer JAR to a temporary cache if no locally built JAR can be found). Off-chord bass/harmony notes are corrected deterministically for the rendered TSV while the original JSON remains unchanged; corrections appear in `harmonic-corrections.txt`. Output: `%TEMP%\kipitz-gemma-multitrack\` and `%TEMP%\kipitz-gemma-multitrack.zip`.
+- `music/experiments/kipitz-gemma-multitrack.ps1`: sends one composition-plan request and four instrument-part requests to `google/gemma-4-31B-it`; saves JSON and TSV; uses the compiled `music/build/libs/music-renderer.jar` to generate MIDI and WAV files. Build `:music:jar` first using the wrapper. Previously saved model answers are reused on restart; pass `-Regenerate` to request every step again. When pasted into an interactive session, the script looks for the renderer JAR in `%TEMP%\aresstack-audio-renderers\music-renderer.jar`; copy a locally built JAR there. Off-chord bass/harmony notes are corrected deterministically for the rendered TSV while the original JSON remains unchanged; corrections appear in `harmonic-corrections.txt`. Output: `%TEMP%\kipitz-gemma-multitrack\` and `%TEMP%\kipitz-gemma-multitrack.zip`.
 - `sounds/experiments/kipitz-gemma-sounds.ps1`: requests four sound designs; synthesizes WAV files directly with constrained-language-compatible PowerShell. Output: `%TEMP%\kipitz-gemma-sounds\` and `%TEMP%\kipitz-gemma-sounds.zip`.
 
 These requests are initiated only by a user launching the scripts; no remote API is called by the Java renderers. No generated WAVs, private API settings, or audio-renderer binaries are tracked in Git (the standard Gradle wrapper JAR is build tooling).
