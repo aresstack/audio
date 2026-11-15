@@ -1,4 +1,4 @@
-package com.aresstack.audio.studio.mix;
+package com.aresstack.audio.studio.mix.legacy;
 
 /**
  * A second-order filter on float samples. The coefficients follow the formulas of
@@ -6,7 +6,7 @@ package com.aresstack.audio.studio.mix;
  * module works on 16-bit speech, so the formulas were taken over and the float
  * processing written anew for music.
  */
-final class Biquad {
+final class LegacyBiquad {
     private final double b0;
     private final double b1;
     private final double b2;
@@ -15,7 +15,7 @@ final class Biquad {
     private double z1;
     private double z2;
 
-    private Biquad(double b0, double b1, double b2, double a0, double a1, double a2) {
+    private LegacyBiquad(double b0, double b1, double b2, double a0, double a1, double a2) {
         this.b0 = b0 / a0;
         this.b1 = b1 / a0;
         this.b2 = b2 / a0;
@@ -24,13 +24,13 @@ final class Biquad {
     }
 
     /** Raises or lowers everything above a frequency by so many dB. */
-    static Biquad highShelf(int sampleRate, double frequency, double gainDb) {
+    static LegacyBiquad highShelf(int sampleRate, double frequency, double gainDb) {
         double a = Math.pow(10, gainDb / 40);
         double w0 = 2 * Math.PI * Math.min(frequency, sampleRate * 0.45) / sampleRate;
         double cos = Math.cos(w0);
         double alpha = Math.sin(w0) / 2 * Math.sqrt(2);
         double root = 2 * Math.sqrt(a) * alpha;
-        return new Biquad(a * ((a + 1) + (a - 1) * cos + root),
+        return new LegacyBiquad(a * ((a + 1) + (a - 1) * cos + root),
                 -2 * a * ((a - 1) + (a + 1) * cos),
                 a * ((a + 1) + (a - 1) * cos - root),
                 (a + 1) - (a - 1) * cos + root,
@@ -39,16 +39,16 @@ final class Biquad {
     }
 
     /** Lets through what lies below a frequency. */
-    static Biquad lowPass(int sampleRate, double frequency) {
+    static LegacyBiquad lowPass(int sampleRate, double frequency) {
         double w0 = 2 * Math.PI * Math.min(frequency, sampleRate * 0.45) / sampleRate;
         double cos = Math.cos(w0);
         double alpha = Math.sin(w0) / (2 * Math.sqrt(0.5));
-        return new Biquad((1 - cos) / 2, 1 - cos, (1 - cos) / 2, 1 + alpha, -2 * cos, 1 - alpha);
+        return new LegacyBiquad((1 - cos) / 2, 1 - cos, (1 - cos) / 2, 1 + alpha, -2 * cos, 1 - alpha);
     }
 
     /** A filter with the same coefficients and a state of its own, for the other channel. */
-    Biquad again() {
-        return new Biquad(b0, b1, b2, 1, a1, a2);
+    LegacyBiquad again() {
+        return new LegacyBiquad(b0, b1, b2, 1, a1, a2);
     }
 
     void process(float[] samples) {

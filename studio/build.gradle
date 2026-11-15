@@ -22,6 +22,7 @@ tasks.named('compileLauncherJava') {
 def launcherClass = 'com.aresstack.audio.launcher.Launcher'
 
 dependencies {
+    implementation project(':audio-core')
     implementation project(':music')
     implementation project(':instruments')
     implementation 'com.google.code.gson:gson:2.10.1'
@@ -38,7 +39,7 @@ application {
 def mergedServicesDirectory = layout.buildDirectory.dir('merged-service-providers')
 
 tasks.named('jar') {
-    dependsOn ':music:jar', ':instruments:jar', tasks.named('mergeServiceProviders')
+    dependsOn ':audio-core:jar', ':music:jar', ':instruments:jar', tasks.named('mergeServiceProviders')
     archiveFileName = 'audio-studio.jar'
     from sourceSets.launcher.output
     manifest {
@@ -60,7 +61,7 @@ tasks.named('run') {
 }
 
 tasks.register('mergeServiceProviders') {
-    dependsOn ':music:jar', ':instruments:jar'
+    dependsOn ':audio-core:jar', ':music:jar', ':instruments:jar'
     inputs.files(configurations.runtimeClasspath)
     outputs.dir(mergedServicesDirectory)
     doLast {
