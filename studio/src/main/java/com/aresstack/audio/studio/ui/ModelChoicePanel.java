@@ -26,9 +26,10 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 
 /**
- * The models next to the composition prompt: one choice per visible role (planning and
- * composition), filled from "Modelle laden", and the extended assignment of every role behind a
- * button. The choice is only a wish: a production takes it over when it starts.
+ * The models next to a prompt for the AI: one choice per role the page works with (planning and
+ * composition beside the composition prompt; the album's model too on the album page), filled
+ * from "Modelle laden", and the extended assignment of every role behind a button. The choice is
+ * only a wish: a production takes it over when it starts.
  */
 final class ModelChoicePanel extends JPanel {
     /** In the extended assignment: the role has no model of its own and follows another. */
@@ -36,6 +37,7 @@ final class ModelChoicePanel extends JPanel {
 
     private final Runnable changed;
     private final Runnable loadModels;
+    private final List<ModelRole> roles;
     private final List<String> known = new ArrayList<>();
     private final List<JComboBox<String>> boxes = new ArrayList<>();
     private final List<JLabel> purposes = new ArrayList<>();
@@ -47,7 +49,15 @@ final class ModelChoicePanel extends JPanel {
      * @param loadModels asks the service for its models; answers with {@link #setModels}
      */
     ModelChoicePanel(Runnable changed, Runnable loadModels) {
+        this(ModelRoles.visible(), changed, loadModels);
+    }
+
+    /**
+     * @param roles the roles this page lets the user choose a model for, in the order shown
+     */
+    ModelChoicePanel(List<ModelRole> roles, Runnable changed, Runnable loadModels) {
         super(new GridBagLayout());
+        this.roles = List.copyOf(roles);
         this.changed = Objects.requireNonNull(changed);
         this.loadModels = Objects.requireNonNull(loadModels);
         setOpaque(false);
@@ -59,14 +69,16 @@ final class ModelChoicePanel extends JPanel {
         at.fill = GridBagConstraints.HORIZONTAL;
         at.weightx = 1;
         add(DeckWidgets.lettering("KI-Modelle"), at);
-        for (ModelRole role : ModelRoles.visible()) {
+        for (ModelRole role : this.roles) {
             JComboBox<String> box = box(role);
             boxes.add(box);
             at.gridy++;
             at.gridwidth = 1;
             at.weightx = 0;
             at.insets = new Insets(6, 0, 0, 8);
-            JLabel name = new JLabel(role.label() + "smodell");
+            // "Planungsmodell", "Kompositionsmodell", but "Albummodell".
+            JLabel name = new JLabel(role.label()
+                    + (role.label().endsWith("ung") || role.label().endsWith("ion") ? "smodell" : "modell"));
             name.setForeground(AudioStudioTheme.TEXT);
             add(name, at);
             at.gridx = 1;
@@ -112,7 +124,12 @@ final class ModelChoicePanel extends JPanel {
             }
             Object chosen = box.getSelectedItem();
             String name = chosen == null ? "" : chosen.toString().trim();
-            assignment = assignment.with(role, name.isEmpty() || name.equals(assignment.base()) ? null : name);
+            // The model the role would get anyway (the base model, or that of the role it follows)
+            // is no model of its own: the role goes on following.
+            ModelAssignment following = assignment.with(role, null);
+            assignment = name.isEmpty() || name.equals(following.modelFor(role)) ? following
+                    : assignment.with(role, name);
+            showOthers(box); // a role that follows this one shows its new model
             changed.run();
         });
         return box;
@@ -120,7 +137,7 @@ final class ModelChoicePanel extends JPanel {
 
     /** The choice of a visible role, for tests. */
     JComboBox<String> choice(ModelRole role) {
-        return boxes.get(ModelRoles.visible().indexOf(role));
+        return boxes.get(roles.indexOf(role));
     }
 
     /** The assignment as chosen. */
@@ -159,11 +176,19 @@ final class ModelChoicePanel extends JPanel {
     }
 
     private void refresh() {
+        showOthers(null);
+    }
+
+    /** Shows the assignment in every choice but the one the user is just changing. */
+    private void showOthers(JComboBox<String> changing) {
         filling = true;
         try {
-            List<ModelRole> shown = ModelRoles.visible();
+            List<ModelRole> shown = roles;
             for (int i = 0; i < boxes.size(); i++) {
                 JComboBox<String> box = boxes.get(i);
+                if (box == changing) {
+                    continue;
+                }
                 box.setModel(new DefaultComboBoxModel<>(offered().toArray(new String[0])));
                 String model = assignment.modelFor(shown.get(i));
                 box.setSelectedItem(model);
