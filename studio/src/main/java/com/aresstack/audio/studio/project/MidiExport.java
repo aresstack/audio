@@ -1,6 +1,7 @@
 package com.aresstack.audio.studio.project;
 
 import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.Dynamics;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.TimeMap;
 import java.io.ByteArrayOutputStream;
@@ -26,6 +27,8 @@ import javax.sound.midi.Track;
  * channel get a port of their own, as there.
  */
 public final class MidiExport {
+    /** The MIDI controller of expression, which the hairpins drive while notes are held. */
+    public static final int EXPRESSION = 11;
     private MidiExport() {
     }
 
@@ -66,6 +69,10 @@ public final class MidiExport {
                 }
                 if (channel != 9) {
                     midi(track, ShortMessage.PROGRAM_CHANGE, channel, part.program(), 0, 0);
+                }
+                for (Dynamics.ExpressionPoint point : composition.expression(part.id())) {
+                    // Held notes swell and fade with the hairpins of the part (controller 11, expression).
+                    midi(track, ShortMessage.CONTROL_CHANGE, channel, EXPRESSION, point.value(), point.tick());
                 }
                 for (Composition.PlacedNote placed : composition.notesOf(part.id())) {
                     midi(track, ShortMessage.NOTE_ON, channel, placed.note().pitch(), composition.playedVelocity(placed),

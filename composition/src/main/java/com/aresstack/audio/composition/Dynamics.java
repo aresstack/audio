@@ -287,9 +287,80 @@ public record Dynamics(List<Mark> marks, List<Hairpin> hairpins, Scale scale, Ar
         if (isEmpty() && articulation == null) {
             return written;
         }
-        double factor = (isEmpty() ? 1.0 : levelVelocity(partId, tick) / scale.velocity(scale.reference()))
-                * articulations.velocity(articulation);
+        // Within a hairpin a note starts at the loudest level the hairpin reaches; the expression
+        // curve (see expression) brings it down to the level at its start and lets it swell or fade
+        // while it is held.
+        double factor = (isEmpty() ? 1.0 : levelVelocity(partId, tick) / expression(partId, tick)
+                / scale.velocity(scale.reference())) * articulations.velocity(articulation);
         return (int) Math.max(1, Math.min(127, Math.round(written * factor)));
+    }
+
+    /** The hairpin that holds for a part at a tick (the one that began last), {@code null} if none. */
+    public Hairpin hairpinAt(String partId, long tick) {
+        Hairpin found = null;
+        for (Hairpin pin : hairpins) {
+            if (pin.holdsFor(partId) && pin.startTick() <= tick && tick < pin.endTick()) {
+                found = pin;
+            }
+        }
+        return found;
+    }
+
+    /** The loudest level velocity a hairpin reaches for a part: where it begins or its target. */
+    public double peak(String partId, Hairpin pin) {
+        return Math.max(levelVelocity(partId, pin.startTick()), scale.velocity(pin.target()));
+    }
+
+    /**
+     * The share of the loudness a part has at a tick, from 0 to 1, as MIDI expression (controller
+     * 11) plays it: within a hairpin the level there over the loudest level of the hairpin, so
+     * that a held note swells or fades with it; 1 everywhere else.
+     */
+    public double expression(String partId, long tick) {
+        Hairpin pin = hairpinAt(partId, tick);
+        if (pin == null) {
+            return 1.0;
+        }
+        double peak = peak(partId, pin);
+        return peak <= 0 ? 1.0 : Math.min(1.0, levelVelocity(partId, tick) / peak);
+    }
+
+    /** A value of the expression curve: from this tick on, until the next point, this share of 127. */
+    public record ExpressionPoint(long tick, int value) {
+    }
+
+    /**
+     * The expression curve of a part in steps of {@code stepTicks}: the points where its value
+     * changes, from the start of its first hairpin on, back to 127 where a hairpin ends. Empty
+     * when no hairpin holds for the part: then nothing but the velocities shape its loudness.
+     */
+    public List<ExpressionPoint> expressionCurve(String partId, long stepTicks) {
+        if (stepTicks < 1) {
+            throw new IllegalArgumentException("The steps of an expression curve last at least one tick: " + stepTicks);
+        }
+        List<ExpressionPoint> points = new ArrayList<>();
+        int last = 127;
+        for (Hairpin pin : hairpins) {
+            if (!pin.holdsFor(partId)) {
+                continue;
+            }
+            for (long tick = pin.startTick(); tick < pin.endTick(); tick += stepTicks) {
+                if (hairpinAt(partId, tick) != pin) {
+                    continue;
+                }
+                int value = (int) Math.round(127 * expression(partId, tick));
+                if (value != last) {
+                    points.add(new ExpressionPoint(tick, value));
+                    last = value;
+                }
+            }
+            if (last != 127 && hairpinAt(partId, pin.endTick()) == null) {
+                points.add(new ExpressionPoint(pin.endTick(), 127));
+                last = 127;
+            }
+        }
+        points.sort(Comparator.comparingLong(ExpressionPoint::tick));
+        return points;
     }
 
     /** The ticks a note of this written length sounds with this articulation: at least one. */

@@ -101,7 +101,7 @@ public final class NewBarsPerformanceTest {
                 + "\"dynamics\":[{\"bar\":9,\"level\":\"pp\"},{\"bar\":2,\"level\":\"ff\"}],"
                 + "\"hairpins\":[{\"fromBar\":9,\"toBar\":13,\"to\":\"ff\"}]");
         PieceExtension extension = PieceExtension.start(session, ContinuationComposer.with(model),
-                ContinuationRequest.of(8, ContinuationPreset.FREE, ContinuationEnding.OPEN), Ids.seeded(5), QUIET);
+                ContinuationRequest.of(8, ContinuationPreset.STANDALONE, ContinuationEnding.OPEN), Ids.seeded(5), QUIET);
 
         assertTrue(model.prompts().get(0).contains("Plan the performance of the new bars 9-16"));
         Composition after = extension.proposal().result();
@@ -128,9 +128,12 @@ public final class NewBarsPerformanceTest {
                 if (note.tick() < 8 * BAR) {
                     assertEquals(note.note().velocity(), played);
                 } else if (note.tick() == 8 * BAR) {
+                    // the crescendo starts pianissimo: the note starts at the loudest level of the
+                    // hairpin, and the expression brings it down to pianissimo while it is held
                     Dynamics.Scale scale = Dynamics.Scale.STANDARD;
-                    assertEquals(Math.round(note.note().velocity() * scale.velocity(Dynamics.Level.PP)
-                            / (double) scale.velocity(scale.reference())), played);
+                    assertEquals(scale.velocity(Dynamics.Level.PP) / (double) scale.velocity(Dynamics.Level.FF),
+                            after.dynamics().expression(part.id(), note.tick()), 1e-9);
+                    assertTrue(after.expression(part.id()).get(0).value() < 127 / 2);
                 } else if (note.tick() >= 12 * BAR) {
                     assertTrue(played + " from bar 13", played > note.note().velocity());
                 }
@@ -199,7 +202,7 @@ public final class NewBarsPerformanceTest {
     public void withoutPerformanceInTheAnswerNothingButTheNotesChanges() throws Exception {
         Composition before = session.composition();
         PieceExtension extension = PieceExtension.start(session, ContinuationComposer.with(model("\"x\":0")),
-                ContinuationRequest.of(8, ContinuationPreset.FREE, ContinuationEnding.OPEN), Ids.seeded(9), QUIET);
+                ContinuationRequest.of(8, ContinuationPreset.STANDALONE, ContinuationEnding.OPEN), Ids.seeded(9), QUIET);
         Composition after = extension.proposal().result();
         assertEquals(ContinuationPerformance.NONE, extension.continuation().plan().performance());
         assertEquals(before.timeMap(), after.timeMap());
