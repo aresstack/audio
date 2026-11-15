@@ -72,6 +72,23 @@ final class PieceSpecFields extends JPanel {
         add(planned);
         show(null);
         choose(CompositionSpec.legacy());
+        barsChosen = false;
+        bars.addChangeListener(event -> barsChosen = true);
+    }
+
+    /** Whether the bars were set by the user or by a piece; a suggestion then leaves them alone. */
+    private boolean barsChosen;
+
+    /**
+     * The length a new piece has unless the user says otherwise (setting "Takte je Stück und
+     * Schritt"): taken while the user has not set the bars and no planned piece locks the fields.
+     */
+    void suggestBars(int suggested) {
+        if (locked || barsChosen) {
+            return;
+        }
+        bars.setValue(Math.max(1, Math.min(CompositionSpec.MAX_BARS, suggested)));
+        barsChosen = false;
     }
 
     private static void width(Component field, int width) {
