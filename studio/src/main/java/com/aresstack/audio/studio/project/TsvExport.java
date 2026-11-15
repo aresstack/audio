@@ -79,6 +79,10 @@ public final class TsvExport {
             lines.add("track\t" + part.id() + "\t" + part.program() + "\t" + channels.get(part.id())
                     + (part.role() == null ? "" : "\t" + part.role()));
             boolean grand = part.staffLayout() == Part.StaffLayout.GRAND;
+            if (!Voicing.struck(part) && !Voicing.expressible(part)) {
+                throw new NotExpressible("arrangement.tsv knows at most " + Voicing.MOST_PER_STAFF
+                        + " voices per staff: " + part.id());
+            }
             if (grand) {
                 lines.add("staff\t" + part.id() + "\tgrand");
             }
