@@ -66,7 +66,7 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
                 new java.util.TreeSet<String>(callers(source, "pieceModel\\.of\\(")));
         assertEquals("only what the user asks for by name changes the saved piece",
                 new java.util.TreeSet<String>(List.of("addVoice", "composeAgain", "extendPiece", "insertBars",
-                        "intensityOverBars", "pieceChanged", "reorchestrate", "reworkRegion", "sectionIntensity",
+                        "intensityOverBars", "performance", "pieceChanged", "reorchestrate", "reworkRegion", "sectionIntensity",
                         "showRevisions", "showSections",
                         "undoPiece",
                         "popupMenuWillBecomeVisible", "savedPiece" /* its own header */)),
