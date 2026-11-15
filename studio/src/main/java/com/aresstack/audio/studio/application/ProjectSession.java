@@ -4,6 +4,7 @@ import com.aresstack.audio.composition.Composition;
 import com.aresstack.audio.composition.Meta;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.Section;
+import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.composition.Track;
 import com.aresstack.audio.composition.mix.MixScene;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
@@ -35,9 +36,11 @@ import java.util.Optional;
  * from them. Rendered stems are taken over, so nothing is rendered again.
  *
  * <p>Until the edit core (work package F3) exists, the composer and the renaming of a track
- * still write {@code arrangement.tsv} and {@code spatial-scene.json} themselves.
- * {@link #synchronize()} takes such a change into the model, and only such a change: what the
- * model holds beyond the old files is kept wherever the old files did not change.
+ * still write {@code arrangement.tsv} and {@code spatial-scene.json} themselves. Opening a piece
+ * never takes such a change: a file that is older than the model, or merely different, cannot
+ * overwrite it. The caller that has just written the file calls {@link #synchronize()}, which
+ * takes over what changed and keeps what the model holds beyond the old files; a model that says
+ * more than {@code arrangement.tsv} can is never replaced from that file.
  */
 public final class ProjectSession {
     /** The files that describe the piece in {@code arrangement.tsv} and beside it. */
@@ -66,10 +69,10 @@ public final class ProjectSession {
     public static Optional<ProjectSession> open(Path folder) throws IOException {
         if (Files.isRegularFile(folder.resolve(CompositionJson.FILE_NAME))) {
             ProjectFile project = ProjectFile.load(folder); // refuses a newer format before anything is read
-            ProjectSession session = new ProjectSession(folder, CompositionJson.load(folder), MixJson.load(folder),
-                    project == null ? List.of() : project.warnings());
-            session.synchronize();
-            return Optional.of(session);
+            // The model is the truth: opening never takes anything from the old files. Whether they
+            // changed since the model last took them over says externalChanges().
+            return Optional.of(new ProjectSession(folder, CompositionJson.load(folder), MixJson.load(folder),
+                    project == null ? List.of() : project.warnings()));
         }
         ProjectFolder.keepLegacy(folder);
         Optional<LegacyImport.Result> imported = LegacyImport.read(folder);
@@ -113,7 +116,47 @@ public final class ProjectSession {
     }
 
     /**
-     * Takes into the model what the old pipeline has written since the model last took it over:
+     * Whether the old pipeline has written {@code arrangement.tsv}, {@code tracks.json}, the plan,
+     * the name or the stage since the model last took them over. Opening a piece never takes such
+     * a change; {@link #synchronize()} does, when the caller decides to.
+     */
+    public boolean externalChanges() throws IOException {
+        if (!Files.isRegularFile(folder.resolve(ProjectFolder.ARRANGEMENT))) {
+            return false;
+        }
+        ProjectFile project = ProjectFile.load(folder);
+        Map<String, String> now = sources(folder);
+        Map<String, String> before = project == null ? Map.of() : project.sources();
+        return changed(before, now, PIECE_FILES) || changed(before, now, STAGE_FILES);
+    }
+
+    /**
+     * Whether the model says only what {@code arrangement.tsv} can say: one tempo in four
+     * quarters, one clip per track over its default part. Only then is the file a full view of
+     * the model, and only then may a new version of it be taken over without losing anything.
+     */
+    public boolean withinTsv() {
+        try {
+            TsvExport.lines(composition);
+        } catch (TsvExport.NotExpressible beyond) {
+            return false;
+        }
+        for (Track track : composition.tracks()) {
+            if (track.kind() != Track.Kind.MIDI || track.clips().size() > 1) {
+                return false;
+            }
+            for (com.aresstack.audio.composition.Clip clip : track.clips()) {
+                if (!(clip instanceof com.aresstack.audio.composition.MidiClip midi) || clip.startTick() != 0
+                        || (midi.partId() != null && !midi.partId().equals(track.defaultPartId()))) {
+                    return false;
+                }
+            }
+        }
+        return composition.assets().isEmpty() && composition.parts().size() == composition.tracks().size();
+    }
+
+    /**
+     * Takes into the model, on purpose, what the old pipeline has written since the model last took it over:
      * a new {@code arrangement.tsv} from the composer or a renamed track, a changed
      * {@code tracks.json}, plan or name, and the stage in {@code spatial-scene.json}. Nothing
      * happens if none of these files changed. Parts whose notes stayed the same are kept as the
@@ -131,6 +174,11 @@ public final class ProjectSession {
         boolean stage = changed(before, now, STAGE_FILES);
         if (!piece && !stage) {
             return false;
+        }
+        if (piece && !withinTsv()) {
+            throw new IOException("Das Werk enthält mehr, als arrangement.tsv ausdrücken kann (Tempo- oder"
+                    + " Taktwechsel, mehrere Clips oder Instrumente je Bahn); die geänderte Datei wird nicht"
+                    + " übernommen, damit nichts verloren geht: " + folder);
         }
         Optional<LegacyImport.Result> current = LegacyImport.read(folder, folder, composition, mix);
         if (current.isEmpty()) {
@@ -196,7 +244,8 @@ public final class ProjectSession {
     /**
      * The model after a new import of the old files: a part (with its track) whose notes sound
      * as before stays as the model has it; meta fields the old files do not say keep their
-     * value; the sections stay where they still cover the piece.
+     * value; the sections stay where they still cover the piece; the time map stays where the
+     * file names the same tempo.
      */
     private static Composition keepingModel(Composition imported, Composition model) {
         List<Part> parts = new ArrayList<>();
@@ -215,7 +264,8 @@ public final class ProjectSession {
         List<Section> sections = model.sections().isEmpty()
                 || model.sections().get(model.sections().size() - 1).endTick() != imported.endTick()
                 ? imported.sections() : model.sections();
-        return new Composition(meta, imported.timeMap(), sections, parts, tracks, model.assets());
+        TimeMap time = imported.timeMap().tempoAt(0) == model.timeMap().tempoAt(0) ? model.timeMap() : imported.timeMap();
+        return new Composition(meta, time, sections, parts, tracks, model.assets());
     }
 
     private static String or(String first, String second) {

@@ -8,6 +8,10 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.Key;
+import com.aresstack.audio.composition.Section;
+import com.aresstack.audio.composition.TimeMap;
+import com.aresstack.audio.composition.Track;
 import com.aresstack.audio.composition.MidiClip;
 import com.aresstack.audio.composition.Note;
 import com.aresstack.audio.studio.golden.Golden;
@@ -201,7 +205,12 @@ public final class ProjectSessionTest {
     public void aRenamedTrackKeepsTheRestOfThePiece() throws Exception {
         Composition before = ProjectSession.open(piece).orElseThrow().composition();
         StageMixService.rename(piece, "bass", "low");
-        Composition after = ProjectSession.open(piece).orElseThrow().composition();
+        ProjectSession reopened = ProjectSession.open(piece).orElseThrow();
+        assertEquals("opening takes nothing over", before, reopened.composition());
+        assertTrue(reopened.externalChanges());
+        assertTrue(reopened.synchronize());
+        assertFalse(reopened.externalChanges());
+        Composition after = reopened.composition();
         assertEquals(List.of("melody", "harmony", "low", "drums"), after.parts().stream().map(p -> p.id()).toList());
         assertEquals(notes(before, "drums"), notes(after, "drums"));
         assertNotEquals(null, after.part("low"));
@@ -247,6 +256,7 @@ public final class ProjectSessionTest {
         ProjectSession reopened = ProjectSession.open(piece).orElseThrow();
         assertEquals(withGenre, reopened.composition());
         assertEquals(fixed, reopened.mix());
+        assertFalse(reopened.synchronize());
 
         // The composer changes one note: the model takes it, and keeps the rest of what it knows.
         List<String> lines = new ArrayList<>(Files.readAllLines(piece.resolve(ProjectFolder.ARRANGEMENT)));
@@ -296,6 +306,101 @@ public final class ProjectSessionTest {
                 composition.sections(), composition.parts(), composition.tracks(), composition.assets());
         assertNotEquals(StemManifest.digest(composition, "melody"), StemManifest.digest(slower, "melody"));
         assertEquals(List.of(), StemManifest.current(StemManifest.load(piece), slower));
+    }
+
+    /** PO acceptance (1): a model changed and saved while arrangement.tsv is older comes back unchanged. */
+    @Test
+    public void aSavedModelIsNotOverwrittenByAnOlderArrangement() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        Composition edited = withVelocity(session.composition(), "melody", 0, 33);
+        CompositionJson.save(piece, edited); // as an editor of the model saves; arrangement.tsv is now behind
+        Files.setLastModifiedTime(piece.resolve(ProjectFolder.ARRANGEMENT), FileTime.fromMillis(System.currentTimeMillis() + 60_000));
+
+        ProjectSession reopened = ProjectSession.open(piece).orElseThrow();
+        assertEquals(edited, reopened.composition());
+        assertEquals(edited, CompositionJson.load(piece));
+        assertFalse("the view is old, not new", reopened.externalChanges());
+        assertFalse(reopened.synchronize());
+        assertEquals(edited, ProjectSession.open(piece).orElseThrow().composition());
+
+        // Saving writes the view from the model; the model stays as it is.
+        reopened.save();
+        assertEquals(edited, ProjectSession.open(piece).orElseThrow().composition());
+        assertTrue(Files.readAllLines(piece.resolve(ProjectFolder.ARRANGEMENT)).stream()
+                .anyMatch(line -> line.startsWith("note\tmelody\t") && line.endsWith("\t33")));
+    }
+
+    /** PO acceptance (2): an arrangement the old composer really wrote anew is taken over on purpose. */
+    @Test
+    public void aNewlyWrittenArrangementIsTakenOverOnlyOnPurpose() throws Exception {
+        Composition before = ProjectSession.open(piece).orElseThrow().composition();
+        List<String> lines = new ArrayList<>(Files.readAllLines(piece.resolve(ProjectFolder.ARRANGEMENT)));
+        lines.add("note\tdrums\t15240\t120\t42\t60");
+        Files.write(piece.resolve(ProjectFolder.ARRANGEMENT), lines, StandardCharsets.UTF_8);
+
+        ProjectSession reopened = ProjectSession.open(piece).orElseThrow();
+        assertEquals("not by opening", before, reopened.composition());
+        assertEquals(before, CompositionJson.load(piece));
+        assertTrue(reopened.externalChanges());
+        assertTrue(reopened.synchronize());
+        assertEquals(notes(before, "drums").size() + 1, notes(reopened.composition(), "drums").size());
+        assertEquals(reopened.composition(), CompositionJson.load(piece));
+        assertEquals(reopened.composition(), ProjectSession.open(piece).orElseThrow().composition());
+    }
+
+    /** PO acceptance (3): what arrangement.tsv cannot say is saved and opened without loss, and a new file cannot replace it. */
+    @Test
+    public void whatTheArrangementCannotSayIsNeverLost() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        Composition c = session.composition();
+        TimeMap time = new TimeMap(List.of(new TimeMap.Tempo(0, 108), new TimeMap.Tempo(4 * 1920, 90)),
+                List.of(new TimeMap.Meter(0, 4, 4), new TimeMap.Meter(4 * 1920, 3, 4)),
+                List.of(new TimeMap.KeyChange(0, Key.C_MAJOR), new TimeMap.KeyChange(4 * 1920, new Key(2, Key.Mode.MINOR))));
+        long end = 4 * 1920 + 4 * 1440;
+        List<Section> sections = List.of(new Section("intro", "Intro", "intro", 0, 4 * 1920, 0.3, List.of("C"), "leise"),
+                new Section("main", "Hauptteil", "verse", 4 * 1920, end - 4 * 1920, 0.8, List.of("Dm"), null));
+        Track melody = c.track("melody");
+        MidiClip first = (MidiClip) melody.clips().get(0);
+        MidiClip flute = new MidiClip("flutclip", 4 * 1920, 1440, "harmony",
+                List.of(new Note("flutnote", 0, 480, 74, 90, c.part("harmony").firstVoice().id())));
+        MidiClip shortened = new MidiClip(first.id(), 0, 4 * 1920, null,
+                first.notes().stream().filter(n -> n.endTick() <= 4 * 1920).toList());
+        List<Track> tracks = new ArrayList<>(c.tracks());
+        tracks.set(tracks.indexOf(melody), melody.withClips(List.of(shortened, flute)));
+        Composition beyond = new Composition(c.meta().withGenre("Filmmusik"), time, sections, c.parts(), tracks, c.assets());
+        assertEquals(List.of(), com.aresstack.audio.composition.CompositionValidator.validate(beyond));
+        CompositionJson.save(piece, beyond);
+
+        ProjectSession reopened = ProjectSession.open(piece).orElseThrow();
+        assertEquals(beyond, reopened.composition());
+        assertFalse(reopened.withinTsv());
+        reopened.save(); // the TSV cannot say it, so it is left as it is, and the model stays
+        assertEquals(beyond, ProjectSession.open(piece).orElseThrow().composition());
+
+        // Even a newly written arrangement cannot replace such a model.
+        List<String> lines = new ArrayList<>(Files.readAllLines(piece.resolve(ProjectFolder.ARRANGEMENT)));
+        lines.add("note\tdrums\t15240\t120\t42\t60");
+        Files.write(piece.resolve(ProjectFolder.ARRANGEMENT), lines, StandardCharsets.UTF_8);
+        ProjectSession again = ProjectSession.open(piece).orElseThrow();
+        try {
+            again.synchronize();
+            fail("a model beyond the TSV must not be replaced from it");
+        } catch (IOException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains("nicht übernommen"));
+        }
+        assertEquals(beyond, again.composition());
+        assertEquals(beyond, CompositionJson.load(piece));
+    }
+
+    private static Composition withVelocity(Composition composition, String trackId, int index, int velocity) {
+        Track track = composition.track(trackId);
+        MidiClip clip = (MidiClip) track.clips().get(0);
+        List<Note> notes = new ArrayList<>(clip.notes());
+        Note old = notes.get(index);
+        notes.set(index, new Note(old.id(), old.tick(), old.length(), old.pitch(), velocity, old.voiceId()));
+        List<Track> tracks = new ArrayList<>(composition.tracks());
+        tracks.set(tracks.indexOf(track), track.withClips(List.of(clip.withNotes(notes))));
+        return composition.withTracks(tracks);
     }
 
     private static List<Note> notes(Composition composition, String trackId) {
