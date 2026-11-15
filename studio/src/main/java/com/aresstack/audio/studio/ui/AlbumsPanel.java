@@ -154,6 +154,9 @@ final class AlbumsPanel extends JPanel {
     private final SuggestBox titleBox = new SuggestBox(title);
     private final SuggestBox descriptionBox = new SuggestBox(description);
     private final SuggestBox styleBox = new SuggestBox(style);
+    /** Description and style open into a large box: an album may need a long text, not one line. */
+    private final WideText descriptionWide = new WideText(description, descriptionBox);
+    private final WideText styleWide = new WideText(style, styleBox);
     private final JSpinner trackCount = new JSpinner(new SpinnerNumberModel(12, 1, AlbumConcept.MAX_TRACKS, 1));
     /** How long a piece may be: from … to … minutes; the plan gives each title its own length in it. */
     private final JSpinner minutes = new JSpinner(new SpinnerNumberModel(
@@ -275,8 +278,8 @@ final class AlbumsPanel extends JPanel {
         c.anchor = GridBagConstraints.WEST;
         c.fill = GridBagConstraints.HORIZONTAL;
         row(concept, c, 0, "Titel", titleBox, 3);
-        row(concept, c, 1, "Worum geht es? Das bekommt die KI gesagt.", descriptionBox, 3);
-        row(concept, c, 2, "Stil", styleBox, 3);
+        row(concept, c, 1, "Worum geht es? Das bekommt die KI gesagt.", descriptionWide, 3);
+        row(concept, c, 2, "Stil", styleWide, 3);
         // An empty list that is opened asks the AI (again): a request that failed is not the last word.
         for (final Field field : Field.values()) {
             box(field).addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
@@ -296,9 +299,9 @@ final class AlbumsPanel extends JPanel {
                 }
             });
         }
-        typed(title, afterTitle);
-        typed(description, afterDescription);
-        typed(style, afterStyle);
+        typed(title, afterTitle, title);
+        typed(description, afterDescription, descriptionWide.area());
+        typed(style, afterStyle, styleWide.area());
         c.gridy = 3;
         c.gridwidth = 1;
         c.gridx = 0;
@@ -532,7 +535,7 @@ final class AlbumsPanel extends JPanel {
         AlbumTrack selected = there && row >= 0 && row < album.tracks().size() ? album.tracks().get(row) : null;
         create.setEnabled(!running && !busy);
         delete.setEnabled(free);
-        for (Component field : new Component[]{titleBox, descriptionBox, styleBox, trackCount, minutes, minutesTo}) {
+        for (Component field : new Component[]{titleBox, descriptionWide, styleWide, trackCount, minutes, minutesTo}) {
             field.setEnabled(free);
         }
         plan.setEnabled(free);
@@ -568,7 +571,7 @@ final class AlbumsPanel extends JPanel {
     }
 
     /** When the user has typed into a field and paused, proposals are asked for. */
-    private void typed(JTextField field, Timer timer) {
+    private void typed(JTextField field, Timer timer, Component box) {
         field.getDocument().addDocumentListener(new DocumentListener() {
             @Override
             public void insertUpdate(DocumentEvent event) {
@@ -586,7 +589,7 @@ final class AlbumsPanel extends JPanel {
 
             private void changed() {
                 // Only what the user types counts, not what the page puts into the field itself.
-                if (album != null && field.isFocusOwner()) {
+                if (album != null && (field.isFocusOwner() || box.isFocusOwner())) {
                     timer.restart();
                 }
             }
