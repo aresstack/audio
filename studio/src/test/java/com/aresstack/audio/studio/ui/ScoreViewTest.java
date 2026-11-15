@@ -97,4 +97,82 @@ public final class ScoreViewTest {
         }
         assertTrue(names.containsAll(Arrays.asList("sharp", "flat", "natural", "doubleSharp", "doubleFlat")));
     }
+
+    /** Flute, then a part on two staves (a grand staff if asked), every note a whole note on a middle line: nothing leaves its staff. */
+    private static Score threeStaves(boolean grand) {
+        List<String> lines = new ArrayList<String>(Arrays.asList("tempo\t96", "track\tflute\t73\t0\tmelody"));
+        if (grand) {
+            lines.add("track\tpiano\t0\t1\tharmony");
+            lines.add("staff\tpiano\tgrand");
+        } else {
+            lines.add("track\tviolin\t40\t1\tharmony");
+            lines.add("track\tcello\t42\t2\tbass");
+        }
+        for (int bar = 0; bar < 4; bar++) {
+            lines.add("note\tflute\t" + bar * 1920 + "\t1920\t71\t90");
+            lines.add("note\t" + (grand ? "piano" : "violin") + "\t" + bar * 1920 + "\t1920\t71\t90" + (grand ? "\trh" : ""));
+            lines.add("note\t" + (grand ? "piano" : "cello") + "\t" + bar * 1920 + "\t1920\t50\t90" + (grand ? "\tlh" : ""));
+        }
+        return Score.of(lines);
+    }
+
+    private static int ink(BufferedImage picture, int fromX, int toX, int fromY, int toY) {
+        int dark = 0;
+        for (int x = fromX; x < toX; x++) {
+            for (int y = fromY; y < toY; y++) {
+                if ((picture.getRGB(x, y) & 0xFF) < 120) {
+                    dark++;
+                }
+            }
+        }
+        return dark;
+    }
+
+    @Test
+    public void aGrandStaffIsBracedItsBarLinesGoThroughBothSystemsAndTheyStandCloser() {
+        Score grand = threeStaves(true);
+        assertEquals(3, grand.staves().size());
+        assertTrue(grand.staves().get(1).grand() && grand.staves().get(2).grand());
+        ScoreView view = new ScoreView();
+        view.setScore(grand, Arrays.asList("flute", "piano"), "");
+        BufferedImage braced = view.picture(1400);
+        ScoreView plain = new ScoreView();
+        plain.setScore(threeStaves(false), Arrays.asList("flute", "violin", "cello"), "");
+        BufferedImage single = plain.picture(1400);
+        assertTrue("the two systems stand closer than two parts", braced.getHeight() < single.getHeight());
+
+        // The second staff begins 86 below the first (54); a staff is 36 high. Below it: the gap to the third.
+        int gapTop = 54 + 86 + 36 + 4;
+        assertTrue("bar lines cross the gap between the systems of the grand staff",
+                ink(braced, 300, 1390, gapTop, gapTop + 14) > 4 * 10);
+        assertEquals("but not the gap between two parts", 0, ink(single, 300, 1390, gapTop, gapTop + 14));
+        assertEquals("nor the gap between the flute and the grand staff", 0, ink(braced, 300, 1390, 54 + 36 + 6, 54 + 86 - 6));
+        assertTrue("a brace stands before the grand staff",
+                ink(braced, 118, 131, 54 + 86, 54 + 86 + 62 + 36) > ink(single, 118, 131, 54 + 86, 54 + 86 + 62 + 36) + 60);
+    }
+
+    @Test
+    public void threeVoicesOnAStaffAreDrawnAndNamedUnderTheMouse() {
+        List<String> lines = new ArrayList<String>(Arrays.asList("tempo\t96", "meter\t3\t4", "key\tF\tmajor",
+                "track\tpiano\t0\t1\tharmony", "staff\tpiano\tgrand"));
+        String[][] notes = {{"0", "1440", "72", "rh"}, {"0", "480", "65", "rh2"}, {"480", "480", "69", "rh2"},
+                {"0", "240", "64", "rh3"}, {"240", "240", "66", "rh3"}, {"480", "960", "64", "rh3"},
+                {"0", "1440", "41", "lh"}, {"0", "480", "53", "lh2"}, {"1440", "1440", "46", "lh"}};
+        for (String[] note : notes) {
+            lines.add("note\tpiano\t" + note[0] + "\t" + note[1] + "\t" + note[2] + "\t80\t" + note[3]);
+        }
+        Score score = Score.of(lines);
+        assertEquals(3, score.staves().get(0).voices());
+        ScoreView view = new ScoreView();
+        view.setSize(1400, 400);
+        view.setScore(score, Arrays.asList("piano"), "");
+        assertNotNull(view.picture(1400));
+        String upper = view.getToolTipText(new java.awt.event.MouseEvent(view, java.awt.event.MouseEvent.MOUSE_MOVED, 0,
+                0, 400, 54 + 18, 0, false));
+        assertNotNull(upper);
+        assertTrue(upper, upper.startsWith("piano · ") && upper.contains(score.staves().get(0).voiceName(2)));
+        String lower = view.getToolTipText(new java.awt.event.MouseEvent(view, java.awt.event.MouseEvent.MOUSE_MOVED, 0,
+                0, 400, 54 + 62 + 18, 0, false));
+        assertTrue(lower, lower.contains(score.staves().get(1).voiceName(0)));
+    }
 }

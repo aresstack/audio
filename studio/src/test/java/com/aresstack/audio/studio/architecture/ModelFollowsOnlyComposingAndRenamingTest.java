@@ -38,7 +38,7 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         assertEquals("opening loads the model, composing and renaming bring it in step, rendering reads it,"
                         + " a drawn movement is kept; nothing else reaches it",
                 new java.util.TreeSet<String>(List.of("composeIntoPiece", "loadArrangementForCurrentDirectory",
-                        "loadDemo", "movementChanged", "pieceToEdit", "renamed", "renderArrangement", "savedPiece",
+                        "loadDemo", "movementChanged", "pieceToEdit", "renamed", "renderArrangement", "savedPiece", "scoreOf",
                         "showMovements")), users);
         assertEquals("only a curve the user drew is written into the mix of the model", List.of("movementChanged"),
                 callers(source, "pieceModel\\.move\\("));
@@ -51,9 +51,10 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         assertTrue("loading the demo replaces the piece on the user's word, through the one place that"
                         + " protects a model the demo cannot replace",
                 bodyOf(source, "private void loadDemo() {").contains("DemoIntoPiece.load(input, folder, pieceModel)"));
-        assertEquals("rendering only reads the saved model; the changes the user asks for by name"
+        assertEquals("rendering and the score only read the saved model; the changes the user asks for by name"
                         + " (a proposal taken, undo, redo, revisions) get it from one place",
-                List.of("renderArrangement", "savedPiece"), callers(source, "pieceModel\\.of\\("));
+                new java.util.TreeSet<String>(List.of("renderArrangement", "savedPiece", "scoreOf")),
+                new java.util.TreeSet<String>(callers(source, "pieceModel\\.of\\(")));
         assertEquals("only what the user asks for by name changes the saved piece",
                 new java.util.TreeSet<String>(List.of("addVoice", "composeAgain", "extendPiece", "insertBars",
                         "intensityOverBars", "pieceChanged", "reorchestrate", "reworkRegion", "sectionIntensity",
