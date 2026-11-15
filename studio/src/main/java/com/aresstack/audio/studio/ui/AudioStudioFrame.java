@@ -462,6 +462,21 @@ public final class AudioStudioFrame extends JFrame {
         addVoiceItem.setToolTipText("Die KI schreibt eine neue Stimme zu den vorhandenen; die anderen bleiben unverändert");
         addVoiceItem.addActionListener(event -> addVoice());
         moreMenu.add(addVoiceItem);
+        javax.swing.JMenuItem reworkItem = new javax.swing.JMenuItem("Passage ersetzen oder variieren …");
+        reworkItem.setToolTipText("Die KI schreibt markierte Takte gewählter Spuren neu; im Arrangement mit Umschalt und"
+                + " Ziehen markieren");
+        reworkItem.addActionListener(event -> reworkRegion());
+        moreMenu.add(reworkItem);
+        // The same on the marked passage itself, with the right mouse button.
+        javax.swing.JPopupMenu passageMenu = new javax.swing.JPopupMenu();
+        javax.swing.JMenuItem reworkMarked = new javax.swing.JMenuItem("Passage ersetzen oder variieren …");
+        reworkMarked.addActionListener(event -> reworkRegion());
+        javax.swing.JMenuItem unmark = new javax.swing.JMenuItem("Markierung aufheben");
+        unmark.addActionListener(event -> arrangementView.mark(null));
+        passageMenu.add(reworkMarked);
+        passageMenu.add(unmark);
+        arrangementView.setComponentPopupMenu(passageMenu);
+        arrangementView.setToolTipText("Klick: dorthin springen · Umschalt und Ziehen: Passage markieren · rechte Maustaste: Menü");
         moreMenu.addSeparator();
         moreMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
             @Override
@@ -1823,6 +1838,29 @@ public final class AudioStudioFrame extends JFrame {
                         com.aresstack.audio.studio.ai.VoiceComposer.with(model), request, progress));
     }
 
+    /** Asks how the AI shall write the marked passage anew, and has it written as a proposal. */
+    private void reworkRegion() {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent()) {
+            message("Erst ein Stück komponieren: dann lässt sich eine Passage neu schreiben.");
+            return;
+        }
+        if (busy()) {
+            return;
+        }
+        final RegionForm.Asked asked = RegionForm.ask(this, piece.get().composition(), arrangementView.bars(),
+                arrangementView.marked());
+        if (asked == null) {
+            return;
+        }
+        offerFromAi(piece.get(), (asked.firstBar() == asked.lastBar() ? "Takt " + asked.firstBar()
+                : "Takt " + asked.firstBar() + " bis " + asked.lastBar()) + " wird als Vorschlag neu geschrieben; das"
+                + " Stück bleibt, wie es ist, bis der Vorschlag übernommen wird.", (session, model, progress) ->
+                com.aresstack.audio.studio.application.RegionOffer.start(session,
+                        com.aresstack.audio.studio.ai.RegionComposer.with(model), asked.request(), asked.partIds(),
+                        asked.firstBar(), asked.lastBar(), progress));
+    }
+
     /** Has the AI make a proposal for the saved piece; what was asked for decides how. */
     private interface OfferStart {
         com.aresstack.audio.studio.application.AiOffer start(
@@ -1894,7 +1932,7 @@ public final class AudioStudioFrame extends JFrame {
                              final Path alone, final KipitzChatClient client, final RenderSettings settings) {
         try {
             ProposalDialog.Verdict verdict = new ProposalDialog(this, "Vorschlag der KI", offer.what(), offer.notes(),
-                    alone == null ? null : "Nur das Neue anhören", true, new ProposalDialog.Listening() {
+                    alone == null ? null : offer.soloName(), true, new ProposalDialog.Listening() {
                         @Override
                         public void proposal() {
                             listenTo(whole, "VORSCHLAG");
