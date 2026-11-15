@@ -332,6 +332,9 @@ public final class AudioStudioFrame extends JFrame {
     private final javax.swing.ButtonGroup pageGroup = new javax.swing.ButtonGroup();
     /** Under the name of the studio: the project, that is the library with all its albums. */
     private final JLabel projectName = new JLabel();
+    /** The project's name while it is renamed: in place of the name, Enter keeps it, Esc leaves it. */
+    private final javax.swing.JTextField projectNameField = new javax.swing.JTextField();
+    private final JPanel projectNameHolder = new JPanel(new java.awt.CardLayout());
     /** The model of the open piece; it follows what the studio still writes the old way. */
     private final com.aresstack.audio.studio.application.PieceModel pieceModel =
             new com.aresstack.audio.studio.application.PieceModel(this::modelSays);
@@ -519,14 +522,40 @@ public final class AudioStudioFrame extends JFrame {
         projectName.setFont(projectName.getFont().deriveFont(java.awt.Font.BOLD, 14f));
         projectName.setForeground(AudioStudioTheme.TEXT);
         projectName.setToolTipText("Das Projekt: " + songs.root());
-        songMenuKey.setToolTipText("Projekte: wechseln, neu anlegen, umbenennen");
+        songMenuKey.setToolTipText("Projekte: wechseln, neu anlegen, umbenennen, exportieren, importieren");
+        projectName.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent event) {
+                if (event.getClickCount() == 2) {
+                    startRenamingProject();
+                }
+            }
+        });
+        projectNameField.setFont(projectName.getFont());
+        projectNameField.addActionListener(event -> finishRenamingProject(true));
+        projectNameField.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("ESCAPE"), "leave");
+        projectNameField.getActionMap().put("leave", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent event) {
+                finishRenamingProject(false);
+            }
+        });
+        projectNameField.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusLost(java.awt.event.FocusEvent event) {
+                finishRenamingProject(true);
+            }
+        });
+        projectNameHolder.setOpaque(false);
+        projectNameHolder.add(projectName, "shown");
+        projectNameHolder.add(projectNameField, "editing");
         songMenuKey.addActionListener(event -> projectMenu().show(songMenuKey, 0, songMenuKey.getHeight()));
         songMenuKey.setMargin(new Insets(2, 4, 2, 4));
         songMenuKey.setFocusable(false);
         songMenuKey.setPreferredSize(new Dimension(30, 28));
         JPanel line = new JPanel(new BorderLayout(4, 0));
         line.setOpaque(false);
-        line.add(projectName, BorderLayout.CENTER);
+        line.add(projectNameHolder, BorderLayout.CENTER);
         line.add(songMenuKey, BorderLayout.EAST);
         line.setAlignmentX(0f);
         line.setMaximumSize(new Dimension(232, 28));
@@ -4156,34 +4185,34 @@ public final class AudioStudioFrame extends JFrame {
             menu.add(item);
         }
         menu.addSeparator();
-        javax.swing.JMenuItem create = new javax.swing.JMenuItem("Neues Projekt …");
+        javax.swing.JMenuItem create = new javax.swing.JMenuItem("Neues Projekt");
+        create.setToolTipText("Legt ein leeres Projekt an und öffnet es; den Namen dann oben ändern");
         create.addActionListener(event -> {
-            String name = JOptionPane.showInputDialog(this, "Wie soll das neue Projekt heißen?", "Neues Projekt");
-            if (name == null) {
-                return;
-            }
             try {
-                switchProject(projects.create(name));
+                switchProject(projects.create(com.aresstack.audio.studio.application.Projects.NEW_NAME));
             } catch (IOException failed) {
                 message("Das Projekt ließ sich nicht anlegen: " + failed.getMessage());
             }
         });
         menu.add(create);
-        javax.swing.JMenuItem rename = new javax.swing.JMenuItem("Projekt umbenennen …");
-        rename.addActionListener(event -> {
-            Object name = JOptionPane.showInputDialog(this, "Neuer Name des Projekts:", "Projekt umbenennen",
-                    JOptionPane.PLAIN_MESSAGE, null, null, projectTitle());
-            if (name == null || name.toString().isBlank()) {
-                return;
-            }
-            try {
-                projects.rename(songs.root(), name.toString());
-                projectName.setText(projectTitle());
-            } catch (IOException failed) {
-                message("Das Projekt ließ sich nicht umbenennen: " + failed.getMessage());
-            }
-        });
+        javax.swing.JMenuItem rename = new javax.swing.JMenuItem("Projekt umbenennen");
+        rename.setToolTipText("Den Namen oben direkt ändern: Enter übernimmt, Esc lässt ihn (auch per Doppelklick)");
+        rename.addActionListener(event -> startRenamingProject());
         menu.add(rename);
+        menu.addSeparator();
+        javax.swing.JMenuItem export = new javax.swing.JMenuItem("Projekt exportieren …");
+        export.setToolTipText("Alben, Stücke, Revisionen und Einstellungen (ohne API-Schlüssel) als ZIP, ohne Renders");
+        export.addActionListener(event -> exportProject(false));
+        menu.add(export);
+        javax.swing.JMenuItem exportAll = new javax.swing.JMenuItem("Projekt mit Renders exportieren …");
+        exportAll.setToolTipText("Wie Exportieren, dazu alle gerenderten Klänge (WAV): größer, aber sofort abspielbar");
+        exportAll.addActionListener(event -> exportProject(true));
+        menu.add(exportAll);
+        javax.swing.JMenuItem importing = new javax.swing.JMenuItem("Projekt importieren …");
+        importing.setToolTipText("Liest eine Projekt-ZIP als neues Projekt ein; vorhandene Projekte bleiben, wie sie sind");
+        importing.addActionListener(event -> importProject());
+        menu.add(importing);
+        menu.addSeparator();
         javax.swing.JMenuItem folder = new javax.swing.JMenuItem("Projektordner zeigen");
         folder.setToolTipText(songs.root().toString());
         folder.addActionListener(event -> {
@@ -4196,6 +4225,117 @@ public final class AudioStudioFrame extends JFrame {
         });
         menu.add(folder);
         return menu;
+    }
+
+    /** Shows the project's name as a field to change it in place. */
+    private void startRenamingProject() {
+        projectNameField.setText(projectTitle());
+        ((java.awt.CardLayout) projectNameHolder.getLayout()).show(projectNameHolder, "editing");
+        projectNameField.selectAll();
+        projectNameField.requestFocusInWindow();
+    }
+
+    /** Ends renaming: keeps the typed name, or leaves the old one. */
+    private void finishRenamingProject(boolean keep) {
+        if (!projectNameField.isShowing()) {
+            return;
+        }
+        String typed = projectNameField.getText().trim();
+        ((java.awt.CardLayout) projectNameHolder.getLayout()).show(projectNameHolder, "shown");
+        if (!keep || typed.isEmpty() || typed.equals(projectTitle())) {
+            return;
+        }
+        try {
+            projects.rename(songs.root(), typed);
+            projectName.setText(projectTitle());
+            append("Projekt umbenannt: " + projectTitle());
+        } catch (IOException failed) {
+            message("Das Projekt ließ sich nicht umbenennen: " + failed.getMessage());
+        }
+    }
+
+    /** Writes the open project into a ZIP file of the user's choice, in the background. */
+    private void exportProject(boolean renders) {
+        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
+        chooser.setDialogTitle(renders ? "Projekt mit Renders exportieren (ZIP)" : "Projekt exportieren (ZIP)");
+        chooser.setSelectedFile(new java.io.File(projectTitle().replaceAll("[^\\p{L}\\p{N} ()_-]", "").trim()
+                + com.aresstack.audio.studio.application.ProjectArchive.ENDING));
+        if (chooser.showSaveDialog(this) != javax.swing.JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        Path chosen = chooser.getSelectedFile().toPath();
+        String ending = com.aresstack.audio.studio.application.ProjectArchive.ENDING;
+        final Path target = chosen.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(ending)
+                ? chosen : chosen.resolveSibling(chosen.getFileName() + ending);
+        try {
+            keepSong();
+            saveSettings(false);
+        } catch (Exception failed) {
+            message("Das offene Stück ließ sich vor dem Export nicht sichern: " + failed.getMessage());
+            return;
+        }
+        final Path root = songs.root();
+        final String name = projectTitle();
+        setStatus("Projekt wird exportiert …");
+        new SwingWorker<com.aresstack.audio.studio.application.ProjectArchive.Written, Void>() {
+            @Override
+            protected com.aresstack.audio.studio.application.ProjectArchive.Written doInBackground() throws Exception {
+                Properties settings = settingsStore.load();
+                return com.aresstack.audio.studio.application.ProjectArchive.export(root, name, settings, target,
+                        renders);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    com.aresstack.audio.studio.application.ProjectArchive.Written written = get();
+                    String line = "Projekt exportiert: " + written.file() + " (" + written.files() + " Dateien, "
+                            + (written.bytes() / 1024) + " KB"
+                            + (renders || written.skippedRenders() == 0 ? ""
+                            : ", " + written.skippedRenders() + " Renders weggelassen") + ")";
+                    append(line);
+                    setStatus(line);
+                } catch (Exception failed) {
+                    Throwable cause = failed.getCause() == null ? failed : failed.getCause();
+                    message("Das Projekt ließ sich nicht exportieren: " + cause.getMessage());
+                }
+            }
+        }.execute();
+    }
+
+    /** Reads a project ZIP as a new project beside the others and opens it. */
+    private void importProject() {
+        if (busy() || (albumsPanel != null && (albumsPanel.producing() || albumsPanel.busy()))) {
+            message("Erst den laufenden Vorgang beenden oder abbrechen, dann ein Projekt importieren.");
+            return;
+        }
+        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
+        chooser.setDialogTitle("Projekt importieren (ZIP)");
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Projekt-ZIP", "zip"));
+        if (chooser.showOpenDialog(this) != javax.swing.JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        final Path archive = chooser.getSelectedFile().toPath();
+        setStatus("Projekt wird importiert …");
+        new SwingWorker<com.aresstack.audio.studio.application.ProjectArchive.Imported, Void>() {
+            @Override
+            protected com.aresstack.audio.studio.application.ProjectArchive.Imported doInBackground() throws Exception {
+                return com.aresstack.audio.studio.application.ProjectArchive.importInto(projects, archive);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    com.aresstack.audio.studio.application.ProjectArchive.Imported made = get();
+                    append("Projekt importiert als „" + made.name() + "“" + (made.renamed()
+                            ? " (der Name war schon vergeben)" : "") + ": " + made.files() + " Dateien");
+                    switchProject(made.root());
+                } catch (Exception failed) {
+                    Throwable cause = failed.getCause() == null ? failed : failed.getCause();
+                    message("Das Projekt ließ sich nicht importieren: " + cause.getMessage());
+                }
+            }
+        }.execute();
     }
 
     /**

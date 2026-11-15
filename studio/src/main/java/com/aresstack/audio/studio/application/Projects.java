@@ -92,9 +92,15 @@ public final class Projects {
         write(home.resolve("project.properties"), properties);
     }
 
-    /** Makes a new, empty project with this name and returns its folder. */
+    /** What a new project is called when it is given no name. */
+    public static final String NEW_NAME = "Neues Projekt";
+
+    /**
+     * Makes a new, empty project and returns its folder. If another project has that name
+     * already, the new one gets a number behind it, so that no two are called the same.
+     */
     public Path create(String name) throws IOException {
-        String clean = name == null || name.isBlank() ? "Neues Projekt" : name.trim();
+        String clean = uniqueName(name == null || name.isBlank() ? NEW_NAME : name.trim());
         String slug = clean.toLowerCase(Locale.ROOT).replace("ä", "ae").replace("ö", "oe").replace("ü", "ue")
                 .replace("ß", "ss").replaceAll("[^a-z0-9]+", "-").replaceAll("^-+|-+$", "");
         if (slug.isEmpty()) {
@@ -107,6 +113,20 @@ public final class Projects {
         Files.createDirectories(root);
         rename(root, clean);
         return root;
+    }
+
+    /** This name, or with " (2)", " (3)" … behind it while another project is called so already. */
+    public String uniqueName(String name) {
+        String wanted = name == null || name.isBlank() ? NEW_NAME : name.trim();
+        java.util.Set<String> taken = new java.util.HashSet<String>();
+        for (Project project : all()) {
+            taken.add(project.name().toLowerCase(Locale.ROOT));
+        }
+        String free = wanted;
+        for (int number = 2; taken.contains(free.toLowerCase(Locale.ROOT)); number++) {
+            free = wanted + " (" + number + ")";
+        }
+        return free;
     }
 
     /** What a project is called: the name it was given, the first one "Mein Projekt", else its folder. */
