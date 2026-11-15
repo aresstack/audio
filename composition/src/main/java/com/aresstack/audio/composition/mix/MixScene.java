@@ -1,6 +1,7 @@
 package com.aresstack.audio.composition.mix;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * The mix of a piece: the room, the master level, how the level is set, a channel for each
@@ -26,6 +27,19 @@ public record MixScene(Room room, double masterDb, LevelMode levelMode, List<Mix
         for (MixChannel channel : channels) {
             if (channel.owner().equals(owner)) {
                 return channel;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The lane that moves a parameter of a channel ({@code null} for the master), or {@code null}.
+     * If a file holds more than one, the first counts; the {@link MixValidator} names the others.
+     */
+    public AutomationLane lane(String channelId, String parameter) {
+        for (AutomationLane lane : automation) {
+            if (Objects.equals(lane.channelId(), channelId) && lane.parameter().equals(parameter)) {
+                return lane;
             }
         }
         return null;

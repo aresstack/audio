@@ -118,6 +118,9 @@ public final class CompositionJson {
             e.addProperty("tick", key.tick());
             e.addProperty("tonic", key.key().tonic());
             e.addProperty("mode", key.key().mode().name().toLowerCase(Locale.ROOT));
+            if (key.key().flats() != new Key(key.key().tonic(), key.key().mode()).flats()) {
+                e.addProperty("flats", key.key().flats()); // G flat major, D sharp minor
+            }
             return e;
         }));
         return t;
@@ -134,8 +137,7 @@ public final class CompositionJson {
                 list(t, "tempos", e -> new TimeMap.Tempo(e.get("tick").getAsLong(), e.get("bpm").getAsDouble())),
                 list(t, "meters", e -> new TimeMap.Meter(e.get("tick").getAsLong(), e.get("numerator").getAsInt(),
                         e.get("denominator").getAsInt())),
-                list(t, "keys", e -> new TimeMap.KeyChange(e.get("tick").getAsLong(), new Key(
-                        e.get("tonic").getAsInt(), Key.Mode.valueOf(text(e, "mode").toUpperCase(Locale.ROOT))))));
+                list(t, "keys", e -> new TimeMap.KeyChange(e.get("tick").getAsLong(), key(e))));
     }
 
     private static JsonObject section(Section section) {
@@ -284,6 +286,13 @@ public final class CompositionJson {
         if (value != null) {
             object.addProperty(name, value);
         }
+    }
+
+    /** A key as written; {@code flats} only for a key of six sharps or six flats that is not written the usual way. */
+    private static Key key(JsonObject e) {
+        int tonic = e.get("tonic").getAsInt();
+        Key.Mode mode = Key.Mode.valueOf(text(e, "mode").toUpperCase(Locale.ROOT));
+        return e.has("flats") ? new Key(tonic, mode, e.get("flats").getAsBoolean()) : new Key(tonic, mode);
     }
 
     static String text(JsonObject object, String name) {
