@@ -331,6 +331,29 @@ public final class LiveGraphTest {
     }
 
     @Test
+    public void aLoopShorterThanABlockWrapsAsOftenAsItHasTo() throws Exception {
+        int frames = 100;
+        float[] ramp = new float[frames];
+        for (int i = 0; i < frames; i++) {
+            ramp[i] = 0.1f + i * 0.005f;
+        }
+        LiveGraph graph = new LiveGraph(List.of(new LiveChannel(new ArraySource(ramp, ramp.clone(), RATE), frames,
+                ChannelParameters.builder().build(), 0, null)), null, 0, frames);
+        graph.setLoop(frames);
+        AudioBlock block = new AudioBlock(512);
+        graph.prepare(RATE, 512);
+        float[] out = new float[512 * 4];
+        for (int at = 0; at < out.length; at += 512) {
+            block.setFrames(512);
+            Assert.assertEquals("a loop never ends", 512, graph.read(block));
+            System.arraycopy(block.left, 0, out, at, 512);
+        }
+        for (int i = 0; i < out.length; i++) {
+            Assert.assertEquals("frame " + i, ramp[i % frames], out[i], 1e-6f);
+        }
+    }
+
+    @Test
     public void smallEchoDelayChangesGlideAndDoNotCancelATone() throws Exception {
         // A tone and one strong echo; the echo's delay creeps by 2 frames every 10 ms, as when dragging.
         // Gliding the delay moves the comb of tone and echo smoothly; it never mixes the echo with a
