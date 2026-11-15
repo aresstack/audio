@@ -135,6 +135,25 @@ public final class MixLevelTest {
     }
 
     @Test
+    public void everyLevelIsCorrectWhenTheMixIsWrittenOverOneOfItsOwnStems() throws Exception {
+        // the stems are read while the mix is written, twice with a normalization: the output must not cut them short
+        MixLevel[] levels = {MixLevel.legacy(-2), MixLevel.fixed(0),
+                MixLevel.fixed(0, LookaheadLimiter.Settings.DEFAULT, ExportNormalization.peak(-1)),
+                MixLevel.fixed(0, LookaheadLimiter.Settings.DEFAULT, ExportNormalization.loudness(-16))};
+        for (MixLevel level : levels) {
+            Path inPlace = file("in-place.wav");
+            Path apart = file("apart.wav");
+            Files.copy(files.get(0), inPlace, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            List<Path> fromInPlace = Arrays.asList(inPlace, files.get(1), files.get(2));
+            new SpatialStemMixer().mix(files, placements, AcousticRoom.HALL, 2, level, apart, 24);
+            new SpatialStemMixer().mix(fromInPlace, placements, AcousticRoom.HALL, 2, level, inPlace, 24);
+            Assert.assertArrayEquals(level.toString(), Files.readAllBytes(apart), Files.readAllBytes(inPlace));
+            String[] left = folder.getRoot().list((dir, name) -> name.endsWith(".part"));
+            Assert.assertEquals(level + ": no part file left behind", 0, left.length);
+        }
+    }
+
+    @Test
     public void liveLevelHasNoNormalization() {
         MixLevel export = MixLevel.fixed(-3, LookaheadLimiter.Settings.DEFAULT, ExportNormalization.loudness(-14));
         Assert.assertEquals(ExportNormalization.Kind.NONE, export.live().normalization().kind());
