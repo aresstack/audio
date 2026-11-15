@@ -62,6 +62,10 @@ public final class ExplicitVoicesTest {
         assertTrue("the flute names no voices",
                 lines.stream().filter(l -> l.startsWith("note\tflute\t")).allMatch(l -> l.split("\t").length == 6));
 
+        assertEquals("no note of the hands needed a correction",
+                List.of("part\tnote\tfield\toriginal\tcorrected\treason"),
+                Files.readAllLines(dir.resolve("note-corrections.tsv"), StandardCharsets.UTF_8));
+
         // The reference renderer plays the file as before: neither line nor column sounds.
         Golden.renderReference(tsv, folder.newFolder("lied-render").toPath());
 
@@ -107,7 +111,7 @@ public final class ExplicitVoicesTest {
         assertEquals(16, upper.bar(1, 0).get(0).length());
         assertEquals(1, lower.voices());
         assertEquals(Voice.Stem.AUTO, lower.stem(0));
-        assertArrayEquals(new int[]{55}, lower.bar(0, 0).get(0).pitches());
+        assertArrayEquals("the left hand keeps its low G", new int[]{43}, lower.bar(0, 0).get(0).pitches());
         assertEquals("the flute stays one staff", 1,
                 score.staves().stream().filter(s -> s.trackId().equals("flute")).count());
         assertFalse(score.staves().stream().filter(s -> s.trackId().equals("flute")).findFirst().orElseThrow().grand());

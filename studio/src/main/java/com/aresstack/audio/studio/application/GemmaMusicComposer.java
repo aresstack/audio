@@ -477,8 +477,10 @@ public final class GemmaMusicComposer {
                         progress.update("WARN: Ignoring non-object note in " + track.id());
                         continue;
                     }
+                    String hand = grand ? Voicing.normalize(voiceOf(element.getAsJsonObject()), true) : null;
                     CompositionNoteNormalizer.NormalizedNote note = normalizer.normalize(
-                            element.getAsJsonObject(), track.id(), track.role(), index, section[0], section[1]);
+                            element.getAsJsonObject(), track.id(), track.role(), index, section[0], section[1],
+                            CompositionNoteNormalizer.range(track.role(), grand, hand));
                     if (note == null) {
                         continue;
                     }

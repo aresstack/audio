@@ -95,7 +95,7 @@ final class FakeChatModel implements ChatModel {
             if (hands) {
                 add(notes, start, bar, place(tones[tones.length - 1], 67), 70).addProperty("voice", "rh");
                 add(notes, start, bar, place(tones[1], 60), 60).addProperty("voice", "rh2");
-                add(notes, start, bar, place(tones[0], 48), 70).addProperty("voice", "lh");
+                add(notes, start, bar, place(tones[0], 36), 70).addProperty("voice", "lh");
             } else if ("drums".equals(role)) {
                 add(notes, start, 0.5, 36, 90);
                 if (bar >= 3) {
