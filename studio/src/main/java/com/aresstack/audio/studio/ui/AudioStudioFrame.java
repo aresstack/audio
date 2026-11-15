@@ -249,6 +249,10 @@ public final class AudioStudioFrame extends JFrame {
         append(line);
     }
 
+    /** How often a cut-off answer is asked for again, and by how much its room grows (studio.properties). */
+    private int longerAnswers = KipitzChatClient.LONGER_ANSWERS;
+    private int longerAnswerFactor = KipitzChatClient.LONGER_FACTOR;
+
     /** The models last named in the protocol; a production asks for them often, they are named once. */
     private String modelsSaid;
     /** The note editor's way into the open piece: every change a patch through the edit core (B1). */
@@ -2293,6 +2297,7 @@ public final class AudioStudioFrame extends JFrame {
         }
         return new com.aresstack.audio.studio.ai.ModelLineup(fixed,
                 name -> new KipitzChatClient(url, key, name, routes).legacyModel(fixed.base())
+                        .longerAnswers(longerAnswers, longerAnswerFactor)
                         // A connection that breaks off or is tried again is said at once, in the protocol and below.
                         .troubles(line -> SwingUtilities.invokeLater(() -> append(line))));
     }
@@ -4066,6 +4071,8 @@ public final class AudioStudioFrame extends JFrame {
             sectionBars.setValue(AiDefaults.sectionBars(saved));
             detailedLog.setSelected(Boolean.parseBoolean(saved.getProperty("detailedLog", "false")));
             growBars.setValue(AiDefaults.growBars(saved));
+            longerAnswers = AiDefaults.longerAnswers(saved);
+            longerAnswerFactor = AiDefaults.longerAnswerFactor(saved);
             specFields.suggestBars((Integer) growBars.getValue());
             proxyHost.setText(saved.getProperty("proxyHost", ""));
             proxyPort.setText(saved.getProperty("proxyPort", ""));
@@ -4146,6 +4153,8 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("sectionBars", sectionBars.getValue().toString());
             saved.setProperty("detailedLog", Boolean.toString(detailedLog.isSelected()));
             saved.setProperty("pieceBars", growBars.getValue().toString());
+            saved.setProperty("longerAnswers", Integer.toString(longerAnswers));
+            saved.setProperty("longerAnswerFactor", Integer.toString(longerAnswerFactor));
             saved.setProperty("proxyHost", proxyHost.getText().trim());
             saved.setProperty("proxyPort", proxyPort.getText().trim());
             String selectedProxyMode = proxyMode.getSelectedIndex() == 0 ? ""

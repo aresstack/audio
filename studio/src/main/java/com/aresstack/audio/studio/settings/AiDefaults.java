@@ -65,6 +65,26 @@ public final class AiDefaults {
         }
     }
 
+    /** How often an answer cut off at its limit is asked for again ({@code longerAnswers}, 0 to 6). */
+    public static int longerAnswers(Properties settings) {
+        return number(settings, "longerAnswers", com.aresstack.audio.studio.ai.KipitzChatClient.LONGER_ANSWERS, 0, 6);
+    }
+
+    /** By how much the room grows each time it is asked again ({@code longerAnswerFactor}, 2 to 4). */
+    public static int longerAnswerFactor(Properties settings) {
+        return number(settings, "longerAnswerFactor", com.aresstack.audio.studio.ai.KipitzChatClient.LONGER_FACTOR,
+                2, 4);
+    }
+
+    private static int number(Properties settings, String key, int fallback, int least, int most) {
+        try {
+            return Math.max(least, Math.min(most,
+                    Integer.parseInt(settings.getProperty(key, Integer.toString(fallback)).trim())));
+        } catch (NumberFormatException invalid) {
+            return fallback;
+        }
+    }
+
     /** The chat completions address for a base address, or {@code null} if it is no HTTP(S) address. */
     public static String completionsEndpoint(String base) {
         String normalized = base.trim().replaceAll("/+$", "");
