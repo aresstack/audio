@@ -523,15 +523,15 @@ public final class AudioStudioFrame extends JFrame {
                 {"console", "Protokoll"}};
         for (final String[] entry : entries) {
             DeckWidgets.PageKey key = new DeckWidgets.PageKey(entry[1]);
-            key.addActionListener(event -> pages.show(pageHolder, entry[0]));
+            key.addActionListener(event -> showPage(entry[0]));
             onePage.add(key);
             pageKeys.put(entry[0], key);
             keysOfPages.add(key);
         }
-        settingsKey.addActionListener(event -> pages.show(pageHolder, "settings"));
+        settingsKey.addActionListener(event -> showPage("settings"));
         onePage.add(settingsKey); // one page at a time: the gear lights instead of a page key
         pageKeys.put("settings", settingsKey);
-        libraryKey.addActionListener(event -> pages.show(pageHolder, "library"));
+        libraryKey.addActionListener(event -> showPage("library"));
         onePage.add(libraryKey);
         pageKeys.put("library", libraryKey);
         pageKeys.get("song").setSelected(true);
@@ -3581,7 +3581,7 @@ public final class AudioStudioFrame extends JFrame {
                 currentAlbum = albumId;
                 openSong(folder);
                 if (Paths.get(directory.getText().trim()).equals(folder)) {
-                    showPage("song");
+                    showPiecePage(); // Arrangement, Bühne or Protokoll stay when another title is chosen
                 }
             }
 
@@ -5214,7 +5214,19 @@ public final class AudioStudioFrame extends JFrame {
 
     private long shownSecond;
 
+    /** The page shown now, so that a click on another title keeps the view the user chose. */
+    private String shownPage = "song";
+
+    /** The pages that show the open piece; switching titles stays on them. */
+    private static final java.util.Set<String> PIECE_PAGES = java.util.Set.of("song", "deck", "stage", "console");
+
+    /** Shows the open piece: on the page of the piece the user looks at, else on the composition page. */
+    private void showPiecePage() {
+        showPage(PIECE_PAGES.contains(shownPage) ? shownPage : "song");
+    }
+
     private void showPage(String page) {
+        shownPage = page;
         pages.show(pageHolder, page);
         javax.swing.JToggleButton key = pageKeys.get(page);
         if (key != null) {
@@ -5239,8 +5251,16 @@ public final class AudioStudioFrame extends JFrame {
         }
     }
 
+    /** A notice for the user: in the status line and the log, never as a dialog that has to be clicked away. */
     private void message(String text) {
-        JOptionPane.showMessageDialog(this, text, "Audio Studio", JOptionPane.WARNING_MESSAGE);
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(() -> message(text));
+            return;
+        }
+        String line = text == null ? "" : text.trim();
+        String said = line.startsWith("WARN") || line.startsWith("ERROR") ? line : "WARN: " + line;
+        append(said);
+        setStatus(said); // also while tracks are at work: the notice answers what the user just did
     }
 
     private int parseParallel(String configured) {
@@ -5252,6 +5272,12 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     private void loadArrangementForCurrentDirectory(Properties saved) {
+        // The piece as a model first: lanes, score, sections and the stage are drawn from it right
+        // below, and before they showed the model of the piece opened before (or the old file at
+        // the start, which for a longer piece with tempo changes still says its first eight bars).
+        // An old piece is taken into the model here, its old files stay as they are.
+        String chosen = directory.getText().trim();
+        pieceModel.open(chosen.isEmpty() ? null : Paths.get(chosen));
         loadingTracks = true;
         try {
             Path folder = Paths.get(directory.getText().trim());
@@ -5294,9 +5320,6 @@ public final class AudioStudioFrame extends JFrame {
         } finally {
             loadingTracks = false;
         }
-        // The piece as a model: an old piece is taken into it here, its old files stay as they are.
-        String chosen = directory.getText().trim();
-        pieceModel.open(chosen.isEmpty() ? null : Paths.get(chosen));
         showMovements();
         stageFollowsMix.remember(pieceToEdit().orElse(null)); // the stage as it stands belongs to this mix
         answersState = pieceToEdit().map(com.aresstack.audio.studio.application.ProjectSession::composition)
