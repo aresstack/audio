@@ -64,7 +64,9 @@ import java.util.Set;
  * the preview. Accepted changes and changes by hand can be undone and redone within the session;
  * revisions in {@code revisions/} are made before and after every accepted AI change, when the
  * piece is saved and on request, the first being the original. After every change only the stems
- * of parts that sound different are dropped from {@code render/manifest.json}.
+ * of parts that sound different are dropped from {@code render/manifest.json}. A part a change
+ * brings in gets a channel strip with the usual seat of its role and an entry in {@code tracks.json}
+ * and {@code spatial-scene.json}; undoing the change takes it out of both again ({@link PartSeats}).
  */
 public final class ProjectSession {
     /** The files that describe the piece in {@code arrangement.tsv} and beside it. */
@@ -462,6 +464,7 @@ public final class ProjectSession {
                 shifted = TimeShift.shift(shifted, shift.fromTick(), shift.ticks());
             }
         }
+        shifted = PartSeats.seatNewParts(shifted, proposal.base(), proposal.result(), ids);
         history.push(new State(proposal.result(), shifted), description);
         return become(history.current());
     }
@@ -481,6 +484,7 @@ public final class ProjectSession {
             }
             StemManifest.save(folder, kept);
         }
+        PartSeats.followOldFiles(folder, changes, composition, mix);
         persist();
         return changes;
     }
@@ -537,14 +541,15 @@ public final class ProjectSession {
         List<Track> tracks = new ArrayList<>();
         for (Part part : imported.parts()) {
             Part old = model.part(part.id());
-            boolean same = old != null && model.track(part.id()) != null
+            Track own = trackOf(model, part.id());
+            boolean same = old != null && own != null
                     && TsvExport.linesOf(imported, part.id()).equals(TsvExport.linesOf(model, part.id()));
             // tracks.json is still where the old studio keeps instrument and sound bank: they come
             // from there even for a part whose notes stayed the same.
             parts.add(!same ? part : part.instrument() == null ? old
                     : new Part(old.id(), old.name(), old.role(), part.instrument(), old.program(), part.libraryId(),
                             old.staffLayout(), old.voices(), old.legacyChannel()));
-            tracks.add(same ? model.track(part.id()) : imported.track(part.id()));
+            tracks.add(same ? own : imported.track(part.id()));
         }
         Meta a = imported.meta();
         Meta b = model.meta();
@@ -553,6 +558,23 @@ public final class ProjectSession {
         List<Section> sections = keepingSections(imported, model);
         TimeMap time = imported.timeMap().tempoAt(0) == model.timeMap().tempoAt(0) ? model.timeMap() : imported.timeMap();
         return new Composition(meta, time, sections, parts, tracks, model.assets());
+    }
+
+    /**
+     * The track of a part in the model: the track of the same id as for an imported part, else the
+     * track whose default part it is (a part added later, such as a new voice, has a track of its own id).
+     */
+    private static Track trackOf(Composition model, String partId) {
+        Track same = model.track(partId);
+        if (same != null) {
+            return same;
+        }
+        for (Track track : model.tracks()) {
+            if (partId.equals(track.defaultPartId())) {
+                return track;
+            }
+        }
+        return null;
     }
 
     /**

@@ -207,7 +207,7 @@ public final class CompositionEditor {
                 List<Note> notes = new ArrayList<>(midi.notes());
                 for (String id : remove.noteIds()) {
                     Note note = note(midi, id);
-                    requireNoteInScope(reach, at.track, midi, note);
+                    requireNoteBeginsInScope(reach, at.track, midi, note);
                     notes.remove(note);
                 }
                 yield replaceClip(piece, at, midi.withNotes(notes));
@@ -216,7 +216,7 @@ public final class CompositionEditor {
                 Located at = locate(piece, change.clipId());
                 MidiClip midi = midi(at);
                 Note old = note(midi, change.note().id());
-                requireNoteInScope(reach, at.track, midi, old);
+                requireNoteBeginsInScope(reach, at.track, midi, old);
                 requireNoteInScope(reach, at.track, midi, change.note());
                 List<Note> notes = new ArrayList<>(midi.notes());
                 notes.set(notes.indexOf(old), change.note());
@@ -270,7 +270,12 @@ public final class CompositionEditor {
         }
     }
 
-    private static void requireNoteInScope(Reach reach, Track track, MidiClip clip, Note note) throws Refused {
+    /**
+     * A note that is there may be removed or changed if it begins in the scope, however long it
+     * sounds: a note belongs to the stretch in which it begins (architecture review E5, rule of
+     * the border), and the proof does not protect it either.
+     */
+    private static void requireNoteBeginsInScope(Reach reach, Track track, MidiClip clip, Note note) throws Refused {
         long tick = clip.startTick() + note.tick();
         if (!reach.targetsClip(track, clip)) {
             throw new Refused(note.id(), "the note's clip " + clip.id() + " is not a target of the scope");
@@ -278,6 +283,12 @@ public final class CompositionEditor {
         if (!reach.scope().begins(tick)) {
             throw new Refused(note.id(), "the note begins at tick " + tick + ", outside the time of the scope");
         }
+    }
+
+    /** A note that comes in must begin in the scope and end before its end (or the transition zone's). */
+    private static void requireNoteInScope(Reach reach, Track track, MidiClip clip, Note note) throws Refused {
+        long tick = clip.startTick() + note.tick();
+        requireNoteBeginsInScope(reach, track, clip, note);
         if (tick + note.length() > reach.scope().noteEndLimit()) {
             throw new Refused(note.id(), "the note sounds beyond the end of the scope");
         }
