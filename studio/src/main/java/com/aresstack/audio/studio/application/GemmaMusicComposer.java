@@ -218,17 +218,52 @@ public final class GemmaMusicComposer {
         }
         final SketchProgress watched = progress instanceof SketchProgress ? (SketchProgress) progress : null;
         final String step = "Die KI plant Struktur und Harmonien";
+        final int[] chordsShown = {-1};
         if (watched != null) {
             watched.preparing(step, 0);
+            showForm(watched, spec, List.of(), chordsShown);
         }
         JsonObject plan = planner.generate("Return valid JSON only, no Markdown.", prompt,
                 Math.min(spec.isLegacy() ? 2048 : 4096, maxTokens), directory.resolve("composition-plan.json"),
-                watched == null ? null : text -> watched.preparing(step, text.length()));
+                watched == null ? null : text -> {
+                    watched.preparing(step, text.length());
+                    showForm(watched, spec, seenChords(text), chordsShown);
+                });
         validatePlan(plan, spec, progress);
         if (watched != null) {
-            watched.planned(chords(plan, spec));
+            List<String> chords = chords(plan, spec);
+            showForm(watched, spec, chords, chordsShown);
+            watched.planned(chords);
         }
         return plan;
+    }
+
+    /** The chords of a plan that is still being written, bar by bar as far as they have arrived. */
+    static List<String> seenChords(String text) {
+        List<String> chords = new ArrayList<String>();
+        try {
+            JsonObject seen = com.aresstack.audio.studio.ai.PartialJson.read(text);
+            if (seen != null && seen.has("chords") && seen.get("chords").isJsonArray()) {
+                for (JsonElement chord : seen.getAsJsonArray("chords")) {
+                    if (chord.isJsonPrimitive()) {
+                        chords.add(chord.getAsString().trim());
+                    }
+                }
+            }
+        } catch (RuntimeException unreadable) {
+            // a look at the plan on its way
+        }
+        return chords;
+    }
+
+    /** Shows the form of the new piece, one section over all its bars, with the chords known so far. */
+    private static void showForm(SketchProgress watched, CompositionSpec spec, List<String> chords, int[] shown) {
+        if (spec.isLegacy() || chords.size() == shown[0]) {
+            return;
+        }
+        shown[0] = chords.size();
+        watched.form(List.of(new com.aresstack.audio.studio.progress.FormSection(0, spec.bars(), "A", null, null,
+                chords.subList(0, Math.min(chords.size(), spec.bars())))));
     }
 
     /** What the plan is to say about tempo and loudness, in the words of {@link PlanShape}. */

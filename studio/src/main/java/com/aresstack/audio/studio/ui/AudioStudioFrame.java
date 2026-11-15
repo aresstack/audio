@@ -4114,6 +4114,11 @@ public final class AudioStudioFrame extends JFrame {
                     }
 
                     @Override
+                    public void form(final List<com.aresstack.audio.studio.progress.FormSection> sections) {
+                        SwingUtilities.invokeLater(() -> showForm(sections));
+                    }
+
+                    @Override
                     public void planned(final List<String> chords) {
                         SwingUtilities.invokeLater(() -> showPlanned(chords));
                     }
@@ -4620,6 +4625,52 @@ public final class AudioStudioFrame extends JFrame {
         append(said.toString());
         setStatus(said.toString());
         sayOnPaper(said + " · gleich kommen die Noten");
+    }
+
+    /**
+     * The form while the AI plans it: the sections appear above the lanes and in the score as the
+     * plan names them, with the chords that have arrived. Only shown; the form of the saved piece
+     * is shown again when the work is over.
+     */
+    private void showForm(List<com.aresstack.audio.studio.progress.FormSection> sections) {
+        if (worker == null || worker.isDone()) {
+            return;
+        }
+        try {
+            List<SectionMark> marks = new ArrayList<SectionMark>();
+            int bars = 0;
+            for (com.aresstack.audio.studio.progress.FormSection section : sections) {
+                marks.add(new SectionMark("plan" + marks.size(), section.firstBar(), section.bars(),
+                        section.name() == null ? "…" : section.name(), section.function(), section.intensity(),
+                        section.chords()));
+                bars = Math.max(bars, section.firstBar() + section.bars());
+            }
+            if (arrangementView.bars() < bars) {
+                // The lanes get the bars of the plan before the first note, so that the sections have their place.
+                List<String> lines = new ArrayList<String>();
+                lines.add("bars\t" + bars);
+                List<String> ids = new ArrayList<String>();
+                int melodic = 0;
+                for (MusicTrack track : trackTable.tracks()) {
+                    boolean drums = MusicTrack.DRUMS.equals(track.role());
+                    int next = melodic % 15;
+                    if (!drums) {
+                        melodic++;
+                    }
+                    lines.add("track\t" + track.id() + "\t" + track.program() + "\t"
+                            + (drums ? 9 : next >= 9 ? next + 1 : next));
+                    ids.add(track.id());
+                }
+                ArrangementView.Arrangement lanes = ArrangementView.Arrangement.of(lines);
+                if (lanes != null) {
+                    arrangementView.setArrangement(lanes, withAudioLanes(ids), "");
+                }
+            }
+            sectionBar.setSections(marks);
+            scoreView.setSections(marks);
+        } catch (RuntimeException undrawn) {
+            // a look at the plan on its way; the status line says the step as well
+        }
     }
 
     /** A line on the paper of the score while it has no notes yet. */

@@ -6,6 +6,7 @@ import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.Role;
 import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.studio.progress.Progress;
+import com.aresstack.audio.studio.progress.FormSection;
 import com.aresstack.audio.studio.progress.SketchProgress;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -105,6 +106,51 @@ public final class EditSketch {
         SketchProgress watched = (SketchProgress) progress;
         watched.preparing(what, 0);
         return Listening.to(text -> watched.preparing(what, text.length()));
+    }
+
+    /**
+     * As {@link #preparing(Progress, String)}, and the form is shown while the plan arrives.
+     *
+     * @param form the form of the piece for the answer read so far ({@link PartialJson}; an empty
+     *             object before anything arrived)
+     */
+    public static Listening.Scope preparing(Progress progress, String what,
+                                            java.util.function.Function<JsonObject, List<FormSection>> form) {
+        if (!(progress instanceof SketchProgress)) {
+            return Listening.to(null);
+        }
+        SketchProgress watched = (SketchProgress) progress;
+        watched.preparing(what, 0);
+        final List<FormSection>[] told = new List[1];
+        java.util.function.Consumer<JsonObject> tell = seen -> {
+            try {
+                List<FormSection> sections = form.apply(seen);
+                if (sections != null && !sections.equals(told[0])) {
+                    told[0] = sections;
+                    watched.form(sections);
+                }
+            } catch (RuntimeException unshown) {
+                // a look at the plan on its way; the plan itself does not depend on it
+            }
+        };
+        tell.accept(new JsonObject());
+        return Listening.to(text -> {
+            watched.preparing(what, text.length());
+            JsonObject seen = PartialJson.read(text);
+            if (seen != null) {
+                tell.accept(seen);
+            }
+        });
+    }
+
+    /** Shows the piece as it is now, before the first new note: with the room the work will fill. */
+    public EditSketch show() {
+        try {
+            shown.sketch(lines());
+        } catch (RuntimeException unshown) {
+            // a picture of the piece on its way
+        }
+        return this;
     }
 
     /**
