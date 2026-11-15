@@ -125,8 +125,8 @@ public final class AudioStudioFrame extends JFrame {
     /** The models of the production that runs; cancelling stops all of them. */
     private volatile com.aresstack.audio.studio.ai.ModelLineup activeModels;
     /** Which model answers for which role, as last chosen; taken over unchanged when a production starts. */
-    private com.aresstack.audio.studio.ai.ModelAssignment modelAssignment =
-            com.aresstack.audio.studio.ai.ModelAssignment.single(AiDefaults.MODEL);
+    private final ModelChoicePanel modelChoices = new ModelChoicePanel(() -> saveSettings(false),
+            () -> loadModelNames(false));
     private String preferredKeePassEntry = "";
     // The desk: display, transport, waveform, master meters, and the pages behind the keys under the display.
     private final DeckPlayer player = new DeckPlayer();
@@ -539,6 +539,8 @@ public final class AudioStudioFrame extends JFrame {
         wish.add(DeckWidgets.lettering("Was für Musik soll es sein? Das bekommt die KI gesagt."), BorderLayout.NORTH);
         wish.add(prompt, BorderLayout.CENTER);
         prompt.setPreferredSize(new Dimension(300, 92));
+        modelChoices.setBorder(BorderFactory.createEmptyBorder(0, 16, 0, 0));
+        wish.add(modelChoices, BorderLayout.EAST);
 
         // Under the words for the AI: what came of them, as the score a conductor reads.
         JScrollPane sheet = new JScrollPane(scoreView, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
@@ -856,9 +858,29 @@ public final class AudioStudioFrame extends JFrame {
         modelControls.setOpaque(false);
         modelControls.add(model, BorderLayout.CENTER);
         JButton listModels = new JButton("Modelle laden");
-        listModels.addActionListener(event -> loadModelNames());
+        listModels.addActionListener(event -> loadModelNames(true));
+        model.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            private void follow() {
+                modelChoices.setBase(model.getText());
+            }
+
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent event) {
+                follow();
+            }
+
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent event) {
+                follow();
+            }
+
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent event) {
+                follow();
+            }
+        });
         modelControls.add(listModels, BorderLayout.EAST);
-        addRow(ai, row++, "Modell", modelControls);
+        addRow(ai, row++, "Basismodell", modelControls);
         tokenLimit.setPreferredSize(new Dimension(110, 30));
         parallelRequests.setPreferredSize(new Dimension(110, 30));
         addRow(ai, row++, "Antwortlänge",
@@ -1282,7 +1304,7 @@ public final class AudioStudioFrame extends JFrame {
     /** The assignment as chosen now: the roles as set, the base model from the settings page. */
     private com.aresstack.audio.studio.ai.ModelAssignment currentAssignment() {
         String base = model.getText().trim();
-        return modelAssignment.withBase(base.isEmpty() ? AiDefaults.MODEL : base);
+        return modelChoices.assignment().withBase(base.isEmpty() ? AiDefaults.MODEL : base);
     }
 
     /** Writes down in the piece which model each role has for this production. */
@@ -1483,7 +1505,12 @@ public final class AudioStudioFrame extends JFrame {
         return value + "/chat/completions";
     }
 
-    private void loadModelNames() {
+    /**
+     * Asks the service for its models and offers them in the model choices.
+     *
+     * @param ask whether the user then picks the base model, as on the settings page
+     */
+    private void loadModelNames(final boolean ask) {
         if (endpoint.getText().trim().isEmpty()) {
             message("Bitte zuerst den KIPITZ-Endpunkt oder einen KeePass-Eintrag wählen.");
             return;
@@ -1506,8 +1533,13 @@ public final class AudioStudioFrame extends JFrame {
                         message("Der Server hat keine Modelle zurückgegeben.");
                         return;
                     }
+                    modelChoices.setModels(models);
+                    append(models.size() + " Modelle geladen; sie stehen in der Modellauswahl der Komposition.");
+                    if (!ask) {
+                        return;
+                    }
                     Object choice = JOptionPane.showInputDialog(AudioStudioFrame.this,
-                            "Modell für Komposition wählen:", "KIPITZ-Modelle",
+                            "Basismodell wählen (gilt für alle Rollen ohne eigenes Modell):", "KIPITZ-Modelle",
                             JOptionPane.QUESTION_MESSAGE, null,
                             models.toArray(), models.contains(chosenModel)
                                     ? chosenModel : models.get(0));
@@ -1686,7 +1718,7 @@ public final class AudioStudioFrame extends JFrame {
             endpoint.setText(saved.getProperty("endpoint", ""));
             apiKey.setText(saved.getProperty("apiKey", ""));
             model.setText(saved.getProperty("model", model.getText()));
-            modelAssignment = com.aresstack.audio.studio.settings.ModelSettings.read(saved);
+            modelChoices.setAssignment(com.aresstack.audio.studio.settings.ModelSettings.read(saved));
             tokenLimit.setValue(AiDefaults.maxTokens(saved));
             proxyHost.setText(saved.getProperty("proxyHost", ""));
             proxyPort.setText(saved.getProperty("proxyPort", ""));
