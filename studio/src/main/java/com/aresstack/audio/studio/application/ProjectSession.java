@@ -15,6 +15,8 @@ import com.aresstack.audio.composition.edit.Patch;
 import com.aresstack.audio.composition.edit.Proposal;
 import com.aresstack.audio.composition.edit.Revision;
 import com.aresstack.audio.composition.edit.TimeShift;
+import com.aresstack.audio.composition.mix.AutomationLane;
+import com.aresstack.audio.composition.mix.MixChannel;
 import com.aresstack.audio.composition.mix.MixScene;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.project.CompositionJson;
@@ -62,7 +64,9 @@ import java.util.Set;
  * the preview. Accepted changes and changes by hand can be undone and redone within the session;
  * revisions in {@code revisions/} are made before and after every accepted AI change, when the
  * piece is saved and on request, the first being the original. After every change only the stems
- * of parts that sound different are dropped from {@code render/manifest.json}.
+ * of parts that sound different are dropped from {@code render/manifest.json}. A part a change
+ * brings in gets a channel strip with the usual seat of its role and an entry in {@code tracks.json}
+ * and {@code spatial-scene.json}; undoing the change takes it out of both again ({@link PartSeats}).
  */
 public final class ProjectSession {
     /** The files that describe the piece in {@code arrangement.tsv} and beside it. */
@@ -220,16 +224,16 @@ public final class ProjectSession {
         }
         LegacyImport.Result result = current.get();
         Composition merged = piece ? keepingModel(result.composition(), composition) : composition;
-        boolean partsChanged = !ids(merged).equals(ids(composition));
-        MixScene mixed = stage || partsChanged || mix == null ? result.mix() : mix;
+        MixScene mixed = keepingMix(result.mix(), mix, merged, stage);
         boolean changed = !merged.equals(composition) || !Objects.equals(mixed, mix);
-        composition = merged;
-        mix = mixed;
         if (changed) {
+            // First the files, then the session: if writing fails, the session keeps the model on
+            // disk, and the next call finds the same change again and takes it over then.
+            StemManifest.save(folder, StemManifest.current(StemManifest.load(folder), merged));
+            writeModel(merged, mixed);
+            composition = merged;
+            mix = mixed;
             history.push(new State(composition, mix), "Übernommen aus den Dateien des Komponisten");
-            // Stems taken over stay valid only for parts that still sound as they did.
-            StemManifest.save(folder, StemManifest.current(StemManifest.load(folder), composition));
-            writeModel();
         }
         ProjectFile kept = project != null ? project
                 : new ProjectFile(ProjectFile.FORMAT_VERSION, null, null, new ArrayList<>(), null);
@@ -249,7 +253,12 @@ public final class ProjectSession {
         }
     }
 
-    /** Writes the model and {@code arrangement.tsv} from it, without a revision. */
+    /**
+     * Writes the model and {@code arrangement.tsv} from it, without a revision. A piece that says
+     * more than the TSV can (tempo or meter changes, another meter than 4/4) gets
+     * {@code arrangement.mid}, written from the model, as its exchange file. A TSV lying there is
+     * left as it is (work package F1): {@link #synchronize()} never takes it over such a model.
+     */
     private void persist() throws IOException {
         writeModel();
         Path arrangement = folder.resolve(ProjectFolder.ARRANGEMENT);
@@ -257,7 +266,12 @@ public final class ProjectSession {
         try {
             lines = TsvExport.lines(composition);
         } catch (TsvExport.NotExpressible beyond) {
-            return; // then arrangement.mid is the exchange format
+            MidiExport.write(composition, folder.resolve(ProjectFolder.MIDI));
+            ProjectFile project = ProjectFile.load(folder);
+            if (project != null) {
+                project.withSources(sources(folder)).save(folder);
+            }
+            return;
         }
         boolean same = false;
         if (Files.isRegularFile(arrangement)) {
@@ -437,7 +451,7 @@ public final class ProjectSession {
                 .orElseThrow(() -> new IOException("Keine Revision " + revisionId + " in " + folder));
         dropPending();
         String description = "Revision " + revision.sequence() + " wiederhergestellt";
-        history.push(new State(revision.composition(), mix), description);
+        history.push(new State(revision.composition(), revision.mix() != null ? revision.mix() : mix), description);
         ChangeSet changes = become(history.current());
         record(Revision.Author.USER, description, null);
         return changes;
@@ -450,6 +464,7 @@ public final class ProjectSession {
                 shifted = TimeShift.shift(shifted, shift.fromTick(), shift.ticks());
             }
         }
+        shifted = PartSeats.seatNewParts(shifted, proposal.base(), proposal.result(), ids);
         history.push(new State(proposal.result(), shifted), description);
         return become(history.current());
     }
@@ -469,6 +484,7 @@ public final class ProjectSession {
             }
             StemManifest.save(folder, kept);
         }
+        PartSeats.followOldFiles(folder, changes, composition, mix);
         persist();
         return changes;
     }
@@ -499,7 +515,7 @@ public final class ProjectSession {
     private Revision record(Revision.Author author, String description, String runId) throws IOException {
         Revision revision = new Revision(ids.next(), lastRevision == null ? 1 : lastRevision.sequence() + 1,
                 lastRevision == null ? null : lastRevision.id(), author, System.currentTimeMillis(), description, runId,
-                composition);
+                composition, mix);
         RevisionStore.save(folder, revision);
         lastRevision = revision;
         ProjectFile project = ProjectFile.load(folder);
@@ -517,28 +533,142 @@ public final class ProjectSession {
     /**
      * The model after a new import of the old files: a part (with its track) whose notes sound
      * as before stays as the model has it; meta fields the old files do not say keep their
-     * value; the sections stay where they still cover the piece; the time map stays where the
-     * file names the same tempo.
+     * value; the sections (the form of the piece) stay, and only music beyond their end gets a
+     * section of its own; the time map stays where the file names the same tempo.
      */
     private static Composition keepingModel(Composition imported, Composition model) {
         List<Part> parts = new ArrayList<>();
         List<Track> tracks = new ArrayList<>();
         for (Part part : imported.parts()) {
             Part old = model.part(part.id());
-            boolean same = old != null && model.track(part.id()) != null
+            Track own = trackOf(model, part.id());
+            boolean same = old != null && own != null
                     && TsvExport.linesOf(imported, part.id()).equals(TsvExport.linesOf(model, part.id()));
-            parts.add(same ? old : part);
-            tracks.add(same ? model.track(part.id()) : imported.track(part.id()));
+            // tracks.json is still where the old studio keeps instrument and sound bank: they come
+            // from there even for a part whose notes stayed the same.
+            parts.add(!same ? part : part.instrument() == null ? old
+                    : new Part(old.id(), old.name(), old.role(), part.instrument(), old.program(), part.libraryId(),
+                            old.staffLayout(), old.voices(), old.legacyChannel()));
+            tracks.add(same ? own : imported.track(part.id()));
         }
         Meta a = imported.meta();
         Meta b = model.meta();
         Meta meta = new Meta(or(a.title(), b.title()), or(a.genre(), b.genre()), or(a.mood(), b.mood()),
                 or(a.brief(), b.brief()), or(a.plannedFrom(), b.plannedFrom()), or(a.remarks(), b.remarks()));
-        List<Section> sections = model.sections().isEmpty()
-                || model.sections().get(model.sections().size() - 1).endTick() != imported.endTick()
-                ? imported.sections() : model.sections();
+        List<Section> sections = keepingSections(imported, model);
         TimeMap time = imported.timeMap().tempoAt(0) == model.timeMap().tempoAt(0) ? model.timeMap() : imported.timeMap();
         return new Composition(meta, time, sections, parts, tracks, model.assets());
+    }
+
+    /**
+     * The track of a part in the model: the track of the same id as for an imported part, else the
+     * track whose default part it is (a part added later, such as a new voice, has a track of its own id).
+     */
+    private static Track trackOf(Composition model, String partId) {
+        Track same = model.track(partId);
+        if (same != null) {
+            return same;
+        }
+        for (Track track : model.tracks()) {
+            if (partId.equals(track.defaultPartId())) {
+                return track;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The mix after a new import: the channels of parts that stayed keep what the mix says of
+     * them, a new part gets the seat the import gives it, a part that went loses its channel and
+     * its automation. Only a changed {@code spatial-scene.json} sets places, levels, room and
+     * level curves anew; how the level is set ({@code levelMode}) is never said by the old files
+     * and stays as the mix has it.
+     */
+    private static MixScene keepingMix(MixScene imported, MixScene model, Composition composition, boolean stage) {
+        if (model == null) {
+            return imported;
+        }
+        if (stage) {
+            // The stage file says the places and levels anew, for the parts it knows; a part of the
+            // model it does not know keeps its channel and its curve.
+            List<MixChannel> channels = new ArrayList<>();
+            List<String> fromStage = new ArrayList<>();
+            for (Part part : composition.parts()) {
+                MixChannel.Owner owner = MixChannel.Owner.part(part.id());
+                MixChannel fresh = imported.channelOf(owner);
+                MixChannel channel = fresh != null ? fresh : model.channelOf(owner);
+                if (channel != null) {
+                    channels.add(channel);
+                    if (fresh != null) {
+                        fromStage.add(channel.id());
+                    }
+                }
+            }
+            List<AutomationLane> automation = new ArrayList<>();
+            for (AutomationLane lane : imported.automation()) {
+                if (fromStage.contains(lane.channelId())) {
+                    automation.add(lane);
+                }
+            }
+            for (AutomationLane lane : model.automation()) {
+                boolean stays = channels.stream().anyMatch(c -> c.id().equals(lane.channelId()))
+                        && !fromStage.contains(lane.channelId());
+                if (lane.channelId() == null || stays) {
+                    automation.add(lane);
+                }
+            }
+            return new MixScene(imported.room(), imported.masterDb(), model.levelMode(), channels, automation);
+        }
+        List<MixChannel> channels = new ArrayList<>();
+        List<String> kept = new ArrayList<>();
+        for (Part part : composition.parts()) {
+            MixChannel.Owner owner = MixChannel.Owner.part(part.id());
+            MixChannel old = model.channelOf(owner);
+            MixChannel channel = old != null ? old : imported.channelOf(owner);
+            if (channel != null) {
+                channels.add(channel);
+                kept.add(channel.id());
+            }
+        }
+        List<AutomationLane> automation = new ArrayList<>();
+        for (AutomationLane lane : model.automation()) {
+            if (lane.channelId() == null || kept.contains(lane.channelId())) {
+                automation.add(lane);
+            }
+        }
+        for (AutomationLane lane : imported.automation()) {
+            boolean newChannel = lane.channelId() != null && kept.contains(lane.channelId())
+                    && model.channels().stream().noneMatch(c -> c.id().equals(lane.channelId()));
+            if (newChannel) {
+                automation.add(lane);
+            }
+        }
+        return new MixScene(model.room(), model.masterDb(), model.levelMode(), channels, automation);
+    }
+
+    /**
+     * The form of the piece after a new import: the old files know only one section over the
+     * whole piece, so the sections of the model stay as they are. Music that now goes beyond them
+     * gets one more section from their end to its end; a piece that got shorter keeps its form.
+     */
+    private static List<Section> keepingSections(Composition imported, Composition model) {
+        if (model.sections().isEmpty()) {
+            return imported.sections();
+        }
+        List<Section> sections = new ArrayList<>(model.sections());
+        long end = sections.get(sections.size() - 1).endTick();
+        long music = imported.endTick();
+        if (music > end) {
+            java.util.Set<String> taken = new java.util.HashSet<>();
+            sections.forEach(section -> taken.add(section.id()));
+            com.aresstack.audio.composition.Ids ids = com.aresstack.audio.composition.Ids.random();
+            String id = ids.next();
+            while (taken.contains(id)) {
+                id = ids.next();
+            }
+            sections.add(new Section(id, "Neu", null, end, music - end, null, List.of(), null));
+        }
+        return sections;
     }
 
     private static String or(String first, String second) {
@@ -565,6 +695,10 @@ public final class ProjectSession {
     }
 
     private void writeModel() throws IOException {
+        writeModel(composition, mix);
+    }
+
+    private void writeModel(Composition composition, MixScene mix) throws IOException {
         CompositionJson.save(folder, composition);
         if (mix != null) {
             MixJson.save(folder, mix);

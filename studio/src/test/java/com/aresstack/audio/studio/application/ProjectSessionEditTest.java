@@ -243,4 +243,30 @@ public final class ProjectSessionEditTest {
         session.accept(proposal);
         assertEquals(62, session.composition().notesOf("melody").get(0).note().pitch());
     }
+
+    @Test
+    public void restoringARevisionAfterAShiftBringsBackItsMixToo() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        Composition original = session.composition();
+        com.aresstack.audio.composition.mix.MixScene mix = session.mix();
+        session.apply(Patch.of("Zwei Takte Platz", new EditOp.ShiftTime(2 * 1920, 1920)), EditScope.everything());
+        assertNotEquals("the automation moved along", mix, session.mix());
+        session.restoreRevision(session.revisions().get(0).id());
+        assertEquals(original, session.composition());
+        assertEquals(mix, session.mix());
+    }
+
+    @Test
+    public void aPieceBeyondTheTsvGetsItsMidiWrittenFromTheModel() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        com.aresstack.audio.composition.TimeMap waltz = new com.aresstack.audio.composition.TimeMap(
+                session.composition().timeMap().tempos(),
+                List.of(new com.aresstack.audio.composition.TimeMap.Meter(0, 3, 4)),
+                session.composition().timeMap().keys());
+        session.apply(Patch.of("Walzer", new EditOp.SetTimeMap(waltz)), EditScope.everything());
+        assertArrayEquals(com.aresstack.audio.studio.project.MidiExport.bytes(session.composition()),
+                Files.readAllBytes(piece.resolve(ProjectFolder.MIDI)));
+        assertFalse(session.externalChanges());
+        assertEquals(session.composition(), ProjectSession.open(piece).orElseThrow().composition());
+    }
 }

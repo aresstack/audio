@@ -13,6 +13,11 @@ import com.aresstack.audio.composition.Composition;
 import com.aresstack.audio.composition.MidiClip;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.Section;
+import com.aresstack.audio.composition.mix.MixChannel;
+import com.aresstack.audio.composition.mix.MixScene;
+import com.aresstack.audio.studio.stage.SoundSourcePlacement;
+import com.aresstack.audio.studio.stage.SpatialScene;
+import com.aresstack.audio.studio.stage.SpatialSceneStore;
 import com.aresstack.audio.composition.edit.ChangeSet;
 import com.aresstack.audio.composition.edit.EditOp;
 import com.aresstack.audio.composition.edit.EditScope;
@@ -158,6 +163,107 @@ public final class VoiceAdditionTest {
     }
 
     @Test
+    public void anAcceptedVoiceGetsAStageSeatAChannelAndAnEntryInTheOldFiles() throws Exception {
+        MixScene mixBefore = session.mix();
+        TrackArrangement tracksBefore = new TrackArrangementStore().load(piece);
+        SpatialScene stageBefore = new SpatialSceneStore().load(piece);
+        VoiceAddition addition = VoiceAddition.start(session, VoiceComposer.with(trumpetPlayer()),
+                trumpet(List.of(), false), Ids.seeded(13), QUIET);
+        String id = addition.voice().part().id();
+        assertEquals("nothing before acceptance", mixBefore, session.mix());
+        addition.accept();
+
+        // a channel with the usual seat of a second melody, the existing channels as they were
+        MixChannel channel = session.mix().channelOf(MixChannel.Owner.part(id));
+        assertNotNull(channel);
+        SoundSourcePlacement usual = SpatialScene.standard(List.of(new MusicTrack("melody", "melody", "x", 0, null),
+                new MusicTrack("other", "melody", "x", 0, null))).placement("other");
+        assertEquals(usual.x(), channel.x(), 1e-9);
+        assertEquals(usual.depth(), channel.depth(), 1e-9);
+        assertEquals(usual.levelDb(), channel.levelDb(), 1e-9);
+        assertFalse(channel.muted());
+        assertEquals(mixBefore.channels().size() + 1, session.mix().channels().size());
+        assertTrue(session.mix().channels().containsAll(mixBefore.channels()));
+        assertEquals(session.mix(), com.aresstack.audio.studio.project.MixJson.load(piece));
+
+        // tracks.json and spatial-scene.json know the trumpet; nothing else in them changed
+        List<MusicTrack> tracks = new TrackArrangementStore().load(piece).tracks();
+        assertEquals(tracksBefore.tracks().size() + 1, tracks.size());
+        MusicTrack added = tracks.get(tracks.size() - 1);
+        assertEquals(id, added.id());
+        assertEquals("melody", added.role());
+        assertEquals("Trumpet", added.instrument());
+        assertEquals(56, added.program());
+        assertEquals(described(tracksBefore.tracks()), described(tracks.subList(0, tracks.size() - 1)));
+        SpatialScene stage = new SpatialSceneStore().load(piece);
+        assertEquals(channel.x(), stage.placement(id).x(), 1e-3);
+        for (SoundSourcePlacement seat : stageBefore.placements()) {
+            assertEquals(SpatialSceneStore.write(new SpatialScene(null, List.of(seat))).toString(),
+                    SpatialSceneStore.write(new SpatialScene(null, List.of(stage.placement(seat.trackId())))).toString());
+        }
+        assertFalse("our own writes are no external change", session.externalChanges());
+
+        // undo takes the trumpet out of mix and old files again
+        session.undo();
+        assertNull(session.mix().channelOf(MixChannel.Owner.part(id)));
+        assertEquals(mixBefore, session.mix());
+        assertEquals(described(tracksBefore.tracks()), described(new TrackArrangementStore().load(piece).tracks()));
+        assertNull(new SpatialSceneStore().load(piece).placement(id));
+        assertFalse(session.externalChanges());
+        session.redo();
+        assertEquals(channel, session.mix().channelOf(MixChannel.Owner.part(id)));
+        assertNotNull(new SpatialSceneStore().load(piece).placement(id));
+    }
+
+    @Test
+    public void theMixOfTheOtherPartsAndItsLevelModeSurviveAddingAndUndo() throws Exception {
+        MixScene opened = session.mix();
+        MixChannel first = opened.channels().get(0);
+        List<MixChannel> channels = new ArrayList<>(opened.channels());
+        channels.set(0, new MixChannel(first.id(), first.owner(), -0.8, 0.9, -7.5, 0.25, 0.7, true, true));
+        MixScene own = new MixScene(opened.room(), -3, com.aresstack.audio.composition.mix.LevelMode.FIXED, channels,
+                opened.automation());
+        com.aresstack.audio.studio.project.MixJson.save(piece, own);
+        session = ProjectSession.open(piece).orElseThrow();
+        assertEquals(own, session.mix());
+
+        VoiceAddition addition = VoiceAddition.start(session, VoiceComposer.with(trumpetPlayer()),
+                trumpet(List.of(), false), Ids.seeded(19), QUIET);
+        addition.accept();
+        MixScene accepted = session.mix();
+        assertEquals(com.aresstack.audio.composition.mix.LevelMode.FIXED, accepted.levelMode());
+        assertEquals(-3, accepted.masterDb(), 0);
+        assertEquals(own.room(), accepted.room());
+        assertEquals(own.automation(), accepted.automation());
+        assertEquals(own.channels(), accepted.channels().subList(0, own.channels().size()));
+        assertEquals(accepted, com.aresstack.audio.studio.project.MixJson.load(piece));
+
+        session.undo();
+        assertEquals(own, session.mix());
+        assertEquals(own, com.aresstack.audio.studio.project.MixJson.load(piece));
+        session.redo();
+        assertEquals(accepted, session.mix());
+    }
+
+    @Test
+    public void anAcceptedVoiceSurvivesTakingOverChangedOldFiles() throws Exception {
+        VoiceAddition addition = VoiceAddition.start(session, VoiceComposer.with(trumpetPlayer()),
+                trumpet(List.of(), false), Ids.seeded(17), QUIET);
+        addition.accept();
+        Composition accepted = session.composition();
+        String id = addition.voice().part().id();
+        Path song = piece.resolve("song.properties");
+        Files.writeString(song, Files.readString(song).replace("name=Morgen im Viertel", "name=Abend im Viertel"));
+        assertTrue(session.externalChanges());
+        session.synchronize();
+        Composition now = session.composition();
+        assertEquals("Abend im Viertel", now.meta().title());
+        assertEquals("part, track, clips and note ids of the new voice stay", accepted.part(id), now.part(id));
+        assertEquals(accepted.track(addition.voice().track().id()), now.track(addition.voice().track().id()));
+        assertEquals(accepted.notesOf(id), now.notesOf(id));
+    }
+
+    @Test
     public void discardLeavesThePieceAndRegenerateMakesAnotherVersion() throws Exception {
         FakeChatModel model = trumpetPlayer();
         Composition before = session.composition();
@@ -268,5 +374,10 @@ public final class VoiceAdditionTest {
                 assertNull(before.part(add.part().id()));
             }
         }
+    }
+
+    private static List<String> described(List<MusicTrack> tracks) {
+        return tracks.stream().map(t -> t.id() + "|" + t.role() + "|" + t.instrument() + "|" + t.program() + "|"
+                + t.libraryId()).toList();
     }
 }
