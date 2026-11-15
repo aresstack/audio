@@ -89,7 +89,8 @@ public final class PieceRendering {
                     + " unverändert übernommen.");
         }
         com.aresstack.audio.studio.project.MidiExport.write(composition, folder.resolve(MIDI_FILE));
-        Path mix = new StageMixService().mix(folder.resolve("arrangement.tsv"), folder, progress);
+        // The tracks and the time of the mix are those of the model: arrangement.tsv is not read.
+        Path mix = new StageMixService().mix(StageMixService.Piece.of(composition), folder, progress);
         return new Outcome(mix, stems);
     }
 
