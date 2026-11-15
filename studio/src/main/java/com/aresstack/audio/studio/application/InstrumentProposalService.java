@@ -1,6 +1,6 @@
 package com.aresstack.audio.studio.application;
 
-import com.aresstack.audio.studio.ai.KipitzChatClient;
+import com.aresstack.audio.studio.ai.ChatModel;
 import com.aresstack.audio.studio.progress.Progress;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -14,10 +14,10 @@ import com.aresstack.audio.studio.stage.SpatialSceneStore;
 
 /** Offer a user-reviewable instrumentation proposal before generating any musical notes. */
 public final class InstrumentProposalService {
-    private final KipitzChatClient client;
+    private final ChatModel client;
     private final int maxTokens;
 
-    public InstrumentProposalService(KipitzChatClient client, int maxTokens) {
+    public InstrumentProposalService(ChatModel client, int maxTokens) {
         this.client = client;
         this.maxTokens = maxTokens;
     }

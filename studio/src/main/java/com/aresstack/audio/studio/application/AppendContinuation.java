@@ -35,13 +35,17 @@ public final class AppendContinuation {
     private AppendContinuation() {
     }
 
-    /** The kinds of operation a continuation needs; notes of existing clips only change in the transition. */
+    /**
+     * The kinds of operation a continuation needs; notes of existing clips only change in the
+     * transition, where a clip of the original may also grow so that a new note sounds past its end.
+     */
     public static Set<EditOp.Kind> kinds(boolean revisesTail) {
         EnumSet<EditOp.Kind> kinds = EnumSet.of(EditOp.Kind.ADD_PART, EditOp.Kind.ADD_TRACK, EditOp.Kind.ADD_CLIP,
                 EditOp.Kind.SET_SECTIONS);
         if (revisesTail) {
             kinds.add(EditOp.Kind.ADD_NOTES);
             kinds.add(EditOp.Kind.REMOVE_NOTES);
+            kinds.add(EditOp.Kind.RESIZE_CLIP);
         }
         return Set.copyOf(kinds);
     }
@@ -87,6 +91,9 @@ public final class AppendContinuation {
             if (!change.removed().isEmpty()) {
                 operations.add(new EditOp.RemoveNotes(change.clipId(), change.removed()));
             }
+            if (change.lengthTicks() > 0) {
+                operations.add(new EditOp.ResizeClip(change.clipId(), change.lengthTicks()));
+            }
             if (!change.added().isEmpty()) {
                 operations.add(new EditOp.AddNotes(change.clipId(), change.added()));
             }
@@ -100,7 +107,8 @@ public final class AppendContinuation {
     /**
      * What is different about the original between two states of a piece: a note that begins
      * before {@code keptUntil} gone, new or changed, a note of a part that does not go on changed,
-     * a part, track, clip frame or section of the original changed, tempo, meter, key or the
+     * a part, track, clip frame or section of the original changed (a clip of a part that goes on
+     * may only change its end, and only from {@code keptUntil} on), tempo, meter, key or the
      * words about the piece changed, an unexpected new part. Empty when only the continuation
      * came in.
      *
@@ -132,7 +140,7 @@ public final class AppendContinuation {
             }
             for (Clip clip : track.clips()) {
                 Clip kept = now.clips().stream().filter(c -> c.id().equals(clip.id())).findFirst().orElse(null);
-                if (kept == null || !frame(kept).equals(frame(clip))) {
+                if (kept == null || !frame(kept).equals(frame(clip)) && !grown(track, clip, kept, keptUntil, goOn)) {
                     differences.add("clip " + clip.id() + " moved, resized or gone");
                 }
             }
@@ -187,6 +195,16 @@ public final class AppendContinuation {
         }
         lines.sort(null);
         return lines;
+    }
+
+    /**
+     * Whether a clip of a part that goes on only got another end, and both ends lie at or after
+     * {@code keptUntil}: the transition let it grow so that a revised note sounds out.
+     */
+    private static boolean grown(Track track, Clip clip, Clip kept, long keptUntil, Set<String> goOn) {
+        return clip instanceof MidiClip old && kept instanceof MidiClip now && goOn.contains(track.partOf(old))
+                && old.startTick() == now.startTick() && java.util.Objects.equals(old.partId(), now.partId())
+                && old.endTick() >= keptUntil && now.endTick() >= keptUntil;
     }
 
     static String frame(Clip clip) {

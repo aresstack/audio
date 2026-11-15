@@ -286,6 +286,63 @@ public final class PieceExtensionTest {
     }
 
     @Test
+    public void aTransitionNoteRingsPastTheEndOfTheOldClip() throws Exception {
+        // the melody's last revised note begins on beat 3 of bar 8 and lasts four beats: two into bar 9
+        FakeChatModel model = model((instruction, prompt) -> {
+            if (!instruction.equals(ChatContinuationPlanner.INSTRUCTION)
+                    && SectionGenerator.TRANSITION.equals(FakeChatModel.quoted(prompt, "section"))
+                    && "melody".equals(FakeChatModel.quoted(prompt, "part"))) {
+                assertTrue(prompt.contains("may ring up to one bar into the continuation"));
+                return "{\"part\":\"melody\",\"section\":\"transition\",\"notes\":["
+                        + "{\"bar\":1,\"beat\":0,\"duration\":4,\"pitch\":76,\"velocity\":80},"
+                        + "{\"bar\":2,\"beat\":0,\"duration\":2,\"pitch\":74,\"velocity\":80},"
+                        + "{\"bar\":2,\"beat\":2,\"duration\":4,\"pitch\":72,\"velocity\":80}]}";
+            }
+            return null;
+        });
+        Composition before = session.composition();
+        long tailStart = 6 * BAR;
+        ContinuationRequest request = ContinuationRequest.of(16, ContinuationPreset.STANDALONE, ContinuationEnding.OPEN)
+                .revisingTail(2);
+
+        PieceExtension extension = PieceExtension.start(session, composerWith(model), request, Ids.seeded(5), QUIET);
+
+        Composition after = extension.proposal().result();
+        assertEquals(List.of(), CompositionValidator.validate(after));
+        PlacedNote ringing = after.notesOf("melody").stream()
+                .filter(n -> n.tick() == 7 * BAR + BAR / 2 && n.note().pitch() == 72).findFirst().orElseThrow();
+        assertEquals("not cut at the old end", BAR, ringing.note().length());
+        // the old clip grew and took the melody's first new section in; no second clip overlaps it
+        com.aresstack.audio.composition.Track track = after.tracks().stream()
+                .filter(t -> "melody".equals(t.defaultPartId())).findFirst().orElseThrow();
+        com.aresstack.audio.composition.MidiClip grown = null;
+        for (var clip : track.clips()) {
+            if (clip instanceof com.aresstack.audio.composition.MidiClip midi && midi.startTick() < tailStart
+                    && midi.endTick() > ORIGINAL_END) {
+                grown = midi;
+            }
+        }
+        assertNotNull("a clip of the original reaches past bar 8", grown);
+        String grownId = grown.id();
+        assertTrue(before.tracks().stream().flatMap(t -> t.clips().stream()).anyMatch(c -> c.id().equals(grownId)));
+        for (var clip : track.clips()) {
+            assertFalse("no clip overlaps the grown one", clip != grown && clip.startTick() < grown.endTick()
+                    && clip.startTick() >= grown.startTick());
+        }
+        assertTrue(extension.proposal().patch().operations().stream().anyMatch(op -> op instanceof EditOp.ResizeClip));
+        // the original before the transition is as it was, and the guard accepts the grown clip
+        assertEquals(AppendContinuation.hashBefore(before, tailStart), AppendContinuation.hashBefore(after, tailStart));
+        assertEquals(List.of(), AppendContinuation.originalKept(before, after, tailStart, ids(before.parts()), Set.of()));
+        // every note of the melody's new sections is there: two per bar over 16 bars
+        assertEquals(32, after.notesOf("melody").stream().filter(n -> n.tick() >= ORIGINAL_END).count());
+
+        extension.accept();
+        assertEquals(after, session.composition());
+        session.undo();
+        assertEquals(before, session.composition());
+    }
+
+    @Test
     public void aDramaticBuildBringsNewInstrumentsAndARisingIntensity() throws Exception {
         // A3: Verlängerung mit dramatischem Höhepunkt
         FakeChatModel model = composer();

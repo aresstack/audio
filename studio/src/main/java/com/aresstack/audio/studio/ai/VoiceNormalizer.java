@@ -12,7 +12,7 @@ import java.util.Set;
 /**
  * Repairs the notes of a new voice formally and keeps a record of every repair (architecture
  * review E4, policy of the normalizer): onto the sixteenth grid, at least a sixteenth long, within
- * the frame (a note that would sound past its end is cut there), velocity within MIDI, pitch only
+ * the frame (a note that would sound past its end, or past an allowed ring-out, is cut there), velocity within MIDI, pitch only
  * limited to the range of the instrument. Notes outside the key are recorded, not changed. A note
  * that begins outside the frame, or a second note of the same pitch at the same tick, is left out.
  */
@@ -48,6 +48,19 @@ public final class VoiceNormalizer {
 
     /** The notes of one frame, repaired, in the order of the answer. */
     public List<ShapedNote> shape(VoiceFrame frame, GeneratedNotes generated) {
+        return shape(frame, generated, 0);
+    }
+
+    /**
+     * The notes of one frame, repaired, where a note may sound up to {@code ringOut} ticks past the
+     * end of the frame before it is cut (the revised transition of a continuation rings into the
+     * new bars). Notes still begin within the frame.
+     */
+    public List<ShapedNote> shape(VoiceFrame frame, GeneratedNotes generated, long ringOut) {
+        if (ringOut < 0) {
+            throw new IllegalArgumentException("A note rings out zero ticks or more: " + ringOut);
+        }
+        long soundsUntil = frame.endTick() + ringOut;
         corrections.addAll(generated.skipped());
         String where = frame.sectionId();
         List<ShapedNote> shaped = new ArrayList<>();
@@ -81,10 +94,10 @@ public final class VoiceNormalizer {
             }
             long length = Math.max(GRID, Math.round(raw.duration() * TimeMap.PPQ / GRID) * GRID);
             report(where, index, "duration", raw.duration(), length / (double) TimeMap.PPQ, "auf Sechzehntelraster");
-            if (tick + length > frame.endTick()) {
-                long cut = frame.endTick() - tick;
+            if (tick + length > soundsUntil) {
+                long cut = soundsUntil - tick;
                 report(where, index, "duration", length / (double) TimeMap.PPQ, cut / (double) TimeMap.PPQ,
-                        "am Abschnittsende abgeschnitten");
+                        ringOut == 0 ? "am Abschnittsende abgeschnitten" : "nach dem Ausklingen abgeschnitten");
                 length = cut;
             }
             int pitch = range.clamp(Math.max(0, Math.min(127, raw.pitch())));

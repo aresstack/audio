@@ -74,6 +74,16 @@ final class Reach {
         return targetsClip(track, clip) && scope.covers(clip.startTick(), end(clip));
     }
 
+    /**
+     * Whether the end of a clip that lies partly outside the scope's time belongs to the scope:
+     * the clip is a target, the scope allows {@link EditOp.Kind#RESIZE_CLIP}, and the clip ends
+     * within the scope's time. Then its end may move within that time; its start may not.
+     */
+    boolean endInScope(Track track, Clip clip) {
+        return clip instanceof MidiClip midi && scope.allows(EditOp.Kind.RESIZE_CLIP) && targetsClip(track, clip)
+                && midi.endTick() >= scope.editFrom() && midi.endTick() <= scope.toTick();
+    }
+
     /** Whether a note that begins at a tick of the piece, in a clip on a track, may change. */
     boolean noteInScope(Track track, Clip clip, long tick) {
         return targetsClip(track, clip) && scope.begins(tick);
