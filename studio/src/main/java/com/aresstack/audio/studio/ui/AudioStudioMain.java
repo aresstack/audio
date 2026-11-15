@@ -138,7 +138,11 @@ public final class AudioStudioMain {
                 || !java.util.Arrays.equals(written, Files.readAllBytes(folder.resolve("legacy").resolve("arrangement.tsv")))) {
             throw new IllegalStateException("Opening the bundled piece changed its arrangement.");
         }
-        if (com.aresstack.audio.studio.application.ProjectSession.open(folder).get().synchronize()) {
+        byte[] model = Files.readAllBytes(folder.resolve("composition.json"));
+        com.aresstack.audio.studio.application.ProjectSession again =
+                com.aresstack.audio.studio.application.ProjectSession.open(folder).get();
+        if (again.externalChanges() || again.synchronize()
+                || !java.util.Arrays.equals(model, Files.readAllBytes(folder.resolve("composition.json")))) {
             throw new IllegalStateException("A piece that was not touched changed when it was opened again.");
         }
         System.out.println("Piece model: " + session.get().composition().tracks().size() + " tracks, "

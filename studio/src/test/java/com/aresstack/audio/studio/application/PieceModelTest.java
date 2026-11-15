@@ -81,6 +81,69 @@ public final class PieceModelTest {
     }
 
     @Test
+    public void openingNeverReplacesASavedModelFromTheOldFiles() throws Exception {
+        Path folder = Files.createTempDirectory("piece-model-");
+        Files.write(folder.resolve("arrangement.tsv"), PIECE, StandardCharsets.UTF_8);
+        new PieceModel(line -> { }).open(folder);
+        // The model learns what no old file says, and an old file is changed behind its back.
+        com.aresstack.audio.composition.Composition saved =
+                com.aresstack.audio.studio.project.CompositionJson.load(folder);
+        com.aresstack.audio.studio.project.CompositionJson.save(folder,
+                saved.withMeta(saved.meta().withTitle("Nur im Werkmodell")));
+        byte[] model = Files.readAllBytes(folder.resolve("composition.json"));
+        List<String> older = new ArrayList<String>(PIECE);
+        older.set(2, "note\tmelody\t0\t480\t60\t80");
+        Files.write(folder.resolve("arrangement.tsv"), older, StandardCharsets.UTF_8);
+        List<String> said = new ArrayList<String>();
+        PieceModel reopened = new PieceModel(said::add);
+
+        reopened.open(folder);
+
+        assertEquals(new String(model, StandardCharsets.UTF_8),
+                new String(Files.readAllBytes(folder.resolve("composition.json")), StandardCharsets.UTF_8));
+        assertEquals("Nur im Werkmodell", reopened.session().get().composition().meta().title());
+        assertEquals(72, reopened.session().get().composition().notesOf("melody").get(0).note().pitch());
+        assertEquals(said.toString(), 1, said.size());
+        assertTrue(said.get(0).startsWith("WARN: "));
+
+        // Only what the studio itself has just written is taken over, and the model keeps what it knows beyond it.
+        reopened.synchronize();
+        assertEquals(60, reopened.session().get().composition().notesOf("melody").get(0).note().pitch());
+        assertEquals("Nur im Werkmodell", reopened.session().get().composition().meta().title());
+        assertEquals("Nur im Werkmodell",
+                com.aresstack.audio.studio.project.CompositionJson.load(folder).meta().title());
+    }
+
+    @Test
+    public void aFailedFollowingIsTriedAgainFromTheSavedModel() throws Exception {
+        Path folder = Files.createTempDirectory("piece-model-");
+        Files.write(folder.resolve("arrangement.tsv"), PIECE, StandardCharsets.UTF_8);
+        List<String> said = new ArrayList<String>();
+        PieceModel model = new PieceModel(said::add);
+        model.open(folder);
+        said.clear();
+        List<String> composed = new ArrayList<String>(PIECE);
+        composed.set(2, "note\tmelody\t0\t480\t60\t80");
+        Files.write(folder.resolve("arrangement.tsv"), composed, StandardCharsets.UTF_8);
+        Path file = folder.resolve("composition.json");
+        byte[] good = Files.readAllBytes(file);
+        Files.delete(file);
+        Files.createDirectory(file); // the model cannot be written for now
+        Files.write(file.resolve("blocker"), new byte[0]);
+
+        model.synchronize();
+        assertEquals(said.toString(), 1, said.size());
+        assertTrue(said.get(0).startsWith("WARN: "));
+
+        Files.delete(file.resolve("blocker"));
+        Files.delete(file);
+        Files.write(file, good);
+        model.synchronize();
+
+        assertEquals(60, com.aresstack.audio.studio.project.CompositionJson.load(folder).notesOf("melody").get(0).note().pitch());
+    }
+
+    @Test
     public void whatCannotBeReadIsAWarningAndNothingElse() throws Exception {
         Path folder = Files.createTempDirectory("piece-model-");
         Files.write(folder.resolve("arrangement.tsv"), PIECE, StandardCharsets.UTF_8);
