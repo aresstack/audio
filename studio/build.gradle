@@ -60,6 +60,9 @@ tasks.named('jar') {
 tasks.named('test') {
     // The real download of the optional MIT KEMAR set runs only when asked (CI, hrtf-download.yml).
     systemProperty 'hrtf.live', System.getProperty('hrtf.live', 'false')
+    if (Boolean.getBoolean('hrtf.live')) {
+        testLogging.showStandardStreams = true // the measured ears in the CI log
+    }
 }
 
 tasks.named('run') {

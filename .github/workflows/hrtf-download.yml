@@ -6,6 +6,8 @@ on:
   push:
     paths:
       - 'studio/src/main/java/com/aresstack/audio/studio/hrtf/**'
+      - 'studio/src/test/java/com/aresstack/audio/studio/hrtf/**'
+      - 'audio-core/src/main/java/com/aresstack/audio/core/spatial/HrirMeasurements.java'
       - '.github/workflows/hrtf-download.yml'
   workflow_dispatch:
 

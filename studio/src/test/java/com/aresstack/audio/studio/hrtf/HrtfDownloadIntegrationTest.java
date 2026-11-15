@@ -30,7 +30,7 @@ public final class HrtfDownloadIntegrationTest {
         assertTrue(Files.readString(data.resolve(HrtfLibrary.SOURCE_FILE)).contains("Bill Gardner and Keith Martin"));
         long files;
         try (Stream<Path> all = Files.list(data)) {
-            files = all.filter(p -> p.getFileName().toString().endsWith(".dat")).count();
+            files = all.filter(p -> p.getFileName().toString().matches(".*\\.(wav|dat)")).count();
         }
         System.out.println("responses: " + files);
         assertEquals("the compact set has 368 directions", 368, files);
