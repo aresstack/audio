@@ -1,10 +1,12 @@
 # Architekturprüfung: Weiterentwicklung AresStack Audio Studio
 
-**Stand:** 15. November 2026, Fassung 3 · **Geprüfter Code:** `aresstack/audio` `main` `e60793f`; `aresstack/askai` `develop` `5b788e2`; `aresstack/3d4j` `main` `62ce975` · **Status:** vom Product Owner fachlich bestätigt (Abschnitt 8); keine offenen Anforderungen an die Planung. Über Reihenfolge und Beauftragung der Arbeitspakete entscheidet das Projektmanagement
+**Stand:** 15. November 2026, Fassung 4 · **Geprüfter Code:** `aresstack/audio` `main` `e60793f`; `aresstack/askai` `develop` `5b788e2`; `aresstack/3d4j` `main` `62ce975` · **Status:** vom Product Owner fachlich bestätigt (Abschnitt 8); keine offenen Anforderungen an die Planung. Über Reihenfolge und Beauftragung der Arbeitspakete entscheidet das Projektmanagement
 
 Dieses Dokument beantwortet den Architekturbericht vom 15. November 2026 (Abschnitte 16 und 17) auf Grundlage einer erneuten Prüfung des Repositorys. Es liefert Ist-Architektur, Zielarchitektur, Abweichungsanalyse, Architekturentscheidungen, Migrationskonzept, Umsetzungsplan und Abnahmekonzept.
 
 **Grenzen der Prüfung.** `aresstack/audio` wurde vollständig gelesen. In AskAI wurden gezielt die Module `audio-dsp` und `audio-openal` sowie der Build geprüft, in 3d4j der Build, die Paketstruktur und die Dokumentation; beide nicht Zeile für Zeile. Aussagen zu externen Bibliotheken stammen aus allgemeinem Kenntnisstand und sind vor einer Entscheidung (Version, Lizenz, Abhängigkeiten) zu verifizieren. Der Build wurde für diese Prüfung nicht ausgeführt; die CI für `e60793f` gilt laut Bericht als grün.
+
+**Änderungen in Fassung 4.** D0 ist abgeschlossen: neuer Abschnitt 4b mit den Audio-Thread-Eigenschaften der AskAI-Bausteine, der FFT-Messung, dem Entwurf des Master-Limiters und der Entscheidungsgrundlage für D1a; Verweise darauf in E8, 4a und 6.1.
 
 **Änderungen in Fassung 3.** O5 ist entschieden. Die Reihenfolge in 6.3 ist als Empfehlung der Architektur an das Projektmanagement gekennzeichnet, nicht als Vorgabe des Product Owners.
 
@@ -474,13 +476,13 @@ Der Part *konfiguriert* also seine Quelle und seinen Kanalzug, ist aber keines v
 
 Neue Stücke beginnen mit `levelMode = FIXED`. Der Wechsel eines alten Stücks ist eine bewusste Handlung des Benutzers.
 
-**Limiter.** Der Master-Limiter ist ein echter Dynamikprozessor mit Vorausschau, Ansprech- und Rücklaufzeit, kein Abschneiden von Samplewerten. `LimiterProcessor` aus AskAI klemmt PCM16-Werte hart und ist dafür nicht geeignet; er wird neu entwickelt, die Hüllkurvenlogik von `CompressorProcessor` aus AskAI wird als Ausgangspunkt geprüft.
+**Limiter.** Der Master-Limiter ist ein echter Dynamikprozessor mit Vorausschau, Ansprech- und Rücklaufzeit, kein Abschneiden von Samplewerten. `LimiterProcessor` aus AskAI klemmt PCM16-Werte hart und ist dafür nicht geeignet; er wird neu entwickelt, die Hüllkurvenlogik von `CompressorProcessor` aus AskAI wird als Ausgangspunkt geprüft. **Ergebnis (4b.3):** `CompressorProcessor` taugt nicht als Ausgangspunkt; Entwurf und Prüfmuster eines Limiters mit Vorausschau stehen in 4b.3.
 
 **Getrennte Umstellung.** Zuerst reproduziert der Block-Mixer den bisherigen Klang einschließlich der bisherigen Normalisierung (D1a). Erst danach wird die Pegelstrategie geändert (D1b). Klangunterschiede lassen sich so eindeutig der Architektur oder der Pegelverarbeitung zuordnen.
 
 **Erweiterungen in dieser Reihenfolge:** Echtzeit-Wiedergabe mit Parameterwechsel (A13) → Faltungshall (partitionierte Faltung) → Höhe als dritte Koordinate und bewegte Quellen (Positions-Automation ist bereits durch `AutomationLane` abgedeckt) → HRTF-Panner.
 
-**FFT (geändert in Fassung 2).** Für Faltung und HRTF genügt eine FFT mit Zweierpotenz-Länge. AskAI besitzt dafür bereits die Schnittstelle `FourierTransform` (in-place, getrennte Real- und Imaginärfelder) mit der getesteten Implementierung `CommonsMathFourierTransform`. **Diese wird zuerst geprüft**, gemessen an Durchsatz bei den Partitionsgrößen der Faltung, an Allokation je Aufruf (der Aufruf legt heute ein kleines Hüllfeld an) und an der Abhängigkeit auf Apache Commons Math 3. Die Schnittstelle wird übernommen. Eine eigene Implementierung oder JTransforms kommt nur in Betracht, wenn die Messung im Audio-Thread es verlangt.
+**FFT (geändert in Fassung 2).** Für Faltung und HRTF genügt eine FFT mit Zweierpotenz-Länge. AskAI besitzt dafür bereits die Schnittstelle `FourierTransform` (in-place, getrennte Real- und Imaginärfelder) mit der getesteten Implementierung `CommonsMathFourierTransform`. **Diese wird zuerst geprüft**, gemessen an Durchsatz bei den Partitionsgrößen der Faltung, an Allokation je Aufruf (der Aufruf legt heute ein kleines Hüllfeld an) und an der Abhängigkeit auf Apache Commons Math 3. Die Schnittstelle wird übernommen. Eine eigene Implementierung oder JTransforms kommt nur in Betracht, wenn die Messung im Audio-Thread es verlangt. **Ergebnis der Messung (4b.2):** Schnittstelle übernehmen, eigene JDK-Implementierung ohne Allokation, kein Commons Math und kein JTransforms im Kern; die FFT ist nicht Teil von D1a.
 
 **Externe Bibliotheken** (Kenntnisstand, vor Entscheidung zu verifizieren):
 
@@ -546,7 +548,7 @@ Nicht zwingend, obwohl es so wirkt: Der Audio-Kern hängt vom Werkmodell nur üb
 1. Der Kern rechnet in Float-Blöcken. Für AskAI entsteht ein schmaler Adapter zwischen `Pcm16Processor` und `AudioProcessor`, sodass AskAI Kernbausteine nutzen kann, ohne seine Pipeline umzubauen.
 2. Der Kern erhält einen Paketnamen, der mit keinem bestehenden Paket beider Repositories kollidiert, zum Beispiel `com.aresstack.audio.core`.
 3. Wiederverwendet werden Schnittstellen, Koeffizienten, Algorithmen und Tests. Die Profil-Pipeline von AskAI wird nicht zum Kern.
-4. Offen für D1: Audio-Thread-Eigenschaften der zu übernehmenden Bausteine (Allokation, Sperren) im Einzelnen und die FFT-Messung.
+4. Audio-Thread-Eigenschaften der zu übernehmenden Bausteine und die FFT-Messung: erledigt in Abschnitt 4b.
 
 ### 3d4j (`main` `62ce975`)
 
@@ -567,6 +569,135 @@ Nicht zwingend, obwohl es so wirkt: Der Audio-Kern hängt vom Werkmodell nur üb
 ### Ort und Auslieferung des Kerns
 
 Drei Verbraucher liegen in drei Repositories. AskAI bezieht AresStack-Bibliotheken bereits als Maven-Central-Artefakte. Empfehlung: `audio-core` entsteht als Modul in `aresstack/audio`, weil hier der zu zerlegende Mixer und seine Tests liegen, und wird nach D1 als `com.aresstack:audio-core` veröffentlicht. Die Umstellung von AskAI auf den Kern ist kein Teil dieses Plans. Diese Empfehlung ist bestätigt (O5). Maßgeblich sind die Wiederverwendbarkeit durch Audio Studio, AskAI und 3d4j, die Unabhängigkeit von den Anwendungen und die nachweisbare Einhaltung der Qualitätsanforderungen; die technische Ausgestaltung, die Veröffentlichung und die Einbindung in die Verbraucher liegen bei Architektur und Projektmanagement.
+
+---
+
+## 4b. D0, zweiter Teil: Audio-Thread-Eigenschaften, FFT-Messung, Master-Limiter
+
+Geprüft auf AskAI `develop` `5b788e2`. Die Messprogramme und ihre Rohausgabe liegen in [`d0-messungen/`](d0-messungen/README.md). Sie sind kein Produktionscode und werden nicht gebaut.
+
+### 4b.1 Audio-Thread-Eigenschaften der Bausteine
+
+Prüfkriterien: Allokation und Sperren in der Verarbeitungsmethode, Zahlenformat, Blockmodell, Verhalten bei Parameterwechsel. Gelesen wurde jeweils die vollständige Klasse.
+
+| Baustein | Allokation in `process` | Sperren | Format | Blockmodell, Parameter | Folgerung für den Kern |
+|---|---|---|---|---|---|
+| `FourierTransform` / `CommonsMathFourierTransform` | **ja, 24 B je Aufruf**: `new double[][]{real, imag}` als Hüllfeld; gemessen 48 B je Vorwärts-Rückwärts-Paar, die Escape-Analyse beseitigt es nicht | keine (statische Tabellen in Commons Math) | `double`, getrennte Real- und Imaginärfelder, in-place | Länge je Aufruf frei (Zweierpotenz) | Schnittstelle übernehmen, Implementierung nicht (4b.2) |
+| `WindowFunctions.hann` | legt das Fenster bei jedem Aufruf an | keine | `double` | nur bei der Einrichtung zu rufen | übernehmen, Aufruf nur in `prepare` |
+| `BiquadCoefficients` | ein unveränderliches Objekt je Entwurf | keine | formatunabhängig | Fabriken werfen bei ungültigen Werten (Frequenz ≥ Nyquist) | **unverändert übernehmen**. `highShelf(…, slope = 1)` und `lowPass(…, q = √½)` sind algebraisch identisch mit `studio.mix.Biquad`. Abweichung: das Studio begrenzt die Frequenz auf 0,45 · fs, AskAI wirft. Für die Gleichheit in D1a übernimmt der Aufrufer die Begrenzung. Ein Hochpass fehlt in beiden. |
+| `BiquadProcessor` (+ EQ-Unterklassen) | im Dauerbetrieb nein; beim ersten Aufruf und bei jedem Formatwechsel `new BiquadFilterState[]`, im Fehlerfall Exception | keine | rechnet in `double`, **klemmt und rundet nach jedem Sample auf PCM16** | Kanal je Sample über `i % channels`; Koeffizienten sind `final`, ein neuer EQ-Wert verlangt einen neuen Prozessor und verliert den Filterzustand (Knacken) | Algorithmus (transponierte Direktform II, Zustand in `double`) und die 14 Tests aus `BiquadEqualizerTest` übernehmen; neu: Float-Blöcke je Kanal, Einrichtung in `prepare`, Koeffizientenwechsel ohne Zustandsverlust, Denormal-Löschung wie im Studio |
+| `CompressorProcessor` | nein | keine | Schwelle in PCM16-Einheiten, lineare Hüllkurve | **Fehler bei Stereo**: die Hüllkurve läuft über die verschachtelten Samples, daher wirken Ansprech- und Rücklaufzeit nur halb so lang wie eingestellt, und der Detektor ist nicht je Rahmen gekoppelt; kein Knie, keine Vorausschau; ohne eigene Testklasse | **nicht als Ausgangspunkt geeignet**; übrig bleibt die Formel des einpoligen Glättungskoeffizienten |
+| `ExpanderProcessor`, `ExpanderState`, `ExpanderSettings` | nein | keine | dB-Bereich, PCM16 nur beim Ein- und Auslesen | kanalgekoppelter Detektor je Rahmen, weiches Knie, Haltezeit, Zustand getrennt vom Prozessor; je Rahmen ein `log10` und ein `pow`; Sprachschutz über `SpeechActivityTrack` | **Vorlage für spätere Dynamikprozessoren des Kerns** (Struktur, Knie, Haltezeit, 9 Tests); Sprachschutz entfällt |
+| `AudioLevelMeter` | nein | keine; `volatile`-Felder für den Oberflächen-Thread | PCM16 | `consumeRecentPeak` liest und setzt zurück in zwei Schritten: ein dazwischen geschriebener Spitzenwert geht verloren; `+=` auf `volatile` ist nur mit genau einem Schreiber korrekt | Muster (sperrfrei, ein Schreiber) übernehmen; Austausch über `getAndSet` oder blockweise veröffentlichte Momentaufnahme |
+| `StereoOps.applyMidSide` | nein | keine | PCM16 | ohne Zustand, Verstärkung ohne Rampe | entfällt; die Breitenregelung des Mixers mit Pegelrampe bleibt |
+| `Pcm16Resampler` | **ja**: legt Ausgabe und (beim Heruntertasten) eine gefilterte Kopie des ganzen Puffers an | keine | PCM16, nur Mono | ganzer Puffer, kein Zustand über Aufrufe | nicht streamend. Die Catmull-Rom-Interpolation ist als Algorithmus für einen streamenden Resampler brauchbar (Zustand: Bruchposition und drei Vorgängersamples); beim Heruntertasten braucht er einen Tiefpass davor |
+| `ButterworthFilterProcessor` | nur bei Formatwechsel | keine | PCM16 | über `iirj` | nicht in den Kern (E8: keine Fremdabhängigkeit); die RBJ-Biquads genügen |
+| `LimiterProcessor` | nein | keine | PCM16 | hartes Klemmen | nicht übernehmen (4b.3) |
+
+**Gesamtbild.** Keiner der Bausteine benutzt Sperren; außer `AudioLevelMeter` (und dem nicht übernommenen `DelayAndSumBeamformer`) gibt es im Paket `dsp` kein `volatile`, `synchronized` oder `Atomic*`. Die Allokationen liegen in der Einrichtung, bei Formatwechseln, im FFT-Hüllfeld und im ganzpufferigen Resampler. Das eigentliche Hindernis für die Wiederverwendung ist das **Klemmen und Runden auf PCM16 nach jeder Stufe**: Es verschenkt Aussteuerungsreserve zwischen den Stufen und gehört im Kern nur an den Ausgang.
+
+**Regeln für Prozessoren in `audio-core`** (abgeleitet, verbindlich für D1a):
+
+1. `prepare(sampleRate, maxBlockFrames)` legt alles an; `process(block)` allokiert nicht, sperrt nicht, wirft nicht.
+2. Parameter werden außerhalb des Audio-Threads geprüft und als unveränderliche Momentaufnahme übergeben; ein Wechsel erhält den Filterzustand.
+3. Zwischen den Stufen wird nicht geklemmt; Float-Werte über 1,0 sind erlaubt bis zum Limiter beziehungsweise zum `AudioSink`.
+4. Messwerte gehen über genau einen Schreiber an die Oberfläche, sperrfrei.
+5. Jeder Prozessor meldet seine Latenz in Samples (für den Limiter nötig, siehe 4b.3).
+
+Ein Test je Prozessor prüft Regel 1 mit `com.sun.management.ThreadMXBean.getThreadAllocatedBytes` nach dem Aufwärmen.
+
+### 4b.2 FFT-Messung
+
+**Aufbau.** Vorwärts- plus Rücktransformation bei den Längen der Faltungspartitionen (N = 2 · Blockgröße, also 128 bis 16384), je 3 s Aufwärmen, danach 2 000 bis 200 000 Paare. Verglichen werden fünf Fassungen; Rohdaten in `d0-messungen/ergebnisse-2026-11-15.txt`.
+
+Mittlere Zeit je Paar in µs (Median in Klammern), Allokation je Paar:
+
+| N | AskAI-Aufrufweg | Commons Math, Hüllfeld wiederverwendet | reine JDK-Radix-2 mit Tabellen | JTransforms komplex | JTransforms reell |
+|---|---|---|---|---|---|
+| 256 | 5,8 (5,3) | 5,7 (5,4) | 6,7 (6,0) | 3,3 (3,0) | 1,4 (1,3) |
+| 512 | 12,8 (11,9) | 11,1 (10,3) | 13,7 (12,9) | 7,1 (6,6) | 3,7 (3,4) |
+| 1024 | 27,4 (26,4) | 27,7 (26,4) | 28,2 (25,5) | 13,3 (13,4) | 8,2 (7,5) |
+| 2048 | 61,0 (58,1) | 52,5 (48,0) | 61,8 (60,2) | 34,0 (31,7) | 18,4 (15,6) |
+| 4096 | 145 (134) | 132 (136) | 135 (139) | 69 (67) | 38 (36) |
+| 8192 | 375 (363) | 389 (382) | 407 (385) | 162 (153) | 77 (75) |
+| **Allokation** | **48 B** | 0 B | 0 B | 0 B | 0 B |
+| Rundreisefehler bei 16384 | 1,4 · 10⁻¹² | 1,4 · 10⁻¹² | 2,3 · 10⁻¹⁵ | 2,2 · 10⁻¹⁵ | 1,8 · 10⁻¹⁵ |
+
+Die Maximalwerte (bis rund 6 ms) treten bei allen Fassungen auf, auch bei den allokationsfreien, und stammen von der virtuellen Maschine; sie sind keine Eigenschaft der FFT. Die Rundungsfehler liegen bei allen Fassungen weit unter der Auflösung von `float` (≈ 6 · 10⁻⁸).
+
+**Einordnung in das Echtzeit-Budget.** Bei gleichförmig partitionierter Faltung kostet ein Block je Kanal etwa ein FFT-Paar der Länge 2B und die spektrale Multiplikation über alle Partitionen. Die zweite Größe wurde mit `MacBench` gemessen (2,5 s Impulsantwort, ein Kanal):
+
+| Blockgröße B | Budget je Block | Multiplikation je Kanal | FFT-Paar je Kanal (AskAI-Weg) | Stereo gesamt (2 Kanäle) | Anteil am Budget |
+|---|---|---|---|---|---|
+| 128 | 2 902 µs | 126 µs | 5,8 µs | 263 µs | 9,1 % |
+| 512 | 11 610 µs | 110 µs | 27,4 µs | 275 µs | 2,4 % |
+| 2048 | 46 440 µs | 112 µs | 145 µs | 514 µs | 1,1 % |
+
+Mit der schnellsten Fassung (JTransforms reell) sinkt der Anteil bei B = 512 von 2,4 % auf 2,0 %. **Der Faltungshall wird von der spektralen Multiplikation bestimmt, nicht von der FFT.** Sie zu verkleinern ist eine Frage der Partitionierung (ungleichförmige Partitionen, D4), nicht der FFT-Bibliothek. Für HRTF gilt dasselbe: 16 Quellen mit 512er-Impulsantwort brauchen bei B = 512 rund 16 Vorwärtstransformationen der Länge 1024 und zwei Rücktransformationen je Ohr, zusammen unter 3 % des Budgets.
+
+**Abhängigkeiten.**
+
+| Fassung | Abhängigkeiten | Bewertung |
+|---|---|---|
+| Commons Math 3.6.1 | ein Jar, 2,2 MB, 1 402 Einträge, davon 13 im Paket `transform`; letzte Version 2016 | verletzt „ohne Fremdabhängigkeit" (E8) für 13 Klassen; bleibt in AskAI |
+| JTransforms 3.1 | zieht `JLargeArrays` 1.5 und `commons-math3` nach (beide laut POM); verteilt große Transformationen auf einen eigenen Thread-Pool, abschaltbar nur JVM-weit über `ConcurrencyUtils.setNumberOfThreads(1)` | doppelt so schnell, aber drei Jars und ein Thread-Pool im Audio-Thread; **nicht als Standard** |
+| reine JDK-Radix-2 | keine; rund 50 Zeilen, Tabellen in `prepare` | gleich schnell wie Commons Math, ohne Allokation, genauer |
+
+**Entscheidungsvorschlag FFT.**
+
+1. Die Schnittstelle `FourierTransform` wird unverändert übernommen (in-place, getrennte `double`-Felder, Zweierpotenz, normierte Rücktransformation). Zusätzlicher Vertrag im Kern: `forward` und `inverse` allokieren nicht; eine Instanz ist an eine Länge gebunden, damit Tabellen vorab entstehen.
+2. Der Kern liefert eine eigene JDK-Implementierung (Radix-2 mit Drehfaktor- und Bitumkehr-Tabelle). Commons Math kommt nicht in den Kern; JTransforms bleibt Ausweichlösung, die nach der Messung nicht nötig ist.
+3. Weitere Beschleunigung, falls D4 sie verlangt, ohne neue Abhängigkeit: zwei reelle Kanäle in einer komplexen Transformation (links als Real-, rechts als Imaginärteil) halbieren die FFT-Kosten bei Stereo.
+4. **D1a enthält keine FFT.** Schnittstelle und Implementierung kommen mit D4 (Faltungshall). Die Tests aus `ShortTimeFourierTransformTest` und ein Vergleich gegen Commons Math dienen dann als Vertragstests.
+
+### 4b.3 Master-Limiter
+
+**Warum nicht vorhandene Bausteine.** `LimiterProcessor` klemmt Samplewerte und verzerrt jeden Spitzenwert. `CompressorProcessor` mit unendlichem Verhältnis wäre ein Limiter ohne Vorausschau: Bei einer Ansprechzeit über null läuft jeder Anstieg über die Decke, bei null wird er wieder zum Klemmen; dazu kommt der Stereofehler aus 4b.1. Ein weicher Begrenzer (`tanh` o. ä.) verzerrt schon unterhalb der Decke und verletzt damit das Abnahmekriterium aus 7.2.
+
+**Entwurf** (neu zu entwickeln, rund 150 Zeilen, nur JDK):
+
+```
+x ─► Spitzenwert max(|L|,|R|) ─► nötige Verstärkung min(1, Decke/Spitze)
+       ─► Rücklauf (einpolig, nur aufwärts) ─► gleitendes Minimum über n+1 ─► gleitender Mittelwert über n ─► g
+x ─► Verzögerung um n Samples ───────────────────────────────────────────────────────────────────────────► · g ─► y
+```
+
+- **Vorausschau** n = 2 ms (88 Samples bei 44,1 kHz). Das gleitende Minimum mit anschließendem Mittelwert gleicher Länge garantiert, dass die Verstärkung beim verzögerten Spitzensample höchstens die nötige ist, und senkt sie dabei als stetige Rampe über n Samples ab. Das ersetzt eine eigene Ansprechzeit.
+- **Rücklauf** einpolig, Standard 80 ms, einstellbar; sobald die Verstärkung näher als 10⁻⁶ an 1 liegt und kein Pegel über der Decke anliegt, springt sie auf genau 1,0, damit leise Passagen wieder bitgenau durchlaufen.
+- **Stereo gekoppelt**, eine Verstärkung für beide Kanäle, damit das Panorama nicht wandert.
+- **Decke** in dBFS auf Samplebasis, Standard −1 dBFS. Spitzen zwischen den Samples (True Peak) werden nicht erfasst; eine Erkennung mit vierfacher Überabtastung nach ITU-R BS.1770 ist eine spätere Option für den Export.
+- **Latenz** n Samples, gemeldet nach Regel 5. Offline werden die ersten n Ausgabesamples verworfen und am Ende n Samples nachgeschoben, damit der Export samplegenau zum Altmixer liegt; in Echtzeit verschiebt sich der ganze Master um 2 ms.
+- **Allokation** nur in `prepare`: zwei Verzögerungsleitungen, ein Ringpuffer für das Minimum (monotone Warteschlange, Länge n+2), ein Ringpuffer für den Mittelwert. Der Mittelwert wird einmal je Umlauf neu summiert, damit sich Rundungsfehler nicht ansammeln.
+- **Parameter**: Decke und Rücklauf über die Momentaufnahme; die Vorausschau ist fest je Instanz, weil sie Puffergröße und Latenz bestimmt.
+
+**Prüfmuster.** `d0-messungen/LimiterProto.java` setzt den Entwurf um, um ihn gegen die Abnahmekriterien von D1b (7.2) zu prüfen:
+
+| Kriterium aus 7.2 | Ergebnis des Prüfmusters |
+|---|---|
+| Ausgang nie über der Schwelle | 120 s Stereo mit Schlägen, dichtem Material und Einzelklicks bis +25,5 dBFS: höchster Ausgangswert 0,8912509 = Decke (−1 dBFS), **0 Samples darüber** |
+| Verzerrung eines Sinus unterhalb der Schwelle null | Sinus bei −3 dBFS: **bitgleich** zum um n verzögerten Eingang. Nach einem Begrenzungsereignis bitgleich ab 1,1 s nach dessen Ende (Rücklauf 80 ms bis zur Schwelle 10⁻⁶) |
+| Regelverlauf stetig | Sprung von leise auf +12 dBFS: größte Verstärkungsänderung 0,0088 je Sample, Absenkung als Rampe über 88 Samples |
+| Echtzeit (Regel 1) | 16 ns je Stereo-Rahmen (0,07 % Echtzeit), keine Allokation in `process` (104 B über 10 335 Blöcke, Messrauschen des Zählers) |
+
+Das Prüfmuster hat bereits einen Fehler gezeigt, den die Tests in D1b abdecken müssen: Die monotone Warteschlange braucht n+2 Plätze, nicht n+1, sonst wird kurz vor dem Verdrängen der Kopf überschrieben und Spitzen laufen bis 0,11 über die Decke.
+
+**Einordnung.** Der Limiter gehört nach E8 zu **D1b**, nicht zu D1a: D1a reproduziert den bisherigen Klang einschließlich `SpatialStemMixer.master` (Spitzennormalisierung auf 0,92, höchstens +12 dB).
+
+### 4b.4 Entscheidungsgrundlage für D1a
+
+| Thema | Entscheidung für D1a | später |
+|---|---|---|
+| Filterkoeffizienten | `BiquadCoefficients` aus AskAI unverändert übernehmen (Paket `com.aresstack.audio.core`); Frequenzbegrenzung auf 0,45 · fs beim Aufrufer, damit das Ergebnis dem Altmixer gleicht | Hochpass ergänzen |
+| Biquad-Verarbeitung | neu als Float-Blockprozessor nach Regeln 1 bis 5; Algorithmus und Tests aus AskAI | — |
+| Gesamtpegel | `master` wie heute (Spitzennormalisierung), als letzter Schritt des Offline-Mix | Limiter nach 4b.3 in D1b |
+| Resampling | so wie heute (linear), damit „Klang unverändert" gilt; aber streamend | Catmull-Rom mit Tiefpass als eigene, getrennt abgenommene Klangänderung |
+| Pegelabgriff | neu nach Regel 4 | — |
+| Dynamik | keine in D1a | Vorlage `ExpanderProcessor` |
+| FFT | keine in D1a | D4: Schnittstelle aus AskAI, eigene JDK-Implementierung |
+| Abhängigkeiten | keine; `iirj` und `commons-math3` bleiben in AskAI | — |
+| Allokationsprüfung | ein Test je Prozessor über `ThreadMXBean` | — |
+
+Damit ist D0 abgeschlossen. Offene Punkte gibt es für D1a nicht; die Echtzeit-Messung auf Zielrechnern gehört zu D2.
 
 ---
 
@@ -643,7 +774,7 @@ Größe: S ≈ Tage, M ≈ ein bis zwei Wochen, L ≈ mehrere Wochen. Das sind E
 | B2 | Trennung Track/Part in der Oberfläche, Clips (Verschieben, Teilen, Kopieren), Instrumentenwechsel je Clip, Bühne je Part | L | F3, R1 | A7 |
 | B3 | Audio-Bahnen mit eigenem `MixChannel`, `AudioClip` mit Blenden, Assets, Anbindung des Moduls `sounds` | M | B2, D1a | A8 |
 | S1 | Explizite Stimmen in Modell, KI-Format und Partitur; Doppelsystem; mehr als zwei Stimmen | M | F2 | Partitur liest Stimmen statt zu raten |
-| D0 | Bestandsaufnahme AskAI und 3d4j: erster Teil erledigt (Abschnitt 4a). Rest: Audio-Thread-Eigenschaften der zu übernehmenden Bausteine, FFT-Messung | S | — | Entscheidungsgrundlage für D1 |
+| D0 | Bestandsaufnahme AskAI und 3d4j: **erledigt** (Abschnitte 4a und 4b) | S | — | Entscheidungsgrundlage für D1 (4b.4) |
 | D1a | Modul `audio-core`: Blockprozessoren aus dem Mixer herauslösen, streamender Offline-Mix, **Gleichheit zum Altmixer einschließlich bisheriger Normalisierung** | M | F0, D0 | kein Ganzpuffer mehr; `MAX_SECONDS` entfällt; Klang unverändert |
 | D1b | Pegelstrategie: `levelMode`, feste Pegelstruktur, Master-Limiter, Normalisierung als Exportoption, Kompatibilitätsmodus | M | D1a | O3 umgesetzt, getrennt von D1a abgenommen |
 | D2 | Echtzeit-Graph, `LineSink`, Parameterwechsel mit Glättung, Bühne live | L | D1b | A13 |
