@@ -71,6 +71,34 @@ public final class ProcessorAllocationTest {
         });
     }
 
+    @Test
+    public void theLimiterAndTheMasterBusDoNotAllocateEvenWhenTheirSettingsChange() throws Exception {
+        LookaheadLimiter limiter = new LookaheadLimiter();
+        com.aresstack.audio.core.mix.MasterBus bus = new com.aresstack.audio.core.mix.MasterBus(
+                com.aresstack.audio.core.mix.MasterBus.Settings.fixed(0));
+        com.aresstack.audio.core.mix.MasterBus.Settings quieter = com.aresstack.audio.core.mix.MasterBus.Settings.fixed(-4,
+                new LookaheadLimiter.Settings(-3, 50));
+        LookaheadLimiter.Settings lower = new LookaheadLimiter.Settings(-6, 120);
+        limiter.prepare(RATE, BLOCK);
+        bus.prepare(RATE, BLOCK);
+        AudioBlock block = new AudioBlock(BLOCK);
+        float[] loud = TestSignals.noise(BLOCK, 4, 3.0);
+        assertFree(() -> {
+            for (int i = 0; i < BLOCKS; i++) {
+                if (i == BLOCKS / 2) {
+                    limiter.setSettings(lower);
+                    bus.setSettings(quieter);
+                }
+                System.arraycopy(loud, 0, block.left, 0, BLOCK);
+                System.arraycopy(loud, 0, block.right, 0, BLOCK);
+                limiter.process(block);
+                System.arraycopy(loud, 0, block.left, 0, BLOCK);
+                System.arraycopy(loud, 0, block.right, 0, BLOCK);
+                bus.process(block);
+            }
+        });
+    }
+
     private static AudioBlock block() {
         AudioBlock block = new AudioBlock(BLOCK);
         float[] noise = TestSignals.noise(BLOCK, 1, 0.5);
