@@ -25,7 +25,9 @@ public final class ArchitectureTest {
     private static final Path SOURCES = Paths.get("src", "main", "java");
     private static final Pattern IMPORT = Pattern.compile("^import\\s+(static\\s+)?([\\w.]+)", Pattern.MULTILINE);
     private static final List<String> ALLOWED = List.of(
-            "java.util.", "java.security.SecureRandom", "java.lang.", "com.aresstack.audio.composition.");
+            "java.util.", "java.security.SecureRandom", "java.security.MessageDigest",
+            "java.security.NoSuchAlgorithmException", "java.nio.charset.StandardCharsets", "java.lang.",
+            "com.aresstack.audio.composition.");
     private static final List<String> FORBIDDEN_WORDS = List.of("gemma", "kipitz", "openai", "studio.ai", "chatclient");
 
     @Test
