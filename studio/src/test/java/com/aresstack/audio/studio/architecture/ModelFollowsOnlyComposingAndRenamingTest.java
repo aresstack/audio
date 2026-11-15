@@ -37,12 +37,11 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         // drew there (work package D3): an edit of the mix on purpose, which takes over no old file.
         // Likewise movements the AI proposed and the user took with "Übernehmen" (askDirector only
         // reads which tracks have a channel; the proposal itself changes nothing until it is taken).
-        assertEquals("opening loads the model, composing and renaming bring it in step, a drawn movement is kept,"
-                        + " the switch of the level is noted, rendering reads it, movements of the AI are kept"
-                        + " once taken; nothing else reaches it",
-                new java.util.TreeSet<String>(List.of("askDirector", "composeIntoPiece", "levelSwitched",
-                        "loadArrangementForCurrentDirectory", "loadDemo", "movementChanged", "takeWithMovements",
-                        "pieceToEdit", "renamed", "renderArrangement", "savedPiece", "showMovements")), users);
+        assertEquals("opening loads the model, composing and renaming bring it in step, rendering reads it,"
+                        + " a drawn movement is kept, movements of the AI are kept once taken; nothing else reaches it",
+                new java.util.TreeSet<String>(List.of("askDirector", "composeIntoPiece", "loadArrangementForCurrentDirectory",
+                        "loadDemo", "movementChanged", "pieceToEdit", "renamed", "renderArrangement", "savedPiece", "scoreOf",
+                        "showMovements", "takeWithMovements")), users);
         assertTrue("asking the AI for a mix only reads the model",
                 bodyOf(source, "private void askDirector()").replace("pieceModel.movements()", "")
                         .indexOf("pieceModel") < 0);
@@ -58,18 +57,23 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         assertTrue("a curve is kept only once it has settled, and never brings old files into the model",
                 bodyOf(source, "private void movementChanged(").indexOf("synchronize") < 0
                         && bodyOf(source, "private void movementChanged(").contains("if (!settled) {"));
-        assertEquals("the switch of the level writes only the level mode", List.of("levelSwitched"),
-                callers(source, "pieceModel\\.levelFixed\\("));
         assertTrue("loading the demo replaces the piece on the user's word, through the one place that"
                         + " protects a model the demo cannot replace",
                 bodyOf(source, "private void loadDemo() {").contains("DemoIntoPiece.load(input, folder, pieceModel)"));
-        assertEquals("rendering only reads the saved model; the changes the user asks for by name"
+        assertEquals("rendering and the score only read the saved model; the changes the user asks for by name"
                         + " (a proposal taken, undo, redo, revisions) get it from one place",
-                List.of("renderArrangement", "savedPiece"), callers(source, "pieceModel\\.of\\("));
+                new java.util.TreeSet<String>(List.of("renderArrangement", "savedPiece", "scoreOf")),
+                new java.util.TreeSet<String>(callers(source, "pieceModel\\.of\\(")));
         assertEquals("only what the user asks for by name changes the saved piece",
-                new java.util.TreeSet<String>(List.of("composeAgain", "pieceChanged", "showRevisions", "undoPiece",
+                new java.util.TreeSet<String>(List.of("addVoice", "composeAgain", "extendPiece", "insertBars",
+                        "intensityOverBars", "pieceChanged", "reorchestrate", "reworkRegion", "sectionIntensity",
+                        "showRevisions", "showSections",
+                        "undoPiece",
                         "popupMenuWillBecomeVisible", "savedPiece" /* its own header */)),
                 new java.util.TreeSet<String>(callers(source, "savedPiece\\(\\)")));
+        assertTrue("showing the form of the piece only reads the model",
+                !bodyOf(source, "private void showSections()").contains(".apply(")
+                        && !bodyOf(source, "private void showSections()").contains("accept("));
         assertEquals(1, callers(source, "pieceModel\\.").stream().filter("renderArrangement"::equals).count());
         assertEquals("the note editor only gets the open session; it changes it through the edit core alone",
                 "return pieceModel.session();",

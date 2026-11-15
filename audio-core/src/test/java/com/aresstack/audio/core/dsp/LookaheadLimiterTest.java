@@ -219,6 +219,102 @@ public final class LookaheadLimiterTest {
         new LookaheadLimiter.Settings(-1, 0);
     }
 
+    @Test
+    public void theLiveLimiterLeavesAMixAtTheLevelOfTheFileUntouched() {
+        // the file is normalized to peaks of 0.92; live playback at the same factor stays below -0.3 dBFS
+        float[] left = TestSignals.noise(4 * RATE, 21, 1.0);
+        float[] right = TestSignals.noise(4 * RATE, 22, 1.0);
+        float highest = 0;
+        for (int i = 0; i < left.length; i++) {
+            highest = Math.max(highest, Math.max(Math.abs(left[i]), Math.abs(right[i])));
+        }
+        for (int i = 0; i < left.length; i++) {
+            left[i] = left[i] / highest * 0.92f;
+            right[i] = right[i] / highest * 0.92f;
+        }
+        LookaheadLimiter limiter = new LookaheadLimiter(LookaheadLimiter.Settings.LIVE);
+        float[][] out = run(limiter, left, right, 512);
+        int delay = limiter.latencyFrames();
+        for (int i = delay; i < left.length; i++) {
+            Assert.assertEquals("frame " + i, left[i - delay], out[0][i], 0f);
+            Assert.assertEquals("frame " + i, right[i - delay], out[1][i], 0f);
+        }
+        Assert.assertEquals("no action below the ceiling", 1f, limiter.lowestGain(), 0f);
+    }
+
+    @Test
+    public void anIsolatedPeakRecoversQuicklyInTheLiveLimiter() {
+        float[] input = TestSignals.sine(3 * RATE, 997, RATE, 0.7071);
+        input[RATE / 2] = 4f;
+        LookaheadLimiter limiter = new LookaheadLimiter(LookaheadLimiter.Settings.LIVE);
+        float[][] out = run(limiter, input, input.clone(), 256);
+        int delay = limiter.latencyFrames();
+        int lastDifferent = -1;
+        for (int i = delay; i < input.length; i++) {
+            if (out[0][i] != input[i - delay]) {
+                lastDifferent = i;
+            }
+        }
+        double after = (lastDifferent - RATE / 2 - delay) / (double) RATE;
+        // release 40 ms down to 1e-6 below unity: about 0.55 s, a little more while the short dip
+        // nudges the sustained release; well before the 1.1 s of the export limiter
+        Assert.assertTrue("bit-identical again " + after + " s after the click", after < 0.75);
+        assertBelow(out, LookaheadLimiter.Settings.LIVE.ceiling());
+    }
+
+    @Test
+    public void underLastingOverloadTheLiveGainRidesLessOnTheBeat() {
+        // a dense loud passage: a beat every 250 ms over a sustained bed, 4 dB over the ceiling
+        int frames = 6 * RATE;
+        float[] input = new float[frames];
+        java.util.Random random = new java.util.Random(5);
+        for (int i = 0; i < frames; i++) {
+            double beat = i % (RATE / 4) < 600 ? 1.6 : 0.9;
+            input[i] = (float) (beat * (0.6 * Math.sin(2 * Math.PI * 80 * i / RATE) + 0.25 * random.nextGaussian()));
+        }
+        double fixed = ripple(new LookaheadLimiter(new LookaheadLimiter.Settings(-0.3, 40)), input);
+        double live = ripple(new LookaheadLimiter(LookaheadLimiter.Settings.LIVE), input);
+        Assert.assertTrue("gain movement live " + live + " against a fixed 40 ms release " + fixed,
+                live < fixed * 0.5);
+        assertBelow(run(new LookaheadLimiter(LookaheadLimiter.Settings.LIVE), input, input.clone(), 512),
+                LookaheadLimiter.Settings.LIVE.ceiling());
+    }
+
+    @Test
+    public void theLiveLimiterDoesNotDependOnTheBlockSize() {
+        float[] left = TestSignals.noise(4 * RATE, 31, 2.0);
+        float[] right = TestSignals.noise(4 * RATE, 32, 1.2);
+        float[][] reference = run(new LookaheadLimiter(LookaheadLimiter.Settings.LIVE), left, right, 4096);
+        for (int block : new int[]{1, 97, 512}) {
+            float[][] cut = run(new LookaheadLimiter(LookaheadLimiter.Settings.LIVE), left, right, block);
+            Assert.assertArrayEquals("block " + block, reference[0], cut[0], 0f);
+            Assert.assertArrayEquals("block " + block, reference[1], cut[1], 0f);
+        }
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void aSustainedReleaseShorterThanTheReleaseIsRefused() {
+        new LookaheadLimiter.Settings(-1, 80, 40);
+    }
+
+    /** How far the gain travels in the last 4 s, summed over all frames. */
+    private static double ripple(LookaheadLimiter limiter, float[] input) {
+        limiter.prepare(RATE, 1);
+        AudioBlock one = new AudioBlock(1);
+        double previous = 1;
+        double travelled = 0;
+        for (int i = 0; i < input.length; i++) {
+            one.left[0] = input[i];
+            one.right[0] = input[i];
+            limiter.process(one);
+            if (i >= 2 * RATE) {
+                travelled += Math.abs(limiter.gain() - previous);
+            }
+            previous = limiter.gain();
+        }
+        return travelled;
+    }
+
     private static void assertBelow(float[][] out, float ceiling) {
         long over = 0;
         float highest = 0;

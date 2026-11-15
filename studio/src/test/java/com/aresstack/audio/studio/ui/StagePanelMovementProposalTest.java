@@ -41,11 +41,6 @@ public final class StagePanelMovementProposalTest {
         }
 
         @Override
-        public boolean confirmFixedLevel() {
-            return true;
-        }
-
-        @Override
         public void movementChanged(StageMovements movements, String trackId, String parameter, boolean settled) {
         }
 

@@ -39,6 +39,7 @@ public final class LiveGraph implements AudioSource {
     private int glideFrames;
     private long position;
     private volatile long published;
+    private long jumps;
 
     /**
      * @param channels the channels, in the order in which they are added
@@ -131,11 +132,20 @@ public final class LiveGraph implements AudioSource {
         seekTo.set(-1);
     }
 
+    /**
+     * How many seeks {@link #read} has carried out so far; what follows a reader of the graph uses it to
+     * forget what it holds from before a jump. Read it on the thread that reads the graph.
+     */
+    public long jumps() {
+        return jumps;
+    }
+
     /** Never throws: the sources of a live graph hold their sound already. */
     @Override
     public int read(AudioBlock block) {
         long jump = seekTo.getAndSet(-1);
         if (jump >= 0) {
+            jumps++;
             position = jump;
             for (LiveChannel channel : channels) {
                 channel.seek(jump);
@@ -148,21 +158,26 @@ public final class LiveGraph implements AudioSource {
         block.clear(0, wanted);
         long end = loopEnd;
         if (end > 0 && position < end) {
-            // Looping: the block may run over the end of the loop; then the rest comes from its start.
-            int first = (int) Math.min(wanted, end - position);
-            renderInto(block, first);
-            if (position >= end) {
-                position = 0;
-                for (LiveChannel channel : channels) {
-                    channel.rewind();
+            // Looping: the block may run over the end of the loop, even several times when the loop is short;
+            // every time it does, the rest comes from the start of the loop.
+            int done = 0;
+            while (done < wanted) {
+                int part = (int) Math.min(wanted - done, end - position);
+                if (done == 0) {
+                    renderInto(block, part);
+                } else {
+                    scratch.clear(0, part);
+                    renderInto(scratch, part);
+                    System.arraycopy(scratch.left, 0, block.left, done, part);
+                    System.arraycopy(scratch.right, 0, block.right, done, part);
                 }
-            }
-            if (first < wanted) {
-                int rest = wanted - first;
-                scratch.clear(0, rest);
-                renderInto(scratch, rest);
-                System.arraycopy(scratch.left, 0, block.left, first, rest);
-                System.arraycopy(scratch.right, 0, block.right, first, rest);
+                done += part;
+                if (position >= end) {
+                    position = 0;
+                    for (LiveChannel channel : channels) {
+                        channel.rewind();
+                    }
+                }
             }
             published = position;
             return wanted;

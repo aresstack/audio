@@ -27,6 +27,20 @@ import org.junit.rules.TemporaryFolder;
  * the unmastered mix in nothing but the rounding to whole numbers.
  */
 public final class MixLevelTest {
+    /**
+     * The old mixer knows wall echoes at level 1 only: compared with it at that level, everything
+     * but the decided level of the wall echoes (0.5, {@link WallEchoMotionTest}) stays to the bit.
+     */
+    @org.junit.Before
+    public void wallEchoesAsTheOldMixerHadThem() {
+        SpatialStemMixer.wallEchoLevel = 1.0;
+    }
+
+    @org.junit.After
+    public void wallEchoesAsDecided() {
+        SpatialStemMixer.wallEchoLevel = WallEchoMotionTest.LEVEL_DECIDED;
+    }
+
     private static final int RATE = SpatialStemMixer.RATE;
     private static final AcousticRoom DRY = AcousticRoom.STUDIO.withAmount(0);
 
@@ -151,6 +165,37 @@ public final class MixLevelTest {
             String[] left = folder.getRoot().list((dir, name) -> name.endsWith(".part"));
             Assert.assertEquals(level + ": no part file left behind", 0, left.length);
         }
+    }
+
+    @Test
+    public void theFixedLevelHearsTheAutomationOfAMixDocument() throws Exception {
+        // a swell given as automation sounds exactly like the same swell on the placement, in FIXED as well
+        List<SoundSourcePlacement.LevelPoint> swell = Arrays.asList(new SoundSourcePlacement.LevelPoint(0, -18),
+                new SoundSourcePlacement.LevelPoint(1, 0));
+        SoundSourcePlacement still = new SoundSourcePlacement("a", -0.2, 0, 6, 1, 0.3, false, false, null);
+        SoundSourcePlacement swelling = new SoundSourcePlacement("a", -0.2, 0, 6, 1, 0.3, false, false, swell);
+        List<Path> one = Arrays.asList(files.get(0));
+        MixLevel level = MixLevel.fixed(-2, LookaheadLimiter.Settings.DEFAULT, ExportNormalization.peak(-1));
+        Path automated = file("automated.wav");
+        Path placed = file("placed.wav");
+        Path plain = file("plain.wav");
+        new SpatialStemMixer().withAutomation(StageAutomation.of(Arrays.asList(swelling), 2))
+                .mix(one, Arrays.asList(still), AcousticRoom.HALL, 2, level, automated, 24);
+        new SpatialStemMixer().mix(one, Arrays.asList(swelling), AcousticRoom.HALL, 2, level, placed, 24);
+        new SpatialStemMixer().mix(one, Arrays.asList(still), AcousticRoom.HALL, 2, level, plain, 24);
+        Assert.assertArrayEquals(Files.readAllBytes(placed), Files.readAllBytes(automated));
+        Assert.assertFalse(Arrays.equals(Files.readAllBytes(plain), Files.readAllBytes(automated)));
+    }
+
+    @Test
+    public void liveTakesTheFactorOfTheFileBehindTheSofterLimiter() throws Exception {
+        MixOutcome outcome = new SpatialStemMixer().mix(files, placements, DRY, 2, MixLevel.legacy(-2), file("f.wav"), 16);
+        com.aresstack.audio.core.mix.MasterBus.Settings live = MixLevel.liveMaster(outcome.legacyFactor(), -2);
+        Assert.assertEquals(LevelMode.FIXED, live.mode());
+        Assert.assertEquals(outcome.legacyFactor(), live.gain(), 0f);
+        Assert.assertSame(LookaheadLimiter.Settings.LIVE, live.limiter());
+        // before the first mix: the fixed make-up and the master level
+        Assert.assertEquals(Math.pow(10, (MixLevel.MAKEUP_DB - 2) / 20), MixLevel.liveMaster(Float.NaN, -2).gain(), 1e-6);
     }
 
     @Test

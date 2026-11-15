@@ -8,7 +8,6 @@ import com.aresstack.audio.core.live.LiveChannel;
 import com.aresstack.audio.core.live.LiveGraph;
 import com.aresstack.audio.core.live.LivePlayback;
 import com.aresstack.audio.core.live.LiveSink;
-import com.aresstack.audio.core.mix.LevelMode;
 import com.aresstack.audio.core.mix.MasterBus;
 import com.aresstack.audio.core.stream.ArraySource;
 import com.aresstack.audio.core.stream.LinearResampler;
@@ -51,6 +50,8 @@ public final class LiveStage implements AutoCloseable {
     private java.util.concurrent.ScheduledExecutorService glider;
     /** How the tracks move with the piece: place and room share from the mix document (work package D3). */
     private volatile StageAutomation movements;
+    /** How the level curve of a placement lies in the time of the piece; {@code null}: in bars of one length. */
+    private volatile java.util.function.Function<List<SoundSourcePlacement>, StageAutomation> levels;
 
     private LiveStage(List<float[][]> sounds, List<SoundSourcePlacement> placements, AcousticRoom room,
                       double secondsPerBar, StageAutomation movements, StageSound sound) {
@@ -176,8 +177,13 @@ public final class LiveStage implements AutoCloseable {
 
     /** The numbers of a channel for a placement on this stage; a muted track is turned down. */
     private ChannelParameters parameters(SoundSourcePlacement placement) {
-        ChannelParameters parameters = SpatialStemMixer.parameters(placement,
-                movements.of(placement.trackId()), room, secondsPerBar, sound);
+        java.util.function.Function<List<SoundSourcePlacement>, StageAutomation> timed = levels;
+        ChannelParameters parameters = timed == null
+                ? SpatialStemMixer.parameters(placement, movements.of(placement.trackId()), room, secondsPerBar, sound)
+                // As the file mix joins them: the level curve of the placement as it stands now, in the
+                // time of the piece, with the movements of the mix document.
+                : SpatialStemMixer.parameters(placement,
+                        timed.apply(List.of(placement)).movingAs(movements).of(placement.trackId()), room, sound);
         return placement.muted() ? parameters.toBuilder().level(0).build() : parameters;
     }
 
@@ -328,6 +334,22 @@ public final class LiveStage implements AutoCloseable {
         }
     }
 
+    /**
+     * How the level curves of the placements lie in the time of the piece: what the file mix
+     * hears of them ({@code StageAutomation.of(placements, timeMap)} for a piece whose tempo or
+     * meter changes). Every track is placed again with it; a track moved later gets the curve of
+     * its new placement the same way. Without this, a level curve is read in bars of one length
+     * ({@code secondsPerBar}), which is the same for a piece with one tempo and one meter.
+     */
+    public void levels(java.util.function.Function<List<SoundSourcePlacement>, StageAutomation> timed) {
+        synchronized (glides) {
+            levels = timed;
+            for (int track = 0; track < current.length; track++) {
+                graph.channel(track).set(parameters(current[track]));
+            }
+        }
+    }
+
     /** The movements of place and room share this stage follows. */
     public StageAutomation movements() {
         return movements;
@@ -351,18 +373,12 @@ public final class LiveStage implements AutoCloseable {
     }
 
     /**
-     * The master bus for live playback with this level strategy. In {@link LevelMode#FIXED} the
-     * same gain and limiter as the file; in the compatibility mode the factor the last file mix
-     * found ({@link MixOutcome#legacyFactor()}), so that live playback is as loud as the file. A
-     * legacy piece that was never mixed (factor not a number) plays at the master level alone.
+     * The master bus for live playback ("export old, live new"): the factor the last file mix of
+     * the piece found ({@link MixOutcome#legacyFactor()}) as a fixed gain with the live limiter, so
+     * live sounds like the file; see {@link MixLevel#liveMaster(float, double)}.
      */
-    public static MasterBus.Settings master(MixLevel level, float legacyFactor) {
-        if (level.mode() == LevelMode.FIXED) {
-            return level.master();
-        }
-        float factor = Float.isFinite(legacyFactor) && legacyFactor > 0 ? legacyFactor
-                : (float) Math.pow(10, level.masterDb() / 20);
-        return MasterBus.Settings.legacy(factor);
+    public static MasterBus.Settings master(float legacyFactor, double masterDb) {
+        return MixLevel.liveMaster(legacyFactor, masterDb);
     }
 
     /** Live playback of this stage into a sink (a sound card, or a test), paused at the start. */

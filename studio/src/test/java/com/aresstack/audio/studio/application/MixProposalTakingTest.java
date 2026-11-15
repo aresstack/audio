@@ -49,7 +49,7 @@ public final class MixProposalTakingTest {
         Path song = piece();
         Path arrangement = song.resolve("arrangement.tsv");
         StageMixService service = new StageMixService();
-        SpatialScene first = service.scene(arrangement, song).withFixedLevel(true).withMaster(-14)
+        SpatialScene first = service.scene(arrangement, song).withMaster(-14)
                 .inRoom(AcousticRoom.STUDIO.withAmount(0));
         stages.save(song, first);
         List<String> log = new ArrayList<>();
@@ -140,7 +140,7 @@ public final class MixProposalTakingTest {
     public void whatCannotBeKeptIsNotTakenByHalf() throws Exception {
         Path song = piece();
         Path arrangement = song.resolve("arrangement.tsv");
-        SpatialScene first = new StageMixService().scene(arrangement, song).withFixedLevel(true);
+        SpatialScene first = new StageMixService().scene(arrangement, song);
         stages.save(song, first);
         PieceModel model = new PieceModel(line -> { });
         model.open(song);

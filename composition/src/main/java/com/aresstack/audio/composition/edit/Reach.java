@@ -16,9 +16,15 @@ final class Reach {
     private final EditScope scope;
     private final Set<String> knownParts = new HashSet<>();
     private final Set<String> knownTracks = new HashSet<>();
+    private final Set<String> knownAssets = new HashSet<>();
+    private final com.aresstack.audio.composition.TimeMap timeMap;
 
     Reach(EditScope scope, Composition before) {
         this.scope = scope;
+        this.timeMap = before.timeMap();
+        for (com.aresstack.audio.composition.Asset asset : before.assets()) {
+            knownAssets.add(asset.id());
+        }
         for (Part part : before.parts()) {
             knownParts.add(part.id());
         }
@@ -33,6 +39,11 @@ final class Reach {
 
     boolean newPart(String partId) {
         return partId != null && !knownParts.contains(partId);
+    }
+
+    /** Whether an asset is one the change brings in, as the scope allows. */
+    boolean newAssetAllowed(String assetId) {
+        return !knownAssets.contains(assetId) && scope.allows(EditOp.Kind.ADD_ASSET);
     }
 
     boolean newTrack(String trackId) {
@@ -89,8 +100,11 @@ final class Reach {
         return targetsClip(track, clip) && scope.begins(tick);
     }
 
-    /** Where a clip ends in ticks; an audio clip, whose length is in samples, counts its start only. */
-    static long end(Clip clip) {
-        return clip instanceof MidiClip midi ? midi.endTick() : clip.startTick() + 1;
+    /** Where a clip ends in ticks; an audio clip's length in samples is measured on the time map. */
+    long end(Clip clip) {
+        if (clip instanceof MidiClip midi) {
+            return midi.endTick();
+        }
+        return ((com.aresstack.audio.composition.AudioClip) clip).endTick(timeMap);
     }
 }

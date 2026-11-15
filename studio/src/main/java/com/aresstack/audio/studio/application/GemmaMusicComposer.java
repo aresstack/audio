@@ -1,12 +1,14 @@
 package com.aresstack.audio.studio.application;
 
 import com.aresstack.audio.composition.Key;
+import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.ai.ChatModel;
 import com.aresstack.audio.studio.ai.ModelLineup;
 import com.aresstack.audio.studio.ai.ModelRoles;
 import com.aresstack.audio.studio.progress.Progress;
 import com.aresstack.audio.studio.progress.TrackProgress;
+import com.aresstack.audio.studio.score.Voicing;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -238,10 +240,9 @@ public final class GemmaMusicComposer {
                                         : promptFor(target, plan, spec, chords, section,
                                         s == 0 ? null : context(answers.get(s - 1), sections.get(s - 1), spec));
                                 Path cached = cachedResponse(directory, target, prompt, spec);
-                                allKnown &= Files.isRegularFile(cached);
-                                JsonObject answer = client.generate(
-                                        "Compose original instrumental music. Return valid JSON only.",
-                                        prompt, maxTokens, cached);
+                                String instruction = "Compose original instrumental music. Return valid JSON only.";
+                                allKnown &= client.hasAnswer(instruction, prompt, maxTokens, cached);
+                                JsonObject answer = client.generate(instruction, prompt, maxTokens, cached);
                                 validateResponse(target, answer);
                                 answers.add(answer);
                                 notes += answer.getAsJsonArray("notes").size();
@@ -308,7 +309,8 @@ public final class GemmaMusicComposer {
                 + "Every note needs numeric beat,duration,pitch,velocity; "
                 + "0 <= beat < 32, 0.25 <= duration <= 4, beat+duration <= 32. "
                 + "Align to multiples of 0.25. Use absolute song beats and explicitly list "
-                + "the notes. Compose this track as part of the shared arrangement; no Markdown.";
+                + "the notes. Compose this track as part of the shared arrangement; no Markdown."
+                + voiceRule(track, true);
     }
 
     /**
@@ -355,7 +357,8 @@ public final class GemmaMusicComposer {
                 .append(beats).append(". Align to multiples of 0.25. ")
                 .append(whole ? "Use absolute song beats" : "Count beats from the start of these bars")
                 .append(" and explicitly list the notes. Compose this track as part of the shared arrangement; "
-                        + "no Markdown.");
+                        + "no Markdown.")
+                .append(voiceRule(track, false));
         return text.toString();
     }
 
@@ -475,6 +478,14 @@ public final class GemmaMusicComposer {
             int channel = tracks.channelFor(track.id());
             body.add("track\t" + track.id() + "\t" + track.program() + "\t"
                     + channel + "\t" + track.role());
+            boolean grand = grand(track);
+            if (grand) {
+                body.add("staff\t" + track.id() + "\tgrand");
+            }
+            // The voices the answer names (since S1); written only if it names any.
+            List<String> lines = new ArrayList<String>();
+            List<long[]> written = new ArrayList<long[]>();
+            List<String> named = new ArrayList<String>();
             int playable = 0;
             int index = 0;
             for (int s = 0; s < parts.size(); s++) {
@@ -487,18 +498,31 @@ public final class GemmaMusicComposer {
                         progress.update("WARN: Ignoring non-object note in " + track.id());
                         continue;
                     }
+                    String hand = grand ? Voicing.normalize(voiceOf(element.getAsJsonObject()), true) : null;
                     CompositionNoteNormalizer.NormalizedNote note = normalizer.normalize(
-                            element.getAsJsonObject(), track.id(), track.role(), index, section[0], section[1]);
+                            element.getAsJsonObject(), track.id(), track.role(), index, section[0], section[1],
+                            CompositionNoteNormalizer.range(track.role(), grand, hand));
                     if (note == null) {
                         continue;
                     }
-                    body.add("note\t" + track.id() + "\t" + note.startTick()
+                    lines.add("note\t" + track.id() + "\t" + note.startTick()
                             + "\t" + note.durationTicks() + "\t" + note.pitch()
                             + "\t" + note.velocity());
+                    written.add(new long[]{note.startTick(), note.durationTicks(), note.pitch()});
+                    named.add(voiceOf(element.getAsJsonObject()));
                     end = Math.max(end, note.startTick() + note.durationTicks());
                     playable++;
                 }
             }
+            String[] answered = named.toArray(new String[0]);
+            boolean struck = MusicTrack.DRUMS.equals(track.role());
+            if (!struck && Voicing.named(answered, grand)) {
+                String[] voices = Voicing.assign(written, answered, false, grand);
+                for (int i = 0; i < lines.size(); i++) {
+                    lines.set(i, lines.get(i) + "\t" + voices[i]);
+                }
+            }
+            body.addAll(lines);
             if (playable == 0) {
                 throw new IOException("No playable notes for " + track.id()
                         + ". The cached model response was preserved.");
@@ -514,6 +538,38 @@ public final class GemmaMusicComposer {
         progress.update("Created " + tracks.tracks().size() + " MIDI tracks; "
                 + normalizer.correctionCount() + " note corrections. Cached JSON preserved.");
         return output;
+    }
+
+    /** Whether a track is written on a grand staff: piano, organ and harp (since S1). */
+    static boolean grand(MusicTrack track) {
+        return Voicing.layoutFor(track.program(), MusicTrack.DRUMS.equals(track.role())) == Part.StaffLayout.GRAND;
+    }
+
+    /** The voice a note of an answer names, as written; {@code null} if it names none. */
+    private static String voiceOf(JsonObject note) {
+        JsonElement voice = note.get("voice");
+        if (voice == null || voice.isJsonNull() || !voice.isJsonPrimitive()) {
+            return null;
+        }
+        return voice.getAsString();
+    }
+
+    /**
+     * What the prompt of a track asks about voices (since S1): on a grand staff the hand of every
+     * note; on a harmony or texture track, which may play several lines at once, the line of each
+     * note if it has several. Empty for every other track, whose prompt stays as it was.
+     */
+    static String voiceRule(MusicTrack track, boolean legacy) {
+        if (grand(track)) {
+            return "\nThis instrument is written on a grand staff: give every note a field voice, \"rh\" for the "
+                    + "right hand (treble staff) or \"lh\" for the left hand (bass staff); a hand that plays two "
+                    + "independent lines at once uses \"rh2\" or \"lh2\" for its second line.";
+        }
+        if (!legacy && (MusicTrack.HARMONY.equals(track.role()) || MusicTrack.TEXTURE.equals(track.role()))) {
+            return "\nIf the track plays independent lines at the same time, give every note a field voice: "
+                    + "\"1\" for the top line, \"2\" for the next one, and so on.";
+        }
+        return "";
     }
 
     /** The chord of each bar: the locked ones of the legacy spec, else those of the plan. */

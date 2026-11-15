@@ -17,7 +17,6 @@ public final class SpatialScene {
     private final AcousticRoom room;
     private final Map<String, SoundSourcePlacement> placements;
     private final double masterDb;
-    private final boolean fixedLevel;
 
     public SpatialScene(AcousticRoom room, List<SoundSourcePlacement> placements) {
         this(room, placements, 0);
@@ -27,17 +26,6 @@ public final class SpatialScene {
      * @param masterDb how far below full level the finished mix is, 0 (full) down to -30 dB
      */
     public SpatialScene(AcousticRoom room, List<SoundSourcePlacement> placements, double masterDb) {
-        this(room, placements, masterDb, false);
-    }
-
-    /**
-     * @param masterDb   how far below full level the finished mix is, 0 (full) down to -30 dB
-     * @param fixedLevel whether the piece was switched to the fixed level structure with the
-     *                   limiter; a piece is mixed to its peak as before until its user switches it
-     */
-    public SpatialScene(AcousticRoom room, List<SoundSourcePlacement> placements, double masterDb,
-                        boolean fixedLevel) {
-        this.fixedLevel = fixedLevel;
         this.masterDb = SoundSourcePlacement.within(masterDb, MIN_MASTER, 0);
         this.room = room == null ? AcousticRoom.HALL : room;
         Map<String, SoundSourcePlacement> kept = new LinkedHashMap<String, SoundSourcePlacement>();
@@ -62,17 +50,7 @@ public final class SpatialScene {
     public double masterDb() { return masterDb; }
 
     public SpatialScene withMaster(double db) {
-        return new SpatialScene(room, placements(), db, fixedLevel);
-    }
-
-    /**
-     * Whether the mix has a fixed level structure (master level, then the limiter) instead of
-     * being brought to its peak. False for every piece until its user switches it on purpose.
-     */
-    public boolean fixedLevel() { return fixedLevel; }
-
-    public SpatialScene withFixedLevel(boolean fixed) {
-        return new SpatialScene(room, placements(), masterDb, fixed);
+        return new SpatialScene(room, placements(), db);
     }
 
     public List<SoundSourcePlacement> placements() {
@@ -98,11 +76,11 @@ public final class SpatialScene {
         if (!found) {
             changed.add(placement);
         }
-        return new SpatialScene(room, changed, masterDb, fixedLevel);
+        return new SpatialScene(room, changed, masterDb);
     }
 
     public SpatialScene inRoom(AcousticRoom other) {
-        return new SpatialScene(other, placements(), masterDb, fixedLevel);
+        return new SpatialScene(other, placements(), masterDb);
     }
 
     /**
@@ -125,7 +103,7 @@ public final class SpatialScene {
             seen.put(track.role(), nth + 1);
             seats.add(seat(track, nth));
         }
-        return new SpatialScene(room, seats, masterDb, fixedLevel);
+        return new SpatialScene(room, seats, masterDb);
     }
 
     /** The scene with every placement that is not locked taken from a proposal; the room comes from the proposal. */
@@ -139,7 +117,7 @@ public final class SpatialScene {
                 merged.add(proposed.withMuted(existing.muted()));
             }
         }
-        return new SpatialScene(proposal.room, merged, masterDb, fixedLevel);
+        return new SpatialScene(proposal.room, merged, masterDb);
     }
 
     /** The usual seat of a role; several tracks of one role fan out to both sides in turn. */

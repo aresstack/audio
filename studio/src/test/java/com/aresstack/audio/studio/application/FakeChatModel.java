@@ -20,7 +20,9 @@ import java.util.regex.Pattern;
 /**
  * Answers the composer's prompts as a model would, without network (architecture review 7.1):
  * a plan with the numbers it was asked for and the given chords, and for each track and section
- * notes on the tones of the chords the prompt names. Keeps its answers in the cache files, as the
+ * notes on the tones of the chords the prompt names. A track the prompt asks to name the hands of
+ * (a grand staff, since S1) gets two lines in the right hand that begin and end together, as
+ * {@code rh} and {@code rh2}, and the root in the left hand, as {@code lh}. Keeps its answers in the cache files, as the
  * real client does, and remembers every prompt.
  */
 final class FakeChatModel implements ChatModel {
@@ -85,11 +87,16 @@ final class FakeChatModel implements ChatModel {
         Matcher perBar = Pattern.compile("A bar has ([0-9.]+) quarter-note beats").matcher(prompt);
         double bar = perBar.find() ? Double.parseDouble(perBar.group(1)) : 4;
         String[] chords = group(prompt, "chords by bar: (.*?)\\. ").split(" \\| ");
+        boolean hands = prompt.contains("grand staff") && prompt.contains("field voice");
         JsonArray notes = new JsonArray();
         for (int b = 0; b < chords.length; b++) {
             int[] tones = Chord.parse(chords[b]).tones();
             double start = b * bar;
-            if ("drums".equals(role)) {
+            if (hands) {
+                add(notes, start, bar, place(tones[tones.length - 1], 67), 70).addProperty("voice", "rh");
+                add(notes, start, bar, place(tones[1], 60), 60).addProperty("voice", "rh2");
+                add(notes, start, bar, place(tones[0], 36), 70).addProperty("voice", "lh");
+            } else if ("drums".equals(role)) {
                 add(notes, start, 0.5, 36, 90);
                 if (bar >= 3) {
                     add(notes, start + 2, 0.5, 38, 80);
@@ -125,12 +132,13 @@ final class FakeChatModel implements ChatModel {
         return pitch;
     }
 
-    private static void add(JsonArray notes, double beat, double duration, int pitch, int velocity) {
+    private static JsonObject add(JsonArray notes, double beat, double duration, int pitch, int velocity) {
         JsonObject note = new JsonObject();
         note.addProperty("beat", beat);
         note.addProperty("duration", duration);
         note.addProperty("pitch", pitch);
         note.addProperty("velocity", velocity);
         notes.add(note);
+        return note;
     }
 }

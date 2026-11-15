@@ -41,6 +41,20 @@ public final class MixLevel {
         this.normalization = normalization;
     }
 
+    /**
+     * The master bus of the live stage (decision of the product owner, 15.11.2026: "export
+     * old, live new"): files and exports are always mixed in the compatibility mode; live
+     * playback uses the factor the last file mix of the piece found as a fixed gain, with the
+     * live limiter, so it sounds like the file until a live change pushes a peak over the
+     * ceiling. A piece that was never mixed to a file (factor not a positive number) gets the
+     * studio's make-up gain and its master level.
+     */
+    public static MasterBus.Settings liveMaster(float legacyFactor, double masterDb) {
+        float gain = Float.isFinite(legacyFactor) && legacyFactor > 0 ? legacyFactor
+                : (float) Math.pow(10, (MAKEUP_DB + Math.min(0, masterDb)) / 20);
+        return MasterBus.Settings.live(gain);
+    }
+
     /** The compatibility mode: normalized to the peak as before, then the master level. */
     public static MixLevel legacy(double masterDb) {
         return new MixLevel(LevelMode.LEGACY_PEAK, 0, masterDb, null, ExportNormalization.NONE);
