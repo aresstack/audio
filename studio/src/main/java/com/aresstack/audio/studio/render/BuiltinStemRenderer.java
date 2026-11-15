@@ -41,11 +41,24 @@ public final class BuiltinStemRenderer implements StemRenderer {
         List<BuiltinSynthesis.Tone> tones = new ArrayList<>();
         for (Composition.PlacedNote placed : composition.notesOf(part.id())) {
             long tick = placed.tick();
-            tones.add(new BuiltinSynthesis.Tone(time.seconds(tick),
-                    placed.note().length() / (double) TimeMap.PPQ * 60.0 / time.tempoAt(tick),
+            tones.add(new BuiltinSynthesis.Tone(time.seconds(tick), heldSeconds(time, tick, placed.endTick()),
                     placed.note().pitch(), placed.note().velocity(), tick));
         }
         return BuiltinSynthesis.part(role(part), tones, frames);
+    }
+
+    /**
+     * How long a note is held, in seconds. Across a change of tempo it is the time between its
+     * start and its end; at one tempo it is computed as the reference renderer does, so that the
+     * samples stay the same to the last bit.
+     */
+    static double heldSeconds(TimeMap time, long tick, long endTick) {
+        for (TimeMap.Tempo tempo : time.tempos()) {
+            if (tempo.tick() > tick && tempo.tick() < endTick) {
+                return time.seconds(endTick) - time.seconds(tick);
+            }
+        }
+        return (endTick - tick) / (double) TimeMap.PPQ * 60.0 / time.tempoAt(tick);
     }
 
     /** The role the sound is shaped by; a part without one sounds by its id, as in the old renderer. */
