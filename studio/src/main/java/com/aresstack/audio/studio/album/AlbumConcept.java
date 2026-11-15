@@ -10,8 +10,10 @@ package com.aresstack.audio.studio.album;
  * @param trackCount  the number of pieces, 1 to {@link #MAX_TRACKS}
  * @param minSeconds  how long a piece is at least, 10 seconds to {@link #MAX_SECONDS}
  * @param maxSeconds  how long a piece is at most, not below {@code minSeconds}
+ * @param original    whether it rebuilds an existing work the wish names, see {@link #withOriginal}
  */
-public record AlbumConcept(String description, String style, int trackCount, int minSeconds, int maxSeconds) {
+public record AlbumConcept(String description, String style, int trackCount, int minSeconds, int maxSeconds,
+                           boolean original) {
     public static final int MAX_TRACKS = 99;
     public static final int MAX_SECONDS = 3600;
     /** The range an album gets unless the user says otherwise: four to six minutes. */
@@ -33,6 +35,19 @@ public record AlbumConcept(String description, String style, int trackCount, int
             throw new IllegalArgumentException("Ein Stück dauert 10 Sekunden bis 60 Minuten: " + minSeconds + " bis "
                     + maxSeconds + " s");
         }
+    }
+
+    /** An album of new music (not "Original nachbilden"). */
+    public AlbumConcept(String description, String style, int trackCount, int minSeconds, int maxSeconds) {
+        this(description, style, trackCount, minSeconds, maxSeconds, false);
+    }
+
+    /**
+     * Whether the album rebuilds an existing work named in its wish ("Original nachbilden"): the
+     * plan takes the real movements with their titles, keys and lengths, the pieces their themes.
+     */
+    public AlbumConcept withOriginal(boolean rebuild) {
+        return new AlbumConcept(description, style, trackCount, minSeconds, maxSeconds, rebuild);
     }
 
     /** An album whose pieces all have about the same length. */

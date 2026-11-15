@@ -106,7 +106,12 @@ public record Album(String id, String title, AlbumConcept concept, List<AlbumTra
         append(text, ", mood: ", own.mood());
         append(text, ", played by: ", own.instrumentation());
         append(text, ", form: ", own.form());
-        text.append(". Fill its whole length with this form; develop and vary the ideas instead of repeating a short one.");
+        if (concept.original()) {
+            text.append(".\n").append(com.aresstack.audio.studio.application.OriginalWork.GUIDANCE)
+                    .append(" This track is that movement of the original.");
+        } else {
+            text.append(". Fill its whole length with this form; develop and vary the ideas instead of repeating a short one.");
+        }
         if (tracks.size() > 1) {
             text.append("\nThe other tracks of the album, so that this one fits in and differs from them:");
             for (AlbumTrack other : tracks) {

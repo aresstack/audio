@@ -225,6 +225,8 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
                         albums.save(album); // first the album knows its piece, then the piece is filled
                     }
                     piece = pieceFolder(track);
+                    // Notes given for the title bind the piece: it is made from them, not composed freely.
+                    new AlbumTemplates(albums).intoPiece(album.id(), trackId, piece);
                     // The piece keeps its own words; what it is told about its album is added for the AI only.
                     songs.save(piece, track.title(), own(track));
                     set(trackId, Status.RUNNING, "", 0);

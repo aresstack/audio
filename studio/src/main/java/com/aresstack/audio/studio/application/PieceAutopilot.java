@@ -108,6 +108,14 @@ public final class PieceAutopilot {
         return this;
     }
 
+    private int templateLines = com.aresstack.audio.studio.template.TextTemplate.DEFAULT_LINES;
+
+    /** How many lines of a template written as text the AI writes over in one request (setting "Zeilen der Vorlage je Anfrage"). */
+    public PieceAutopilot templateLines(int lines) {
+        this.templateLines = lines;
+        return this;
+    }
+
     /**
      * Makes the piece in its folder. Everything composing writes becomes part of the model of the
      * piece ({@link ComposingIntoPiece}). Called again for the same folder, the answers the models
@@ -120,6 +128,10 @@ public final class PieceAutopilot {
      */
     public Result run(String description, Path folder, CompositionSpec spec, SpatialScene stage, SongLibrary songs,
                       PieceModel model, Progress progress, Listener listener) throws Exception {
+        java.util.Optional<Path> template = ScoreTemplates.of(folder);
+        if (template.isPresent()) {
+            return fromTemplate(template.get(), description, folder, stage, songs, model, progress, listener);
+        }
         InstrumentProposalService proposals = new InstrumentProposalService(
                 models.model(ModelRoles.INSTRUMENTS), maxTokens);
         if (mostVoices > 0) {
@@ -163,6 +175,37 @@ public final class PieceAutopilot {
         if (begun || first != spec) {
             arrangement = grow(folder, model, description, spec.bars(), progress);
         }
+        return new Result(arrangement, render(arrangement, folder, model, assignments, programs, progress), tracks,
+                scene);
+    }
+
+    /**
+     * The piece follows notes the user gave: the players come from the template, not from a
+     * proposal, and its notes are those of the template, set right where they are plainly wrong
+     * ({@link TemplatePiece}). Tempo, meter, key and length are the template's. The stage the
+     * piece has is kept for the tracks it fits; new tracks stand where a new stage puts them.
+     */
+    private Result fromTemplate(Path template, String description, Path folder, SpatialScene stage, SongLibrary songs,
+                                PieceModel model, Progress progress, Listener listener) throws Exception {
+        TemplatePiece.Made made = new TemplatePiece(models, maxTokens, templateLines)
+                .read(template, description, folder, progress);
+        TrackArrangement tracks = withPreferredSoundbanks(made.tracks(), registry);
+        SpatialScene before = stage != null ? stage : scenes.load(folder);
+        SpatialScene scene = before == null ? SpatialScene.standard(tracks.tracks()) : before.fitting(tracks.tracks());
+        scenes.save(folder, scene);
+        Map<String, InstrumentLibrary> assignments = assignments(tracks, registry);
+        Map<String, Integer> programs = new HashMap<String, Integer>();
+        for (MusicTrack track : tracks.tracks()) {
+            programs.put(track.id(), track.program());
+        }
+        if (listener != null) {
+            listener.staged(tracks, scene);
+        }
+        new TrackArrangementStore().save(folder, tracks);
+        Path arrangement = ComposingIntoPiece.run(() -> TemplatePiece.write(made, tracks, folder, template), folder,
+                description, songs, model);
+        progress.update("Das Stück folgt der Notenvorlage „" + template.getFileName() + "“: " + made.spec().label()
+                + ".");
         return new Result(arrangement, render(arrangement, folder, model, assignments, programs, progress), tracks,
                 scene);
     }

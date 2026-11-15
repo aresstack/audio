@@ -166,6 +166,26 @@ public final class AlbumProducerTest {
         assertEquals(List.of("Track 1"), pieces.orders.stream().map(PieceProduction.PieceOrder::name).toList());
     }
 
+    /** Notes given for a title bind its piece: the piece gets the template before it is made. */
+    @Test
+    public void aTitleWithNotesGivesThemToItsPiece() throws Exception {
+        Album album = album(2);
+        Path notes = temporary.newFile("primavera.mid").toPath();
+        Files.write(notes, new byte[]{'M', 'T', 'h', 'd'});
+        AlbumTemplates templates = new AlbumTemplates(files);
+        templates.put(album.id(), "t2", notes);
+        assertTrue(templates.of(album.id(), "t2").isPresent());
+        assertFalse(templates.of(album.id(), "t1").isPresent());
+        Pieces pieces = new Pieces();
+        new AlbumProducer(files, songs, pieces, 1).start(album.id(), QUIET).await();
+
+        for (PieceProduction.PieceOrder order : pieces.orders) {
+            boolean follows = com.aresstack.audio.studio.application.ScoreTemplates.of(order.folder()).isPresent();
+            assertEquals(order.name(), order.name().equals("Track 2"), follows);
+        }
+        assertEquals(2, pieces.orders.size());
+    }
+
     /**
      * PO finding on PR #41: after "Abbrechen" the same producer goes on in the same studio. The
      * production of pieces of a run is stopped for good by its cancel (as a model lineup is), so

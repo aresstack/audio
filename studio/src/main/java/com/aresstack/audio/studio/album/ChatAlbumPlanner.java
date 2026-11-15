@@ -39,6 +39,14 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         return this;
     }
 
+    /** How many movements of a work that is rebuilt are planned at once (setting "Parallel"). */
+    private int atOnce = 1;
+
+    public ChatAlbumPlanner parallel(int requests) {
+        this.atOnce = Math.max(1, requests);
+        return this;
+    }
+
     public ChatAlbumPlanner(ChatModel model, int maxTokens) {
         this.model = model;
         this.maxTokens = maxTokens;
@@ -47,6 +55,9 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
     @Override
     public Album plan(Album album, Path cache, Progress progress) throws IOException {
         AlbumConcept concept = album.concept();
+        if (concept.original()) {
+            return rebuild(album, cache, progress);
+        }
         List<AlbumTrack> kept = new ArrayList<AlbumTrack>();
         for (AlbumTrack track : album.tracks()) {
             if (track.hasPiece()) {
@@ -118,6 +129,159 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
     }
 
     /**
+     * "Original nachbilden": first the movements of the work are found, as many as the work has
+     * (not as many as the album asked for), then every movement is planned in a request of its
+     * own, with its real title, key, meter, tempo, length and form. Each planned movement is shown
+     * as soon as it is there. A title that has a piece already stays, at the place of the
+     * movement of the same name, or after the movements.
+     */
+    private Album rebuild(Album album, Path cache, Progress progress) throws IOException {
+        AlbumConcept concept = album.concept();
+        progress.update("KI ermittelt die Sätze des Werks für „" + album.title() + "“ ...");
+        Path listed = cache == null ? null : cache.resolve("album-movements.json");
+        if (listed != null) {
+            Files.deleteIfExists(listed);
+        }
+        JsonObject said = model.generate(INSTRUCTION, movementsPrompt(album), maxTokens, listed);
+        List<String> movements = new ArrayList<String>();
+        JsonArray named = said != null && said.has("movements") && said.get("movements").isJsonArray()
+                ? said.getAsJsonArray("movements") : new JsonArray();
+        for (JsonElement element : named) {
+            String title = element.isJsonObject() ? AlbumFiles.text(element.getAsJsonObject(), "title")
+                    : element.isJsonPrimitive() ? element.getAsString().trim() : "";
+            if (!title.isBlank() && movements.size() < AlbumConcept.MAX_TRACKS) {
+                movements.add(title);
+            }
+        }
+        if (movements.isEmpty()) {
+            throw new IOException("Die KI hat keine Sätze des Werks genannt; bitte das Werk im Text genauer nennen.");
+        }
+        progress.update("Das Werk hat " + movements.size() + " Sätze; jeder wird einzeln geplant.");
+        List<AlbumTrack> kept = new ArrayList<AlbumTrack>();
+        for (AlbumTrack track : album.tracks()) {
+            if (track.hasPiece()) {
+                kept.add(track);
+            }
+        }
+        List<String> ids = new ArrayList<String>();
+        for (AlbumTrack track : kept) {
+            ids.add(track.id());
+        }
+        // Every movement has its row at once, in the order of the work; the rows are filled as their
+        // answers come, several at a time.
+        AlbumTrack[] rows = new AlbumTrack[movements.size()];
+        List<Integer> open = new ArrayList<Integer>();
+        for (int i = 0; i < movements.size(); i++) {
+            AlbumTrack same = null;
+            for (AlbumTrack track : kept) {
+                if (track.title().equalsIgnoreCase(movements.get(i))) {
+                    same = track;
+                }
+            }
+            if (same != null) {
+                rows[i] = same;
+                kept.remove(same);
+            } else {
+                String id = freshId(ids);
+                ids.add(id);
+                JsonObject placeholder = new JsonObject();
+                placeholder.addProperty("title", movements.get(i));
+                rows[i] = track(id, placeholder, i + 1, concept);
+                open.add(i);
+            }
+        }
+        show(rows, kept);
+        java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(
+                Math.min(atOnce, Math.max(1, open.size())), task -> {
+                    Thread thread = new Thread(task, "album-movement");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+        List<java.util.concurrent.Future<?>> asked = new ArrayList<java.util.concurrent.Future<?>>();
+        for (int i : open) {
+            asked.add(workers.submit(() -> {
+                Path answer = cache == null ? null : cache.resolve("album-movement-" + (i + 1) + ".json");
+                if (answer != null) {
+                    Files.deleteIfExists(answer);
+                }
+                progress.update("KI plant Satz " + (i + 1) + " von " + movements.size() + ": " + movements.get(i)
+                        + " ...");
+                JsonObject entry = model.generate(INSTRUCTION, movementPrompt(album, movements, i), maxTokens, answer);
+                entry = entry == null ? new JsonObject() : entry;
+                if (AlbumFiles.text(entry, "title").isBlank()) {
+                    entry.addProperty("title", movements.get(i));
+                }
+                synchronized (rows) {
+                    rows[i] = track(rows[i].id(), entry, i + 1, concept);
+                    show(rows, kept);
+                }
+                return null;
+            }));
+        }
+        workers.shutdown();
+        try {
+            for (java.util.concurrent.Future<?> each : asked) {
+                each.get();
+            }
+        } catch (InterruptedException interrupted) {
+            workers.shutdownNow();
+            Thread.currentThread().interrupt();
+            throw new java.io.InterruptedIOException("Planen abgebrochen.");
+        } catch (java.util.concurrent.ExecutionException failed) {
+            workers.shutdownNow();
+            Throwable cause = failed.getCause();
+            throw cause instanceof IOException io ? io : new IOException(cause.getMessage(), cause);
+        }
+        List<AlbumTrack> tracks = new ArrayList<AlbumTrack>(java.util.Arrays.asList(rows));
+        tracks.addAll(kept);
+        progress.update("Trackliste bereit: " + tracks.size() + " Sätze des Originals.");
+        AlbumConcept counted = new AlbumConcept(concept.description(), concept.style(), Math.max(1, tracks.size()),
+                concept.minSeconds(), concept.maxSeconds(), true);
+        return album.withConcept(counted).withTracks(tracks);
+    }
+
+    private void show(AlbumTrack[] rows, List<AlbumTrack> kept) {
+        if (watcher != null) {
+            List<AlbumTrack> seen = new ArrayList<AlbumTrack>(java.util.Arrays.asList(rows));
+            seen.addAll(kept);
+            watcher.accept(seen);
+        }
+    }
+
+    static String movementsPrompt(Album album) {
+        AlbumConcept concept = album.concept();
+        return "List the movements of the existing work this album rebuilds, in their original order.\n"
+                + "{\"album\":\"" + escape(album.title()) + "\",\"wish\":\"" + escape(concept.description())
+                + "\",\"style\":\"" + escape(concept.style()) + "\"}\n"
+                + "Name every movement (or every piece, for a collection) the work has, as many as it has, with its "
+                + "real title, e.g. \"Spring – I. Allegro\", in the language of the wish. Invent nothing.\n"
+                + "Return one JSON object: {\"movements\": [{\"title\": \"...\"}, ...]}.";
+    }
+
+    static String movementPrompt(Album album, List<String> movements, int index) {
+        AlbumConcept concept = album.concept();
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Plan ONE track of an album that rebuilds an existing work: movement ").append(index + 1)
+                .append(" of ").append(movements.size()).append(", \"").append(escape(movements.get(index)))
+                .append("\".\n");
+        prompt.append("{\"album\":\"").append(escape(album.title())).append("\",\"wish\":\"")
+                .append(escape(concept.description())).append("\",\"style\":\"").append(escape(concept.style()))
+                .append("\"}\n");
+        prompt.append("All movements of the work: ");
+        for (int i = 0; i < movements.size(); i++) {
+            prompt.append(i == 0 ? "" : "; ").append(i + 1).append(". ").append(escape(movements.get(i)));
+        }
+        prompt.append("\nLook up this movement as the original has it and invent nothing: ")
+                .append(com.aresstack.audio.studio.application.OriginalWork.GUIDANCE).append('\n');
+        prompt.append("Return one JSON object with: title (the real title of the movement), mood (a few words), "
+                + "tempoBpm (the original tempo, 40-200), key (the original key, like \"E major\" or \"C# minor\"), "
+                + "meter (the original meter, like \"3/4\" or \"12/8\"), instrumentation (the original players), "
+                + "form (the original sections and themes in order), targetSeconds (the length of a usual "
+                + "performance of this movement).");
+        return prompt.toString();
+    }
+
+    /**
      * The titles of a plan that is still being written: the kept ones, then every new one whose
      * title has arrived, with what has arrived of the rest.
      */
@@ -150,12 +314,17 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
     static String prompt(Album album, List<AlbumTrack> kept, int wanted) {
         AlbumConcept concept = album.concept();
         StringBuilder prompt = new StringBuilder();
-        prompt.append("Plan an ORIGINAL instrumental album.\n");
+        prompt.append(concept.original() ? "Plan an instrumental album that rebuilds an existing work.\n"
+                : "Plan an ORIGINAL instrumental album.\n");
         prompt.append("{\"album\":\"").append(escape(album.title())).append("\",\"wish\":\"")
                 .append(escape(concept.description())).append("\",\"style\":\"").append(escape(concept.style()))
-                .append("\",\"tracksWanted\":").append(wanted).append(",\"secondsPerTrack\":")
-                .append(concept.secondsPerTrack()).append(",\"secondsMin\":").append(concept.minSeconds())
-                .append(",\"secondsMax\":").append(concept.maxSeconds()).append("}\n");
+                .append("\",\"tracksWanted\":").append(wanted);
+        if (!concept.original()) {
+            // A work that is rebuilt has the lengths of its movements: no range of the album is named to it.
+            prompt.append(",\"secondsPerTrack\":").append(concept.secondsPerTrack()).append(",\"secondsMin\":")
+                    .append(concept.minSeconds()).append(",\"secondsMax\":").append(concept.maxSeconds());
+        }
+        prompt.append("}\n");
         if (!kept.isEmpty()) {
             prompt.append("These tracks of the album exist already; do not repeat them, plan tracks that go with them:\n");
             for (AlbumTrack track : kept) {
@@ -163,16 +332,23 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
                         .append(track.bpm()).append(" BPM, ").append(track.key()).append('\n');
             }
         }
-        prompt.append("Plan the album as a whole, with a dramaturgy from the first track to the last: an opening, "
-                + "calm and lively tracks in turn, a finale. The tracks must differ in mood, tempo, key, meter and "
-                + "players, and still belong together.\n");
+        if (concept.original()) {
+            prompt.append(com.aresstack.audio.studio.application.OriginalWork.ALBUM_GUIDANCE).append('\n');
+        } else {
+            prompt.append("Plan the album as a whole, with a dramaturgy from the first track to the last: an opening, "
+                    + "calm and lively tracks in turn, a finale. The tracks must differ in mood, tempo, key, meter and "
+                    + "players, and still belong together.\n");
+        }
         prompt.append("Return one JSON object with an array 'tracks' of exactly ").append(wanted)
-                .append(" objects in the order of the album. Each has: title (original, no existing work), "
+                .append(" objects in the order of the album. Each has: title (")
+                .append(concept.original() ? "the real title of the movement" : "original, no existing work")
+                .append("), "
                         + "mood (a few words), tempoBpm (40-200), key (like \"D major\" or \"B minor\"), "
                         + "meter (like \"4/4\", \"3/4\", \"6/8\"), instrumentation (the players in words), "
                         + "form (the sections in order, enough to fill the length without repeating one short idea, "
                         + "e.g. \"").append(DEFAULT_FORM).append("\"), targetSeconds (")
-                .append(concept.minSeconds() == concept.maxSeconds() ? "about " + concept.secondsPerTrack()
+                .append(concept.original() ? "the length of a usual performance of the movement"
+                        : concept.minSeconds() == concept.maxSeconds() ? "about " + concept.secondsPerTrack()
                         : "between " + concept.minSeconds() + " and " + concept.maxSeconds()
                         + "; let the lengths differ from track to track, as the music needs").append(").");
         return prompt.toString();
@@ -184,10 +360,15 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         int seconds = AlbumFiles.number(entry, "targetSeconds", concept.secondsPerTrack());
         // The user said how long a piece may be: a length far off is replaced by the middle, one a
         // little off is brought into the range.
-        if (seconds < concept.minSeconds() / 2 || seconds > concept.maxSeconds() * 2) {
-            seconds = concept.secondsPerTrack();
+        if (concept.original()) {
+            // The original decides how long a movement is, not the range of the album.
+            seconds = Math.max(10, Math.min(AlbumConcept.MAX_SECONDS, seconds));
+        } else {
+            if (seconds < concept.minSeconds() / 2 || seconds > concept.maxSeconds() * 2) {
+                seconds = concept.secondsPerTrack();
+            }
+            seconds = Math.max(concept.minSeconds(), Math.min(concept.maxSeconds(), seconds));
         }
-        seconds = Math.max(concept.minSeconds(), Math.min(concept.maxSeconds(), seconds));
         int bpm = AlbumFiles.number(entry, "tempoBpm", 100);
         return new AlbumTrack(id, title.isBlank() ? "Titel " + number : title, AlbumFiles.text(entry, "mood"),
                 bpm < 40 || bpm > 200 ? 100 : bpm, AlbumFiles.text(entry, "key"), AlbumFiles.text(entry, "meter"),

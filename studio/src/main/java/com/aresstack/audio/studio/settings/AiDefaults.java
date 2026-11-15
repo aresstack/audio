@@ -47,6 +47,21 @@ public final class AiDefaults {
         }
     }
 
+    /**
+     * The lines of a template written as text (ABC and the like) the AI writes over into notes in
+     * one request: {@code TextTemplate.MIN_LINES} to {@code MAX_LINES}, its default when missing or malformed.
+     */
+    public static int templateLines(Properties settings) {
+        int fallback = com.aresstack.audio.studio.template.TextTemplate.DEFAULT_LINES;
+        try {
+            int lines = Integer.parseInt(settings.getProperty("templateLines", Integer.toString(fallback)).trim());
+            return Math.max(com.aresstack.audio.studio.template.TextTemplate.MIN_LINES,
+                    Math.min(com.aresstack.audio.studio.template.TextTemplate.MAX_LINES, lines));
+        } catch (NumberFormatException invalid) {
+            return fallback;
+        }
+    }
+
     /** The bars of a piece and of each step that makes it longer, unless the user says otherwise. */
     public static final int PIECE_BARS = 280;
 
