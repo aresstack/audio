@@ -41,6 +41,10 @@ final class ModelChoicePanel extends JPanel {
     private final List<String> known = new ArrayList<>();
     private final List<JComboBox<String>> boxes = new ArrayList<>();
     private final List<JLabel> purposes = new ArrayList<>();
+    /** Beside each model: how much it thinks before it answers. */
+    private final List<JComboBox<String>> thinkings = new ArrayList<>();
+    /** The ways of thinking as shown; the first lets the model decide. */
+    static final String[] THINKING = {"Standard", "Wenig", "Mittel", "Viel"};
     private ModelAssignment assignment = ModelAssignment.single(AiDefaults.MODEL);
     private boolean filling;
 
@@ -101,7 +105,13 @@ final class ModelChoicePanel extends JPanel {
             at.gridx = 1;
             at.weightx = 1;
             at.insets = new Insets(6, 0, 0, 0);
-            add(box, at);
+            JComboBox<String> thinking = thinking(role);
+            thinkings.add(thinking);
+            JPanel both = new JPanel(new BorderLayout(6, 0));
+            both.setOpaque(false);
+            both.add(box, BorderLayout.CENTER);
+            both.add(thinking, BorderLayout.EAST);
+            add(both, at);
             at.gridx = 1;
             at.gridy++;
             at.insets = new Insets(1, 2, 0, 0);
@@ -120,12 +130,41 @@ final class ModelChoicePanel extends JPanel {
         for (JComboBox<String> box : boxes) {
             box.setEnabled(enabled);
         }
+        for (JComboBox<String> thinking : thinkings) {
+            thinking.setEnabled(enabled);
+        }
         load.setEnabled(enabled);
         extended.setEnabled(enabled);
     }
 
     private final DeckWidgets.RefreshKey load;
     private final JButton extended;
+
+    /** How much the model of a role thinks: Standard (the model decides), Wenig, Mittel or Viel. */
+    private JComboBox<String> thinking(ModelRole role) {
+        JComboBox<String> thinking = new JComboBox<>(THINKING);
+        thinking.setPreferredSize(new Dimension(108, 30));
+        thinking.setToolTipText("Nachdenken vor der Antwort (" + role.label() + "): als reasoning_effort gesendet, "
+                + "bei „Standard“ gar nicht. Nachdenken zählt zu den Tokens der Antwort.");
+        thinking.addActionListener(event -> {
+            if (filling) {
+                return;
+            }
+            assignment = assignment.withEffort(role, effort(thinking.getSelectedIndex()));
+            changed.run();
+        });
+        return thinking;
+    }
+
+    /** The effort sent for a way of thinking as shown; {@code null} for "Standard". */
+    static String effort(int shown) {
+        return shown <= 0 || shown > ModelAssignment.EFFORTS.size() ? null : ModelAssignment.EFFORTS.get(shown - 1);
+    }
+
+    /** The way of thinking shown for an effort. */
+    static int shown(String effort) {
+        return effort == null ? 0 : ModelAssignment.EFFORTS.indexOf(effort) + 1;
+    }
 
     private JComboBox<String> box(ModelRole role) {
         JComboBox<String> box = new JComboBox<>();
@@ -209,6 +248,7 @@ final class ModelChoicePanel extends JPanel {
                 box.setSelectedItem(model);
                 purposes.get(i).setText(shown.get(i).purpose()
                         + (AiDefaults.MODEL.equals(model) ? " · Standard" : ""));
+                thinkings.get(i).setSelectedIndex(Math.max(0, shown(assignment.effortFor(shown.get(i)))));
             }
         } finally {
             filling = false;
@@ -224,6 +264,7 @@ final class ModelChoicePanel extends JPanel {
         at.insets = new Insets(4, 0, 4, 10);
         List<ModelRole> roles = ModelRoles.all();
         List<JComboBox<String>> choices = new ArrayList<>();
+        List<JComboBox<String>> ways = new ArrayList<>();
         at.gridy = 0;
         for (ModelRole role : roles) {
             JComboBox<String> box = new JComboBox<>(); // not editable: the empty entry shows what it follows
@@ -248,11 +289,19 @@ final class ModelChoicePanel extends JPanel {
             at.gridx = 1;
             at.weightx = 1;
             table.add(box, at);
+            JComboBox<String> way = new JComboBox<>(THINKING);
+            way.setSelectedIndex(Math.max(0, shown(assignment.effortFor(role))));
+            way.setToolTipText("Nachdenken vor der Antwort");
+            ways.add(way);
+            at.gridx = 2;
+            at.weightx = 0;
+            table.add(way, at);
             at.gridy++;
         }
         at.gridx = 0;
-        at.gridwidth = 2;
-        table.add(small("Leer: die Aufgabe nimmt das Modell der genannten Rolle. Gilt ab dem nächsten Auftrag."), at);
+        at.gridwidth = 3;
+        table.add(small("Leer: die Aufgabe nimmt das Modell der genannten Rolle. Rechts: wie viel das Modell vorher "
+                + "nachdenkt. Gilt ab dem nächsten Auftrag."), at);
         int answer = JOptionPane.showConfirmDialog(this, table, "Erweiterte Modellzuordnung",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
         if (answer != JOptionPane.OK_OPTION) {
@@ -262,7 +311,8 @@ final class ModelChoicePanel extends JPanel {
         for (int i = 0; i < roles.size(); i++) {
             Object item = choices.get(i).getSelectedItem();
             String name = item == null ? "" : item.toString().trim();
-            chosen = chosen.with(roles.get(i), name.isEmpty() ? null : name);
+            chosen = chosen.with(roles.get(i), name.isEmpty() ? null : name)
+                    .withEffort(roles.get(i), effort(ways.get(i).getSelectedIndex()));
         }
         if (!chosen.equals(assignment)) {
             assignment = chosen;

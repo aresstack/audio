@@ -36,9 +36,29 @@ public final class ModelLineup {
         return assignment;
     }
 
-    /** The chat model of a role. */
+    /**
+     * The chat model of a role. A role that thinks in a way of its own gets a model of its own,
+     * named "model#effort" for the factory (see {@link #effortIn} and {@link #modelIn}).
+     */
     public ChatModel model(ModelRole role) {
-        return named(assignment.modelFor(role));
+        String effort = assignment.effortFor(role);
+        String name = assignment.modelFor(role);
+        return named(effort == null ? name : name + EFFORT_MARK + effort);
+    }
+
+    /** Between a model name and the way it thinks, in the names the factory gets. */
+    public static final String EFFORT_MARK = "#";
+
+    /** The model name in a name the factory gets, without the way it thinks. */
+    public static String modelIn(String name) {
+        int mark = name.lastIndexOf(EFFORT_MARK);
+        return mark < 0 ? name : name.substring(0, mark);
+    }
+
+    /** The way of thinking in a name the factory gets, or {@code null} when the model decides. */
+    public static String effortIn(String name) {
+        int mark = name.lastIndexOf(EFFORT_MARK);
+        return mark < 0 ? null : name.substring(mark + 1);
     }
 
     private ChatModel named(String name) {

@@ -112,6 +112,9 @@ public final class KipitzChatClient implements ChatModel {
         request.addProperty("top_k", TOP_K);
         request.addProperty("max_tokens", maxTokens);
         request.addProperty("user", "audio-swing-studio");
+        if (reasoningEffort != null) {
+            request.addProperty("reasoning_effort", reasoningEffort); // without: the model decides
+        }
         JsonArray messages = new JsonArray();
         messages.add(message("system", instruction));
         messages.add(message("user", prompt));
@@ -377,6 +380,16 @@ public final class KipitzChatClient implements ChatModel {
     }
 
     /** How often a request is sent again when the connection fails or breaks off, before the failure counts. */
+
+    /** How much this model thinks before it answers: low, medium or high; {@code null} lets it decide. */
+    private volatile String reasoningEffort;
+
+    /** Sets how much this model thinks before it answers, sent as {@code reasoning_effort}; {@code null}: it decides. */
+    public KipitzChatClient reasoningEffort(String effort) {
+        String value = effort == null ? "" : effort.trim().toLowerCase(java.util.Locale.ROOT);
+        this.reasoningEffort = ModelAssignment.EFFORTS.contains(value) ? value : null;
+        return this;
+    }
 
     /** The wait for the first text of an answer by default, in seconds: a busy service lets requests queue. */
     public static final int FIRST_TEXT_SECONDS = 300;

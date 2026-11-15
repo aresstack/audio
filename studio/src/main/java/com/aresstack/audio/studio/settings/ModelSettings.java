@@ -31,8 +31,14 @@ public final class ModelSettings {
             if (own != null && !own.isBlank()) {
                 assignment = assignment.with(role, own);
             }
+            assignment = assignment.withEffort(role, settings.getProperty(effortKey(role)));
         }
         return assignment;
+    }
+
+    /** The key of how much a role's model thinks, e.g. {@code thinking.planning}. */
+    public static String effortKey(ModelRole role) {
+        return "thinking." + role.key();
     }
 
     /**
@@ -47,6 +53,12 @@ public final class ModelSettings {
                 settings.remove(role.settingKey());
             } else {
                 settings.setProperty(role.settingKey(), own);
+            }
+            String effort = assignment.effortFor(role);
+            if (effort == null) {
+                settings.remove(effortKey(role));
+            } else {
+                settings.setProperty(effortKey(role), effort);
             }
         }
     }
