@@ -9,7 +9,7 @@ import java.util.List;
  * itself (ids unique, references resolved, clips in place) says {@link CompositionValidator}.
  */
 public record Composition(Meta meta, TimeMap timeMap, List<Section> sections, List<Part> parts, List<Track> tracks,
-                          List<Asset> assets) {
+                          List<Asset> assets, Dynamics dynamics) {
     /** A note together with where it sounds in the piece. */
     public record PlacedNote(Note note, long tick, Track track, MidiClip clip) {
         public long endTick() {
@@ -26,6 +26,40 @@ public record Composition(Meta meta, TimeMap timeMap, List<Section> sections, Li
         parts = List.copyOf(parts == null ? List.of() : parts);
         tracks = List.copyOf(tracks == null ? List.of() : tracks);
         assets = List.copyOf(assets == null ? List.of() : assets);
+        dynamics = dynamics == null ? Dynamics.NONE : dynamics;
+    }
+
+    /** A piece without dynamic marks: every note sounds as written. */
+    public Composition(Meta meta, TimeMap timeMap, List<Section> sections, List<Part> parts, List<Track> tracks,
+                       List<Asset> assets) {
+        this(meta, timeMap, sections, parts, tracks, assets, Dynamics.NONE);
+    }
+
+    /** The velocity a placed note sounds with: as written, shaped by the dynamics and its articulation. */
+    public int playedVelocity(PlacedNote placed) {
+        return dynamics.velocity(placed.track().partOf(placed.clip()), placed.tick(), placed.note().velocity(),
+                placed.note().articulation());
+    }
+
+    /** The ticks a placed note sounds: its written length, shortened or lengthened by its articulation. */
+    public long playedLength(PlacedNote placed) {
+        Note note = placed.note();
+        long length = dynamics.length(note.length(), note.articulation());
+        if (length > note.length()) {
+            // A note held over its value never sounds into the next note of the same pitch: that
+            // note would be cut off by the end of this one.
+            for (Note next : placed.clip().notes()) {
+                if (next.pitch() == note.pitch() && next.tick() > note.tick() && next.tick() < note.tick() + length) {
+                    length = Math.max(note.length(), next.tick() - note.tick());
+                }
+            }
+        }
+        return length;
+    }
+
+    /** The tick at which a placed note stops sounding. */
+    public long playedEnd(PlacedNote placed) {
+        return placed.tick() + playedLength(placed);
     }
 
     public Part part(String id) {
@@ -89,18 +123,26 @@ public record Composition(Meta meta, TimeMap timeMap, List<Section> sections, Li
     }
 
     public Composition withAssets(List<Asset> changed) {
-        return new Composition(meta, timeMap, sections, parts, tracks, changed);
+        return new Composition(meta, timeMap, sections, parts, tracks, changed, dynamics);
     }
 
     public Composition withMeta(Meta changed) {
-        return new Composition(changed, timeMap, sections, parts, tracks, assets);
+        return new Composition(changed, timeMap, sections, parts, tracks, assets, dynamics);
     }
 
     public Composition withParts(List<Part> changed) {
-        return new Composition(meta, timeMap, sections, changed, tracks, assets);
+        return new Composition(meta, timeMap, sections, changed, tracks, assets, dynamics);
+    }
+
+    public Composition withTimeMap(TimeMap changed) {
+        return new Composition(meta, changed, sections, parts, tracks, assets, dynamics);
+    }
+
+    public Composition withDynamics(Dynamics changed) {
+        return new Composition(meta, timeMap, sections, parts, tracks, assets, changed);
     }
 
     public Composition withTracks(List<Track> changed) {
-        return new Composition(meta, timeMap, sections, parts, changed, assets);
+        return new Composition(meta, timeMap, sections, parts, changed, assets, dynamics);
     }
 }

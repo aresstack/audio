@@ -23,7 +23,7 @@ import java.util.OptionalInt;
  * bars   &lt;number of bars&gt;                     (optional; see {@link #bars()})
  * track  &lt;id&gt;  &lt;program&gt;  &lt;channel&gt;  [&lt;role&gt;]
  * staff  &lt;track id&gt;  &lt;single|grand&gt;            (optional; single if missing)
- * note   &lt;track id&gt;  &lt;tick&gt;  &lt;length&gt;  &lt;pitch&gt;  &lt;velocity&gt;  [&lt;voice&gt;]
+ * note   &lt;track id&gt;  &lt;tick&gt;  &lt;length&gt;  &lt;pitch&gt;  &lt;velocity&gt;  [&lt;voice&gt;]  [&lt;articulation&gt;]
  * </pre>
  * Ticks are at {@link #PPQ} per quarter note. The tonic of a key is written as a letter with
  * {@code #} or {@code b}, for example {@code key  D  minor} or {@code key  Bb  major}. Pieces
@@ -37,6 +37,10 @@ import java.util.OptionalInt;
  * voices of the upper system of a grand staff (right hand) and {@code lh}, {@code lh2}, ... for
  * those of the lower one (left hand). A track whose notes name no voice is set by the heuristic
  * of the score, as every piece from before S1. Neither line nor column changes what sounds.
+ * Since the dynamics work package a note may name its articulation in an eighth column
+ * ({@code staccato}, {@code staccatissimo}, {@code tenuto}, {@code accent}, {@code marcato},
+ * {@code legato}); the seventh column is then blank if the voice is the guessed one. The
+ * studio plays it; the reference renderer of this module plays the note as written.
  * Byte order marks are ignored, and so are blank lines and lines that start with {@code #}.
  *
  * <p>The reader itself is lenient: it records what each line says, in the order of the
@@ -135,11 +139,18 @@ public final class ArrangementFile {
     /**
      * A {@code note} line with at least six columns whose four numbers can all be read.
      *
-     * @param voice the voice the seventh column names, without blanks; {@code null} if the line
-     *              has no seventh column or it is blank (since S1)
+     * @param voice        the voice the seventh column names, without blanks; {@code null} if the line
+     *                     has no seventh column or it is blank (since S1)
+     * @param articulation the articulation the eighth column names, without blanks; {@code null}
+     *                     if the line has no eighth column or it is blank
      */
     public record Note(int line, String text, int columns, String trackId, long tick, long length, int pitch,
-                       int velocity, String voice) implements Entry {
+                       int velocity, String voice, String articulation) implements Entry {
+        /** A note line without articulation. */
+        public Note(int line, String text, int columns, String trackId, long tick, long length, int pitch,
+                    int velocity, String voice) {
+            this(line, text, columns, trackId, tick, length, pitch, velocity, voice, null);
+        }
     }
 
     /** A line that is neither a comment nor any of the above. */
@@ -221,7 +232,8 @@ public final class ArrangementFile {
             return new Note(number, line, fields.length, fields[1], Long.parseLong(fields[2].trim()),
                     Long.parseLong(fields[3].trim()), Integer.parseInt(fields[4].trim()),
                     Integer.parseInt(fields[5].trim()),
-                    fields.length >= 7 && !fields[6].trim().isEmpty() ? fields[6].trim() : null);
+                    fields.length >= 7 && !fields[6].trim().isEmpty() ? fields[6].trim() : null,
+                    fields.length >= 8 && !fields[7].trim().isEmpty() ? fields[7].trim() : null);
         } catch (NumberFormatException odd) {
             return new Problem(number, line, "a note needs whole numbers for tick, length, pitch and velocity");
         }

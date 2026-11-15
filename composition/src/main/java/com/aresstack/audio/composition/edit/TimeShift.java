@@ -29,7 +29,10 @@ import java.util.Set;
  * <li>every section that starts at {@code f} or later starts {@code d} later; a section that runs
  *     across {@code f} becomes {@code d} longer. A shift at the border of two sections leaves a
  *     gap that the patch fills with a new section.</li>
- * <li>every tempo, meter and key event at {@code f} or later, except those at tick 0.</li>
+ * <li>every tempo, meter and key event at {@code f} or later, except those at tick 0; a gliding
+ *     tempo keeps gliding.</li>
+ * <li>every dynamic mark at {@code f} or later, except those at tick 0; a hairpin that starts
+ *     there moves, one that runs across {@code f} becomes {@code d} longer.</li>
  * <li>in the mix ({@link #shift(MixScene, long, long)}), every automation point at {@code f} or later.</li>
  * </ul>
  */
@@ -69,13 +72,13 @@ public final class TimeShift {
             }
         }
         return new Composition(piece.meta(), shift(piece.timeMap(), fromTick, ticks), sections, piece.parts(), tracks,
-                piece.assets());
+                piece.assets(), piece.dynamics().shifted(fromTick, ticks));
     }
 
     public static TimeMap shift(TimeMap time, long fromTick, long ticks) {
         List<TimeMap.Tempo> tempos = new ArrayList<>();
         for (TimeMap.Tempo t : time.tempos()) {
-            tempos.add(moves(t.tick(), fromTick) ? new TimeMap.Tempo(t.tick() + ticks, t.bpm()) : t);
+            tempos.add(moves(t.tick(), fromTick) ? new TimeMap.Tempo(t.tick() + ticks, t.bpm(), t.glide()) : t);
         }
         List<TimeMap.Meter> meters = new ArrayList<>();
         for (TimeMap.Meter m : time.meters()) {
@@ -115,9 +118,9 @@ public final class TimeShift {
         List<Note> second = new ArrayList<>();
         for (Note n : clip.notes()) {
             if (n.tick() >= cut) {
-                second.add(new Note(n.id(), n.tick() - cut, n.length(), n.pitch(), n.velocity(), n.voiceId()));
+                second.add(new Note(n.id(), n.tick() - cut, n.length(), n.pitch(), n.velocity(), n.voiceId(), n.articulation()));
             } else if (n.endTick() > cut) {
-                first.add(new Note(n.id(), n.tick(), cut - n.tick(), n.pitch(), n.velocity(), n.voiceId()));
+                first.add(new Note(n.id(), n.tick(), cut - n.tick(), n.pitch(), n.velocity(), n.voiceId(), n.articulation()));
             } else {
                 first.add(n);
             }

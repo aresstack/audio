@@ -112,7 +112,8 @@ public final class RegionRework {
                 tracks.add(new Track(track.id(), track.name(), Track.Kind.MIDI, home, owned));
             }
         }
-        MidiExport.write(new Composition(piece.meta(), piece.timeMap(), piece.sections(), selected, tracks, List.of()),
+        MidiExport.write(new Composition(piece.meta(), piece.timeMap(), piece.sections(), selected, tracks, List.of(),
+                        piece.dynamics()),
                 folder.resolve(PARTS));
         return folder;
     }

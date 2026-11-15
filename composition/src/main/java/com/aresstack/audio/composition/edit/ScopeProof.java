@@ -81,6 +81,9 @@ public final class ScopeProof {
         if (!scope.allows(EditOp.Kind.SET_TIME_MAP)) {
             entries.put("timeMap", piece.timeMap().toString());
         }
+        if (!scope.allows(EditOp.Kind.SET_DYNAMICS)) {
+            entries.put("dynamics", piece.dynamics().toString());
+        }
         if (!scope.allows(EditOp.Kind.SET_SECTIONS)) {
             entries.put("sections", piece.sections().toString());
         }

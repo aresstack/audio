@@ -94,7 +94,7 @@ public final class VoiceAddition {
         Composition piece = proposal.result();
         Track track = piece.track(voice.track().id());
         Composition solo = new Composition(piece.meta(), piece.timeMap(), piece.sections(),
-                List.of(piece.part(voice.part().id())), List.of(track), List.of());
+                List.of(piece.part(voice.part().id())), List.of(track), List.of(), piece.dynamics());
         MidiExport.write(solo, folder.resolve(SOLO));
         return folder;
     }

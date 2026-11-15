@@ -194,7 +194,7 @@ public final class StageAutomation {
         return owner.kind() == MixChannel.Owner.Kind.PART ? owner.id() : "audio-track:" + owner.id();
     }
 
-    /** A lane in seconds of the piece, with a point of its own at every change of tempo it spans. */
+    /** A lane in seconds of the piece, with a point of its own at every change of tempo (and step of a glide) it spans. */
     static AutomationCurve curve(AutomationLane lane, TimeMap time) {
         if (lane == null || lane.points().isEmpty() || !lane.known()) {
             return null;
@@ -203,7 +203,9 @@ public final class StageAutomation {
         long first = points.get(0).tick();
         long last = points.get(points.size() - 1).tick();
         TreeSet<Long> changes = new TreeSet<>();
-        for (TimeMap.Tempo tempo : time.tempos()) {
+        // Within an accelerando or ritardando seconds do not follow ticks in a straight line: the
+        // steps a player hears get points of their own, so the curve follows the glide.
+        for (TimeMap.Tempo tempo : time.playedTempos()) {
             if (tempo.tick() > first && tempo.tick() < last) {
                 changes.add(tempo.tick());
             }

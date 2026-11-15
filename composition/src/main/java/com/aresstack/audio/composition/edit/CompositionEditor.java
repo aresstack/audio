@@ -263,9 +263,10 @@ public final class CompositionEditor {
                 yield replaceClip(piece, at, changed);
             }
             case EditOp.SetSections set ->
-                    new Composition(piece.meta(), piece.timeMap(), set.sections(), piece.parts(), piece.tracks(), piece.assets());
-            case EditOp.SetTimeMap set ->
-                    new Composition(piece.meta(), set.timeMap(), piece.sections(), piece.parts(), piece.tracks(), piece.assets());
+                    new Composition(piece.meta(), piece.timeMap(), set.sections(), piece.parts(), piece.tracks(), piece.assets(),
+                            piece.dynamics());
+            case EditOp.SetTimeMap set -> piece.withTimeMap(set.timeMap());
+            case EditOp.SetDynamics set -> piece.withDynamics(set.dynamics());
             case EditOp.SetMeta set -> piece.withMeta(set.meta());
             case EditOp.ShiftTime shift -> TimeShift.shift(piece, shift.fromTick(), shift.ticks());
         };

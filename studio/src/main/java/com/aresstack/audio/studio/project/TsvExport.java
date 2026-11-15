@@ -24,6 +24,9 @@ import java.util.Map;
  * refused with {@link NotExpressible}; then {@code arrangement.mid} is the format to exchange
  * the piece in.
  *
+ * <p>Dynamic marks, hairpins and a gliding tempo are beyond the format as tempo changes are; the
+ * articulation of a note it writes in an eighth column.
+ *
  * <p>Since S1 a part on a grand staff gets a {@code staff} line after its track line, and the
  * notes of a part name their voice in a seventh column ({@link Voicing}) where the voices of the
  * model are not those the score would guess anyway. A piece whose voices are the guessed ones,
@@ -45,6 +48,9 @@ public final class TsvExport {
         TimeMap time = composition.timeMap();
         if (time.tempos().size() != 1 || time.meters().size() != 1 || time.keys().size() != 1) {
             throw new NotExpressible("arrangement.tsv knows one tempo, one meter and one key only");
+        }
+        if (!composition.dynamics().equals(com.aresstack.audio.composition.Dynamics.NONE)) {
+            throw new NotExpressible("arrangement.tsv knows no dynamic marks, hairpins or own playing factors");
         }
         TimeMap.Meter meter = time.meters().get(0);
         if (meter.numerator() > 32 || meter.denominator() > 32) {
@@ -90,9 +96,11 @@ public final class TsvExport {
             String[] voices = voices(part, placedNotes);
             for (int i = 0; i < placedNotes.size(); i++) {
                 Composition.PlacedNote placed = placedNotes.get(i);
+                com.aresstack.audio.composition.Articulation articulation = placed.note().articulation();
                 lines.add("note\t" + part.id() + "\t" + placed.tick() + "\t" + placed.note().length() + "\t"
                         + placed.note().pitch() + "\t" + placed.note().velocity()
-                        + (voices == null ? "" : "\t" + voices[i]));
+                        + (voices == null ? articulation == null ? "" : "\t" : "\t" + voices[i])
+                        + (articulation == null ? "" : "\t" + articulation.token()));
             }
         }
         return lines;

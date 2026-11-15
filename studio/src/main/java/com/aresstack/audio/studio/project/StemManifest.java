@@ -69,8 +69,9 @@ public final class StemManifest {
         sounding.append(part.program()).append('\t').append(part.role()).append('\t').append(part.libraryId())
                 .append('\t').append(TsvExport.channels(composition).get(partId)).append('\n');
         for (Composition.PlacedNote placed : composition.notesOf(partId)) {
-            sounding.append(placed.tick()).append('\t').append(placed.note().length()).append('\t')
-                    .append(placed.note().pitch()).append('\t').append(placed.note().velocity()).append('\n');
+            // As it sounds: dynamics and articulation are in the played length and velocity.
+            sounding.append(placed.tick()).append('\t').append(composition.playedLength(placed)).append('\t')
+                    .append(placed.note().pitch()).append('\t').append(composition.playedVelocity(placed)).append('\n');
         }
         try {
             MessageDigest sha = MessageDigest.getInstance("SHA-256");

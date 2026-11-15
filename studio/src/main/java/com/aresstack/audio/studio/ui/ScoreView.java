@@ -54,6 +54,12 @@ final class ScoreView extends JComponent implements Scrollable {
     private static final int GRAND_STEP = 62;
     private static final int SYSTEM_GAP = 46;
     private static final int TOP = 54;
+    /** The room over a line of the sheet for tempo marks, where the piece changes its tempo. */
+    private static final int TEMPO_BAND = 18;
+    /** How far below its staff the dynamics of a staff stand; between the systems of a grand staff they stand in the middle. */
+    private static final float DYNAMICS_BELOW = 26f;
+    /** How wide a hairpin opens. */
+    private static final float HAIRPIN_OPENING = 9f;
     private static final Map<String, Path2D> GLYPHS = new HashMap<String, Path2D>();
 
     static {
@@ -105,6 +111,8 @@ final class ScoreView extends JComponent implements Scrollable {
         int shift;
         /** A rest that fills its bar: written as a whole rest in every meter. */
         boolean wholeBar;
+        /** The sixteenth of the piece the event begins on, counted from 0 over all bars. */
+        int position;
 
         Placed(Score.Event event, float x, float staffTop, boolean stemUp) {
             this.event = event;
@@ -186,13 +194,14 @@ final class ScoreView extends JComponent implements Scrollable {
             double scale = format.getImageableWidth() / sheet.getWidth();
             int high = sheet.systemHeight();
             int systems = (sheet.score.bars() + sheet.barsPerSystem() - 1) / sheet.barsPerSystem();
-            int perPage = Math.max(1, (int) ((format.getImageableHeight() / scale - TOP) / high));
+            int top = TOP + sheet.band();
+            int perPage = Math.max(1, (int) ((format.getImageableHeight() / scale - top) / high));
             int first = page * perPage;
             if (first >= systems) {
                 return java.awt.print.Printable.NO_SUCH_PAGE;
             }
-            int from = first == 0 ? 0 : TOP + first * high - 40;
-            int to = TOP + Math.min(systems, first + perPage) * high - 40;
+            int from = first == 0 ? 0 : top + first * high - 40 - sheet.band();
+            int to = top + Math.min(systems, first + perPage) * high - 40 - sheet.band();
             Graphics2D g = (Graphics2D) graphics.create();
             g.translate(format.getImageableX(), format.getImageableY());
             g.scale(scale, scale);
@@ -211,10 +220,10 @@ final class ScoreView extends JComponent implements Scrollable {
         }
         second = played;
         if (score != null && played >= 0 && isShowing()) {
-            int system = Math.min(score.bars() - 1, (int) (played / score.secondsPerBar())) / barsPerSystem();
+            int system = Math.min(score.bars() - 1, (int) score.barAt(played)) / barsPerSystem();
             if (system != shownSystem) {
                 shownSystem = system;
-                scrollRectToVisible(new Rectangle(0, TOP - 30 + system * systemHeight(), 10,
+                scrollRectToVisible(new Rectangle(0, TOP + band() - 30 + system * systemHeight(), 10,
                         Math.min(systemHeight(), getVisibleRect().height)));
             }
         }
@@ -264,7 +273,12 @@ final class ScoreView extends JComponent implements Scrollable {
     private int systemHeight() {
         List<Score.Staff> staves = staves();
         float[] tops = tops(staves);
-        return Math.round(staves.isEmpty() ? STAFF_STEP : tops[tops.length - 1] + STAFF_STEP) + SYSTEM_GAP;
+        return Math.round(staves.isEmpty() ? STAFF_STEP : tops[tops.length - 1] + STAFF_STEP) + SYSTEM_GAP + band();
+    }
+
+    /** The room for tempo marks over every line of the sheet: none for a piece of one tempo. */
+    private int band() {
+        return score == null || score.tempoMarks().isEmpty() ? 0 : TEMPO_BAND;
     }
 
     /** Where each staff begins below the top of its line of the sheet: the two systems of a grand staff stand closer. */
@@ -292,11 +306,11 @@ final class ScoreView extends JComponent implements Scrollable {
     @Override
     public String getToolTipText(java.awt.event.MouseEvent event) {
         List<Score.Staff> staves = staves();
-        if (score == null || staves.isEmpty() || event.getY() < TOP - 20) {
+        if (score == null || staves.isEmpty() || event.getY() < TOP + band() - 20) {
             return null;
         }
         float[] tops = tops(staves);
-        float within = (event.getY() - TOP) % (float) systemHeight();
+        float within = (event.getY() - TOP - band()) % (float) systemHeight();
         for (int row = 0; row < staves.size(); row++) {
             Score.Staff staff = staves.get(row);
             if (within >= tops[row] - 2 * SPACE && within <= tops[row] + 6 * SPACE
@@ -317,7 +331,7 @@ final class ScoreView extends JComponent implements Scrollable {
             return new Dimension(600, 200);
         }
         int systems = (score.bars() + barsPerSystem() - 1) / barsPerSystem();
-        return new Dimension(600, TOP + systems * systemHeight());
+        return new Dimension(600, TOP + band() + systems * systemHeight());
     }
 
     @Override
@@ -375,7 +389,7 @@ final class ScoreView extends JComponent implements Scrollable {
         g.drawString("♩ = " + score.tempo(), left, 30);
 
         for (int system = 0; system < systems; system++) {
-            float systemTop = TOP + system * systemHeight();
+            float systemTop = TOP + band() + system * systemHeight();
             if (visible != null && (systemTop > visible.y + visible.height + 60
                     || systemTop + systemHeight() < visible.y - 60)) {
                 continue;
@@ -427,8 +441,9 @@ final class ScoreView extends JComponent implements Scrollable {
             if (system > 0) {
                 g.setColor(AudioStudioTheme.withAlpha(lines, 70));
                 g.setStroke(new BasicStroke(1f));
-                g.draw(new Line2D.Float(14, systemTop - 34, getWidth() - 24, systemTop - 34));
+                g.draw(new Line2D.Float(14, systemTop - 34 - band(), getWidth() - 24, systemTop - 34 - band()));
             }
+            tempoMarks(g, systemTop, firstBar, lastBar, left + LEAD, barWidth, barLength, systemRight);
 
             for (int row = 0; row < staves.size(); row++) {
                 Score.Staff staff = staves.get(row);
@@ -491,6 +506,11 @@ final class ScoreView extends JComponent implements Scrollable {
                         g.fill(new Rectangle2D.Float(barRight - 3, top, 3.6f, reach - top));
                     }
                 }
+
+                // Dynamics under the staff; between the two systems of a grand staff.
+                float dynamicsLine = upper ? (top + 4 * SPACE + systemTop + tops[row + 1]) / 2 + 5
+                        : top + 4 * SPACE + DYNAMICS_BELOW;
+                dynamics(g, staff, dynamicsLine, firstBar, lastBar, left + LEAD, barWidth, barLength, systemRight);
 
                 // The notes of this staff in this system, one voice after the other.
                 // Where the heads of earlier voices stand in each bar: a later voice steps aside from them.
@@ -574,6 +594,7 @@ final class ScoreView extends JComponent implements Scrollable {
                                     forced != null ? forced.booleanValue() : stemUp(event, staff.clef()));
                             place.shift = restShift;
                             place.wholeBar = wholeBar;
+                            place.position = bar * barLength + event.start();
                             inBar.add(place);
                             if (!event.rest()) {
                                 accidentals(g, place, staff.clef());
@@ -592,6 +613,12 @@ final class ScoreView extends JComponent implements Scrollable {
                                 float to = index + 1 < placed.size() ? placed.get(index + 1).x : systemRight - 4;
                                 tie(g, place, to, staff.clef());
                             }
+                            com.aresstack.audio.composition.Articulation articulation =
+                                    staff.articulationAt(place.position);
+                            if (articulation != null && !place.wholeBar) {
+                                float next = index + 1 < placed.size() ? placed.get(index + 1).x : systemRight - 4;
+                                articulation(g, place, articulation, next, staff.clef());
+                            }
                         }
                     }
                 }
@@ -599,7 +626,7 @@ final class ScoreView extends JComponent implements Scrollable {
 
             // Where the playback is.
             if (second >= 0) {
-                double bar = second / score.secondsPerBar();
+                double bar = score.barAt(second);
                 if (bar >= firstBar && bar < lastBar) {
                     int whole = (int) bar;
                     float x = (float) (left + LEAD + (whole - firstBar) * barWidth + 18 + (barWidth - 30) * (bar - whole));
@@ -911,6 +938,153 @@ final class ScoreView extends JComponent implements Scrollable {
             arc.moveTo(from, y);
             arc.curveTo(from + (end - from) * 0.3f, y + bulge, from + (end - from) * 0.7f, y + bulge, end, y);
             g.draw(arc);
+        }
+    }
+
+    /** Where a sixteenth of the piece lies in a line of the sheet, or NaN outside of it; its end is the right edge. */
+    private static float xOf(int position, int firstBar, int lastBar, float barsLeft, float barWidth, int barLength,
+                             float systemRight) {
+        int bar = position / barLength;
+        if (bar == lastBar && position % barLength == 0) {
+            return systemRight;
+        }
+        if (bar < firstBar || bar >= lastBar) {
+            return Float.NaN;
+        }
+        return barsLeft + (bar - firstBar) * barWidth + 18 + (barWidth - 30) * (position % barLength) / barLength;
+    }
+
+    /** The tempo marks over a line of the sheet, and the dashed line of an accelerando or ritardando through it. */
+    private void tempoMarks(Graphics2D g, float systemTop, int firstBar, int lastBar, float barsLeft, float barWidth,
+                            int barLength, float systemRight) {
+        if (score.tempoMarks().isEmpty()) {
+            return;
+        }
+        float y = systemTop - 36;
+        int lineStart = firstBar * barLength;
+        int lineEnd = lastBar * barLength;
+        g.setFont(new java.awt.Font(java.awt.Font.SERIF, java.awt.Font.BOLD | java.awt.Font.ITALIC, 13));
+        FontMetrics metrics = g.getFontMetrics();
+        for (Score.TempoMark mark : score.tempoMarks()) {
+            float x = xOf(mark.position(), firstBar, lastBar, barsLeft, barWidth, barLength, systemRight);
+            float dashFrom = Float.NaN;
+            if (!Float.isNaN(x) && mark.position() < lineEnd) {
+                g.setColor(ink);
+                g.drawString(mark.text(), x - 4, y);
+                dashFrom = x - 4 + metrics.stringWidth(mark.text()) + 4;
+            } else if (mark.until() > lineStart && mark.position() < lineStart) {
+                dashFrom = barsLeft; // the glide goes on from the line before
+            }
+            if (mark.until() >= 0 && !Float.isNaN(dashFrom)) {
+                float to = mark.until() >= lineEnd ? systemRight
+                        : xOf(mark.until(), firstBar, lastBar, barsLeft, barWidth, barLength, systemRight) - 8;
+                if (to > dashFrom) {
+                    g.setColor(faint);
+                    g.setStroke(new BasicStroke(1f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f,
+                            new float[]{4f, 4f}, 0f));
+                    g.draw(new Line2D.Float(dashFrom, y - 4, to, y - 4));
+                }
+            }
+        }
+    }
+
+    /** The dynamic marks and hairpins of a staff in a line of the sheet, on a line under it. */
+    private void dynamics(Graphics2D g, Score.Staff staff, float y, int firstBar, int lastBar, float barsLeft,
+                          float barWidth, int barLength, float systemRight) {
+        if (staff.dynamics().isEmpty() && staff.hairpins().isEmpty()) {
+            return;
+        }
+        int lineStart = firstBar * barLength;
+        int lineEnd = lastBar * barLength;
+        g.setColor(ink);
+        g.setFont(new java.awt.Font(java.awt.Font.SERIF, java.awt.Font.BOLD | java.awt.Font.ITALIC, 15));
+        FontMetrics metrics = g.getFontMetrics();
+        for (Score.DynamicMark mark : staff.dynamics()) {
+            float x = xOf(mark.position(), firstBar, lastBar, barsLeft, barWidth, barLength, systemRight);
+            if (!Float.isNaN(x) && mark.position() < lineEnd) {
+                g.drawString(mark.level().symbol(), x - 2, y);
+            }
+        }
+        g.setStroke(new BasicStroke(1.2f));
+        for (Score.HairpinMark pin : staff.hairpins()) {
+            if (pin.to() <= lineStart || pin.from() >= lineEnd) {
+                continue;
+            }
+            float from = pin.from() < lineStart ? barsLeft
+                    : xOf(pin.from(), firstBar, lastBar, barsLeft, barWidth, barLength, systemRight);
+            float to = pin.to() >= lineEnd ? systemRight - 4
+                    : xOf(pin.to(), firstBar, lastBar, barsLeft, barWidth, barLength, systemRight) - 6;
+            // A hairpin starting on a mark leaves room for it.
+            for (Score.DynamicMark mark : staff.dynamics()) {
+                if (mark.position() == pin.from()) {
+                    from += metrics.stringWidth(mark.level().symbol()) + 2;
+                }
+            }
+            if (to <= from + 4) {
+                continue;
+            }
+            // Where the hairpin is cut by the end of a line, it opens (or closes) only part of the way.
+            float span = Math.max(1, pin.to() - pin.from());
+            float atFrom = Math.max(0, Math.min(1, (Math.max(pin.from(), lineStart) - pin.from()) / span));
+            float atTo = Math.max(0, Math.min(1, (Math.min(pin.to(), lineEnd) - pin.from()) / span));
+            float openFrom = (pin.crescendo() ? atFrom : 1 - atFrom) * HAIRPIN_OPENING / 2;
+            float openTo = (pin.crescendo() ? atTo : 1 - atTo) * HAIRPIN_OPENING / 2;
+            float middle = y - 5;
+            g.draw(new Line2D.Float(from, middle - openFrom, to, middle - openTo));
+            g.draw(new Line2D.Float(from, middle + openFrom, to, middle + openTo));
+        }
+    }
+
+    /** The sign of an articulation at a note, on the side of the head away from the stem; legato as a slur to the next note. */
+    private void articulation(Graphics2D g, Placed place, com.aresstack.audio.composition.Articulation articulation,
+                              float next, Score.Clef clef) {
+        int[] pitches = place.event.pitches();
+        int low = Integer.MAX_VALUE;
+        int high = Integer.MIN_VALUE;
+        for (int i = 0; i < pitches.length; i++) {
+            low = Math.min(low, place(place.event, i, clef));
+            high = Math.max(high, place(place.event, i, clef));
+        }
+        boolean below = place.stemUp;
+        float head = below ? y(place.staffTop, low) : y(place.staffTop, high);
+        float y = below ? Math.max(head + 1.3f * SPACE, y(place.staffTop, -1)) : Math.min(head - 1.3f * SPACE,
+                y(place.staffTop, 9));
+        float x = place.x + 0.59f * SPACE;
+        g.setColor(ink);
+        g.setStroke(new BasicStroke(1.3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        switch (articulation) {
+            case STACCATO -> g.fill(new Ellipse2D.Float(x - 1.8f, y - 1.8f, 3.6f, 3.6f));
+            case STACCATISSIMO -> {
+                Path2D wedge = new Path2D.Float();
+                float tip = below ? y - 3.5f : y + 3.5f;
+                wedge.moveTo(x - 2.2f, below ? y + 3.5f : y - 3.5f);
+                wedge.lineTo(x + 2.2f, below ? y + 3.5f : y - 3.5f);
+                wedge.lineTo(x, tip);
+                wedge.closePath();
+                g.fill(wedge);
+            }
+            case TENUTO -> g.draw(new Line2D.Float(x - 4.5f, y, x + 4.5f, y));
+            case ACCENT -> {
+                g.draw(new Line2D.Float(x - 4.5f, y - 3f, x + 4.5f, y));
+                g.draw(new Line2D.Float(x + 4.5f, y, x - 4.5f, y + 3f));
+            }
+            case MARCATO -> {
+                float point = below ? y + 3.5f : y - 3.5f;
+                float foot = below ? y - 3.5f : y + 3.5f;
+                g.draw(new Line2D.Float(x - 3.5f, foot, x, point));
+                g.draw(new Line2D.Float(x, point, x + 3.5f, foot));
+            }
+            case LEGATO -> {
+                float from = place.x + 0.6f * SPACE;
+                float end = Math.max(from + 8, next + 0.6f * SPACE);
+                float bulge = (below ? 0.8f : -0.8f) * SPACE;
+                Path2D arc = new Path2D.Float();
+                arc.moveTo(from, y);
+                arc.curveTo(from + (end - from) * 0.3f, y + bulge, from + (end - from) * 0.7f, y + bulge, end, y);
+                g.draw(arc);
+            }
+            default -> {
+            }
         }
     }
 }

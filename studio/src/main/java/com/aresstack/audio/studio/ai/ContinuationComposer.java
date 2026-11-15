@@ -496,7 +496,7 @@ public final class ContinuationComposer {
                             + " endet dort, wo das verschobene Original beginnt (Originaldauer nicht erhaltbar)");
                 }
                 removed.add(cut.id());
-                added.add(new Note(cut.id(), cut.tick(), length, cut.pitch(), cut.velocity(), cut.voiceId()));
+                added.add(new Note(cut.id(), cut.tick(), length, cut.pitch(), cut.velocity(), cut.voiceId(), cut.articulation()));
                 end = Math.max(end, hold.tick() + length);
             }
             long length = end - half.startTick();
@@ -570,7 +570,7 @@ public final class ContinuationComposer {
                     long offset = clip.startTick() - home.startTick();
                     for (Note note : clip.notes()) {
                         added.add(new Note(note.id(), note.tick() + offset, note.length(), note.pitch(), note.velocity(),
-                                note.voiceId()));
+                                note.voiceId(), note.articulation()));
                     }
                     end = Math.max(end, clip.endTick());
                     clips.remove(placed);
@@ -585,7 +585,7 @@ public final class ContinuationComposer {
                                     + ContextBuilder.quarters(stop - note.tick()) + "\tvor dem Clip von " + owner
                                     + " abgeschnitten");
                             note = new Note(note.id(), note.tick(), stop - note.tick(), note.pitch(), note.velocity(),
-                                    note.voiceId());
+                                    note.voiceId(), note.articulation());
                         }
                         cut.add(note);
                     }

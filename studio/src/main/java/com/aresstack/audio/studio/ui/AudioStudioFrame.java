@@ -774,7 +774,16 @@ public final class AudioStudioFrame extends JFrame {
         sheet.getVerticalScrollBar().setUnitIncrement(40);
         JPanel notes = new JPanel(new BorderLayout(0, 6));
         notes.setOpaque(false);
-        notes.add(DeckWidgets.lettering("Partitur · was die Instrumente spielen"), BorderLayout.NORTH);
+        // Over the score: how it is played, tempo, dynamics and articulation, to be set by hand.
+        JPanel scoreHead = new JPanel(new BorderLayout());
+        scoreHead.setOpaque(false);
+        scoreHead.add(DeckWidgets.lettering("Partitur · was die Instrumente spielen"), BorderLayout.WEST);
+        JButton performance = new JButton("Vortrag: Tempo, Dynamik, Artikulation …");
+        performance.setToolTipText("Tempowechsel (auch accelerando, ritardando), Dynamikzeichen und Gabeln, "
+                + "Artikulationen und was die Stufen bedeuten");
+        performance.addActionListener(event -> performance());
+        scoreHead.add(performance, BorderLayout.EAST);
+        notes.add(scoreHead, BorderLayout.NORTH);
         notes.add(sheet, BorderLayout.CENTER);
         JPanel written = new JPanel(new BorderLayout(0, 14));
         written.setOpaque(false);
@@ -2687,6 +2696,48 @@ public final class AudioStudioFrame extends JFrame {
             message("Die Intensität ließ sich nicht setzen: " + failed.getMessage());
         }
         showSections();
+    }
+
+    /**
+     * The user sets how the piece is played: tempo with jumps and glides, dynamic marks and
+     * hairpins, what the levels and articulations stand for, and articulations of notes. Each
+     * confirmed change is one undoable step; what sounds different is rendered again.
+     */
+    private void performance() {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent()) {
+            message("Erst ein Stück komponieren: dann hat es Noten, deren Vortrag sich einstellen lässt.");
+            return;
+        }
+        if (busy()) {
+            return;
+        }
+        final com.aresstack.audio.studio.application.ProjectSession session = piece.get();
+        PerformanceDialog.Result chosen = PerformanceDialog.show(this, session.composition(),
+                (partId, first, last, articulation) -> {
+                    com.aresstack.audio.composition.edit.ChangeSet changes =
+                            com.aresstack.audio.studio.application.PerformanceEdit.articulate(session, partId, first,
+                                    last, articulation);
+                    if (!changes.isEmpty()) {
+                        pieceChanged((articulation == null ? "Artikulation entfernt" : articulation.germanName())
+                                + " für " + partId + ", Takt " + first + " bis " + last
+                                + " (unter „Rückgängig“ zurückzunehmen).", changes);
+                    }
+                });
+        if (chosen == null) {
+            return;
+        }
+        try {
+            com.aresstack.audio.composition.edit.ChangeSet changes =
+                    com.aresstack.audio.studio.application.PerformanceEdit.apply(session, chosen.tempos(),
+                            chosen.dynamics());
+            if (!changes.isEmpty()) {
+                pieceChanged("Tempo und Dynamik gesetzt (unter „Rückgängig“ zurückzunehmen); was anders klingt, wird neu "
+                        + "gerendert.", changes);
+            }
+        } catch (Exception failed) {
+            message("Tempo und Dynamik ließen sich nicht setzen: " + failed.getMessage());
+        }
     }
 
     /** Lays an intensity curve over the sections of the marked bars, or of the whole piece; the form only. */
