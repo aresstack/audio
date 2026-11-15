@@ -203,6 +203,13 @@ public final class AudioStudioFrame extends JFrame {
             DeckWidgets.Symbol.CANCEL, AudioStudioTheme.AMBER, "Laufenden Vorgang abbrechen");
     private final java.awt.CardLayout pages = new java.awt.CardLayout();
     private final JPanel pageHolder = new JPanel(pages);
+    /** Where a proposal of the AI is shown, above the tracks of the arrangement; empty while there is none. */
+    private final JPanel proposalHolder = new JPanel(new BorderLayout());
+    /** The proposal that waits for the user's answer, or {@code null}. */
+    private ProposalPanel openProposal;
+    /** The piece a proposal was made for and its notes at that time: a proposal fits only the piece it was made for. */
+    private com.aresstack.audio.studio.application.ProjectSession offerPiece;
+    private com.aresstack.audio.composition.Composition offerBase;
     private final javax.swing.Timer clock = new javax.swing.Timer(33, event -> tick());
     private boolean choosingPlayback;
 
@@ -501,7 +508,13 @@ public final class AudioStudioFrame extends JFrame {
                 "Die KI verteilt das Material markierter Takte neu auf die Stimmen", this::reorchestrate));
         JPanel arrangementBody = new JPanel(new BorderLayout());
         arrangementBody.setOpaque(false);
-        arrangementBody.add(pieceActions, BorderLayout.NORTH);
+        // A proposal of the AI waits here, under the keys that ask for one: part of the page, no dialog.
+        proposalHolder.setOpaque(false);
+        JPanel aboveTracks = new JPanel(new BorderLayout());
+        aboveTracks.setOpaque(false);
+        aboveTracks.add(pieceActions, BorderLayout.NORTH);
+        aboveTracks.add(proposalHolder, BorderLayout.CENTER);
+        arrangementBody.add(aboveTracks, BorderLayout.NORTH);
         arrangementBody.add(trackTable, BorderLayout.CENTER);
         DeckWidgets.Module output = new DeckWidgets.Module("Arrangement", arrangementBody);
         output.setHeadEnd(sourceChoice);
@@ -2255,6 +2268,11 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     private boolean busy() {
+        if (openProposal != null) {
+            showPage("deck");
+            message("Erst den Vorschlag der KI über den Spuren übernehmen oder verwerfen.");
+            return true;
+        }
         if (worker != null && !worker.isDone()) {
             message("Erst den laufenden Vorgang beenden oder abbrechen.");
             return true;
@@ -2268,6 +2286,7 @@ public final class AudioStudioFrame extends JFrame {
      */
     private void proposeAgain(final String trackId,
                               final com.aresstack.audio.studio.application.ProjectSession piece) {
+        offerPiece = piece;
         final TrackArrangement chosen;
         final com.aresstack.audio.studio.ai.ModelLineup models;
         final RenderSettings settings;
@@ -2340,8 +2359,9 @@ public final class AudioStudioFrame extends JFrame {
                         + "es gibt nichts zu übernehmen.");
                 return;
             }
-            boolean take = new ProposalDialog(this, "Vorschlag der KI",
-                    "Die KI hat die Spur „" + offer.trackId() + "“ neu komponiert.", new ProposalDialog.Listening() {
+            showProposal(new ProposalPanel("Die KI hat die Spur „" + offer.trackId() + "“ neu komponiert.",
+                    java.util.Collections.<String>emptyList(), java.util.Collections.<String>emptyList(), null, false,
+                    new ProposalPanel.Listening() {
                         @Override
                         public void proposal() {
                             listenTo(heard, "VORSCHLAG · " + offer.trackId().toUpperCase(java.util.Locale.ROOT), 0);
@@ -2357,16 +2377,21 @@ public final class AudioStudioFrame extends JFrame {
                         public void stop() {
                             stopPlayback();
                         }
-                    }).ask();
-            stopPlayback();
-            showPlaybackChoice(); // the player lets go of the preview before its folder goes
-            if (take) {
-                com.aresstack.audio.composition.edit.ChangeSet changes = offer.accept();
-                pieceChanged("Vorschlag übernommen: Spur " + offer.trackId() + " neu komponiert.", changes);
-            } else {
-                offer.discard();
-                append("Vorschlag verworfen; das Stück ist unverändert.");
-            }
+                    }, verdict -> {
+                        boolean fits = closeProposal();
+                        try {
+                            if (verdict == ProposalPanel.Verdict.TAKE && fits) {
+                                com.aresstack.audio.composition.edit.ChangeSet changes = offer.accept();
+                                pieceChanged("Vorschlag übernommen: Spur " + offer.trackId() + " neu komponiert.", changes);
+                            } else {
+                                offer.discard();
+                                append(verdict == ProposalPanel.Verdict.TAKE ? STALE_PROPOSAL
+                                        : "Vorschlag verworfen; das Stück ist unverändert.");
+                            }
+                        } catch (Exception failed) {
+                            message("Der Vorschlag ließ sich nicht abschließen: " + failed.getMessage());
+                        }
+                    }));
         } catch (Exception failed) {
             message("Der Vorschlag ließ sich nicht abschließen: " + failed.getMessage());
         }
@@ -2568,6 +2593,7 @@ public final class AudioStudioFrame extends JFrame {
      */
     private void offerFromAi(final com.aresstack.audio.studio.application.ProjectSession piece, String said,
                              final OfferStart starter) {
+        offerPiece = piece;
         final com.aresstack.audio.studio.ai.ModelLineup models;
         final RenderSettings settings;
         try {
@@ -2628,8 +2654,8 @@ public final class AudioStudioFrame extends JFrame {
                              final Path alone, final com.aresstack.audio.studio.ai.ModelLineup models,
                              final RenderSettings settings) {
         try {
-            ProposalDialog.Verdict verdict = new ProposalDialog(this, "Vorschlag der KI", offer.what(), offer.notes(),
-                    offer.toConfirm(), alone == null ? null : offer.soloName(), true, new ProposalDialog.Listening() {
+            showProposal(new ProposalPanel(offer.what(), offer.notes(), offer.toConfirm(),
+                    alone == null ? null : offer.soloName(), true, new ProposalPanel.Listening() {
                         @Override
                         public void proposal() {
                             listenTo(whole, "VORSCHLAG", offer.listenFromSecond());
@@ -2650,14 +2676,25 @@ public final class AudioStudioFrame extends JFrame {
                         public void stop() {
                             stopPlayback();
                         }
-                    }).decide();
-            stopPlayback();
-            showPlaybackChoice(); // the player lets go of the preview before its folder goes
-            if (verdict == ProposalDialog.Verdict.TAKE) {
+                    }, verdict -> offerDecided(offer, verdict, models, settings)));
+        } catch (Exception failed) {
+            message("Der Vorschlag ließ sich nicht abschließen: " + failed.getMessage());
+        }
+    }
+
+    private static final String STALE_PROPOSAL = "Das Stück wurde geändert, seit die KI den Vorschlag gemacht hat;"
+            + " er passt nicht mehr und wurde verworfen. Das Stück ist, wie es war.";
+
+    /** The user answered the proposal above the tracks: it is taken, made again or thrown away. */
+    private void offerDecided(final com.aresstack.audio.studio.application.AiOffer offer, ProposalPanel.Verdict verdict,
+                              final com.aresstack.audio.studio.ai.ModelLineup models, final RenderSettings settings) {
+        boolean fits = closeProposal();
+        try {
+            if (verdict == ProposalPanel.Verdict.TAKE && fits) {
                 String what = offer.what();
-                offer.confirm(); // the dialog lets "Übernehmen" through only after the user ticked what the original loses
+                offer.confirm(); // the panel lets "Übernehmen" through only after the user ticked what the original loses
                 pieceChanged("Vorschlag übernommen. " + what, offer.accept());
-            } else if (verdict == ProposalDialog.Verdict.AGAIN) {
+            } else if (verdict == ProposalPanel.Verdict.AGAIN && fits) {
                 append("Die KI schreibt den Vorschlag noch einmal, anders.");
                 activeModels = models;
                 start(new Operation() {
@@ -2677,11 +2714,41 @@ public final class AudioStudioFrame extends JFrame {
                 });
             } else {
                 offer.discard();
-                append("Vorschlag verworfen; das Stück ist unverändert.");
+                append(verdict == ProposalPanel.Verdict.DROP ? "Vorschlag verworfen; das Stück ist unverändert."
+                        : STALE_PROPOSAL);
             }
         } catch (Exception failed) {
             message("Der Vorschlag ließ sich nicht abschließen: " + failed.getMessage());
         }
+    }
+
+    /** Shows a proposal above the tracks of the arrangement and brings that page to the front. */
+    private void showProposal(ProposalPanel proposal) {
+        openProposal = proposal;
+        offerBase = offerPiece == null ? null : offerPiece.composition();
+        proposalHolder.removeAll();
+        proposalHolder.add(proposal, BorderLayout.CENTER);
+        proposalHolder.revalidate();
+        proposalHolder.repaint();
+        showPage("deck");
+        append("Der Vorschlag der KI steht auf der Seite Arrangement über den Spuren: anhören, übernehmen oder verwerfen.");
+    }
+
+    /**
+     * Takes the answered proposal from the page and lets the player go of its preview.
+     *
+     * @return whether the piece still has the notes the proposal was made for
+     */
+    private boolean closeProposal() {
+        openProposal = null;
+        proposalHolder.removeAll();
+        proposalHolder.revalidate();
+        proposalHolder.repaint();
+        stopPlayback();
+        showPlaybackChoice(); // the player lets go of the preview before its folder goes
+        boolean fits = offerPiece == null || offerBase == null || offerBase.equals(offerPiece.composition());
+        offerBase = null;
+        return fits;
     }
 
     /** Plays a file that is not one of the playback choices: the preview of a proposal. */
