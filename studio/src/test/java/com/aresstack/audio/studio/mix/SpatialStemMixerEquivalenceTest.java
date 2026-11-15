@@ -20,6 +20,20 @@ import org.junit.rules.TemporaryFolder;
  * old mixer is kept unchanged as {@link LegacySpatialStemMixer} for this comparison.
  */
 public final class SpatialStemMixerEquivalenceTest {
+    /**
+     * The old mixer knows wall echoes at level 1 only: compared with it at that level, everything
+     * but the decided level of the wall echoes (0.5, {@link WallEchoMotionTest}) stays to the bit.
+     */
+    @org.junit.Before
+    public void wallEchoesAsTheOldMixerHadThem() {
+        SpatialStemMixer.wallEchoLevel = 1.0;
+    }
+
+    @org.junit.After
+    public void wallEchoesAsDecided() {
+        SpatialStemMixer.wallEchoLevel = WallEchoMotionTest.LEVEL_DECIDED;
+    }
+
     private static final int RATE = SpatialStemMixer.RATE;
     private static final int[] BLOCKS = {64, 512, 4096, 1, 777};
     private static final AcousticRoom DRY = AcousticRoom.STUDIO.withAmount(0);

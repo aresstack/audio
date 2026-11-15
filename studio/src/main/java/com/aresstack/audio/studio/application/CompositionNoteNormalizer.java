@@ -65,6 +65,17 @@ public final class CompositionNoteNormalizer {
      */
     public NormalizedNote normalize(JsonObject source, String part, String role, int noteIndex,
                                     int firstBar, int bars) {
+        return normalize(source, part, role, noteIndex, firstBar, bars, range(role));
+    }
+
+    /**
+     * A note of an answer for one section within the range of pitches given, for example that of
+     * a hand of a grand staff ({@link #range(String, boolean, String)}).
+     *
+     * @param range lowest and highest pitch the note may have
+     */
+    public NormalizedNote normalize(JsonObject source, String part, String role, int noteIndex,
+                                    int firstBar, int bars, int[] range) {
         final double sectionBeats = bars * spec.quartersPerBar();
         final double offset = firstBar * spec.quartersPerBar();
         final double beat;
@@ -99,7 +110,7 @@ public final class CompositionNoteNormalizer {
         alignedDuration = Math.min(alignedDuration, sectionBeats - alignedBeat);
 
         int midiPitch = Math.max(0, Math.min(127, pitch));
-        int correctedPitch = normalizePitch(role, offset + alignedBeat, midiPitch);
+        int correctedPitch = normalizePitch(role, offset + alignedBeat, midiPitch, range);
         int correctedVelocity = Math.max(35, Math.min(105, velocity));
 
         report(part, noteIndex, "beat", beat, alignedBeat, "Align to 16th-note grid");
@@ -145,6 +156,31 @@ public final class CompositionNoteNormalizer {
         return beats == Math.rint(beats) ? String.valueOf((long) beats) : String.valueOf(beats);
     }
 
+    /** The range of the right hand of a grand staff: F below middle C up to C three octaves above it. */
+    static final int[] RIGHT_HAND = {53, 96};
+    /** The range of the left hand of a grand staff: the low A of the bass up to G above middle C. */
+    static final int[] LEFT_HAND = {33, 67};
+
+    /**
+     * The lowest and highest pitch of a note (since S1): on a grand staff (piano, organ, harp) the
+     * range of the hand the note names, or both hands together if it names none, whatever the
+     * role; on a single staff the range of the role, as before.
+     *
+     * @param voice the voice the note names in the words of {@code score.Voicing}, or {@code null}
+     */
+    static int[] range(String role, boolean grand, String voice) {
+        if (!grand || "drums".equals(role)) {
+            return range(role);
+        }
+        if (voice != null && voice.startsWith("rh")) {
+            return RIGHT_HAND;
+        }
+        if (voice != null && voice.startsWith("lh")) {
+            return LEFT_HAND;
+        }
+        return new int[]{LEFT_HAND[0], RIGHT_HAND[1]};
+    }
+
     /** The lowest and highest pitch of a role. */
     private static int[] range(String role) {
         if ("melody".equals(role)) {
@@ -160,14 +196,13 @@ public final class CompositionNoteNormalizer {
     }
 
     /** @param beat the beat of the note in quarter notes from the start of the piece */
-    private int normalizePitch(String role, double beat, int pitch) {
+    private int normalizePitch(String role, double beat, int pitch, int[] range) {
         if ("drums".equals(role)) {
             if (!spec.snapToHarmony() && pitch >= 35 && pitch <= 81) {
                 return pitch; // any sound of the General MIDI kit
             }
             return nearest(pitch, new int[]{36, 38, 42, 46}, 36, 46, false);
         }
-        int[] range = range(role);
         if (!spec.snapToHarmony()) {
             int moved = pitch;
             while (moved < range[0]) {

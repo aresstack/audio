@@ -38,9 +38,20 @@ public final class SoundSourcePlacement {
     private final boolean muted;
     private final boolean locked;
     private final List<LevelPoint> dynamics;
+    private final double height;
 
     public SoundSourcePlacement(String trackId, double x, double depth, double levelDb, double width,
                                 double reverb, boolean muted, boolean locked, List<LevelPoint> dynamics) {
+        this(trackId, x, depth, levelDb, width, reverb, muted, locked, dynamics, 0);
+    }
+
+    /**
+     * @param height how high the track stands above the ears of the listener, 0 (ear height, as
+     *               every stage before work package D4) to 1 (top of the stage)
+     */
+    public SoundSourcePlacement(String trackId, double x, double depth, double levelDb, double width,
+                                double reverb, boolean muted, boolean locked, List<LevelPoint> dynamics,
+                                double height) {
         if (trackId == null || trackId.trim().isEmpty()) {
             throw new IllegalArgumentException("A placement needs the id of its track.");
         }
@@ -52,6 +63,7 @@ public final class SoundSourcePlacement {
         this.reverb = within(reverb, 0, 1);
         this.muted = muted;
         this.locked = locked;
+        this.height = within(height, 0, 1);
         List<LevelPoint> points = new ArrayList<LevelPoint>();
         if (dynamics != null) {
             for (LevelPoint point : dynamics) {
@@ -74,41 +86,48 @@ public final class SoundSourcePlacement {
     public double levelDb() { return levelDb; }
     public double width() { return width; }
     public double reverb() { return reverb; }
+    /** Height above the ears of the listener, 0 to 1 (work package D4). */
+    public double height() { return height; }
     public boolean muted() { return muted; }
     /** A locked placement keeps its place when the AI proposes a new stage. */
     public boolean locked() { return locked; }
     public List<LevelPoint> dynamics() { return dynamics; }
 
     public SoundSourcePlacement at(double newX, double newDepth) {
-        return new SoundSourcePlacement(trackId, newX, newDepth, levelDb, width, reverb, muted, locked, dynamics);
+        return new SoundSourcePlacement(trackId, newX, newDepth, levelDb, width, reverb, muted, locked, dynamics, height);
+    }
+
+    /** The same placement at another height, 0 (ear height) to 1. */
+    public SoundSourcePlacement atHeight(double newHeight) {
+        return new SoundSourcePlacement(trackId, x, depth, levelDb, width, reverb, muted, locked, dynamics, newHeight);
     }
 
     public SoundSourcePlacement withLevel(double db) {
-        return new SoundSourcePlacement(trackId, x, depth, db, width, reverb, muted, locked, dynamics);
+        return new SoundSourcePlacement(trackId, x, depth, db, width, reverb, muted, locked, dynamics, height);
     }
 
     public SoundSourcePlacement withWidth(double newWidth) {
-        return new SoundSourcePlacement(trackId, x, depth, levelDb, newWidth, reverb, muted, locked, dynamics);
+        return new SoundSourcePlacement(trackId, x, depth, levelDb, newWidth, reverb, muted, locked, dynamics, height);
     }
 
     public SoundSourcePlacement withReverb(double share) {
-        return new SoundSourcePlacement(trackId, x, depth, levelDb, width, share, muted, locked, dynamics);
+        return new SoundSourcePlacement(trackId, x, depth, levelDb, width, share, muted, locked, dynamics, height);
     }
 
     public SoundSourcePlacement withMuted(boolean silent) {
-        return new SoundSourcePlacement(trackId, x, depth, levelDb, width, reverb, silent, locked, dynamics);
+        return new SoundSourcePlacement(trackId, x, depth, levelDb, width, reverb, silent, locked, dynamics, height);
     }
 
     public SoundSourcePlacement withLocked(boolean kept) {
-        return new SoundSourcePlacement(trackId, x, depth, levelDb, width, reverb, muted, kept, dynamics);
+        return new SoundSourcePlacement(trackId, x, depth, levelDb, width, reverb, muted, kept, dynamics, height);
     }
 
     public SoundSourcePlacement withDynamics(List<LevelPoint> points) {
-        return new SoundSourcePlacement(trackId, x, depth, levelDb, width, reverb, muted, locked, points);
+        return new SoundSourcePlacement(trackId, x, depth, levelDb, width, reverb, muted, locked, points, height);
     }
 
     public SoundSourcePlacement named(String id) {
-        return new SoundSourcePlacement(id, x, depth, levelDb, width, reverb, muted, locked, dynamics);
+        return new SoundSourcePlacement(id, x, depth, levelDb, width, reverb, muted, locked, dynamics, height);
     }
 
     /** The dB this track is above or below its level at a bar, between its points in a straight line. */

@@ -110,7 +110,7 @@ public final class StageAutomationTest {
                 lane(AutomationLane.X, new long[] {0, 2 * BAR}, new double[] {-1, 1}),
                 lane(AutomationLane.DEPTH, new long[] {0}, new double[] {0.9}),
                 lane(AutomationLane.REVERB, new long[] {BAR, 2 * BAR}, new double[] {0, 1}),
-                new AutomationLane("later", "melody-ch", "height", List.of(new AutomationLane.Point(0, 3))),
+                new AutomationLane("later", "melody-ch", "brightness", List.of(new AutomationLane.Point(0, 3))),
                 new AutomationLane("master", null, AutomationLane.LEVEL, List.of(new AutomationLane.Point(0, -3))));
         StageAutomation.Lanes lanes = StageAutomation.of(document, TimeMap.of(120)).of("melody");
         assertTrue(lanes.moves());
