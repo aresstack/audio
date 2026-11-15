@@ -59,6 +59,7 @@ public final class PieceAutopilot {
     private final int maxTokens;
     private final int maxParallel;
     private final Rendering rendering;
+    private int sectionBars = CompositionSpec.SECTION_BARS;
     private final SpatialSceneStore scenes = new SpatialSceneStore();
 
     public PieceAutopilot(InstrumentRegistry registry, ModelLineup models, int maxTokens, int maxParallel,
@@ -68,6 +69,12 @@ public final class PieceAutopilot {
         this.maxTokens = maxTokens;
         this.maxParallel = maxParallel;
         this.rendering = rendering == null ? Rendering.BUILT_IN : rendering;
+    }
+
+    /** How many bars one request for notes covers, see {@link GemmaMusicComposer#sectionBars(int)}. */
+    public PieceAutopilot sectionBars(int bars) {
+        this.sectionBars = bars;
+        return this;
     }
 
     /**
@@ -98,7 +105,7 @@ public final class PieceAutopilot {
             listener.staged(tracks, scene);
         }
         new TrackArrangementStore().save(folder, tracks);
-        GemmaMusicComposer composer = new GemmaMusicComposer(models, maxTokens, maxParallel);
+        GemmaMusicComposer composer = new GemmaMusicComposer(models, maxTokens, maxParallel).sectionBars(sectionBars);
         Path arrangement = ComposingIntoPiece.run(
                 () -> spec == null ? composer.compose(description, folder, tracks, progress)
                         : composer.compose(description, folder, tracks, spec, progress),

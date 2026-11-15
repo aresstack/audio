@@ -35,10 +35,13 @@ public record CompositionSpec(int bars, int bpm, Key key, int numerator, int den
     /** The chords every piece from before F2 was locked to. */
     public static final List<String> LEGACY_CHORDS = List.of("C", "G", "Am", "F", "C", "G", "F", "G");
 
-    /** At most this many bars are composed in one request (review E4: 8 to 16 bars per call). */
+    /** At most this many bars are composed in one request (review E4: 8 to 16 bars per call) unless the user chose another length. */
     public static final int MAX_SECTION_BARS = 16;
-    /** Longer pieces are composed in sections of about this many bars. */
+    /** Longer pieces are composed in sections of about this many bars unless the user chose another length. */
     public static final int SECTION_BARS = 8;
+    /** The shortest and the longest section the user may choose. */
+    public static final int MIN_CHOSEN_SECTION_BARS = 2;
+    public static final int MAX_CHOSEN_SECTION_BARS = 64;
 
     public CompositionSpec {
         if (bars < 1 || bars > MAX_BARS) {
@@ -119,22 +122,34 @@ public record CompositionSpec(int bars, int bpm, Key key, int numerator, int den
         return bars + (bars == 1 ? " Takt" : " Takte") + " · " + meter() + " · " + bpm + " BPM · " + key.germanName();
     }
 
+    /** The sections with the length the studio always used: {@link #SECTION_BARS} bars. */
+    public List<int[]> sections() {
+        return sections(SECTION_BARS);
+    }
+
     /**
      * The sections the piece is composed in, as {@code {first bar, bars}}: the whole piece in one
-     * when it has at most {@link #MAX_SECTION_BARS} bars, else sections of {@link #SECTION_BARS}
-     * bars, the last one taking a remainder of fewer than four bars.
+     * when it has at most twice {@code sectionBars} bars, else sections of {@code sectionBars}
+     * bars, the last one taking a remainder of less than half a section.
+     *
+     * @param sectionBars the bars of one request, {@link #MIN_CHOSEN_SECTION_BARS} to
+     *                    {@link #MAX_CHOSEN_SECTION_BARS}
      */
-    public List<int[]> sections() {
+    public List<int[]> sections(int sectionBars) {
+        if (sectionBars < MIN_CHOSEN_SECTION_BARS || sectionBars > MAX_CHOSEN_SECTION_BARS) {
+            throw new IllegalArgumentException("Ein Abschnitt hat " + MIN_CHOSEN_SECTION_BARS + " bis "
+                    + MAX_CHOSEN_SECTION_BARS + " Takte: " + sectionBars);
+        }
         List<int[]> sections = new ArrayList<>();
-        if (bars <= MAX_SECTION_BARS) {
+        if (bars <= 2 * sectionBars) {
             sections.add(new int[]{0, bars});
             return sections;
         }
         int start = 0;
         while (start < bars) {
-            int length = Math.min(SECTION_BARS, bars - start);
+            int length = Math.min(sectionBars, bars - start);
             int rest = bars - start - length;
-            if (rest > 0 && rest < 4) {
+            if (rest > 0 && 2 * rest < sectionBars) {
                 length += rest;
             }
             sections.add(new int[]{start, length});

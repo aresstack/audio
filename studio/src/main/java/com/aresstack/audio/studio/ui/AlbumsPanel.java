@@ -84,6 +84,11 @@ final class AlbumsPanel extends JPanel {
         /** How many requests the model takes at once: the limit over all pieces of an album together. */
         int parallelRequests();
 
+        /** How many bars one request for notes covers (setting "Takte je Abschnitt"). */
+        default int sectionBars() {
+            return com.aresstack.audio.studio.application.CompositionSpec.SECTION_BARS;
+        }
+
         PieceAutopilot.Rendering rendering();
 
         /** Opens a piece in the editor of the single piece. */
@@ -843,6 +848,7 @@ final class AlbumsPanel extends JPanel {
         try {
             // What the window says is read once, here on the event thread; the workers never ask it.
             final int requests = Math.max(1, host.parallelRequests());
+            final int sectionBars = host.sectionBars();
             final int tokens = host.tokens();
             final PieceAutopilot.Rendering rendering = host.rendering();
             // Every model of the production goes through the same permits: the limit holds over all pieces.
@@ -854,7 +860,8 @@ final class AlbumsPanel extends JPanel {
                 ModelLineup models = first[0] != null ? first[0] : host.models();
                 first[0] = null;
                 return new AutopilotPieceProduction(new PieceAutopilot(registry,
-                        models.through(model -> new LimitedChatModel(model, permits)), tokens, requests, rendering),
+                        models.through(model -> new LimitedChatModel(model, permits)), tokens, requests, rendering)
+                        .sectionBars(sectionBars),
                         songs);
             }, PIECES_AT_ONCE);
         } catch (RuntimeException invalid) {

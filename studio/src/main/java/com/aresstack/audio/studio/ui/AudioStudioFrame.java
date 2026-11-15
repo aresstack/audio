@@ -101,6 +101,7 @@ public final class AudioStudioFrame extends JFrame {
     private final JTextField model = new JTextField("google/gemma-4-31B-it", 23);
     private final JSpinner tokenLimit = new JSpinner(
             new SpinnerNumberModel(16384, 256, Integer.MAX_VALUE, 256));
+    private final JSpinner sectionBars = new JSpinner(new SpinnerNumberModel(8, 2, 64, 1));
     private final JTextField proxyHost = new JTextField(16);
     private final JTextField proxyPort = new JTextField("", 5);
     private final JComboBox<String> proxyMode = new JComboBox<String>(new String[]{
@@ -1460,6 +1461,11 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
+            public int sectionBars() {
+                return (Integer) sectionBars.getValue();
+            }
+
+            @Override
             public PieceAutopilot.Rendering rendering() {
                 return new PieceAutopilot.Rendering(
                         sf2Engine.getSelectedIndex() == 1 ? Sf2Engine.FLUIDSYNTH : Sf2Engine.GERVILL,
@@ -1592,6 +1598,10 @@ public final class AudioStudioFrame extends JFrame {
         parallelRequests.setPreferredSize(new Dimension(110, 30));
         addRow(ai, row++, "Antwortlänge",
                 line(tokenLimit, note("Tokens je Antwort; der Kompositionsplan nutzt höchstens 2.048.")));
+        sectionBars.setPreferredSize(new Dimension(110, 30));
+        sectionBars.setToolTipText("So viele Takte schreibt die KI je Anfrage und Spur, 2 bis 64");
+        addRow(ai, row++, "Takte je Abschnitt",
+                line(sectionBars, note("Takte je Anfrage und Spur; Stücke bis zur doppelten Länge entstehen in einem Zug.")));
         addRow(ai, row++, "Parallel",
                 line(parallelRequests, note("Anfragen gleichzeitig; höchstens so viele wie Spuren.")));
         addRow(ai, row, "", note("Der API-Key wird lokal im Klartext gespeichert (studio.properties im Benutzerordner)."));
@@ -1937,6 +1947,7 @@ public final class AudioStudioFrame extends JFrame {
         }
         final int tokens = (Integer) tokenLimit.getValue();
         final int parallel = (Integer) parallelRequests.getValue();
+        final int sections = (Integer) sectionBars.getValue();
         final RenderSettings settings;
         try {
             settings = captureRenderSettings(chosen);
@@ -1954,7 +1965,7 @@ public final class AudioStudioFrame extends JFrame {
             public Path execute(Progress progress) throws Exception {
                 try {
                     recordModels(output, "Komposition", models);
-                    Path arrangement = composeIntoPiece(new GemmaMusicComposer(models, tokens, parallel),
+                    Path arrangement = composeIntoPiece(new GemmaMusicComposer(models, tokens, parallel).sectionBars(sections),
                             prompt, output, chosen, spec, progress);
                     return renderArrangement(arrangement, output, settings, progress);
                 } finally {
@@ -1999,6 +2010,7 @@ public final class AudioStudioFrame extends JFrame {
         }
         final int tokens = (Integer) tokenLimit.getValue();
         final int parallel = (Integer) parallelRequests.getValue();
+        final int sections = (Integer) sectionBars.getValue();
         if (!saveSettings(false)) {
             return;
         }
@@ -2024,7 +2036,7 @@ public final class AudioStudioFrame extends JFrame {
                     recordModels(output, autopilot ? "Autopilot" : "Instrumentenvorschlag", models);
                     if (autopilot) {
                         // The AI decides everything: the same steps the production of an album runs.
-                        PieceAutopilot pilot = new PieceAutopilot(registry, models, tokens, parallel, rendering);
+                        PieceAutopilot pilot = new PieceAutopilot(registry, models, tokens, parallel, rendering).sectionBars(sections);
                         return composeIntoPiece(pilot, prompt, output, stageBefore, progress);
                     }
                     final InstrumentProposalService.Staged staged = new InstrumentProposalService(
@@ -2460,6 +2472,7 @@ public final class AudioStudioFrame extends JFrame {
         final String prompt = description.getText().trim();
         final int tokens = (Integer) tokenLimit.getValue();
         final int parallel = (Integer) parallelRequests.getValue();
+        final int sections = (Integer) sectionBars.getValue();
         if (!saveSettings(false)) {
             return;
         }
@@ -2473,7 +2486,7 @@ public final class AudioStudioFrame extends JFrame {
                 com.aresstack.audio.studio.application.RecompositionOffer offer = null;
                 try {
                     offer = com.aresstack.audio.studio.application.RecompositionOffer.stage(piece, trackId, runId);
-                    composeAside(new GemmaMusicComposer(models, tokens, parallel), prompt, offer.staging(), chosen,
+                    composeAside(new GemmaMusicComposer(models, tokens, parallel).sectionBars(sections), prompt, offer.staging(), chosen,
                             progress);
                     Path preview = offer.propose(runId);
                     progress.update("Der Vorschlag wird zum Anhören gerendert ...");
@@ -3359,6 +3372,7 @@ public final class AudioStudioFrame extends JFrame {
             modelChoices.setAssignment(com.aresstack.audio.studio.settings.ModelSettings.read(saved));
             albumModelChoices.setAssignment(modelChoices.assignment());
             tokenLimit.setValue(AiDefaults.maxTokens(saved));
+            sectionBars.setValue(AiDefaults.sectionBars(saved));
             proxyHost.setText(saved.getProperty("proxyHost", ""));
             proxyPort.setText(saved.getProperty("proxyPort", ""));
             proxyPacUrl.setText(saved.getProperty("proxyPacUrl", ""));
@@ -3414,6 +3428,7 @@ public final class AudioStudioFrame extends JFrame {
             }
             com.aresstack.audio.studio.settings.ModelSettings.write(saved, currentAssignment());
             saved.setProperty("maxTokens", tokenLimit.getValue().toString());
+            saved.setProperty("sectionBars", sectionBars.getValue().toString());
             saved.setProperty("proxyHost", proxyHost.getText().trim());
             saved.setProperty("proxyPort", proxyPort.getText().trim());
             String selectedProxyMode = proxyMode.getSelectedIndex() == 0 ? ""
