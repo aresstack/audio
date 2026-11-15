@@ -32,8 +32,9 @@ public final class MixProposalTaking {
      * @param before the stage as the user sees it
      * @param taken  the stage with the proposal taken (protected tracks as they were)
      * @return how many movement curves were kept
-     * @throws IOException if the piece has no model or a file cannot be written; then neither the
-     *                     stage file nor the model changed
+     * @throws IOException if the piece has no model or a file cannot be written; then nothing of
+     *                     the proposal is taken: the stage file is as before, and the model holds at
+     *                     most the stage as the user saw it before taking (no step, no revision)
      */
     public static int take(PieceModel model, StageFollowsMix follows, SpatialSceneStore stages,
                            SpatialScene before, SpatialScene taken, MovementDirector.Proposal moves)
@@ -51,6 +52,9 @@ public final class MixProposalTaking {
             } catch (IOException kept) {
                 failed.addSuppressed(kept);
             }
+            // The model may have learnt the stage as it stands before the step could not be written;
+            // that is the stage the user sees, so the next step compares with it.
+            follows.remember(session);
             throw failed;
         }
         follows.remember(session); // the mix now belongs to the stage as it stands

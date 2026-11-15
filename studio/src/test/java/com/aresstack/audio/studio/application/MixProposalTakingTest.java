@@ -60,7 +60,9 @@ public final class MixProposalTakingTest {
         follows.remember(session);
 
         // The user moved the bass by hand: the stage file knows it, the mix of the model not yet.
-        SpatialScene before = first.with(first.placement("bass").at(0.4, 0.6).withLevel(-5));
+        // The melody stands high (D4): the mix document holds no height, the stage keeps it through every step.
+        SpatialScene before = first.with(first.placement("bass").at(0.4, 0.6).withLevel(-5))
+                .with(first.placement("melody").atHeight(0.5));
         stages.save(song, before);
 
         // The proposal: the melody left and in front with a level curve, the bass elsewhere, another
@@ -71,6 +73,7 @@ public final class MixProposalTakingTest {
                                 new SoundSourcePlacement.LevelPoint(1, 0))))
                 .with(before.placement("bass").at(0.1, 0.3));
         SpatialScene taken = before.taking(proposed);
+        Assert.assertEquals(0.5, taken.placement("melody").height(), 0);
         MovementDirector.Proposal moves = new MovementDirector.Proposal(Map.of("melody",
                 Map.of(AutomationLane.X, List.of(new StageMovements.Point(0, -0.8), new StageMovements.Point(2, 0.8)))));
 
