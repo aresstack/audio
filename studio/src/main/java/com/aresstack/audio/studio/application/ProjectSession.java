@@ -16,6 +16,7 @@ import com.aresstack.audio.composition.edit.Proposal;
 import com.aresstack.audio.composition.edit.Revision;
 import com.aresstack.audio.composition.edit.TimeShift;
 import com.aresstack.audio.composition.mix.AutomationLane;
+import com.aresstack.audio.composition.mix.LevelMode;
 import com.aresstack.audio.composition.mix.MixChannel;
 import com.aresstack.audio.composition.mix.MixScene;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
@@ -64,7 +65,9 @@ import java.util.Set;
  * the preview. Accepted changes and changes by hand can be undone and redone within the session;
  * revisions in {@code revisions/} are made before and after every accepted AI change, when the
  * piece is saved and on request, the first being the original. After every change only the stems
- * of parts that sound different are dropped from {@code render/manifest.json}.
+ * of parts that sound different are dropped from {@code render/manifest.json}. A part a change
+ * brings in gets a channel strip with the usual seat of its role and an entry in {@code tracks.json}
+ * and {@code spatial-scene.json}; undoing the change takes it out of both again ({@link PartSeats}).
  */
 public final class ProjectSession {
     /** The files that describe the piece in {@code arrangement.tsv} and beside it. */
@@ -167,8 +170,8 @@ public final class ProjectSession {
     }
 
     /**
-     * Whether the model says only what {@code arrangement.tsv} can say: one tempo in four
-     * quarters, one clip per track over its default part. Only then is the file a full view of
+     * Whether the model says only what {@code arrangement.tsv} can say: one tempo, one meter
+     * and one key, one clip per track over its default part. Only then is the file a full view of
      * the model, and only then may a new version of it be taken over without losing anything.
      */
     public boolean withinTsv() {
@@ -221,7 +224,7 @@ public final class ProjectSession {
             return false;
         }
         LegacyImport.Result result = current.get();
-        Composition merged = piece ? keepingModel(result.composition(), composition) : composition;
+        Composition merged = piece ? keepingModel(result.composition(), composition, result.namedSoundBanks()) : composition;
         MixScene mixed = keepingMix(result.mix(), mix, merged, stage);
         boolean changed = !merged.equals(composition) || !Objects.equals(mixed, mix);
         if (changed) {
@@ -253,7 +256,7 @@ public final class ProjectSession {
 
     /**
      * Writes the model and {@code arrangement.tsv} from it, without a revision. A piece that says
-     * more than the TSV can (tempo or meter changes, another meter than 4/4) gets
+     * more than the TSV can (changes of tempo, meter or key) gets
      * {@code arrangement.mid}, written from the model, as its exchange file. A TSV lying there is
      * left as it is (work package F1): {@link #synchronize()} never takes it over such a model.
      */
@@ -465,6 +468,27 @@ public final class ProjectSession {
         PreviewFolder.delete(folder, proposal.id());
     }
 
+    /**
+     * Sets how the level of the mix is made, on the user's explicit switch, and writes it to
+     * {@code mix.json}. Nothing else of the piece changes and nothing is taken from the old
+     * files. The mode is a setting of the piece, not a step of its history: undo, redo and a
+     * restored revision keep it as it is now. Returns whether it changed.
+     */
+    public boolean setLevelMode(LevelMode mode) throws IOException {
+        if (mode == null || mix == null || mix.levelMode() == mode) {
+            return false;
+        }
+        MixScene switched = inMode(mix, mode);
+        MixJson.save(folder, switched);
+        mix = switched;
+        return true;
+    }
+
+    private static MixScene inMode(MixScene mix, LevelMode mode) {
+        return mix == null || mode == null || mix.levelMode() == mode ? mix
+                : new MixScene(mix.room(), mix.masterDb(), mode, mix.channels(), mix.automation());
+    }
+
     public boolean canUndo() {
         return history.canUndo();
     }
@@ -528,6 +552,7 @@ public final class ProjectSession {
                 shifted = TimeShift.shift(shifted, shift.fromTick(), shift.ticks());
             }
         }
+        shifted = PartSeats.seatNewParts(shifted, proposal.base(), proposal.result(), ids);
         history.push(new State(proposal.result(), shifted), description);
         return become(history.current());
     }
@@ -536,7 +561,8 @@ public final class ProjectSession {
     private ChangeSet become(State state) throws IOException {
         ChangeSet changes = ChangeSet.between(composition, state.composition());
         composition = state.composition();
-        mix = state.mix();
+        // How the level is made is the user's switch and stays, whatever the state said then.
+        mix = inMode(state.mix(), mix == null ? null : mix.levelMode());
         Set<String> stale = changes.staleStems();
         if (!stale.isEmpty()) {
             List<StemManifest.Entry> kept = new ArrayList<>();
@@ -547,6 +573,7 @@ public final class ProjectSession {
             }
             StemManifest.save(folder, kept);
         }
+        PartSeats.followOldFiles(folder, changes, composition, mix);
         persist();
         return changes;
     }
@@ -598,35 +625,59 @@ public final class ProjectSession {
      * value; the sections (the form of the piece) stay, and only music beyond their end gets a
      * section of its own; the time map stays where the file names the same tempo.
      */
-    private static Composition keepingModel(Composition imported, Composition model) {
+    private static Composition keepingModel(Composition imported, Composition model, Set<String> namedSoundBanks) {
         List<Part> parts = new ArrayList<>();
         List<Track> tracks = new ArrayList<>();
         for (Part part : imported.parts()) {
             Part old = model.part(part.id());
-            boolean same = old != null && model.track(part.id()) != null
+            Track own = trackOf(model, part.id());
+            boolean same = old != null && own != null
                     && TsvExport.linesOf(imported, part.id()).equals(TsvExport.linesOf(model, part.id()));
             // tracks.json is still where the old studio keeps instrument and sound bank: they come
-            // from there even for a part whose notes stayed the same.
-            parts.add(!same ? part : part.instrument() == null ? old
-                    : new Part(old.id(), old.name(), old.role(), part.instrument(), old.program(), part.libraryId(),
-                            old.staffLayout(), old.voices(), old.legacyChannel()));
-            tracks.add(same ? model.track(part.id()) : imported.track(part.id()));
+            // from there even for a part whose notes stayed the same, each one that it names, the
+            // built-in sound too. What it does not name stays as the model has it.
+            String library = namedSoundBanks.contains(part.id()) ? part.libraryId() : same ? old.libraryId() : null;
+            parts.add(!same ? part
+                    : new Part(old.id(), old.name(), old.role(), or(part.instrument(), old.instrument()),
+                            old.program(), library, old.staffLayout(), old.voices(), old.legacyChannel()));
+            tracks.add(same ? own : imported.track(part.id()));
         }
         Meta a = imported.meta();
         Meta b = model.meta();
         Meta meta = new Meta(or(a.title(), b.title()), or(a.genre(), b.genre()), or(a.mood(), b.mood()),
                 or(a.brief(), b.brief()), or(a.plannedFrom(), b.plannedFrom()), or(a.remarks(), b.remarks()));
         List<Section> sections = keepingSections(imported, model);
-        TimeMap time = imported.timeMap().tempoAt(0) == model.timeMap().tempoAt(0) ? model.timeMap() : imported.timeMap();
+        // The model's own time map stays unless the file says another tempo, meter or key.
+        TimeMap time = imported.timeMap().tempoAt(0) == model.timeMap().tempoAt(0)
+                && imported.timeMap().meterAt(0).equals(model.timeMap().meterAt(0))
+                && imported.timeMap().keyAt(0).equals(model.timeMap().keyAt(0)) ? model.timeMap() : imported.timeMap();
         return new Composition(meta, time, sections, parts, tracks, model.assets());
+    }
+
+    /**
+     * The track of a part in the model: the track of the same id as for an imported part, else the
+     * track whose default part it is (a part added later, such as a new voice, has a track of its own id).
+     */
+    private static Track trackOf(Composition model, String partId) {
+        Track same = model.track(partId);
+        if (same != null) {
+            return same;
+        }
+        for (Track track : model.tracks()) {
+            if (partId.equals(track.defaultPartId())) {
+                return track;
+            }
+        }
+        return null;
     }
 
     /**
      * The mix after a new import: the channels of parts that stayed keep what the mix says of
      * them, a new part gets the seat the import gives it, a part that went loses its channel and
      * its automation. Only a changed {@code spatial-scene.json} sets places, levels, room and
-     * level curves anew (lanes of place and room share, which the old file cannot hold, stay); how the level is set ({@code levelMode}) is never said by the old files
-     * and stays as the mix has it.
+     * level curves anew (lanes of place and room share, which the old file cannot hold, stay), and
+     * with them how the level is set ({@code levelMode}), which the stage file says since a piece
+     * can be switched to the fixed level; otherwise that stays as the mix has it.
      */
     private static MixScene keepingMix(MixScene imported, MixScene model, Composition composition, boolean stage) {
         if (model == null) {
@@ -663,7 +714,7 @@ public final class ProjectSession {
                     automation.add(lane);
                 }
             }
-            return new MixScene(imported.room(), imported.masterDb(), model.levelMode(), channels, automation);
+            return new MixScene(imported.room(), imported.masterDb(), imported.levelMode(), channels, automation);
         }
         List<MixChannel> channels = new ArrayList<>();
         List<String> kept = new ArrayList<>();

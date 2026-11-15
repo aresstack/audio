@@ -118,6 +118,7 @@ public final class LiveDeckTest {
 
             // Dragged to the right, in the middle of the drag (nothing settled, nothing saved or mixed).
             Assert.assertTrue(deck.stage(scene.with(scene.placement("melody").at(1, 0)), null));
+            arrived(deck);
             tape.allow(30);
             tape.awaitFrames(60 * BLOCK);
             Assert.assertTrue(tape.rms(true, 50 * BLOCK, 60 * BLOCK) > 3 * tape.rms(false, 50 * BLOCK, 60 * BLOCK));
@@ -126,10 +127,12 @@ public final class LiveDeckTest {
             SpatialScene right = scene.with(scene.placement("melody").at(1, 0));
             double loud = tape.rms(true, 50 * BLOCK, 60 * BLOCK);
             deck.stage(right.with(right.placement("melody").withLevel(-12)), null);
+            arrived(deck);
             tape.allow(30);
             tape.awaitFrames(90 * BLOCK);
             Assert.assertEquals(Math.pow(10, -12 / 20.0), tape.rms(true, 80 * BLOCK, 90 * BLOCK) / loud, 0.02);
             deck.stage(right.with(right.placement("melody").withMuted(true)), null);
+            arrived(deck);
             tape.allow(30);
             tape.awaitFrames(120 * BLOCK);
             Assert.assertEquals(0, tape.rms(true, 115 * BLOCK, 120 * BLOCK), 1e-4);
@@ -137,18 +140,62 @@ public final class LiveDeckTest {
             // The master fader is heard live as well; the bass, muted when the stage was read, can be turned up.
             deck.stage(right.with(right.placement("bass").withMuted(false)).with(
                     right.placement("melody").withMuted(true)), null);
+            arrived(deck);
             tape.allow(30);
             tape.awaitFrames(150 * BLOCK);
             double bass = tape.rms(false, 140 * BLOCK, 150 * BLOCK);
             Assert.assertTrue(bass > 0.01);
             deck.stage(right.with(right.placement("bass").withMuted(false)).with(
                     right.placement("melody").withMuted(true)).withMaster(-20), null);
+            arrived(deck);
             tape.allow(30);
             tape.awaitFrames(180 * BLOCK);
             Assert.assertEquals(Math.pow(10, -6 / 20.0), tape.rms(false, 170 * BLOCK, 180 * BLOCK) / bass, 0.02);
             Assert.assertFalse(Files.exists(song.resolve(StageMixService.MIX_FILE)));
             tape.allow(Integer.MAX_VALUE / 2);
         }
+    }
+
+    /** Waits until no track is on its way across the stage any more (a jump glides, see below). */
+    private static void arrived(LiveDeck deck) throws InterruptedException {
+        while (deck.gliding("melody") || deck.gliding("bass")) {
+            Thread.sleep(10);
+        }
+        Thread.sleep(60); // the last step of the glide, and the 20 ms of the channel
+    }
+
+    @Test
+    public void aJumpGlidesAcrossTheStageAndADragIsTakenAtOnce() throws Exception {
+        Path song = piece();
+        Path arrangement = song.resolve("arrangement.tsv");
+        SpatialScene scene = new StageMixService().scene(arrangement, song).withFixedLevel(true).withMaster(-14)
+                .inRoom(AcousticRoom.STUDIO.withAmount(0));
+        scene = scene.with(scene.placement("melody").at(-1, 0));
+        Tape tape = new Tape();
+        try (LiveDeck deck = LiveDeck.open(arrangement, song, scene, null, Float.NaN, () -> tape)) {
+            deck.play();
+            tape.allow(Integer.MAX_VALUE / 2);
+
+            // A small step, as a drag brings them: taken at once.
+            SpatialScene dragged = scene.with(scene.placement("melody").at(-0.95, 0));
+            deck.stage(dragged, null);
+            Assert.assertFalse(deck.gliding("melody"));
+
+            // From the far left to the far right in one step (a step undone, a proposal taken): on its way.
+            long before = System.nanoTime();
+            deck.stage(dragged.with(dragged.placement("melody").at(1, 0)), null);
+            Assert.assertTrue(deck.gliding("melody"));
+            Assert.assertFalse("the track that did not move stays where it is", deck.gliding("bass"));
+            arrived(deck);
+            double milliseconds = (System.nanoTime() - before) / 1e6;
+            Assert.assertTrue("took " + milliseconds, milliseconds >= 300 && milliseconds < 2000);
+
+            // The same stage again is no jump.
+            deck.stage(dragged.with(dragged.placement("melody").at(1, 0)), null);
+            Assert.assertFalse(deck.gliding("melody"));
+        }
+        Assert.assertEquals(0.5, LiveDeck.far(scene.placement("melody").at(-1, 0), scene.placement("melody").at(0, 0)), 1e-9);
+        Assert.assertEquals(0.25, LiveDeck.far(scene.placement("melody").withLevel(0), scene.placement("melody").withLevel(-6)), 1e-9);
     }
 
     @Test
@@ -305,6 +352,61 @@ public final class LiveDeckTest {
             Assert.assertTrue(tape.rms(false, 50 * BLOCK, 60 * BLOCK) > 3 * tape.rms(true, 50 * BLOCK, 60 * BLOCK));
             tape.allow(Integer.MAX_VALUE / 2);
         }
+    }
+
+    /**
+     * The acceptance the product owner asked for (D2 with D3): a movement the user drew is heard the
+     * same way wherever the piece sounds: live at Play, in the mixed file that is played when the
+     * stage cannot be played live, and in the exported WAV; also after the piece was opened again.
+     */
+    @Test
+    public void aDrawnMovementIsHeardLiveInTheFileThatStandsInAndInTheExportAlsoAfterOpeningAgain() throws Exception {
+        Path song = piece();
+        Path arrangement = song.resolve("arrangement.tsv");
+        java.util.List<String> log = new java.util.ArrayList<String>();
+        PieceModel model = new PieceModel(log::add);
+        model.open(song);
+        Assert.assertTrue(String.valueOf(log), model.movements().editable("melody"));
+        // Drawn on the stage page: the melody stands far right through the whole piece; its disc stays on the left.
+        StageMovements drawn = model.movements().with("melody", "x",
+                java.util.List.of(new StageMovements.Point(0, 1)));
+        Assert.assertTrue(String.valueOf(log), model.move(drawn, "melody", "x"));
+
+        // Opened again: the curve is there, and every way of hearing the piece follows it.
+        PieceModel again = new PieceModel(log::add);
+        again.open(song);
+        Assert.assertEquals(java.util.List.of(new StageMovements.Point(0, 1)), again.movements().of("melody", "x"));
+        StageMixService service = new StageMixService();
+        SpatialScene scene = service.scene(arrangement, song).withFixedLevel(true).withMaster(-14)
+                .inRoom(AcousticRoom.STUDIO.withAmount(0));
+        scene = scene.with(scene.placement("melody").at(-1, 0)).with(scene.placement("bass").withMuted(true));
+
+        Tape tape = new Tape();
+        try (LiveDeck deck = LiveDeck.open(arrangement, song, scene, null, Float.NaN, () -> tape)) {
+            deck.play();
+            tape.allow(30);
+            tape.awaitFrames(30 * BLOCK);
+            Assert.assertTrue("live", tape.rms(true, 20 * BLOCK, 30 * BLOCK) > 3 * tape.rms(false, 20 * BLOCK, 30 * BLOCK));
+            tape.allow(Integer.MAX_VALUE / 2);
+        }
+        SpatialStemMixer.Signal file = SpatialStemMixer.read(service.mix(arrangement, song, scene, line -> { }));
+        Assert.assertTrue("the mixed file that is played instead", rms(file.right) > 3 * rms(file.left));
+        SpatialStemMixer.Signal export = SpatialStemMixer.read(
+                service.export(arrangement, song, scene, song.resolve("out.wav"), 24));
+        Assert.assertTrue("the exported WAV", rms(export.right) > 3 * rms(export.left));
+
+        // Without the curve the same stage sounds from the left: it was the curve that was heard.
+        Assert.assertTrue(again.move(again.movements().with("melody", "x", java.util.List.of()), "melody", "x"));
+        SpatialStemMixer.Signal still = SpatialStemMixer.read(service.mix(arrangement, song, scene, line -> { }));
+        Assert.assertTrue(rms(still.left) > 3 * rms(still.right));
+    }
+
+    private static double rms(float[] side) {
+        double sum = 0;
+        for (float sample : side) {
+            sum += sample * (double) sample;
+        }
+        return Math.sqrt(sum / Math.max(1, side.length));
     }
 
     @Test

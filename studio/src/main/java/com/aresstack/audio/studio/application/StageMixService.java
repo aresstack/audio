@@ -278,6 +278,12 @@ public final class StageMixService {
         return tracks;
     }
 
+    /** How long one bar of a written arrangement lasts: its meter at its tempo (4/4 for pieces from before F2). */
+    public static double secondsPerBar(Path arrangement) throws IOException {
+        ArrangementFile file = ArrangementFile.read(arrangement);
+        return file.quartersPerBar() * 60.0 / file.tempoOrDefault();
+    }
+
     /** The tempo of a written arrangement, kept within 20..400; 108 if it names none that can be read. */
     public static int tempo(Path arrangement) throws IOException {
         return ArrangementFile.read(arrangement).tempoOrDefault();

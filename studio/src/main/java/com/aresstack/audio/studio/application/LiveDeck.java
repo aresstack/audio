@@ -65,6 +65,9 @@ public final class LiveDeck implements AutoCloseable {
         this.fixedLevel = scene.fixedLevel();
         this.legacyFactor = legacyFactor;
         this.legacyMasterDb = scene.masterDb();
+        for (SoundSourcePlacement placement : scene.placements()) {
+            sent.put(placement.trackId(), placement); // where the stage was loaded: a jump from there glides
+        }
     }
 
     /**
@@ -173,7 +176,7 @@ public final class LiveDeck implements AutoCloseable {
             return false;
         }
         for (SoundSourcePlacement placement : wanted.placements()) {
-            stage.move(heard(placement, only));
+            hear(heard(placement, only));
         }
         scene = wanted;
         playback.master().setSettings(master(wanted));
@@ -182,7 +185,55 @@ public final class LiveDeck implements AutoCloseable {
 
     /** One track moved; the others stay. {@code false} if the stage has no such track. */
     public boolean move(SoundSourcePlacement placement, String only) {
-        return stage.move(heard(placement, only));
+        return hear(heard(placement, only));
+    }
+
+    /** From this share of the stage on, a change in one step is a jump and not a drag. */
+    static final double JUMP = 0.1;
+
+    /** Where each track was sent last, and until when it is on its way there. */
+    private final java.util.Map<String, SoundSourcePlacement> sent = new java.util.HashMap<String, SoundSourcePlacement>();
+    private final java.util.Map<String, Long> onItsWayUntil = new java.util.HashMap<String, Long>();
+
+    /**
+     * Sends a track to where it stands now. Dragging brings the places in small steps, and each is
+     * taken at once (20 ms glide of the channel). A jump (a step undone, a proposal taken, the
+     * usual seating, another scene) would sound like a cut that way: it glides across the stage
+     * itself in 300 to 600 ms, longer the farther it goes. While a track is on such a way, what
+     * comes next glides on from where it is, so that a drag begun then does not cut either.
+     */
+    private synchronized boolean hear(SoundSourcePlacement placement) {
+        String id = placement.trackId();
+        SoundSourcePlacement before = sent.get(id);
+        if (before == placement) {
+            return true; // nothing new for this track
+        }
+        sent.put(id, placement);
+        long now = System.nanoTime();
+        Long until = onItsWayUntil.get(id);
+        boolean underway = until != null && now < until;
+        double far = before == null ? 0 : far(before, placement);
+        if (far < JUMP && !underway) {
+            return stage.move(placement);
+        }
+        double milliseconds = far < JUMP ? 150 : 300 + 300 * Math.min(1, far);
+        onItsWayUntil.put(id, now + (long) (milliseconds * 1e6));
+        return stage.glide(placement, milliseconds);
+    }
+
+    /** Whether a track is on its way across the stage right now (a jump, not a drag). */
+    synchronized boolean gliding(String trackId) {
+        Long until = onItsWayUntil.get(trackId);
+        return until != null && System.nanoTime() < until;
+    }
+
+    /** How far two placements are apart, as a share of what each number can span; the largest counts. */
+    static double far(SoundSourcePlacement from, SoundSourcePlacement to) {
+        double far = Math.abs(to.x() - from.x()) / 2;
+        far = Math.max(far, Math.abs(to.depth() - from.depth()));
+        far = Math.max(far, Math.abs(to.levelDb() - from.levelDb()) / 24);
+        far = Math.max(far, Math.abs(to.width() - from.width()));
+        return Math.max(far, Math.abs(to.reverb() - from.reverb()));
     }
 
     /**

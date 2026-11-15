@@ -31,6 +31,12 @@ public final class PackageDependencyTest {
         assertEquals(List.of(), referencesFrom("project", "studio.ui", "studio.ai", "studio.application", "javax.swing"));
     }
 
+    /** C1: planners, generators and the context of the AI know no window, no use case and no project files. */
+    @Test
+    public void theAiKnowsNoWindowNoUseCaseAndNoProjectFiles() throws IOException {
+        assertEquals(List.of(), referencesFrom("ai", "studio.ui", "studio.application", "studio.project", "javax.swing"));
+    }
+
     private static List<String> referencesFrom(String pkg, String... forbidden) throws IOException {
         List<String> found = new ArrayList<>();
         try (Stream<Path> files = Files.walk(ROOT.resolve(pkg))) {

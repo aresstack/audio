@@ -39,8 +39,11 @@ public final class LiveStage implements AutoCloseable {
     private final double secondsPerBar;
     private final List<String> trackIds;
     private final LiveGraph graph;
-    /** Where each track was placed last, so that it can be placed again when its movements change. */
-    private final SoundSourcePlacement[] placed;
+    /** Where each track stands as last handed to its channel, for glides that start from there. */
+    private final SoundSourcePlacement[] current;
+    /** The running glide of each track, so that a new move or glide replaces it. */
+    private final java.util.concurrent.Future<?>[] glides;
+    private java.util.concurrent.ScheduledExecutorService glider;
     /** How the tracks move with the piece: place and room share from the mix document (work package D3). */
     private volatile StageAutomation movements;
 
@@ -52,7 +55,6 @@ public final class LiveStage implements AutoCloseable {
         this.room = room;
         this.secondsPerBar = secondsPerBar;
         this.movements = movements == null ? StageAutomation.NONE : movements;
-        this.placed = placements.toArray(new SoundSourcePlacement[0]);
         long length = 0;
         for (float[][] sound : sounds) {
             length = Math.max(length, sound[0].length);
@@ -69,6 +71,8 @@ public final class LiveStage implements AutoCloseable {
                     parameters(placement), capacity, reflects ? SpatialStemMixer.echoLowPass(room) : null));
         }
         this.trackIds = List.copyOf(ids);
+        this.current = placements.toArray(new SoundSourcePlacement[0]);
+        this.glides = new java.util.concurrent.Future<?>[placements.size()];
         this.graph = new LiveGraph(channels, SpatialStemMixer.reverb(room), (float) room.amount(),
                 length + SpatialStemMixer.tail(length, room));
     }
@@ -156,21 +160,123 @@ public final class LiveStage implements AutoCloseable {
         return trackIds;
     }
 
-    /** Moves the track at this place of the list; heard from the next block on. */
+    /** How often a glide hands over a new place: every 10 ms, finer than the 20 ms each step glides. */
+    public static final long GLIDE_STEP_MS = 10;
+
+    /**
+     * Moves the track at this place of the list; heard from the next block on. The numbers of the
+     * channel glide there in 20 ms: right for dragging, where the places come in small steps, but a
+     * jump across the stage sounds like a cut. For a jump, use {@link #glide}.
+     */
     public void move(int track, SoundSourcePlacement placement) {
-        placed[track] = placement;
+        synchronized (glides) {
+            cancelGlide(track);
+            hand(track, placement);
+        }
+    }
+
+    private void hand(int track, SoundSourcePlacement placement) {
+        current[track] = placement;
         graph.channel(track).set(parameters(placement));
+    }
+
+    private void cancelGlide(int track) {
+        if (glides[track] != null) {
+            glides[track].cancel(false);
+            glides[track] = null;
+        }
+    }
+
+    /**
+     * Moves a track over this time on the stage itself: place, depth, level, width and room share
+     * go from where the track stands to the target along a smooth curve (slow at start and end),
+     * and every {@link #GLIDE_STEP_MS} the channel gets the place in between. Unlike gliding the
+     * gains of the channel, this keeps the loudness while the track crosses the middle (equal
+     * power at every point of the way) and the echoes move with it. Mute and level curve change
+     * at the start. A new move or glide of the same track replaces it.
+     */
+    public void glide(int track, SoundSourcePlacement target, double milliseconds) {
+        if (!(milliseconds > GLIDE_STEP_MS)) {
+            move(track, target);
+            return;
+        }
+        synchronized (glides) {
+            cancelGlide(track);
+            SoundSourcePlacement from = current[track];
+            long start = System.nanoTime();
+            double nanos = milliseconds * 1e6;
+            java.util.concurrent.Future<?>[] self = new java.util.concurrent.Future<?>[1];
+            Runnable step = () -> {
+                double share = Math.min(1, (System.nanoTime() - start) / nanos);
+                synchronized (glides) {
+                    if (glides[track] != self[0]) {
+                        return;
+                    }
+                    hand(track, between(from, target, share));
+                    if (share >= 1) {
+                        glides[track].cancel(false);
+                        glides[track] = null;
+                    }
+                }
+            };
+            self[0] = glider().scheduleAtFixedRate(step, 0, GLIDE_STEP_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+            glides[track] = self[0];
+        }
+    }
+
+    /** Glides the track with the id of the placement; {@code false} if the stage has no such track. */
+    public boolean glide(SoundSourcePlacement target, double milliseconds) {
+        int track = trackIds.indexOf(target.trackId());
+        if (track < 0) {
+            return false;
+        }
+        glide(track, target, milliseconds);
+        return true;
+    }
+
+    /**
+     * The place a share of the way from one placement to another, 0..1, on a smooth curve
+     * (3s² − 2s³): numbers that change in a straight line between the two, mute and level curve
+     * already those of the target.
+     */
+    static SoundSourcePlacement between(SoundSourcePlacement from, SoundSourcePlacement to, double share) {
+        double s = Math.max(0, Math.min(1, share));
+        double eased = s * s * (3 - 2 * s);
+        if (s >= 1) {
+            return to;
+        }
+        return new SoundSourcePlacement(to.trackId(), mix(from.x(), to.x(), eased), mix(from.depth(), to.depth(), eased),
+                mix(from.levelDb(), to.levelDb(), eased), mix(from.width(), to.width(), eased),
+                mix(from.reverb(), to.reverb(), eased), to.muted(), to.locked(), to.dynamics());
+    }
+
+    private static double mix(double from, double to, double share) {
+        return from + (to - from) * share;
+    }
+
+    private java.util.concurrent.ScheduledExecutorService glider() {
+        if (glider == null) {
+            glider = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(task -> {
+                Thread thread = new Thread(task, "live-stage-glide");
+                thread.setDaemon(true);
+                return thread;
+            });
+        }
+        return glider;
     }
 
     /**
      * Other movements of place and room share (a curve was drawn while the piece plays): every
      * track is placed again with them and follows them from the next block on. A parameter with a
-     * curve follows the curve; where a track has none, it stands where its placement says.
+     * curve follows the curve; where a track has none, it stands where its placement says. A track
+     * that glides goes on gliding, with the new movements from its next step on.
      */
     public void moving(StageAutomation changed) {
-        movements = changed == null ? StageAutomation.NONE : changed;
-        for (int track = 0; track < placed.length; track++) {
-            graph.channel(track).set(parameters(placed[track]));
+        synchronized (glides) {
+            movements = changed == null ? StageAutomation.NONE : changed;
+            for (int track = 0; track < current.length; track++) {
+                graph.channel(track).set(parameters(current[track]));
+            }
         }
     }
 
@@ -225,6 +331,14 @@ public final class LiveStage implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
+        synchronized (glides) {
+            for (int track = 0; track < glides.length; track++) {
+                cancelGlide(track);
+            }
+            if (glider != null) {
+                glider.shutdownNow();
+            }
+        }
         graph.close();
     }
 }

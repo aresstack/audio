@@ -83,12 +83,9 @@ public final class MidiExport {
         }
     }
 
-    /** Sharps or flats (major keys on the circle of fifths) and the mode, as the key signature event has it. */
+    /** The key signature event: sharps (positive) or flats (negative) as the key writes them, and the mode. */
     private static byte[] keySignature(TimeMap.KeyChange change) {
-        int[] fifthsOfMajor = {0, -5, 2, -3, 4, -1, 6, 1, -4, 3, -2, 5};
-        boolean minor = change.key().mode() == com.aresstack.audio.composition.Key.Mode.MINOR;
-        int tonic = minor ? (change.key().tonic() + 3) % 12 : change.key().tonic();
-        return new byte[]{(byte) fifthsOfMajor[tonic], (byte) (minor ? 1 : 0)};
+        return new byte[]{(byte) change.key().fifths(), (byte) (change.key().mode() == com.aresstack.audio.composition.Key.Mode.MINOR ? 1 : 0)};
     }
 
     private static void midi(Track track, int command, int channel, int data1, int data2, long tick)

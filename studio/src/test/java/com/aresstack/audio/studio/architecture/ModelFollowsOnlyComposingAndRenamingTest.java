@@ -33,10 +33,10 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         }
         // Beside these, the stage page shows the movements the model holds and keeps a curve the user
         // drew there (work package D3): an edit of the mix on purpose, which takes over no old file.
-        assertEquals("opening loads the model, composing and renaming bring it in step, a drawn movement is kept;"
+        assertEquals("opening loads the model, composing and renaming bring it in step, a drawn movement is kept, the switch of the level is noted;"
                         + " nothing else reaches it",
-                new java.util.TreeSet<String>(List.of("composeIntoPiece", "loadArrangementForCurrentDirectory",
-                        "movementChanged", "renamed", "showMovements")), users);
+                new java.util.TreeSet<String>(List.of("composeIntoPiece", "levelSwitched",
+                        "loadArrangementForCurrentDirectory", "movementChanged", "renamed", "showMovements")), users);
         assertEquals("only a curve the user drew is written into the mix of the model", List.of("movementChanged"),
                 callers(source, "pieceModel\\.move\\("));
         assertTrue("showing the movements only reads the model",
@@ -45,6 +45,8 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         assertTrue("a curve is kept only once it has settled, and never brings old files into the model",
                 bodyOf(source, "private void movementChanged(").indexOf("synchronize") < 0
                         && bodyOf(source, "private void movementChanged(").contains("if (!settled) {"));
+        assertEquals("the switch of the level writes only the level mode", List.of("levelSwitched"),
+                callers(source, "pieceModel\\.levelFixed\\("));
         assertEquals("renaming synchronizes itself, right after its files were written", List.of("renamed"),
                 callers(source, "pieceModel\\.synchronize\\(\\)"));
         assertEquals("opening only opens", List.of("loadArrangementForCurrentDirectory"),

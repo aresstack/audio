@@ -239,4 +239,62 @@ public final class LiveGraphTest {
         Assert.assertEquals(0, TestSignals.rms(block.left, 400, 512), 1e-6);
         Assert.assertTrue(channel.settled());
     }
+
+    @Test
+    public void echoDelaysThatChangeFasterThanAFadeNeverJump() throws Exception {
+        // Dragging sends a new place every block, faster than the 20 ms fade of a changed echo delay.
+        int frames = RATE;
+        float[] tone = TestSignals.sine(frames, 110, RATE, 0.5);
+        ChannelParameters base = ChannelParameters.builder().pan(0, 0)
+                .echoes(new int[]{100}, new float[]{1f}, new float[]{1f}).build();
+        LiveChannel channel = new LiveChannel(new ArraySource(tone, tone.clone(), RATE), frames, base, 4000, WALLS);
+        LiveGraph graph = new LiveGraph(List.of(channel), null, 0, frames);
+        int[] delays = {300, 301, 900, 120, 2000, 2001, 50};
+        float[] out = new float[frames];
+        AudioBlock block = new AudioBlock(512);
+        graph.prepare(RATE, 512);
+        int at = 0;
+        int got;
+        int turn = 0;
+        do {
+            if (at > RATE / 4 && turn < delays.length) {
+                channel.set(base.toBuilder().echoes(new int[]{delays[turn++]}, new float[]{1f}, new float[]{1f}).build());
+            }
+            block.setFrames(512);
+            got = graph.read(block);
+            System.arraycopy(block.left, 0, out, at, got);
+            at += got;
+        } while (got == 512);
+        float most = largestStep(new float[][]{out}, 4096);
+        // the echo is the low-passed sine: it moves by at most about 0.008 per sample
+        Assert.assertTrue("largest step " + most, most < 0.012f);
+    }
+
+    @Test
+    public void aSeekSilencesTheRoomOfThePassageLeftBehind() throws Exception {
+        int frames = 2 * RATE;
+        float[] left = new float[frames];
+        left[100] = 1;
+        ChannelParameters loud = ChannelParameters.builder().pan(0, 0).send(1, 1).build();
+        LiveGraph graph = new LiveGraph(List.of(new LiveChannel(new ArraySource(left, left.clone(), RATE), frames,
+                loud, 0, null)), new RoomReverb(ROOM), 1f, frames);
+        AudioBlock block = new AudioBlock(512);
+        graph.prepare(RATE, 512);
+        float before = 0;
+        for (int b = 0; b < 20; b++) {
+            block.setFrames(512);
+            graph.read(block);
+            for (int i = 0; i < 512; i++) {
+                before = Math.max(before, Math.abs(block.left[i]));
+            }
+        }
+        Assert.assertTrue("the room rings " + before, before > 1e-3);
+        graph.seek(RATE);
+        block.setFrames(512);
+        graph.read(block);
+        for (int i = 0; i < 512; i++) {
+            Assert.assertEquals(0f, block.left[i], 0f);
+            Assert.assertEquals(0f, block.right[i], 0f);
+        }
+    }
 }
