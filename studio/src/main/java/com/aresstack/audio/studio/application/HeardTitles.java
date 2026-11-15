@@ -130,6 +130,13 @@ public final class HeardTitles {
             return false;
         }
 
+        /** Starts anew: the piece counted now may be heard again (it was produced anew). */
+        public void reset() {
+            piece = null;
+            seconds = 0;
+            told = false;
+        }
+
         /** How long the piece counted now has been heard. */
         public double seconds() {
             return seconds;

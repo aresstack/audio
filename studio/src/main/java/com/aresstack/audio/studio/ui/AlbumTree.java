@@ -107,6 +107,10 @@ final class AlbumTree extends JPanel {
     }
 
     private final Host host;
+    /** The background of a title nobody has heard yet: the accent of the theme over the tree. */
+    static final java.awt.Color NEW_TITLE = blend(AudioStudioTheme.MODULE, AudioStudioTheme.ACCENT, 0.28f);
+    /** Which titles are marked as not heard yet; none until the window says. */
+    private java.util.function.Predicate<Path> newTitle = folder -> false;
     private final DefaultMutableTreeNode root = new DefaultMutableTreeNode("Projekt");
     private final DefaultTreeModel model = new DefaultTreeModel(root);
     private final JTree tree = new JTree(model);
@@ -114,6 +118,27 @@ final class AlbumTree extends JPanel {
     private boolean filling;
     /** When the selection last told the window, so that the click that made it does not tell it twice. */
     private long announcedAt = -1;
+
+    /** Marks the titles this says are not heard yet (the player page); repainted at once. */
+    void setNewTitles(java.util.function.Predicate<Path> isNew) {
+        newTitle = isNew == null ? folder -> false : isNew;
+        tree.repaint();
+    }
+
+    @Override
+    public void repaint() {
+        super.repaint();
+        if (tree != null) {
+            tree.repaint();
+        }
+    }
+
+    private static java.awt.Color blend(java.awt.Color under, java.awt.Color over, float share) {
+        return new java.awt.Color(
+                Math.round(under.getRed() + (over.getRed() - under.getRed()) * share),
+                Math.round(under.getGreen() + (over.getGreen() - under.getGreen()) * share),
+                Math.round(under.getBlue() + (over.getBlue() - under.getBlue()) * share));
+    }
 
     AlbumTree(Host host) {
         super(new BorderLayout(0, 8));
@@ -133,7 +158,8 @@ final class AlbumTree extends JPanel {
             public Component getTreeCellRendererComponent(JTree owner, Object value, boolean selected, boolean expanded,
                                                           boolean leaf, int row, boolean focused) {
                 Object shown = value instanceof DefaultMutableTreeNode node ? node.getUserObject() : value;
-                setBackgroundNonSelectionColor(AudioStudioTheme.MODULE);
+                setBackgroundNonSelectionColor(shown instanceof TitleNode marked && marked.folder() != null
+                        && newTitle.test(marked.folder()) ? NEW_TITLE : AudioStudioTheme.MODULE);
                 setTextNonSelectionColor(AudioStudioTheme.TEXT);
                 setBackgroundSelectionColor(AudioStudioTheme.RAISED);
                 setTextSelectionColor(AudioStudioTheme.TEXT);
