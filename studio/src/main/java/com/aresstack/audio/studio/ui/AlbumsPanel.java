@@ -159,6 +159,8 @@ final class AlbumsPanel extends JPanel {
     /** What each field was last asked with, so that the same question is not asked twice. */
     private final Map<Field, String> askedWith = new EnumMap<Field, String>(Field.class);
     private final Map<Field, Integer> waiting = new EnumMap<Field, Integer>(Field.class);
+    /** Why the last request for a field gave nothing; told at the field and under the list. */
+    private final Map<Field, String> unanswered = new EnumMap<Field, String>(Field.class);
     private final Timer afterTitle = pause(() -> {
         propose(Field.STYLE);
         propose(Field.DESCRIPTION);
@@ -169,9 +171,18 @@ final class AlbumsPanel extends JPanel {
 
     /** The concept of the album, and beside it what the window adds (the choice of the models). */
     private final JPanel conceptRow = new JPanel(new BorderLayout(16, 0));
+    private javax.swing.JComponent beside;
+    /** Turns over the track list while the AI plans it. */
+    private final DeckWidgets.WaitCircle planning = new DeckWidgets.WaitCircle();
+
+    /** Whether the wait circle over the track list turns (for a test). */
+    boolean waitingForTracks() {
+        return planning.turning();
+    }
 
     /** Something that belongs beside the concept of the album: the models that plan and compose it. */
     void setBesideConcept(javax.swing.JComponent component) {
+        beside = component;
         conceptRow.add(component, BorderLayout.EAST);
         conceptRow.revalidate();
     }
@@ -222,6 +233,25 @@ final class AlbumsPanel extends JPanel {
         row(concept, c, 0, "Titel", titleBox, 3);
         row(concept, c, 1, "Worum geht es? Das bekommt die KI gesagt.", descriptionBox, 3);
         row(concept, c, 2, "Stil", styleBox, 3);
+        // An empty list that is opened asks the AI (again): a request that failed is not the last word.
+        for (final Field field : Field.values()) {
+            box(field).addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+                @Override
+                public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent event) {
+                    if (suggestions.of(field).isEmpty()) {
+                        propose(field);
+                    }
+                }
+
+                @Override
+                public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent event) {
+                }
+
+                @Override
+                public void popupMenuCanceled(javax.swing.event.PopupMenuEvent event) {
+                }
+            });
+        }
         typed(title, afterTitle);
         typed(description, afterDescription);
         typed(style, afterStyle);
@@ -294,7 +324,22 @@ final class AlbumsPanel extends JPanel {
         conceptRow.setOpaque(false);
         conceptRow.add(concept, BorderLayout.CENTER);
         right.add(conceptRow, BorderLayout.NORTH);
-        right.add(tableScroll, BorderLayout.CENTER);
+        // The wait circle lies over the list: two components on one place, the circle on top.
+        JPanel listed = new JPanel() {
+            @Override
+            public boolean isOptimizedDrawingEnabled() {
+                return false;
+            }
+        };
+        listed.setLayout(new javax.swing.OverlayLayout(listed));
+        listed.setOpaque(false);
+        planning.setAlignmentX(0.5f);
+        planning.setAlignmentY(0.5f);
+        tableScroll.setAlignmentX(0.5f);
+        tableScroll.setAlignmentY(0.5f);
+        listed.add(planning);
+        listed.add(tableScroll);
+        right.add(listed, BorderLayout.CENTER);
         right.add(bottom, BorderLayout.SOUTH);
         add(right, BorderLayout.CENTER);
 
@@ -367,6 +412,7 @@ final class AlbumsPanel extends JPanel {
         afterDescription.stop();
         afterStyle.stop();
         askedWith.clear();
+        unanswered.clear();
         suggestions = chosen == null ? AlbumSuggestions.EMPTY : AlbumSuggestions.load(files.folder(chosen.id()));
         showProposals();
         trackCount.setValue(chosen == null ? 12 : chosen.concept().trackCount());
@@ -418,6 +464,9 @@ final class AlbumsPanel extends JPanel {
             field.setEnabled(free);
         }
         plan.setEnabled(free);
+        if (beside != null) {
+            beside.setEnabled(!running && !busy); // no model is chosen while the models are at work
+        }
         add.setEnabled(free);
         remove.setEnabled(free && selected != null);
         up.setEnabled(free && selected != null && row > 0);
@@ -475,7 +524,10 @@ final class AlbumsPanel extends JPanel {
         for (Field field : Field.values()) {
             List<String> known = suggestions.of(field);
             box(field).proposals(known);
-            box(field).setToolTipText(known.isEmpty() ? "Vorschläge der KI erscheinen hier, sobald ein Titel steht."
+            String problem = unanswered.get(field);
+            box(field).setToolTipText(problem != null
+                    ? "Die Vorschläge der KI blieben aus: " + problem + " · Den Pfeil öffnen fragt noch einmal."
+                    : known.isEmpty() ? "Vorschläge der KI erscheinen hier, sobald ein Titel steht."
                     : known.size() + " Vorschläge der KI: mit dem Pfeil öffnen.");
         }
         // A style proposed while none is written yet shows faintly in the field, as a first idea.
@@ -510,7 +562,9 @@ final class AlbumsPanel extends JPanel {
             proposer = suggester != null ? suggester
                     : new ChatAlbumSuggester(host.models().model(AlbumRoles.ALBUM), host.tokens());
         } catch (RuntimeException noModel) {
-            // Without a model there are no proposals; the fields work as before.
+            // Without a model there are no proposals; the fields work as before, and say why.
+            unanswered.put(field, String.valueOf(noModel.getMessage()));
+            showProposals();
             return;
         }
         askedWith.put(field, with);
@@ -519,17 +573,30 @@ final class AlbumsPanel extends JPanel {
         box(field).setToolTipText("Die KI sucht Vorschläge …");
         proposing.execute(() -> {
             List<String> fresh;
+            String problem = null;
             try {
                 fresh = proposer.suggest(field, named, about, sounds, known);
             } catch (IOException | RuntimeException failed) {
                 fresh = List.of();
+                problem = String.valueOf(failed.getMessage());
                 host.log("Vorschläge der KI (" + field.key() + ") blieben aus: " + failed.getMessage());
             }
             List<String> found = fresh;
+            String said = problem;
             SwingUtilities.invokeLater(() -> {
                 waiting.merge(field, -1, Integer::sum);
                 if (album == null || !album.id().equals(asked.id())) {
                     return;
+                }
+                if (said != null) {
+                    // A request that failed is no answer: the same words may be asked again.
+                    if (with.equals(askedWith.get(field))) {
+                        askedWith.remove(field);
+                    }
+                    unanswered.put(field, said);
+                    say("Die Vorschläge der KI blieben aus: " + said);
+                } else {
+                    unanswered.remove(field);
                 }
                 AlbumSuggestions grown = suggestions.with(field, found);
                 if (grown != suggestions) {
@@ -639,7 +706,9 @@ final class AlbumsPanel extends JPanel {
         final Album asked = album;
         final int tokens = host.tokens();
         busy = true;
+        table.requestFocusInWindow(); // the key that was pressed is locked now: the focus goes to the list, not to a choice
         keys();
+        planning.turn(true);
         say("Die KI plant die Trackliste ...");
         Thread worker = new Thread(() -> {
             Album planned = null;
@@ -654,6 +723,7 @@ final class AlbumsPanel extends JPanel {
             final String said = problem;
             SwingUtilities.invokeLater(() -> {
                 busy = false;
+                planning.turn(false);
                 if (result != null) {
                     reload(result.id());
                     say("Trackliste bereit. Du kannst sie ändern und danach das Album produzieren.");

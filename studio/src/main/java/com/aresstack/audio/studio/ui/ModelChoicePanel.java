@@ -69,7 +69,7 @@ final class ModelChoicePanel extends JPanel {
         at.fill = GridBagConstraints.HORIZONTAL;
         at.weightx = 1;
         // The heading, and right beside it the sign that fetches the models of the service anew.
-        DeckWidgets.RefreshKey load = new DeckWidgets.RefreshKey(
+        load = new DeckWidgets.RefreshKey(
                 "Modelle neu laden: die Modelle des eingestellten Dienstes in die Auswahl holen");
         load.addActionListener(event -> this.loadModels.run());
         JPanel head = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
@@ -102,7 +102,7 @@ final class ModelChoicePanel extends JPanel {
             add(purpose, at);
             at.gridx = 0;
         }
-        JButton extended = new JButton("Erweiterte Modellzuordnung …");
+        extended = new JButton("Erweiterte Modellzuordnung …");
         extended.setToolTipText("Jeder KI-Aufgabe ein eigenes Modell geben");
         extended.addActionListener(event -> showExtended());
         JPanel buttons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
@@ -115,6 +115,20 @@ final class ModelChoicePanel extends JPanel {
         add(buttons, at);
         refresh();
     }
+
+    /** Locked while the models are at work (a track list is planned, an album produced): no choice then. */
+    @Override
+    public void setEnabled(boolean enabled) {
+        super.setEnabled(enabled);
+        for (JComboBox<String> box : boxes) {
+            box.setEnabled(enabled);
+        }
+        load.setEnabled(enabled);
+        extended.setEnabled(enabled);
+    }
+
+    private final DeckWidgets.RefreshKey load;
+    private final JButton extended;
 
     private JComboBox<String> box(ModelRole role) {
         JComboBox<String> box = new JComboBox<>();

@@ -30,7 +30,9 @@ public final class ChatAlbumSuggester implements AlbumSuggester {
 
     public ChatAlbumSuggester(ChatModel model, int maxTokens) {
         this.model = model;
-        this.maxTokens = Math.max(256, Math.min(maxTokens, 1024));
+        // Room for a model that thinks before it answers: its thinking counts as tokens of the answer,
+        // and an answer cut off at the limit is no answer.
+        this.maxTokens = Math.max(256, Math.min(maxTokens, 4096));
     }
 
     @Override

@@ -264,6 +264,60 @@ final class DeckWidgets {
     }
 
     /**
+     * A circle that turns while something is waited for (a list the AI is writing), in the pink of
+     * the desk. It lies over what it waits for, lets the mouse through and is seen only while it
+     * turns.
+     */
+    static final class WaitCircle extends javax.swing.JComponent {
+        private int angle;
+        private final javax.swing.Timer turning = new javax.swing.Timer(40, event -> {
+            angle = (angle + 12) % 360;
+            repaint();
+        });
+
+        WaitCircle() {
+            setOpaque(false);
+            setVisible(false);
+        }
+
+        /** Starts or stops the circle; stopped, it is not there. */
+        void turn(boolean on) {
+            setVisible(on);
+            if (on) {
+                turning.start();
+            } else {
+                turning.stop();
+            }
+        }
+
+        boolean turning() {
+            return turning.isRunning();
+        }
+
+        @Override
+        public boolean contains(int x, int y) {
+            return false; // what lies under it stays in reach
+        }
+
+        @Override
+        protected void paintComponent(java.awt.Graphics graphics) {
+            java.awt.Graphics2D g = (java.awt.Graphics2D) graphics.create();
+            g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setRenderingHint(java.awt.RenderingHints.KEY_STROKE_CONTROL, java.awt.RenderingHints.VALUE_STROKE_PURE);
+            double r = 17;
+            double cx = getWidth() / 2.0;
+            double cy = getHeight() / 2.0;
+            g.setStroke(new java.awt.BasicStroke(4f, java.awt.BasicStroke.CAP_ROUND, java.awt.BasicStroke.JOIN_ROUND));
+            Color pink = AudioStudioTheme.ACCENT;
+            g.setColor(new Color(pink.getRed(), pink.getGreen(), pink.getBlue(), 50));
+            g.draw(new java.awt.geom.Ellipse2D.Double(cx - r, cy - r, 2 * r, 2 * r));
+            g.setColor(pink);
+            g.draw(new java.awt.geom.Arc2D.Double(cx - r, cy - r, 2 * r, 2 * r, -angle, 100, java.awt.geom.Arc2D.OPEN));
+            g.dispose();
+        }
+    }
+
+    /**
      * A small sign beside a heading that fetches something anew: two arrows that turn in a
      * circle. No frame and no words; it lights up under the pointer.
      */
