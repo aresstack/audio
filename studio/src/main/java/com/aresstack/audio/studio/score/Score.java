@@ -331,7 +331,7 @@ public final class Score {
             if (!kit && (grand || Voicing.named(voices, false))) {
                 List<long[]> notes = written.get(track.getKey());
                 staves.addAll(staves(track.getKey(), notes, Voicing.assign(notes, voices, false, grand),
-                        Map.of(), grand, bars, bar, key));
+                        Map.of(), grand, bars, bar, beat(numerator, denominator), key));
                 continue;
             }
             Staff staff = new Staff(track.getKey(), kit ? Clef.PERCUSSION : clef(track.getValue()),
@@ -381,7 +381,7 @@ public final class Score {
             }
             if (Voicing.struck(part)) {
                 TreeMap<Integer, List<int[]>> track = track(notes);
-                staves.add(new Staff(part.id(), Clef.PERCUSSION, voices(track, bars, true, bar)));
+                staves.add(new Staff(part.id(), Clef.PERCUSSION, voices(track, bars, true, bar, beat(numerator, denominator))));
                 continue;
             }
             Map<String, String> tokens = Voicing.tokens(part);
@@ -397,7 +397,7 @@ public final class Score {
                 }
             }
             staves.addAll(staves(part.id(), notes, voices, stems,
-                    part.staffLayout() == Part.StaffLayout.GRAND, bars, bar, key));
+                    part.staffLayout() == Part.StaffLayout.GRAND, bars, bar, beat(numerator, denominator), key));
         }
         return new Score(tempo, bars, staves, key, numerator, denominator);
     }
@@ -430,7 +430,8 @@ public final class Score {
      * @param stems  stem directions the voices ask for; a voice not named follows {@link Voicing#stem}
      */
     private static List<Staff> staves(String trackId, List<long[]> notes, String[] voices,
-                                      Map<String, Voice.Stem> stems, boolean grand, int bars, int bar, Key key) {
+                                      Map<String, Voice.Stem> stems, boolean grand, int bars, int bar, int beat,
+                                      Key key) {
         List<Staff> staves = new ArrayList<Staff>();
         List<Placement> systems = grand ? List.of(Placement.UPPER, Placement.LOWER) : List.of(Placement.SINGLE);
         for (Placement system : systems) {
@@ -459,7 +460,7 @@ public final class Score {
                         line.add(notes.get(i));
                     }
                 }
-                written.add(write(sounding(track(line), bars, false, bar), bars, bar));
+                written.add(write(sounding(track(line), bars, false, bar), bars, bar, beat));
                 Voice.Stem asked = stems.get(name);
                 directions.add(asked != null ? asked : Voicing.stem(name, names));
             }
