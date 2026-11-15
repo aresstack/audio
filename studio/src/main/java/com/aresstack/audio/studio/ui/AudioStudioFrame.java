@@ -4025,11 +4025,25 @@ public final class AudioStudioFrame extends JFrame {
         }
         Album chosen = currentAlbum == null ? null : albumMembers.albums().album(currentAlbum).orElse(null);
         setTitle("AresStack Audio Studio — " + (chosen == null ? "" : chosen.title() + " — ") + songs.name(current));
-        songFacts.setText(songFacts(current));
+        songFacts.setText(songFacts(current, modelBars(current)));
     }
 
     /** One line about the piece from its plan: tempo, key, metre, length and mood; a hint when there is no plan. */
-    private static String songFacts(Path folder) {
+    /**
+     * The bars of the piece as its model has them, or 0 without a model: after "Verlängern" or a
+     * production in portions the plan still names the length it was first planned with.
+     */
+    private int modelBars(Path folder) {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> model = pieceModel.of(folder);
+        if (!model.isPresent()) {
+            return 0;
+        }
+        com.aresstack.audio.composition.Composition piece = model.get().composition();
+        long end = piece.endTick();
+        return end <= 0 ? 0 : piece.timeMap().barOf(end - 1) + 1;
+    }
+
+    private static String songFacts(Path folder, int modelBars) {
         Path plan = folder.resolve("composition-plan.json");
         if (!Files.isRegularFile(plan)) {
             return Files.isRegularFile(folder.resolve("arrangement.tsv")) ? "Arrangement ohne Plan der KI"
@@ -4041,7 +4055,9 @@ public final class AudioStudioFrame extends JFrame {
             StringBuilder facts = new StringBuilder();
             String[][] parts = {{"tempoBpm", " BPM"}, {"key", ""}, {"timeSignature", ""}, {"bars", " Takte"}};
             for (String[] part : parts) {
-                if (json.has(part[0]) && json.get(part[0]).isJsonPrimitive()) {
+                if ("bars".equals(part[0]) && modelBars > 0) {
+                    facts.append(facts.length() > 0 ? "  ·  " : "").append(modelBars).append(part[1]);
+                } else if (json.has(part[0]) && json.get(part[0]).isJsonPrimitive()) {
                     facts.append(facts.length() > 0 ? "  ·  " : "").append(json.get(part[0]).getAsString()).append(part[1]);
                 }
             }
