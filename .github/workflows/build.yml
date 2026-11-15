@@ -228,3 +228,24 @@ jobs:
           gh release upload "$tag" release/audio-studio.jar \
             release/district-dawn.mid release/district-dawn-synth.wav release/district-dawn-generaluser.wav \
             release/district-dawn-synth.mp3 release/district-dawn-generaluser.mp3 --clobber
+
+  gpu-windows:
+    # The full screen of the visualizer draws with Direct3D 11 on Windows: its HLSL is compiled by
+    # the compiler of Windows here, which the Linux job cannot do.
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Test the graphics module (HLSL compiled by d3dcompiler_47)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ./gradlew :gpu:test --no-daemon --stacktrace

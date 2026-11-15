@@ -27,6 +27,7 @@ dependencies {
     implementation project(':music')
     implementation project(':instruments')
     implementation project(':sounds')
+    implementation project(':gpu')
     implementation 'com.google.code.gson:gson:2.10.1'
     implementation 'org.java-websocket:Java-WebSocket:1.5.2'
     implementation 'com.formdev:flatlaf:3.5.4'
@@ -41,7 +42,7 @@ application {
 def mergedServicesDirectory = layout.buildDirectory.dir('merged-service-providers')
 
 tasks.named('jar') {
-    dependsOn ':audio-core:jar', ':composition:jar', ':music:jar', ':instruments:jar', ':sounds:jar', tasks.named('mergeServiceProviders')
+    dependsOn ':audio-core:jar', ':composition:jar', ':music:jar', ':instruments:jar', ':sounds:jar', ':gpu:jar', tasks.named('mergeServiceProviders')
     archiveFileName = 'audio-studio.jar'
     from sourceSets.launcher.output
     manifest {
@@ -68,10 +69,12 @@ tasks.named('test') {
 
 tasks.named('run') {
     workingDir rootProject.projectDir
+    // The full screen of the visualizer on the graphics card uses FFM, a preview API in Java 21.
+    jvmArgs '--enable-preview', '--enable-native-access=ALL-UNNAMED'
 }
 
 tasks.register('mergeServiceProviders') {
-    dependsOn ':audio-core:jar', ':composition:jar', ':music:jar', ':instruments:jar', ':sounds:jar'
+    dependsOn ':audio-core:jar', ':composition:jar', ':music:jar', ':instruments:jar', ':sounds:jar', ':gpu:jar'
     inputs.files(configurations.runtimeClasspath)
     outputs.dir(mergedServicesDirectory)
     doLast {

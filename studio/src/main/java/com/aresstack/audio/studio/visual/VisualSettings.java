@@ -26,15 +26,20 @@ import java.util.Properties;
  * @param trail           how much of the last picture stays behind in the trailing effects, 0 to 1
  * @param effect          the key of the effect shown ({@link Effect#key()})
  * @param gpu             whether the full screen uses the graphics card where it can
+ * @param gpuBackend      auto, d3d11 or opengl: which graphics API the full screen uses
+ * @param gpuVsync        whether the full screen waits for the refresh of the screen
+ * @param gpuOpenSeconds  how long the graphics card may take to open the full screen
+ * @param doubleClickMs   the longest time between the two clicks of a double-click on the full screen
  */
 public record VisualSettings(int framesPerSecond, int windowFrames, int bands, double lowestHz, double highestHz,
                              double floorDb, double attack, double release, double beatRatio, double beatAverage,
                              double beatDecay, double beatGap, double bassHz, double trebleHz, int particles, int tunnelRings, double trail, String effect,
-                             boolean gpu) {
+                             boolean gpu, String gpuBackend, boolean gpuVsync, double gpuOpenSeconds,
+                             int doubleClickMs) {
     public static final String PREFIX = "visualizer.";
 
     public static final VisualSettings DEFAULTS = new VisualSettings(30, 2048, 48, 30, 16000, -72, 0.6, 0.12,
-            1.45, 0.05, 0.86, 0.18, 250, 4000, 700, 22, 0.82, "spectrum", true);
+            1.45, 0.05, 0.86, 0.18, 250, 4000, 700, 22, 0.82, "spectrum", true, "auto", true, 6, 450);
 
     public VisualSettings {
         framesPerSecond = clamp(framesPerSecond, 5, 120);
@@ -55,6 +60,9 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
         tunnelRings = clamp(tunnelRings, 2, 200);
         trail = clamp(trail, 0, 0.99);
         effect = effect == null || effect.isBlank() ? "spectrum" : effect.trim();
+        gpuBackend = gpuBackend == null || !gpuBackend.trim().matches("auto|d3d11|opengl") ? "auto" : gpuBackend.trim();
+        gpuOpenSeconds = clamp(gpuOpenSeconds, 1, 60);
+        doubleClickMs = clamp(doubleClickMs, 100, 2000);
     }
 
     /** The settings kept in these properties, defaults where none are. */
@@ -82,7 +90,11 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
                 integer(saved, "tunnelRings", d.tunnelRings),
                 number(saved, "trail", d.trail),
                 saved.getProperty(PREFIX + "effect", d.effect),
-                !"false".equalsIgnoreCase(saved.getProperty(PREFIX + "gpu", String.valueOf(d.gpu))));
+                !"false".equalsIgnoreCase(saved.getProperty(PREFIX + "gpu", String.valueOf(d.gpu))),
+                saved.getProperty(PREFIX + "gpuBackend", d.gpuBackend),
+                !"false".equalsIgnoreCase(saved.getProperty(PREFIX + "gpuVsync", String.valueOf(d.gpuVsync))),
+                number(saved, "gpuOpenSeconds", d.gpuOpenSeconds),
+                integer(saved, "doubleClickMs", d.doubleClickMs));
     }
 
     /** Writes every value into the properties, so that a user finds them all in the file. */
@@ -106,12 +118,17 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
         saved.setProperty(PREFIX + "trail", text(trail));
         saved.setProperty(PREFIX + "effect", effect);
         saved.setProperty(PREFIX + "gpu", String.valueOf(gpu));
+        saved.setProperty(PREFIX + "gpuBackend", gpuBackend);
+        saved.setProperty(PREFIX + "gpuVsync", String.valueOf(gpuVsync));
+        saved.setProperty(PREFIX + "gpuOpenSeconds", text(gpuOpenSeconds));
+        saved.setProperty(PREFIX + "doubleClickMs", String.valueOf(doubleClickMs));
     }
 
     /** The same settings showing another effect. */
     public VisualSettings showing(String key) {
         return new VisualSettings(framesPerSecond, windowFrames, bands, lowestHz, highestHz, floorDb, attack,
-                release, beatRatio, beatAverage, beatDecay, beatGap, bassHz, trebleHz, particles, tunnelRings, trail, key, gpu);
+                release, beatRatio, beatAverage, beatDecay, beatGap, bassHz, trebleHz, particles, tunnelRings, trail, key, gpu, gpuBackend,
+                gpuVsync, gpuOpenSeconds, doubleClickMs);
     }
 
     private static int integer(Properties saved, String key, int fallback) {
