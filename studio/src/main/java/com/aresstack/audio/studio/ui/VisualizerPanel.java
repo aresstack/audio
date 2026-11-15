@@ -54,7 +54,8 @@ final class VisualizerPanel extends JPanel {
     private SoundAnalyzer analyzer;
     private final List<Effect> effects = Effects.all();
     private Effect effect;
-    private String shown;
+    /** Read by the render thread of the graphics card too. */
+    private volatile String shown;
     private final VisualPalette palette = new VisualPalette(new Color(0x0A0B0F), AudioStudioTheme.TEXT,
             AudioStudioTheme.TEXT_FAINT, AudioStudioTheme.ACCENT, AudioStudioTheme.GREEN, AudioStudioTheme.AMBER,
             AudioStudioTheme.RED, AudioStudioTheme.CYAN, AudioStudioTheme::channel);
@@ -69,6 +70,16 @@ final class VisualizerPanel extends JPanel {
     private final Map<String, DeckWidgets.SegmentKey> keys = new LinkedHashMap<String, DeckWidgets.SegmentKey>();
     private final JPanel head = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
     private JFrame fullScreen;
+    /** The full screen on the graphics card while it is open. */
+    private com.aresstack.audio.gpu.GpuScreen gpu;
+    private boolean gpuOpening;
+    /** Why the graphics card could not be used in this run; then the full screen is drawn with Java2D. */
+    private String gpuFailed;
+    /** A line shown over the picture for a moment: which device draws, or why not the graphics card. */
+    private String notice;
+    private long noticeUntil;
+    /** How long a notice stays over the picture. */
+    static final long NOTICE_MILLIS = 6000;
 
     /**
      * @param feed  where the heard sound comes from
@@ -152,6 +163,12 @@ final class VisualizerPanel extends JPanel {
     /** Shows an effect or the score and keeps the choice in the settings. */
     void choose(String key) {
         show(key);
+        if (gpu != null && !com.aresstack.audio.studio.visual.GpuFill.drawsOnGpu(shown)) {
+            // The graphics card does not draw this one: the full screen goes on with Java2D.
+            gpu.close();
+            gpu = null;
+            openFullScreen();
+        }
         settings = settings.showing(shown);
         save();
     }
@@ -174,19 +191,89 @@ final class VisualizerPanel extends JPanel {
         return fullScreen != null;
     }
 
-    /** Fills the screen with what is shown, or brings it back onto the page. */
+    /**
+     * Fills the screen with what is shown, or brings it back onto the page. An effect the graphics
+     * card draws ({@link com.aresstack.audio.studio.visual.GpuFill#drawsOnGpu}) opens there if the
+     * settings want it; where that fails, the full screen is drawn with Java2D, as the others are.
+     */
     void toggleFullScreen() {
+        if (gpu != null) {
+            gpu.close();
+            return;
+        }
         if (fullScreen != null) {
             leaveFullScreen();
+            return;
+        }
+        if (gpuOpening) {
+            return;
+        }
+        if (settings.gpu() && gpuFailed == null && com.aresstack.audio.studio.visual.GpuFill.drawsOnGpu(shown)) {
+            openOnGpu();
+            return;
+        }
+        openFullScreen();
+    }
+
+    /** Opens the full screen on the graphics card off the event thread; falls back to Java2D. */
+    private void openOnGpu() {
+        gpuOpening = true;
+        final VisualSettings now = settings;
+        Thread opening = new Thread(() -> {
+            try {
+                com.aresstack.audio.gpu.GpuScreen screen = com.aresstack.audio.gpu.GpuScreen.open(
+                        new com.aresstack.audio.gpu.GpuScreen.Settings("Audio Studio – Visualizer", now.bands(),
+                                now.gpuVsync(), now.doubleClickMs(), now.gpuOpenSeconds(), now.gpuBackend()),
+                        new com.aresstack.audio.studio.visual.GpuFill(feed, now, () -> shown),
+                        () -> SwingUtilities.invokeLater(this::gpuClosed));
+                SwingUtilities.invokeLater(() -> {
+                    gpuOpening = false;
+                    if (!com.aresstack.audio.studio.visual.GpuFill.drawsOnGpu(shown)) {
+                        // Another effect was chosen while the card opened, one it does not draw.
+                        screen.close();
+                        openFullScreen();
+                    } else if (screen.open()) {
+                        gpu = screen;
+                        notice("Vollbild auf der Grafikkarte: " + screen.description());
+                    }
+                });
+            } catch (com.aresstack.audio.gpu.GpuUnavailableException unavailable) {
+                SwingUtilities.invokeLater(() -> {
+                    gpuOpening = false;
+                    gpuFailed = unavailable.getMessage();
+                    notice(gpuFailed + " Vollbild mit Java2D.");
+                    openFullScreen();
+                });
+            }
+        }, "visualizer-gpu-open");
+        opening.setDaemon(true);
+        opening.start();
+    }
+
+    private void gpuClosed() {
+        gpu = null;
+        canvas.forget();
+    }
+
+    /** Whether the graphics card draws the full screen now. */
+    boolean onGpu() {
+        return gpu != null;
+    }
+
+    private void notice(String text) {
+        notice = text;
+        noticeUntil = System.currentTimeMillis() + NOTICE_MILLIS;
+    }
+
+    /** Fills the screen with a window of Java2D. */
+    private void openFullScreen() {
+        if (java.awt.GraphicsEnvironment.isHeadless()) {
             return;
         }
         java.awt.Window owner = SwingUtilities.getWindowAncestor(this);
         java.awt.GraphicsConfiguration screen = owner != null ? owner.getGraphicsConfiguration()
                 : java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice()
                 .getDefaultConfiguration();
-        if (java.awt.GraphicsEnvironment.isHeadless()) {
-            return;
-        }
         JFrame frame = new JFrame(screen);
         frame.setTitle("Audio Studio – Visualizer");
         frame.setUndecorated(true);
@@ -318,6 +405,10 @@ final class VisualizerPanel extends JPanel {
             g.setFont(AudioStudioTheme.lettering(11f));
             try {
                 drawing.paint(g, width, height, picture, palette, settings);
+                if (notice != null && System.currentTimeMillis() < noticeUntil) {
+                    g.setColor(palette.faint());
+                    g.drawString(notice, 10, height - 10);
+                }
             } finally {
                 g.dispose();
             }

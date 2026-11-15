@@ -19,8 +19,10 @@ import javax.swing.JOptionPane;
  * are compiled <em>for Java 8</em> and have no compile-time dependency on the studio:
  * a class file carries its own version, and a JVM only minds the version of the
  * classes it loads. Started by Java 21 or newer, the launcher starts the studio in
- * the same JVM. Started by an older Java, it looks for a Java 21 on this computer
- * and starts that one with this same JAR. So the JAR runs with a plain
+ * the same JVM; on exactly Java 21 without {@code --enable-preview} it starts that Java once more
+ * with the flags the graphics card of the visualizer needs (FFM is a preview API in Java 21;
+ * {@code -Daudio.gpu=false} leaves that out). Started by an older Java, it looks for a Java 21 on
+ * this computer and starts that one with this same JAR and those flags. So the JAR runs with a plain
  * {@code java -jar} or a double-click, whichever Java the computer starts JARs with.
  * The code is a copy of the launcher of 3d4j, with its own settings; the two
  * programs share nothing at run time.</p>
@@ -34,6 +36,8 @@ public final class Launcher {
     private static final int REQUIRED_JAVA = 21;
     private static final String MAIN = "com.aresstack.audio.studio.ui.AudioStudioMain";
     private static final String RELAUNCHED_PROPERTY = "audio.relaunched";
+    /** {@code -Daudio.gpu=false} starts without the flags for the graphics card; the visualizer then draws with Java2D only. */
+    private static final String GPU_PROPERTY = "audio.gpu";
 
     private Launcher() {
     }
@@ -64,7 +68,17 @@ public final class Launcher {
                         + "AUDIO_STUDIO_JAVA\n(oder -Daudio.java=...).", false);
             }
             // Errors of the second JVM are reported by that JVM; only its exit code is passed on.
-            System.exit(relaunch(sameKind(found), args));
+            System.exit(relaunch(sameKind(found), args, false));
+        }
+        if (java == REQUIRED_JAVA && !previewEnabled() && !Boolean.getBoolean(RELAUNCHED_PROPERTY)
+                && !"false".equalsIgnoreCase(System.getProperty(GPU_PROPERTY))) {
+            // The full screen of the visualizer reaches the graphics card through the FFM API, a
+            // preview API in Java 21: the same Java is started again with the flags it needs.
+            File own = new File(new File(System.getProperty("java.home"), "bin"), "java");
+            File executable = own.isFile() ? own : new File(own.getPath() + ".exe");
+            if (executable.isFile()) {
+                System.exit(relaunch(sameKind(executable), args, true));
+            }
         }
         Class<?> mainClass = Class.forName(MAIN, true, Launcher.class.getClassLoader());
         Method main = mainClass.getMethod("main", String[].class);
@@ -93,17 +107,33 @@ public final class Launcher {
         System.exit(1);
     }
 
-    /** Starts the found Java with this JAR and waits for it to finish. */
-    private static int relaunch(String executable, String[] args) throws Exception {
+    /** Whether this JVM runs with preview features, as the graphics card of the visualizer needs. */
+    private static boolean previewEnabled() {
+        return ManagementFactory.getRuntimeMXBean().getInputArguments().contains("--enable-preview");
+    }
+
+    /**
+     * Starts a Java with this JAR and waits for it to finish.
+     *
+     * @param sameJava whether it is the Java that runs now (started again for the graphics card), which keeps all options
+     */
+    private static int relaunch(String executable, String[] args, boolean sameJava) throws Exception {
         List<String> command = new ArrayList<String>();
         command.add(executable);
         for (String jvmArg : ManagementFactory.getRuntimeMXBean().getInputArguments()) {
-            // Another Java may not know this one's options; system properties it always takes.
-            if (jvmArg.startsWith("-D")) {
+            // The same Java takes all of this one's options (heap, collector, agents); another Java
+            // may not know them, but system properties it always takes.
+            if (sameJava ? !jvmArg.equals("--enable-preview") && !jvmArg.startsWith("--enable-native-access")
+                    : jvmArg.startsWith("-D")) {
                 command.add(jvmArg);
             }
         }
         command.add("-D" + RELAUNCHED_PROPERTY + "=true");
+        if (!"false".equalsIgnoreCase(System.getProperty(GPU_PROPERTY))) {
+            // For the graphics card (FFM, a preview API in Java 21); a newer Java takes the flags too.
+            command.add("--enable-preview");
+            command.add("--enable-native-access=ALL-UNNAMED");
+        }
         command.add("-cp");
         command.add(System.getProperty("java.class.path"));
         command.add(Launcher.class.getName());
