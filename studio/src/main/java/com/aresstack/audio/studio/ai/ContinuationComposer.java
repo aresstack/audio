@@ -170,7 +170,7 @@ public final class ContinuationComposer {
         });
         Map<String, Future<Written>> running = new LinkedHashMap<>();
         int atOnce = Math.min(threads, Math.max(1, voices.size()));
-        progress.update(voices.size() + " Stimmen, " + atOnce + " davon gleichzeitig (Einstellung „Parallel“: höchstens "
+        progress.detail(voices.size() + " Stimmen, " + atOnce + " davon gleichzeitig (Einstellung „Parallel“: höchstens "
                 + threads + "); jede Stimme schreibt ihre Abschnitte nacheinander, weil jeder an den vorigen anschließt.");
         try {
             for (ContinuationVoice voice : voices) {
@@ -215,7 +215,7 @@ public final class ContinuationComposer {
                 connection = "";
                 continue;
             }
-            progress.update("Angefragt: " + voice.name() + " für " + frame.name() + " ...");
+            progress.update("Komponiere " + voice.name() + " für " + frame.name() + " ...");
             long asked = System.currentTimeMillis();
             GeneratedNotes generated;
             try (Listening.Scope watching = Listening.to(sketch == null ? null
@@ -225,7 +225,7 @@ public final class ContinuationComposer {
             if (sketch != null) {
                 sketch.written(voice.key(), voice.program(), voice.role(), frame, generated);
             }
-            progress.update("Komponiert: " + voice.name() + " für " + frame.name() + " (" + generated.notes().size()
+            progress.detail("Komponiert: " + voice.name() + " für " + frame.name() + " (" + generated.notes().size()
                     + " Noten, " + (System.currentTimeMillis() - asked + 500) / 1000 + " s)");
             List<ShapedNote> shaped = normalizer.shape(frame, generated, transition ? ringOut(task) : 0);
             if (frame.intensity() != null) {
