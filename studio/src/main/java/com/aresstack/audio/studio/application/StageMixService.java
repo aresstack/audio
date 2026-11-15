@@ -6,6 +6,7 @@ import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.composition.mix.MixScene;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.mix.MixLevel;
+import com.aresstack.audio.studio.mix.MixOutcome;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
 import com.aresstack.audio.studio.mix.StageAutomation;
 import com.aresstack.audio.studio.project.CompositionJson;
@@ -42,6 +43,7 @@ public final class StageMixService {
 
     private final SpatialSceneStore store = new SpatialSceneStore();
     private final SpatialStemMixer mixer = new SpatialStemMixer();
+    private volatile float legacyFactor = Float.NaN;
 
     /**
      * What the mix has to know of a piece: its tracks, and where its bars lie in time. A piece
@@ -146,44 +148,37 @@ public final class StageMixService {
         return export(Piece.written(arrangement), directory, scene, target, bits);
     }
 
-    /**
-     * Writes the mix on the stage to a file with this level strategy: in {@code FIXED} with the
-     * limiter and, if chosen, a peak or loudness normalization of the file. Without a strategy
-     * ({@code null}) the piece is mixed in the compatibility mode with the master level of its
-     * stage, as every piece is until the user switches it.
-     */
-    public Path export(Path arrangement, Path directory, SpatialScene scene, Path target, int bits, MixLevel level)
-            throws Exception {
-        return export(Piece.written(arrangement), directory, scene, target, bits, level);
-    }
-
     /** Mixes the rendered tracks of a piece on its saved stage; no written arrangement is read for a model. */
     public Path mix(Piece piece, Path directory, Progress progress) throws Exception {
         return mix(piece, directory, scene(piece, directory), progress);
     }
 
     public Path mix(Piece piece, Path directory, SpatialScene scene, Progress progress) throws Exception {
-        return mix(piece, directory, scene, null, directory.resolve(MIX_FILE), 16, null, progress);
+        return mix(piece, directory, scene, null, directory.resolve(MIX_FILE), 16, progress);
     }
 
     /** One track alone, but as it stands on the stage: with its level, its place and the room. */
     public Path solo(Piece piece, Path directory, SpatialScene scene, String trackId) throws Exception {
-        return mix(piece, directory, scene, trackId, directory.resolve(SOLO_FILE), 16, null, message -> { });
+        return mix(piece, directory, scene, trackId, directory.resolve(SOLO_FILE), 16, message -> { });
     }
 
     /** Writes the mix on the stage to a file of the user's choice, with 16 or 24 bits. */
     public Path export(Piece piece, Path directory, SpatialScene scene, Path target, int bits) throws Exception {
-        return mix(piece, directory, scene, null, target, bits, null, message -> { });
+        return mix(piece, directory, scene, null, target, bits, message -> { });
     }
 
-    /** Writes the mix of a piece on the stage to a file with this level strategy; {@code null} is the compatibility mode. */
-    public Path export(Piece piece, Path directory, SpatialScene scene, Path target, int bits, MixLevel level)
-            throws Exception {
-        return mix(piece, directory, scene, null, target, bits, level, message -> { });
+    /**
+     * The factor the last mix of the whole stage to a file applied (peak normalization and master
+     * level), or NaN before the first. Files and exports are always mixed as before
+     * ({@code LEGACY_PEAK}); live playback takes this factor as its fixed gain
+     * ({@link MixLevel#liveMaster}) so that it sounds like the file.
+     */
+    public float legacyFactor() {
+        return legacyFactor;
     }
 
     private Path mix(Piece piece, Path directory, SpatialScene scene, String only, Path target, int bits,
-                     MixLevel level, Progress progress) throws Exception {
+                     Progress progress) throws Exception {
         List<MusicTrack> tracks = piece.tracks();
         SpatialScene fitting = scene.fitting(tracks);
         Map<String, String> stems = stems(directory);
@@ -210,8 +205,12 @@ public final class StageMixService {
         StageAutomation automation = piece.levels(placements).movingAs(piece.movements(directory, progress));
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
-            MixLevel chosen = level != null ? level : MixLevel.legacy(fitting.masterDb());
-            mixer.withAutomation(automation).mix(files, placements, fitting.room(), secondsPerBar, chosen, fresh, bits);
+            // Files and exports sound exactly as before (decision of the product owner: "export old, live new").
+            MixOutcome outcome = mixer.withAutomation(automation).mix(files, placements, fitting.room(), secondsPerBar,
+                    MixLevel.legacy(fitting.masterDb()), fresh, bits);
+            if (only == null) {
+                legacyFactor = outcome.legacyFactor();
+            }
             Files.move(fresh, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(fresh);
