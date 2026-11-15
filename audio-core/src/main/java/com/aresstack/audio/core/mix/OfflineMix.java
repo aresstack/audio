@@ -119,7 +119,7 @@ public final class OfflineMix {
             });
             peak = meter.peak();
             loudness = wantsLoudness ? loudnessMeter.integrated() : Double.NaN;
-            gain = normalization.gain(peak, loudness);
+            gain = wantsLoudness ? normalization.gain(peak, loudnessMeter::integrated) : normalization.gain(peak, loudness);
         }
         float factor = (float) gain;
         MasterBus bus = new MasterBus(master);

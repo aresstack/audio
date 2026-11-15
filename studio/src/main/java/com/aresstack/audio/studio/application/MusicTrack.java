@@ -1,19 +1,19 @@
 package com.aresstack.audio.studio.application;
 
+import com.aresstack.audio.composition.Role;
+import com.aresstack.audio.studio.stage.Performer;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
 /** Define one user-editable musical voice independently of MIDI channel allocation. */
-public final class MusicTrack {
-    public static final String MELODY = "melody";
-    public static final String HARMONY = "harmony";
-    public static final String BASS = "bass";
-    public static final String DRUMS = "drums";
-    public static final String TEXTURE = "texture";
-    public static final List<String> ROLES = Collections.unmodifiableList(
-            Arrays.asList(MELODY, HARMONY, BASS, DRUMS, TEXTURE));
+public final class MusicTrack implements Performer {
+    public static final String MELODY = Role.MELODY;
+    public static final String HARMONY = Role.HARMONY;
+    public static final String BASS = Role.BASS;
+    public static final String DRUMS = Role.DRUMS;
+    public static final String TEXTURE = Role.TEXTURE;
+    public static final List<String> ROLES = Role.ALL;
 
     private final String id;
     private final String role;
@@ -52,7 +52,9 @@ public final class MusicTrack {
         return new MusicTrack(id, role, instrument, program, selectedId);
     }
 
+    @Override
     public String id() { return id; }
+    @Override
     public String role() { return role; }
     public String instrument() { return instrument; }
     public int program() { return program; }

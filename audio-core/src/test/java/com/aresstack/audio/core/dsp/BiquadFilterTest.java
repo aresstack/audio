@@ -3,6 +3,7 @@ package com.aresstack.audio.core.dsp;
 import static com.aresstack.audio.core.TestSignals.rms;
 import static com.aresstack.audio.core.TestSignals.sine;
 
+import com.aresstack.audio.core.AudioBlock;
 import com.aresstack.audio.core.BiquadCoefficients;
 import com.aresstack.audio.core.TestSignals;
 import org.junit.Assert;
@@ -98,6 +99,33 @@ public final class BiquadFilterTest {
         new BiquadFilter(c).process(first, 0, first.length);
         new BiquadFilter(c).process(second, 0, second.length);
         Assert.assertArrayEquals(first, second, 0f);
+    }
+
+    @Test
+    public void bothSidesOfAStereoFilterAlwaysUseTheSameCoefficients() throws Exception {
+        StereoBiquad filter = new StereoBiquad(BiquadCoefficients.highShelf(RATE, 4500, -1, 1));
+        filter.prepare(RATE, 512);
+        BiquadCoefficients[] sets = {BiquadCoefficients.highShelf(RATE, 4500, -9, 1),
+                BiquadCoefficients.highShelf(RATE, 4500, -1, 1)};
+        Thread changer = new Thread(() -> {
+            for (int i = 0; !Thread.currentThread().isInterrupted(); i++) {
+                filter.setCoefficients(sets[i & 1]);
+            }
+        });
+        changer.start();
+        try {
+            AudioBlock block = new AudioBlock(512);
+            float[] noise = TestSignals.noise(512, 6, 0.5);
+            for (int round = 0; round < 20000; round++) {
+                System.arraycopy(noise, 0, block.left, 0, 512);
+                System.arraycopy(noise, 0, block.right, 0, 512);
+                filter.process(block);
+                Assert.assertArrayEquals("round " + round, block.left, block.right, 0f);
+            }
+        } finally {
+            changer.interrupt();
+            changer.join();
+        }
     }
 
     @Test(expected = IllegalArgumentException.class)

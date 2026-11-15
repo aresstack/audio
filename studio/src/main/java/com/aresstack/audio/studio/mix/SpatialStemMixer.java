@@ -20,7 +20,9 @@ import com.aresstack.audio.core.wav.WavFileSource;
 import com.aresstack.audio.studio.stage.AcousticRoom;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -171,12 +173,25 @@ public final class SpatialStemMixer {
                     WavFileSource source = new WavFileSource(files.get(index));
                     return LinearResampler.at(source, source.sampleRate(), RATE);
                 });
-        try (WavFileSink sink = new WavFileSink(output, RATE, bits, blockFrames)) {
-            if (level.mode() == LevelMode.FIXED) {
-                return MixOutcome.fixed(OfflineMix.renderFixed(graph, RATE, blockFrames, level.master(),
-                        level.normalization(), sink));
+        // The mix goes to a file of its own first and replaces the output only when it is finished: the
+        // stems are read while the mix is written (twice, if the level needs a first pass), and the output
+        // may be one of them.
+        Path fresh = output.toAbsolutePath().resolveSibling(output.getFileName() + "." + System.nanoTime() + ".part");
+        try {
+            MixOutcome outcome;
+            try (WavFileSink sink = new WavFileSink(fresh, RATE, bits, blockFrames)) {
+                if (level.mode() == LevelMode.FIXED) {
+                    outcome = MixOutcome.fixed(OfflineMix.renderFixed(graph, RATE, blockFrames, level.master(),
+                            level.normalization(), sink));
+                } else {
+                    outcome = MixOutcome.legacy(OfflineMix.renderNormalized(graph, RATE, blockFrames,
+                            level.masterDb(), sink));
+                }
             }
-            return MixOutcome.legacy(OfflineMix.renderNormalized(graph, RATE, blockFrames, level.masterDb(), sink));
+            Files.move(fresh, output, StandardCopyOption.REPLACE_EXISTING);
+            return outcome;
+        } finally {
+            Files.deleteIfExists(fresh);
         }
     }
 

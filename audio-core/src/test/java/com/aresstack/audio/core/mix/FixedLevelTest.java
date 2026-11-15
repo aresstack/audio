@@ -55,6 +55,17 @@ public final class FixedLevelTest {
     }
 
     @Test
+    public void theMakeUpGainComesBeforeTheMasterLevel() {
+        Assert.assertEquals(Math.pow(10, 9 / 20.0), MasterBus.Settings.fixed(12, -3, LookaheadLimiter.Settings.DEFAULT).gain(), 1e-6);
+        Assert.assertEquals(Math.pow(10, 12 / 20.0), MasterBus.Settings.fixed(12, 4, LookaheadLimiter.Settings.DEFAULT).gain(), 1e-6);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void aMakeUpGainAbove24DbIsRefused() {
+        MasterBus.Settings.fixed(25, 0, LookaheadLimiter.Settings.DEFAULT);
+    }
+
+    @Test
     public void liveAndExportGiveTheSameSamples() throws Exception {
         // live: the master bus behind the graph, block by block, late by its latency
         Signal signal = signal(TestSignals.noise(2 * RATE, 8, 2.5), TestSignals.noise(2 * RATE, 9, 2.5));
@@ -177,6 +188,37 @@ public final class FixedLevelTest {
             Assert.assertTrue(block.left[i - 1] - block.left[i] < 0.001f);
         }
         Assert.assertTrue(block.left[999] > target);
+    }
+
+    @Test
+    public void aLoudnessTargetIsReachedWhenRaisingLetsInPassagesBelowTheAbsoluteGate() throws Exception {
+        // 1 s at -65 dBFS, then 10 s at -75 dBFS: before the gain only the first second counts,
+        // raised to -23 LUFS the quiet part passes the -70 LUFS gate and counts too
+        float[] left = new float[11 * RATE];
+        for (int i = 0; i < left.length; i++) {
+            double height = Math.pow(10, (i < RATE ? -65 : -75) / 20.0);
+            left[i] = (float) (height * Math.sin(2 * Math.PI * 1000 * i / RATE));
+        }
+        Recorded out = renderFixed(signal(left, left.clone()), MasterBus.Settings.fixed(0),
+                ExportNormalization.loudness(-23), 512);
+        Assert.assertEquals(-23, loudness(out), 0.05);
+    }
+
+    @Test
+    public void aGainChangeIsNotLostOnAnEmptyBlock() {
+        MasterBus bus = new MasterBus(MasterBus.Settings.fixed(0));
+        bus.prepare(RATE, 512);
+        AudioBlock block = new AudioBlock(512);
+        bus.setSettings(MasterBus.Settings.fixed(-6));
+        block.setFrames(0);
+        bus.process(block);
+        block.setFrames(512);
+        for (int round = 0; round < 3; round++) {
+            java.util.Arrays.fill(block.left, 0.5f);
+            java.util.Arrays.fill(block.right, 0.5f);
+            bus.process(block);
+        }
+        Assert.assertEquals(0.5 * Math.pow(10, -6 / 20.0), block.left[511], 1e-6);
     }
 
     // ---- helpers

@@ -39,7 +39,22 @@ public final class MasterBus implements AudioProcessor {
          * taken as 0), then the limiter with its ceiling and release.
          */
         public static Settings fixed(double masterDb, LookaheadLimiter.Settings limiter) {
-            return new Settings(LevelMode.FIXED, (float) Math.pow(10, Math.min(0, masterDb) / 20), limiter);
+            return fixed(0, masterDb, limiter);
+        }
+
+        /**
+         * The fixed level structure with a fixed make-up gain in front of the master level: an
+         * application whose stems are rendered with headroom raises them by the same amount for
+         * every piece, so that the limiter, not a look at the whole piece, keeps the peaks.
+         *
+         * @param makeupDb the fixed make-up gain, 0 to +24 dB
+         * @param masterDb the master level, 0 or less; more is taken as 0
+         */
+        public static Settings fixed(double makeupDb, double masterDb, LookaheadLimiter.Settings limiter) {
+            if (!(makeupDb >= 0 && makeupDb <= 24)) {
+                throw new IllegalArgumentException("A make-up gain lies between 0 and +24 dB: " + makeupDb);
+            }
+            return new Settings(LevelMode.FIXED, (float) Math.pow(10, (makeupDb + Math.min(0, masterDb)) / 20), limiter);
         }
 
         /** The fixed level structure with the master level and the usual limiter (−1 dBFS, 80 ms). */
@@ -118,18 +133,21 @@ public final class MasterBus implements AudioProcessor {
     public void process(AudioBlock block) {
         Settings now = settings;
         int frames = block.frames();
-        if (now != applied && now.gain() != gain && frames > 0) {
-            float from = gain;
-            float to = now.gain();
-            float[] left = block.left;
-            float[] right = block.right;
-            for (int i = 0; i < frames; i++) {
-                float g = from + (to - from) * (i + 1) / frames;
-                left[i] *= g;
-                right[i] *= g;
+        if (now != applied && now.gain() != gain) {
+            // a new gain is applied only by a block that has frames to ramp over
+            if (frames > 0) {
+                float from = gain;
+                float to = now.gain();
+                float[] left = block.left;
+                float[] right = block.right;
+                for (int i = 0; i < frames; i++) {
+                    float g = from + (to - from) * (i + 1) / frames;
+                    left[i] *= g;
+                    right[i] *= g;
+                }
+                gain = to;
+                applied = now;
             }
-            gain = to;
-            applied = now;
         } else {
             applied = now;
             if (gain != 1f) {

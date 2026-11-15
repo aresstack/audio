@@ -89,7 +89,8 @@ public final class MixLevelTest {
         List<SoundSourcePlacement> place = Arrays.asList(new SoundSourcePlacement("q", 0.2, 0.4, 0, 1, 0.4, false, false, null));
         Path fixed = file("fixed-quiet.wav");
         Path reference = file("reference.wav");
-        new SpatialStemMixer(333).mix(quiet, place, AcousticRoom.HALL, 2, MixLevel.fixed(0), fixed, 24);
+        new SpatialStemMixer(333).mix(quiet, place, AcousticRoom.HALL, 2,
+                MixLevel.fixed(0, 0, LookaheadLimiter.Settings.DEFAULT, ExportNormalization.NONE), fixed, 24);
         SpatialStemMixer.Mix mix = new SpatialStemMixer().render(
                 Arrays.asList(SpatialStemMixer.read(quiet.get(0))), place, AcousticRoom.HALL, 2);
         Assert.assertTrue(mix.peak() < LookaheadLimiter.Settings.DEFAULT.ceiling());
@@ -115,6 +116,40 @@ public final class MixLevelTest {
                     MixLevel.fixed(0, LookaheadLimiter.Settings.DEFAULT, ExportNormalization.loudness(target)), out, 24);
             Assert.assertEquals(target, loudness(out), 0.05);
             Assert.assertTrue(outcome.fixed().normalizationGain() < 1);
+        }
+    }
+
+    @Test
+    public void theMakeUpGainIsAFixedFactor() throws Exception {
+        // a quiet track: with +12 dB make-up and -3 dB master it comes out 9 dB louder, the limiter untouched
+        List<Path> quiet = Arrays.asList(stem("m", tone(2 * RATE, 220, 0.05), tone(2 * RATE, 220, 0.05)));
+        List<SoundSourcePlacement> place = Arrays.asList(new SoundSourcePlacement("m", 0, 0, 0, 1, 0, false, false, null));
+        Path plain = file("plain.wav");
+        Path raised = file("raised.wav");
+        new SpatialStemMixer().mix(quiet, place, DRY, 2,
+                MixLevel.fixed(0, 0, LookaheadLimiter.Settings.DEFAULT, ExportNormalization.NONE), plain, 24);
+        MixOutcome outcome = new SpatialStemMixer().mix(quiet, place, DRY, 2, MixLevel.fixed(-3), raised, 24);
+        Assert.assertEquals(9, 20 * Math.log10(peak(raised) / peak(plain)), 0.001);
+        Assert.assertEquals(1f, outcome.fixed().lowestLimiterGain(), 0f);
+        Assert.assertEquals(12, MixLevel.fixed(0).makeupDb(), 0);
+    }
+
+    @Test
+    public void everyLevelIsCorrectWhenTheMixIsWrittenOverOneOfItsOwnStems() throws Exception {
+        // the stems are read while the mix is written, twice with a normalization: the output must not cut them short
+        MixLevel[] levels = {MixLevel.legacy(-2), MixLevel.fixed(0),
+                MixLevel.fixed(0, LookaheadLimiter.Settings.DEFAULT, ExportNormalization.peak(-1)),
+                MixLevel.fixed(0, LookaheadLimiter.Settings.DEFAULT, ExportNormalization.loudness(-16))};
+        for (MixLevel level : levels) {
+            Path inPlace = file("in-place.wav");
+            Path apart = file("apart.wav");
+            Files.copy(files.get(0), inPlace, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            List<Path> fromInPlace = Arrays.asList(inPlace, files.get(1), files.get(2));
+            new SpatialStemMixer().mix(files, placements, AcousticRoom.HALL, 2, level, apart, 24);
+            new SpatialStemMixer().mix(fromInPlace, placements, AcousticRoom.HALL, 2, level, inPlace, 24);
+            Assert.assertArrayEquals(level.toString(), Files.readAllBytes(apart), Files.readAllBytes(inPlace));
+            String[] left = folder.getRoot().list((dir, name) -> name.endsWith(".part"));
+            Assert.assertEquals(level + ": no part file left behind", 0, left.length);
         }
     }
 
