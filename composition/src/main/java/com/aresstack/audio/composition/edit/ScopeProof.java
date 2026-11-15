@@ -121,7 +121,9 @@ public final class ScopeProof {
         }
         entries.put("trackOrder", trackOrder.toString());
         for (Asset asset : piece.assets()) {
-            entries.put("asset:" + asset.id(), asset.toString());
+            if (!reach.newAssetAllowed(asset.id())) {
+                entries.put("asset:" + asset.id(), asset.toString());
+            }
         }
         return entries;
     }

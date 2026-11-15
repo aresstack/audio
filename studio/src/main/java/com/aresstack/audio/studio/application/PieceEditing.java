@@ -139,6 +139,48 @@ public final class PieceEditing {
         return applyClips(piece -> ClipEdits.playByNew(piece, clipId, instrument, ids));
     }
 
+    // Audio lanes (work package B3)
+
+    public Outcome addAudioTrack(String name) {
+        return applyClips(piece -> AudioEdits.addTrack(piece, name, ids));
+    }
+
+    /** Copies a WAV file into the piece and places it on an audio lane from a tick. */
+    public Outcome placeFile(String trackId, long tick, java.nio.file.Path file) {
+        return place(trackId, tick, folder -> AudioAssets.copy(folder, file, ids));
+    }
+
+    /** Renders a sound effect of the module {@code sounds} into the piece and places it on an audio lane. */
+    public Outcome placeEffect(String trackId, long tick, com.aresstack.audio.sounds.SoundDesign effect) {
+        return place(trackId, tick, folder -> AudioAssets.render(folder, effect, ids));
+    }
+
+    public Outcome fades(String clipId, long fadeIn, long fadeOut) {
+        return applyClips(piece -> AudioEdits.fades(piece, clipId, fadeIn, fadeOut));
+    }
+
+    public Outcome gain(String clipId, double gainDb) {
+        return applyClips(piece -> AudioEdits.gain(piece, clipId, gainDb));
+    }
+
+    private interface Making {
+        AudioAssets.Ready make(java.nio.file.Path folder) throws IOException;
+    }
+
+    private Outcome place(String trackId, long tick, Making making) {
+        Optional<ProjectSession> open = piece.get();
+        if (open.isEmpty()) {
+            return Outcome.nothing("Dieses Stück hat noch kein Werkmodell; erst komponieren oder öffnen.");
+        }
+        AudioAssets.Ready ready;
+        try {
+            ready = making.make(open.get().folder());
+        } catch (IOException | RuntimeException failed) {
+            return Outcome.nothing("Der Klang ließ sich nicht übernehmen: " + failed.getMessage());
+        }
+        return applyClips(piece -> AudioEdits.place(piece, trackId, tick, ready.asset(), ready.lengthSamples(), ids));
+    }
+
     public Outcome move(Collection<NoteEdits.NoteRef> notes, long ticks, int semitones) {
         return apply(piece -> NoteEdits.move(piece, notes, ticks, semitones));
     }

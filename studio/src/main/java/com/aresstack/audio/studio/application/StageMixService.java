@@ -90,7 +90,8 @@ public final class StageMixService {
             files.add(file);
             placements.add(placement);
         }
-        progress.update("Mische " + tracks.size() + " Spuren auf der Bühne · " + fitting.room().name()
+        heard |= addAudioLanes(directory, only, files, placements, progress);
+        progress.update("Mische " + files.size() + " Spuren auf der Bühne · " + fitting.room().name()
                 + (heard ? "" : " · alle Spuren sind stumm") + " ...");
         int tempo = tempo(arrangement);
         double secondsPerBar = secondsPerBar(arrangement);
@@ -105,6 +106,50 @@ public final class StageMixService {
             Files.deleteIfExists(fresh);
         }
         return target;
+    }
+
+    /**
+     * The audio lanes of the model (work package B3), each as a stem of its clips under
+     * {@code render/audio/}, standing on the stage as their channel strip in {@code mix.json} says.
+     * A piece without a model or without audio lanes adds nothing. Returns whether one is heard.
+     */
+    static boolean addAudioLanes(Path directory, String only, List<Path> files, List<SoundSourcePlacement> placements,
+                                 Progress progress) throws IOException {
+        if (!Files.isRegularFile(directory.resolve(CompositionJson.FILE_NAME))) {
+            return false;
+        }
+        Composition model;
+        MixScene document;
+        try {
+            model = CompositionJson.load(directory);
+            document = MixJson.load(directory);
+        } catch (IOException | RuntimeException unreadable) {
+            progress.update("Das Werkmodell ist nicht lesbar; die Audiospuren fehlen im Mix.");
+            return false;
+        }
+        boolean heard = false;
+        for (com.aresstack.audio.composition.Track track : model.tracks()) {
+            if (track.kind() != com.aresstack.audio.composition.Track.Kind.AUDIO || track.clips().isEmpty()) {
+                continue;
+            }
+            Path stem = directory.resolve("render").resolve("audio").resolve(track.id() + ".wav");
+            for (String warning : com.aresstack.audio.studio.render.AudioTrackStem.write(model, directory, track, stem)) {
+                progress.update("WARN: " + warning);
+            }
+            com.aresstack.audio.composition.mix.MixChannel channel = document == null ? null
+                    : document.channelOf(new com.aresstack.audio.composition.mix.MixChannel.Owner(
+                    com.aresstack.audio.composition.mix.MixChannel.Owner.Kind.AUDIO_TRACK, track.id()));
+            SoundSourcePlacement placement = channel == null ? new SoundSourcePlacement(track.id(), 0, 0.35)
+                    : new SoundSourcePlacement(track.id(), channel.x(), channel.depth(), channel.levelDb(),
+                    channel.width(), channel.reverb(), channel.muted(), channel.locked(), null);
+            if (only != null) {
+                placement = placement.withMuted(!only.equals(track.id()));
+            }
+            heard |= !placement.muted();
+            files.add(stem);
+            placements.add(placement);
+        }
+        return heard;
     }
 
     /**
