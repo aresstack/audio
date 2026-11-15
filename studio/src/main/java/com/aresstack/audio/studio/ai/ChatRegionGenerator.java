@@ -97,7 +97,9 @@ public final class ChatRegionGenerator implements RegionGenerator {
         String prompt = prompt(task, frame, last, connection);
         Path cache = cacheDirectory.resolve(task.request().mode().id() + "-" + task.part().id() + "-" + frame.sectionId()
                 + "-" + ContextBuilder.sha256(prompt).substring(0, 12) + ".json");
-        return GeneratedNotes.read(model.generate(INSTRUCTION, prompt, maxTokens, cache, Listening.current()), task.part().id(),
+        return GeneratedNotes.ask(problem -> model.generate(INSTRUCTION, prompt + GeneratedNotes.again(problem),
+                maxTokens, cache, Listening.current()), cache,
+                task.part().id(),
                 frame.sectionId());
     }
 }

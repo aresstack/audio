@@ -58,6 +58,87 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
         skipped = List.copyOf(skipped);
     }
 
+    /** What asks the model, or takes its kept answer. */
+    public interface Asking {
+        /**
+         * @param problem why the answer before could not be used, to be told to the model; {@code null}
+         *                when asked for the first time
+         */
+        JsonObject ask(String problem) throws IOException;
+    }
+
+    /**
+     * Asks and reads the answer. An answer that cannot be read is never kept: its copy is thrown
+     * away and the model is asked again, told what was wrong, after a pause that grows up to its
+     * longest ({@link Backoff}). It is never given up; only cancelling ends it.
+     */
+    public static GeneratedNotes ask(Asking asking, java.nio.file.Path cache, String partId, String sectionId)
+            throws IOException {
+        String problem = null;
+        for (int asked = 1; ; asked++) {
+            try {
+                return read(asking.ask(problem), partId, sectionId);
+            } catch (UnreadableAnswerException | ForeignPartException unusable) {
+                forget(cache);
+                if (Backoff.givesUp(asked)) {
+                    throw unusable;
+                }
+                problem = unusable.getMessage();
+                Backoff.tell("Unbrauchbare KI-Antwort für " + partId + " (" + sectionId + "): " + problem
+                        + " · Versuch " + (asked + 1) + " in " + Backoff.words(Backoff.delay(asked)) + ".");
+                Backoff.pause(asked, null);
+            }
+        }
+    }
+
+    /** The words added to a prompt when the answer before could not be used. */
+    public static String again(String problem) {
+        return problem == null ? "" : "\nYour previous answer could not be used: " + problem
+                + " Answer again: one JSON object with the field part and the list notes.";
+    }
+
+    private static void forget(java.nio.file.Path cache) {
+        if (cache == null) {
+            return;
+        }
+        try {
+            java.nio.file.Files.deleteIfExists(cache);
+        } catch (IOException kept) {
+            // the next answer is asked for anyway; the file is only a copy
+        }
+    }
+
+    /**
+     * The list of notes of an answer: under "notes", else the first list of note objects in it,
+     * also one level deeper (a model may write {"glockenspiel": {"notes": [...]}}); {@code null}
+     * if there is none.
+     */
+    private static JsonArray notesIn(JsonObject answer, int depth) {
+        JsonElement list = answer.get("notes");
+        if (list != null && list.isJsonArray()) {
+            return list.getAsJsonArray();
+        }
+        for (java.util.Map.Entry<String, JsonElement> entry : answer.entrySet()) {
+            JsonElement value = entry.getValue();
+            if (value.isJsonArray() && value.getAsJsonArray().size() > 0
+                    && value.getAsJsonArray().get(0).isJsonObject()
+                    && value.getAsJsonArray().get(0).getAsJsonObject().has("pitch")) {
+                return value.getAsJsonArray();
+            }
+        }
+        if (depth > 1) {
+            for (java.util.Map.Entry<String, JsonElement> entry : answer.entrySet()) {
+                if (entry.getValue().isJsonObject()) {
+                    JsonArray inner = notesIn(entry.getValue().getAsJsonObject(), depth - 1);
+                    if (inner != null) {
+                        return inner;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     /**
      * Reads the answer of a model for a part and a frame.
      *
@@ -78,13 +159,13 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
             throw new ForeignPartException("Antwort für fremden Abschnitt \"" + section + "\" statt \"" + sectionId
                     + "\" abgelehnt.");
         }
-        JsonElement list = answer.get("notes");
-        if (list == null || !list.isJsonArray()) {
-            throw new IOException("Die Antwort für " + partId + " enthält keine Notenliste.");
+        JsonArray array = notesIn(answer, 2);
+        if (array == null) {
+            throw new UnreadableAnswerException("Die Antwort für " + partId + " enthält keine Notenliste.");
         }
-        JsonArray array = list.getAsJsonArray();
         if (array.size() > MAX_NOTES) {
-            throw new IOException("Zu viele Noten für " + partId + " in " + sectionId + ": " + array.size());
+            throw new UnreadableAnswerException("Zu viele Noten für " + partId + " in " + sectionId + ": "
+                    + array.size());
         }
         List<RawNote> notes = new ArrayList<>();
         List<String> skipped = new ArrayList<>();

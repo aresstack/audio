@@ -79,7 +79,9 @@ public final class ChatPartGenerator implements PartGenerator {
         String prompt = prompt(task, plan, frame, connection);
         Path cache = cacheDirectory.resolve(task.partId() + "-" + frame.sectionId() + "-"
                 + ContextBuilder.sha256(prompt).substring(0, 12) + ".json");
-        return GeneratedNotes.read(model.generate(INSTRUCTION, prompt, maxTokens, cache, Listening.current()), task.partId(),
+        return GeneratedNotes.ask(problem -> model.generate(INSTRUCTION, prompt + GeneratedNotes.again(problem),
+                maxTokens, cache, Listening.current()), cache,
+                task.partId(),
                 frame.sectionId());
     }
 

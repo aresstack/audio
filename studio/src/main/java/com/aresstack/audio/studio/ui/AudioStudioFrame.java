@@ -144,6 +144,12 @@ public final class AudioStudioFrame extends JFrame {
     });
     private final JSpinner parallelRequests = new JSpinner(
             new SpinnerNumberModel(32, 1, 1024, 1));
+    /** The first pause before an AI request is tried again, in seconds. */
+    private final JSpinner retryFirst = new JSpinner(new SpinnerNumberModel(
+            com.aresstack.audio.studio.ai.Backoff.FIRST_SECONDS, 1, 600, 1));
+    /** The longest pause before an AI request is tried again, in seconds. */
+    private final JSpinner retryMost = new JSpinner(new SpinnerNumberModel(
+            com.aresstack.audio.studio.ai.Backoff.MOST_SECONDS, 1, 3600, 10));
     private final JButton proposalButton = new JButton("KI-Instrumentvorschlag");
     private final JButton autopilotButton = new JButton("Vollautomatisch");
     private final JButton generateButton = new JButton("Mit Gemma komponieren");
@@ -1765,6 +1771,17 @@ public final class AudioStudioFrame extends JFrame {
         growBars.addChangeListener(event -> specFields.suggestBars((Integer) growBars.getValue()));
         addRow(ai, row++, "Parallel",
                 line(parallelRequests, note("Anfragen gleichzeitig; höchstens so viele wie Spuren.")));
+        retryFirst.setPreferredSize(new Dimension(110, 30));
+        retryMost.setPreferredSize(new Dimension(110, 30));
+        addRow(ai, row++, "Wiederholen",
+                line(retryFirst, note("s erste Pause, verdoppelt bis höchstens"), retryMost,
+                        note("s. Abgerissene Verbindungen und unbrauchbare Antworten werden ohne Ende wiederholt; "
+                                + "nur „Abbrechen“ beendet das.")));
+        javax.swing.event.ChangeListener retry = event -> com.aresstack.audio.studio.ai.Backoff.configure(
+                (Integer) retryFirst.getValue(), (Integer) retryMost.getValue());
+        retryFirst.addChangeListener(retry);
+        retryMost.addChangeListener(retry);
+        com.aresstack.audio.studio.ai.Backoff.tellTo(line -> SwingUtilities.invokeLater(() -> append(line)));
         detailedLog.setOpaque(false);
         detailedLog.setToolTipText("Zeigt im Protokoll zusätzlich, wie viele Stimmen gleichzeitig laufen und wann welche"
                 + " Antwort mit wie vielen Noten nach wie vielen Sekunden kam");
@@ -4161,6 +4178,10 @@ public final class AudioStudioFrame extends JFrame {
             sfizz.setText(saved.getProperty("sfizz", sfizz.getText()));
             description.setText(saved.getProperty("description", description.getText()));
             parallelRequests.setValue(parseParallel(saved.getProperty("parallel", "32")));
+            retryFirst.setValue(AiDefaults.retryFirstSeconds(saved));
+            retryMost.setValue(AiDefaults.retryMostSeconds(saved));
+            com.aresstack.audio.studio.ai.Backoff.configure((Integer) retryFirst.getValue(),
+                    (Integer) retryMost.getValue());
             String keptDescription = Album.withoutBrief(songs.description(Paths.get(directory.getText().trim())));
             if (keptDescription != null) {
                 description.setText(keptDescription);
@@ -4232,6 +4253,8 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("sfizz", sfizz.getText().trim());
             saved.setProperty("description", description.getText());
             saved.setProperty("parallel", parallelRequests.getValue().toString());
+            saved.setProperty("retryFirstSeconds", retryFirst.getValue().toString());
+            saved.setProperty("retryMostSeconds", retryMost.getValue().toString());
             saved.setProperty("instrumentMode", ownTracks.isSelected() ? "own" : "ai");
             saved.setProperty("voicesMin", voicesMin.getValue().toString());
             saved.setProperty("voicesMax", voicesMax.getValue().toString());

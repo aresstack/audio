@@ -468,11 +468,17 @@ public final class PieceExtensionTest {
                 ? null : "{\"part\":\"harmony\",\"section\":\"s1\",\"notes\":[]}");
         ContinuationRequest request = ContinuationRequest.of(8, ContinuationPreset.STANDALONE, ContinuationEnding.OPEN)
                 .forParts(List.of("melody"));
+        // A wrong answer is asked for again without end (Backoff); the test gives up after two tries.
+        com.aresstack.audio.studio.ai.Backoff.forTests(2, 1);
         try {
-            PieceExtension.start(session, composerWith(model), request, Ids.seeded(2), QUIET);
-            fail("an answer for another part is refused");
-        } catch (ForeignPartException expected) {
-            assertTrue(expected.getMessage().contains("harmony"));
+            try {
+                PieceExtension.start(session, composerWith(model), request, Ids.seeded(2), QUIET);
+                fail("an answer for another part is refused");
+            } catch (ForeignPartException expected) {
+                assertTrue(expected.getMessage().contains("harmony"));
+            }
+        } finally {
+            com.aresstack.audio.studio.ai.Backoff.forTests(0, 2000);
         }
         assertTrue(session.pending().isEmpty());
     }

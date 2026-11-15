@@ -77,6 +77,16 @@ public final class AiDefaults {
                 2, 4);
     }
 
+    /** The first pause before an AI request is tried again, in seconds ({@code retryFirstSeconds}, 1 to 600). */
+    public static int retryFirstSeconds(Properties settings) {
+        return number(settings, "retryFirstSeconds", com.aresstack.audio.studio.ai.Backoff.FIRST_SECONDS, 1, 600);
+    }
+
+    /** The longest pause before an AI request is tried again, in seconds ({@code retryMostSeconds}, 1 to 3600). */
+    public static int retryMostSeconds(Properties settings) {
+        return number(settings, "retryMostSeconds", com.aresstack.audio.studio.ai.Backoff.MOST_SECONDS, 1, 3600);
+    }
+
     private static int number(Properties settings, String key, int fallback, int least, int most) {
         try {
             return Math.max(least, Math.min(most,
