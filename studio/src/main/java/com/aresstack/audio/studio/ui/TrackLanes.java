@@ -285,16 +285,34 @@ final class TrackLanes extends JPanel {
         view.setFit(fitted);
         scroll.setHorizontalScrollBarPolicy(fitted ? ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
                 : ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-        scroll.getHorizontalScrollBar().setUnitIncrement(Math.max(8, view.barWidth() / 2));
+        scroll.getHorizontalScrollBar().setUnitIncrement(30);
         scroll.revalidate();
         fitHeights();
     }
 
-    /** How wide a bar is when the piece is not fitted; the wheel moves half a bar. */
-    void setBarWidth(int width) {
-        view.setBarWidth(width);
-        scroll.getHorizontalScrollBar().setUnitIncrement(Math.max(8, view.barWidth() / 2));
+    private double zoomStep = ArrangementView.ZOOM_STEP;
+    private double zoomMost = ArrangementView.ZOOM_MOST;
+
+    /** How much one notch of Strg + Mausrad zooms, and the largest zoom (from studio.properties). */
+    void setZoomLimits(double step, double most) {
+        zoomStep = step > 1 ? step : ArrangementView.ZOOM_STEP;
+        zoomMost = most >= 1 ? most : ArrangementView.ZOOM_MOST;
+    }
+
+    /** Zooms the piece that is not fitted around the point under the mouse, which stays where it is. */
+    private void zoom(java.awt.event.MouseWheelEvent event) {
+        javax.swing.JViewport port = scroll.getViewport();
+        int mouse = javax.swing.SwingUtilities.convertPoint(event.getComponent(), event.getPoint(), port).x;
+        int before = view.getWidth();
+        double at = before <= 0 ? 0 : (port.getViewPosition().x + mouse) / (double) before;
+        view.setZoom(view.zoom() * Math.pow(zoomStep, -event.getPreciseWheelRotation()), zoomMost);
         scroll.revalidate();
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            int after = view.getWidth();
+            int x = (int) Math.round(at * after) - mouse;
+            port.setViewPosition(new java.awt.Point(Math.max(0, Math.min(Math.max(0, after - port.getExtentSize().width), x)),
+                    port.getViewPosition().y));
+        });
     }
 
     /**
@@ -304,6 +322,13 @@ final class TrackLanes extends JPanel {
      * events before the scroll pane sees them.
      */
     private void wheel(java.awt.event.MouseWheelEvent event) {
+        if (event.isControlDown()) {
+            if (!view.fit()) {
+                zoom(event);
+            }
+            event.consume();
+            return;
+        }
         boolean sideways = event.isShiftDown();
         javax.swing.JScrollBar bar = sideways ? scroll.getHorizontalScrollBar() : scroll.getVerticalScrollBar();
         if (!bar.isVisible() || bar.getMaximum() - bar.getVisibleAmount() <= bar.getMinimum()) {

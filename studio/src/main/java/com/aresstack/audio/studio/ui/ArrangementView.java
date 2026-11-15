@@ -556,17 +556,24 @@ final class ArrangementView extends JComponent {
         return Math.max(audioSeconds, arrangement == null ? 0 : arrangement.seconds());
     }
 
-    /** How wide a bar is by default when the piece is not fitted into the window; the settings choose it. */
-    static final int BAR_WIDTH = 96;
-    static final int MIN_BAR_WIDTH = 16;
-    static final int MAX_BAR_WIDTH = 480;
-    private int barWidth = BAR_WIDTH;
+    /** Default zoom per notch of the wheel and the largest zoom; studio.properties can set others. */
+    static final double ZOOM_STEP = 1.25;
+    static final double ZOOM_MOST = 64;
+    /**
+     * How much wider than the window the piece is drawn when it is not fitted: 1 is the width it
+     * has when fitted, Strg + Mausrad makes it wider or narrower again.
+     */
+    private double zoom = 1;
 
-    /** How wide a bar is when the piece is not fitted into the window, in pixels. */
-    void setBarWidth(int width) {
-        int wanted = Math.max(MIN_BAR_WIDTH, Math.min(MAX_BAR_WIDTH, width));
-        if (wanted != barWidth) {
-            barWidth = wanted;
+    double zoom() {
+        return zoom;
+    }
+
+    /** Sets the zoom (at least 1, the fitted width); the view grows and the scroll pane shows a bar. */
+    void setZoom(double wanted, double most) {
+        double next = Math.max(1, Math.min(Math.max(1, most), wanted));
+        if (next != zoom) {
+            zoom = next;
             revalidate();
             repaint();
             if (companion != null) {
@@ -576,8 +583,9 @@ final class ArrangementView extends JComponent {
         }
     }
 
-    int barWidth() {
-        return barWidth;
+    /** The width there is to see: the window onto the view, or the view itself outside a scroll pane. */
+    private int visibleWidth() {
+        return getParent() instanceof javax.swing.JViewport port ? port.getExtentSize().width : getWidth();
     }
     /** Whether the whole piece is fitted into the width there is; otherwise every bar has its width and the view scrolls. */
     private boolean fit = true;
@@ -602,10 +610,9 @@ final class ArrangementView extends JComponent {
     @Override
     public Dimension getPreferredSize() {
         int width = 400;
-        if (!fit && arrangement != null && arrangement.bars() > 0) {
-            // Sound that plays on after the music gets its width too, at the scale of the bars.
-            double longer = arrangement.seconds() <= 0 ? 1 : Math.max(1, totalSeconds() / arrangement.seconds());
-            width = Math.max(width, GUTTER + 10 + (int) Math.round(arrangement.bars() * barWidth * longer));
+        if (!fit) {
+            // As wide as when fitted, times the zoom: the scroll pane shows a bar as soon as it is wider.
+            width = Math.max(width, (int) Math.round(visibleWidth() * zoom));
         }
         return new Dimension(width, RULER + order.size() * lane + MIX);
     }
