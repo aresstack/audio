@@ -15,8 +15,15 @@ import java.util.List;
  *
  * @param notes   the notes in the order of the answer
  * @param skipped why notes were left out, one line each
+ * @param answer  the whole answer as the model gave it, for what it says beyond the notes; may be {@code null}
  */
-public record GeneratedNotes(String partId, String sectionId, List<RawNote> notes, List<String> skipped) {
+public record GeneratedNotes(String partId, String sectionId, List<RawNote> notes, List<String> skipped,
+                             JsonObject answer) {
+    /** Notes without the answer they came in. */
+    public GeneratedNotes(String partId, String sectionId, List<RawNote> notes, List<String> skipped) {
+        this(partId, sectionId, notes, skipped, null);
+    }
+
     /** The most notes one answer may hold (as for the composer since the start). */
     public static final int MAX_NOTES = 256;
 
@@ -103,7 +110,7 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
                 skipped.add(sectionId + "\t" + (i + 1) + "\tnote\tpresent\tskipped\tfehlende oder ungültige Werte");
             }
         }
-        return new GeneratedNotes(partId, sectionId, notes, skipped);
+        return new GeneratedNotes(partId, sectionId, notes, skipped, answer);
     }
 
     private static String text(JsonObject object, String name) {

@@ -12,9 +12,16 @@ import java.util.Map;
  * @param passages    the new notes per part, in the order of the piece; an empty list is a rest
  * @param corrections every repair and every note left out, part first, tab-separated
  * @param attempt     which attempt this is, from 1
+ * @param performance how the passage is played: tempo, dynamic marks and hairpins in it
  */
 public record RewrittenRegion(RegionRequest request, Map<String, List<NewNote>> passages, MusicalContext context,
-                              List<String> corrections, int attempt) {
+                              List<String> corrections, int attempt, ContinuationPerformance performance) {
+    /** A passage without a planned performance. */
+    public RewrittenRegion(RegionRequest request, Map<String, List<NewNote>> passages, MusicalContext context,
+                           List<String> corrections, int attempt) {
+        this(request, passages, context, corrections, attempt, ContinuationPerformance.NONE);
+    }
+
     /**
      * A note of the new passage.
      *
@@ -35,6 +42,7 @@ public record RewrittenRegion(RegionRequest request, Map<String, List<NewNote>> 
         passages.forEach((part, notes) -> copy.put(part, List.copyOf(notes)));
         passages = java.util.Collections.unmodifiableMap(copy);
         corrections = List.copyOf(corrections);
+        performance = performance == null ? ContinuationPerformance.NONE : performance;
     }
 
     /** A neutral reference to the run, for the revision: what, which parts, which attempt, which context. */

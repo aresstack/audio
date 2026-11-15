@@ -18,16 +18,26 @@ import java.util.List;
  * @param held     the part's notes that begin before the region and sound into it; they stay
  * @param after    the part's notes in the bars after the region; the new passage leads there
  * @param template the selected notes of the part as they are, kept for {@link RegionRequest.Mode#VARIATE}
+ * @param performs the parts of the passage when this part's first call also plans how the
+ *                 passage is played (tempo, dynamics); empty for every other part
  */
 public record RegionTask(MusicalContext context, RegionRequest request, Part part, TimeMap time,
                          List<VoiceFrame> frames, InstrumentRange range, String before, String held, String after,
-                         List<PlacedNote> template, int attempt) {
+                         List<PlacedNote> template, int attempt, List<String> performs) {
+    /** A task that does not plan the performance. */
+    public RegionTask(MusicalContext context, RegionRequest request, Part part, TimeMap time,
+                      List<VoiceFrame> frames, InstrumentRange range, String before, String held, String after,
+                      List<PlacedNote> template, int attempt) {
+        this(context, request, part, time, frames, range, before, held, after, template, attempt, List.of());
+    }
+
     /** Bars before and after the region whose notes of the part are named in the task. */
     public static final int NEIGHBOUR_BARS = 2;
 
     public RegionTask {
         frames = List.copyOf(frames);
         template = List.copyOf(template);
+        performs = List.copyOf(performs == null ? List.of() : performs);
         if (frames.isEmpty() || attempt < 1) {
             throw new IllegalArgumentException("A region task needs a frame and an attempt from 1.");
         }
@@ -63,7 +73,8 @@ public record RegionTask(MusicalContext context, RegionRequest request, Part par
         }
         return new RegionTask(context, request, part, time, VoiceFrame.within(piece, from, to),
                 InstrumentRange.of(part.program(), part.drums()), lines(time, before), lines(time, held),
-                lines(time, after), template, attempt);
+                lines(time, after), template, attempt,
+                partId.equals(selection.parts(piece).get(0)) ? selection.parts(piece) : List.of());
     }
 
     /** Part, instrument and role of the part in one line, for prompts. */
@@ -90,6 +101,21 @@ public record RegionTask(MusicalContext context, RegionRequest request, Part par
                     .append(n.note().velocity()).append('\n');
         }
         return text.toString();
+    }
+
+    /** Whether this part's call for this frame also plans how the passage is played. */
+    public boolean plansPerformance(VoiceFrame frame) {
+        return !performs.isEmpty() && frame.equals(frames.get(0));
+    }
+
+    /** The bars of the passage, counted from 1: the first and the last. */
+    int firstBar() {
+        return frames.get(0).firstBar() + 1;
+    }
+
+    int lastBar() {
+        VoiceFrame last = frames.get(frames.size() - 1);
+        return last.firstBar() + last.bars();
     }
 
     /** What makes a later attempt differ from the first; empty for the first. */
