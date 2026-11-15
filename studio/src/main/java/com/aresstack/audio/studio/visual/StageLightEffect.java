@@ -17,6 +17,37 @@ final class StageLightEffect implements Effect {
     /** The radius of the glow of a track at full level, as a share of the stage width. */
     private static final float GLOW = 0.16f;
 
+    /** How many lights stand on the stage when the tracks are not known: groups of the spectrum, low left, high right. */
+    static final int SPECTRUM_LIGHTS = 7;
+    /** Where the spectrum lights stand: the front of the arc, how far its middle reaches back, how wide it is, how high it lifts. */
+    private static final double ARC_FRONT = 0.25;
+    private static final double ARC_BACK = 0.4;
+    private static final double ARC_WIDTH = 0.85;
+    private static final double ARC_LIFT = 0.3;
+
+    /**
+     * Lights from the spectrum, for a sound whose tracks are not known (a file from elsewhere):
+     * every light is a group of bands, low on the left, high on the right, the middle ones further
+     * back, glowing with the loudest band of their group.
+     */
+    static List<TrackLight> fromSpectrum(SoundPicture sound) {
+        float[] bands = sound.bands;
+        int count = Math.min(SPECTRUM_LIGHTS, Math.max(1, bands.length));
+        java.util.List<TrackLight> lights = new java.util.ArrayList<TrackLight>(count);
+        for (int i = 0; i < count; i++) {
+            int from = i * bands.length / count;
+            int to = Math.max(from + 1, (i + 1) * bands.length / count);
+            float level = 0f;
+            for (int b = from; b < to && b < bands.length; b++) {
+                level = Math.max(level, bands[b]);
+            }
+            double x = count == 1 ? 0 : -1 + 2.0 * i / (count - 1);
+            double depth = ARC_FRONT + ARC_BACK * (1 - Math.abs(x)); // an arc: the middle stands back
+            lights.add(new TrackLight("", i, x * ARC_WIDTH, depth, level * ARC_LIFT, level));
+        }
+        return lights;
+    }
+
     @Override
     public String key() {
         return "stage";
@@ -52,9 +83,11 @@ final class StageLightEffect implements Effect {
         g.draw(floor);
         List<TrackLight> lights = sound.lights;
         if (lights.isEmpty()) {
-            Labels.centred(g, width, height, sound.sounding
-                    ? "Bühnenlichter gibt es bei der Wiedergabe der Bühne." : "Es spielt gerade nichts.", palette);
-            return;
+            if (!sound.sounding) {
+                Labels.quiet(g, width, height, palette);
+                return;
+            }
+            lights = fromSpectrum(sound); // the tracks are not known: the sound itself stands on the stage
         }
         // Far ones first, so that near lights stand in front.
         TrackLight[] ordered = lights.toArray(new TrackLight[0]);

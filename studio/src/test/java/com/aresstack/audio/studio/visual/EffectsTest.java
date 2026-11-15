@@ -66,6 +66,19 @@ public final class EffectsTest {
     }
 
     @Test
+    public void theStageShowsTheSoundItselfWhenTheTracksAreNotKnown() {
+        Effect stage = Effects.find(Effects.all(), "stage");
+        SoundPicture picture = loud(); // no lights: a file from elsewhere
+        BufferedImage image = new BufferedImage(400, 240, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        Effect.clear(g, 400, 240, GROUND);
+        stage.paint(g, 400, 240, picture, PALETTE, VisualSettings.DEFAULTS);
+        g.dispose();
+        assertTrue("lights glow", litPixels(image) > 2000);
+        assertEquals(StageLightEffect.SPECTRUM_LIGHTS, StageLightEffect.fromSpectrum(picture).size());
+    }
+
+    @Test
     public void anUnknownKeyFindsTheFirstEffect() {
         List<Effect> all = Effects.all();
         assertEquals(all.get(0).key(), Effects.find(all, "gibt-es-nicht").key());
