@@ -31,7 +31,7 @@ Dieses Dokument beantwortet den Architekturbericht vom 15. November 2026 (Abschn
 | `instruments` | Soundbank-Registry, Downloader, Proxy-/Trust-Auflösung | JDK |
 | `studio` | Swing-Anwendung, 10 Packages, zusätzlich portierter KeePassRPC-Code | `music`, `instruments`, Gson, Java-WebSocket, FlatLaf |
 
-Gesamtumfang rund 17 000 Zeilen Java, davon `studio` etwa 13 500. Tests: JUnit 4, 17 Testklassen, keine UI-Tests.
+Gesamtumfang rund 17 000 Zeilen Java einschließlich Tests, der größte Teil davon in `studio`. Tests: JUnit 4, 18 Testklassen, keine UI-Tests.
 
 ### 1.2 Packages in `studio` und ihre tatsächlichen Abhängigkeiten
 
