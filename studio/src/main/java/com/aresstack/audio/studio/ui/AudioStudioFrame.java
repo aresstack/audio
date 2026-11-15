@@ -303,7 +303,8 @@ public final class AudioStudioFrame extends JFrame {
         // Under the name: the choice of the piece, and beside it a small menu for new, open and the like.
         songChoice.setToolTipText("Die Komposition wählen, an der gearbeitet wird");
         songChoice.setPreferredSize(new Dimension(196, 28));
-        songMenuKey.setToolTipText("Neue Komposition, öffnen, Ordner zeigen, Plan ansehen, Demo laden");
+        songMenuKey.setToolTipText("Rückgängig, Versionen, Stück verlängern, Takte einfügen, Stimme hinzukomponieren,"
+                + " neue Komposition, öffnen, Ordner zeigen, Plan ansehen, Demo laden");
         songMenuKey.setMargin(new Insets(2, 4, 2, 4));
         songMenuKey.setFocusable(false);
         songMenuKey.setPreferredSize(new Dimension(30, 28));
@@ -475,7 +476,32 @@ public final class AudioStudioFrame extends JFrame {
         sectionBar.setListener((section, intensity) -> sectionIntensity(section, intensity));
         arrangementView.setCompanion(sectionBar);
         arrangementView.setEditing(pieceEditing);
-        DeckWidgets.Module output = new DeckWidgets.Module("Arrangement", trackTable);
+        // What the AI can do with the piece as it is stands in sight above the tracks, not only in the menu.
+        JPanel pieceActions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        pieceActions.setOpaque(false);
+        pieceActions.setBorder(BorderFactory.createEmptyBorder(0, 0, 8, 0));
+        JLabel byAi = new JLabel("KI am Stück:");
+        byAi.setForeground(AudioStudioTheme.TEXT_DIM);
+        pieceActions.add(byAi);
+        pieceActions.add(pieceAction("Verlängern …",
+                "Die KI plant und schreibt weitere Takte ans Ende; das bisherige Stück bleibt erhalten",
+                this::extendPiece));
+        pieceActions.add(pieceAction("Takte einfügen …",
+                "Die KI schreibt neue Takte vor einem Takt; alles ab dort rückt unverändert nach hinten",
+                this::insertBars));
+        pieceActions.add(pieceAction("Stimme hinzu …",
+                "Die KI schreibt eine neue Stimme zu den vorhandenen; die anderen bleiben unverändert",
+                this::addVoice));
+        pieceActions.add(pieceAction("Passage neu …",
+                "Die KI schreibt markierte Takte gewählter Spuren neu; mit Umschalt und Ziehen im Taktlineal markieren",
+                this::reworkRegion));
+        pieceActions.add(pieceAction("Umorchestrieren …",
+                "Die KI verteilt das Material markierter Takte neu auf die Stimmen", this::reorchestrate));
+        JPanel arrangementBody = new JPanel(new BorderLayout());
+        arrangementBody.setOpaque(false);
+        arrangementBody.add(pieceActions, BorderLayout.NORTH);
+        arrangementBody.add(trackTable, BorderLayout.CENTER);
+        DeckWidgets.Module output = new DeckWidgets.Module("Arrangement", arrangementBody);
         output.setHeadEnd(sourceChoice);
 
         // The piece: which one, and what it shall be. What is seldom needed is in the menu "Mehr".
@@ -2386,6 +2412,15 @@ public final class AudioStudioFrame extends JFrame {
                 com.aresstack.audio.studio.application.RegionOffer.start(session,
                         com.aresstack.audio.studio.ai.RegionComposer.with(model), asked.request(), asked.partIds(),
                         asked.firstBar(), asked.lastBar(), progress));
+    }
+
+    /** A key above the tracks for something the AI does with the piece; every such change is a proposal first. */
+    private static JButton pieceAction(String label, String hint, Runnable action) {
+        JButton key = new JButton(label);
+        key.setToolTipText(hint);
+        key.setFocusable(false);
+        key.addActionListener(event -> action.run());
+        return key;
     }
 
     /** Asks how the AI shall make the piece longer, and has the new bars planned and written as a proposal. */
