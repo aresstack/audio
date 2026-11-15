@@ -8,7 +8,6 @@ import com.aresstack.audio.core.live.LiveChannel;
 import com.aresstack.audio.core.live.LiveGraph;
 import com.aresstack.audio.core.live.LivePlayback;
 import com.aresstack.audio.core.live.LiveSink;
-import com.aresstack.audio.core.mix.LevelMode;
 import com.aresstack.audio.core.mix.MasterBus;
 import com.aresstack.audio.core.stream.ArraySource;
 import com.aresstack.audio.core.stream.LinearResampler;
@@ -296,18 +295,12 @@ public final class LiveStage implements AutoCloseable {
     }
 
     /**
-     * The master bus for live playback with this level strategy. In {@link LevelMode#FIXED} the
-     * same gain and limiter as the file; in the compatibility mode the factor the last file mix
-     * found ({@link MixOutcome#legacyFactor()}), so that live playback is as loud as the file. A
-     * legacy piece that was never mixed (factor not a number) plays at the master level alone.
+     * The master bus for live playback ("export old, live new"): the factor the last file mix of
+     * the piece found ({@link MixOutcome#legacyFactor()}) as a fixed gain with the live limiter, so
+     * live sounds like the file; see {@link MixLevel#liveMaster(float, double)}.
      */
-    public static MasterBus.Settings master(MixLevel level, float legacyFactor) {
-        if (level.mode() == LevelMode.FIXED) {
-            return level.master();
-        }
-        float factor = Float.isFinite(legacyFactor) && legacyFactor > 0 ? legacyFactor
-                : (float) Math.pow(10, level.masterDb() / 20);
-        return MasterBus.Settings.legacy(factor);
+    public static MasterBus.Settings master(float legacyFactor, double masterDb) {
+        return MixLevel.liveMaster(legacyFactor, masterDb);
     }
 
     /** Live playback of this stage into a sink (a sound card, or a test), paused at the start. */

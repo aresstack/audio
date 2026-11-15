@@ -86,7 +86,7 @@ public final class LiveStageCheck {
         }
         System.out.println("Lade " + files.size() + " Spuren, Raum: " + room.name() + " ...");
         try (LiveStage stage = LiveStage.load(files, placements, room, 2);
-             LivePlayback playback = stage.playOnLine(LiveStage.master(MixLevel.fixed(0), Float.NaN), buffer)) {
+             LivePlayback playback = stage.playOnLine(LiveStage.master(Float.NaN, 0), buffer)) {
             // a loop plays the music over and over without a gap; the room rings from the end into the start
             stage.loop(loop);
             playback.play();
