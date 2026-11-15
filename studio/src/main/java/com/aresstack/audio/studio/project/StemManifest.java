@@ -5,6 +5,7 @@ import static com.aresstack.audio.studio.project.CompositionJson.list;
 import static com.aresstack.audio.studio.project.CompositionJson.text;
 
 import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.Part;
 import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -43,13 +44,25 @@ public final class StemManifest {
 
     /**
      * The hash of what sounds of a part: the time map (a tempo change moves every note in time),
-     * and its line and its notes as {@code arrangement.tsv} writes them.
+     * its sound (program, role, sound bank, MIDI channel) and its notes where they sound. It does
+     * not depend on whether the piece can be written as {@code arrangement.tsv}.
      */
     public static String digest(Composition composition, String partId) {
+        Part part = composition.part(partId);
+        if (part == null) {
+            return "";
+        }
+        StringBuilder sounding = new StringBuilder();
+        sounding.append(composition.timeMap()).append('\n');
+        sounding.append(part.program()).append('\t').append(part.role()).append('\t').append(part.libraryId())
+                .append('\t').append(TsvExport.channels(composition).get(partId)).append('\n');
+        for (Composition.PlacedNote placed : composition.notesOf(partId)) {
+            sounding.append(placed.tick()).append('\t').append(placed.note().length()).append('\t')
+                    .append(placed.note().pitch()).append('\t').append(placed.note().velocity()).append('\n');
+        }
         try {
             MessageDigest sha = MessageDigest.getInstance("SHA-256");
-            String sounding = composition.timeMap() + "\n" + String.join("\n", TsvExport.linesOf(composition, partId));
-            return HexFormat.of().formatHex(sha.digest(sounding.getBytes(StandardCharsets.UTF_8)));
+            return HexFormat.of().formatHex(sha.digest(sounding.toString().getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
         }
