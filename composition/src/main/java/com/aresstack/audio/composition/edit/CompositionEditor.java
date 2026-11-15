@@ -241,6 +241,27 @@ public final class CompositionEditor {
                 notes.set(notes.indexOf(old), change.note());
                 yield replaceClip(piece, at, midi.withNotes(notes));
             }
+            case EditOp.AddAsset add -> {
+                if (piece.asset(add.asset().id()) != null) {
+                    throw new Refused(add.asset().id(), "an asset of this id exists");
+                }
+                List<com.aresstack.audio.composition.Asset> assets = new ArrayList<>(piece.assets());
+                assets.add(add.asset());
+                yield piece.withAssets(assets);
+            }
+            case EditOp.SetAudioClip set -> {
+                Located at = locate(piece, set.clip().id());
+                if (!(at.clip instanceof com.aresstack.audio.composition.AudioClip old)) {
+                    throw new Refused(at.clip.id(), "not an audio clip");
+                }
+                requireClipInScope(reach, at.track, old);
+                com.aresstack.audio.composition.AudioClip changed = set.clip();
+                if (changed.startTick() != old.startTick()) {
+                    throw new Refused(changed.id(), "an audio clip is moved with MOVE_CLIP");
+                }
+                requireClipInScope(reach, at.track, changed);
+                yield replaceClip(piece, at, changed);
+            }
             case EditOp.SetSections set ->
                     new Composition(piece.meta(), piece.timeMap(), set.sections(), piece.parts(), piece.tracks(), piece.assets());
             case EditOp.SetTimeMap set ->
@@ -284,7 +305,7 @@ public final class CompositionEditor {
         if (!reach.targetsClip(track, clip)) {
             throw new Refused(clip.id(), "the clip is not a target of the scope");
         }
-        if (!reach.scope().covers(clip.startTick(), Reach.end(clip))) {
+        if (!reach.scope().covers(clip.startTick(), reach.end(clip))) {
             throw new Refused(clip.id(), "the clip reaches beyond the time of the scope");
         }
     }
