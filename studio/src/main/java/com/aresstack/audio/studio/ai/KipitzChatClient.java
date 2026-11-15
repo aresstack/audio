@@ -157,7 +157,7 @@ public final class KipitzChatClient implements ChatModel {
             AnswerCache.store(cache, origin, gson.toJson(parsed));
             return parsed;
         } catch (RuntimeException malformed) {
-            throw new IOException("Could not parse the KIPITZ model response.", malformed);
+            throw new IOException("Could not parse the KIPITZ model response (" + malformed + ").", malformed);
         }
     }
 

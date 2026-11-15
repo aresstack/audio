@@ -3412,7 +3412,8 @@ public final class AudioStudioFrame extends JFrame {
     private void createNewComposition() {
         // The new piece goes into an album: the one chosen above, another one, or a new one by its title.
         // Left empty, it lands in the unnamed album.
-        javax.swing.JTextField name = new javax.swing.JTextField("Neues Stück", 24);
+        // Left empty, the piece gets its name from the plan of the AI, as before albums.
+        javax.swing.JTextField name = new javax.swing.JTextField("", 24);
         JComboBox<String> album = new JComboBox<String>();
         album.setEditable(true);
         // Two unnamed albums are told apart by a number, as in the tree.
@@ -3421,7 +3422,8 @@ public final class AudioStudioFrame extends JFrame {
             album.addItem(label);
         }
         album.setSelectedItem(currentAlbum == null || !labels.containsKey(currentAlbum) ? "" : labels.get(currentAlbum));
-        int answer = JOptionPane.showConfirmDialog(this, new Object[]{"Wie soll das neue Stück heißen?", name,
+        int answer = JOptionPane.showConfirmDialog(this, new Object[]{
+                        "Wie soll das neue Stück heißen? Leer: den Namen gibt ihm der Plan der KI.", name,
                         "In welches Album? Ein neuer Titel legt ein neues Album an; leer: ein neues unbenanntes Album.", album},
                 "Neues Stück", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
         if (answer != JOptionPane.OK_OPTION) {
@@ -3431,14 +3433,16 @@ public final class AudioStudioFrame extends JFrame {
         String albumTitle = typed == null ? "" : typed.toString().trim();
         try {
             keepSong();
-            Path folder = songs.create(name.getText());
+            String wanted = name.getText().trim();
+            Path folder = wanted.isEmpty() ? songs.createUntitled("") : songs.create(wanted);
             String target = intoAlbum(folder, albumTitle);
             directory.setText(folder.toString());
             arrangementFile.setText("");
             loadArrangementForCurrentDirectory(new Properties());
             saveSettings(false);
             refreshSongs();
-            append("Neues Stück angelegt: " + songs.name(folder) + (target == null ? "" : " (Album „" + target + "“)"));
+            append("Neues Stück angelegt: " + (wanted.isEmpty() ? "seinen Namen gibt ihm der Plan der KI"
+                    : songs.name(folder)) + (target == null ? "" : " (Album „" + target + "“)"));
         } catch (IOException failed) {
             message("Das Stück ließ sich nicht anlegen: " + failed.getMessage());
         }

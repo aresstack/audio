@@ -84,6 +84,9 @@ public final class AnswerCache {
 
     /** Keeps a new answer and writes down where it came from. */
     public static void store(Path cache, AnswerOrigin origin, String json) throws IOException {
+        if (cache == null) {
+            return; // an answer that is not kept (e.g. proposals for the fields of an album)
+        }
         Files.createDirectories(cache.toAbsolutePath().getParent());
         Files.writeString(cache, json, StandardCharsets.UTF_8);
         Files.writeString(originOf(cache), new GsonBuilder().setPrettyPrinting().create().toJson(origin.toJson()),
