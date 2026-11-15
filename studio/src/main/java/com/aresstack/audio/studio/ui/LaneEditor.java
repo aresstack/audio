@@ -654,9 +654,7 @@ final class LaneEditor extends MouseAdapter {
         if (lane < 0 || lane >= view.order().size()) {
             return false;
         }
-        String id = view.order().get(lane);
-        return editing.composition().map(piece -> piece.track(id) != null
-                && piece.track(id).kind() == com.aresstack.audio.composition.Track.Kind.AUDIO).orElse(false);
+        return view.isAudioLane(view.order().get(lane));
     }
 
     /** What the menu offers on an audio lane: sound effects and files to place, gain and fades of a clip. */

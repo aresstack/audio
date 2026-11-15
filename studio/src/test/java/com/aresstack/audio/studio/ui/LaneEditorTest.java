@@ -245,6 +245,11 @@ public final class LaneEditorTest {
         int index = order.indexOf(lane);
         ArrangementView.ClipBox box = view.arrangement().clips.get(lane).get(0);
         assertTrue(box.audio);
+        // A passage across the rows takes the rows with notes only, not the audio lane.
+        assertTrue(view.isAudioLane(lane));
+        List<String> noteLanes = new ArrayList<String>(order);
+        noteLanes.remove(lane);
+        assertEquals(noteLanes, view.noteLanes());
         int band = view.laneTop(index) + ArrangementView.CLIP_BAND - 1;
         int x = (int) view.xOf(box.start);
         drag(x, band, (int) view.xOf(box.start + 480), band);

@@ -88,6 +88,8 @@ final class ArrangementView extends JComponent {
         com.aresstack.audio.composition.TimeMap timeMap;
         /** The clips of each lane, for a piece with a model (work package B2). */
         final Map<String, List<ClipBox>> clips = new LinkedHashMap<String, List<ClipBox>>();
+        /** The audio lanes of the model: rows of sound, without notes (work package B3). */
+        final java.util.Set<String> audioLanes = new java.util.HashSet<String>();
 
         Arrangement(int tempo) {
             this.tempo = tempo;
@@ -114,6 +116,9 @@ final class ArrangementView extends JComponent {
                 List<ClipBox> boxes = new ArrayList<ClipBox>();
                 arrangement.lanes.put(track.id(), lane);
                 arrangement.clips.put(track.id(), boxes);
+                if (track.kind() == Track.Kind.AUDIO) {
+                    arrangement.audioLanes.add(track.id());
+                }
                 for (Clip clip : track.clips()) {
                     if (clip instanceof com.aresstack.audio.composition.AudioClip audio) {
                         ClipBox box = ClipBox.of(piece, track, audio);
@@ -606,6 +611,25 @@ final class ArrangementView extends JComponent {
 
     List<String> order() {
         return order;
+    }
+
+    /**
+     * The rows that hold notes, in their order: every row but the audio lanes. A selection of bars
+     * across the rows (a passage to replace or vary) takes these, since an audio lane has no notes.
+     */
+    public List<String> noteLanes() {
+        List<String> lanes = new ArrayList<String>();
+        for (String id : order) {
+            if (!isAudioLane(id)) {
+                lanes.add(id);
+            }
+        }
+        return lanes;
+    }
+
+    /** Whether a row is an audio lane of the model. */
+    public boolean isAudioLane(String id) {
+        return arrangement != null && arrangement.audioLanes.contains(id);
     }
 
     int laneHeight() {

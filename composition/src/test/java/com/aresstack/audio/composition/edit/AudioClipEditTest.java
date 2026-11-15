@@ -82,4 +82,29 @@ public final class AudioClipEditTest {
                 lane(EditOp.Kind.ADD_CLIP));
         assertTrue(after.violations().toString(), after.applied());
     }
+
+    @Test
+    public void insertedBarsMoveAudioClipsAndNeverSplitThem() { // C4 INSERT
+        Composition piece = withLaneAndClip(); // c1 from bar 2, one second (800 ticks) long
+        EditResult second = CompositionEditor.apply(piece, Patch.of("second",
+                new EditOp.AddClip("sfx", new AudioClip("c2", 3 * Pieces.BAR, 4410, "boom", 0, 0, 0))),
+                lane(EditOp.Kind.ADD_CLIP));
+        assertTrue(second.violations().toString(), second.applied());
+
+        // Two bars come in where c1 sounds: it stays whole where it was, c2 after it moves on.
+        long at = Pieces.BAR + 400;
+        EditResult inserted = CompositionEditor.apply(second.result(),
+                Patch.of("insert", new EditOp.ShiftTime(at, 2 * Pieces.BAR)), EditScope.everything());
+        assertTrue(inserted.violations().toString(), inserted.applied());
+        Track lane = inserted.result().track("sfx");
+        assertEquals(2, lane.clips().size());
+        AudioClip first = (AudioClip) lane.clips().get(0);
+        assertEquals("c1", first.id());
+        assertEquals(Pieces.BAR, first.startTick());
+        assertEquals(44100, first.lengthSamples());
+        AudioClip moved = (AudioClip) lane.clips().get(1);
+        assertEquals("c2", moved.id());
+        assertEquals(5 * Pieces.BAR, moved.startTick());
+        assertEquals(List.of(), CompositionValidator.validate(inserted.result()));
+    }
 }
