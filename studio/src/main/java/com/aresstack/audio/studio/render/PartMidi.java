@@ -1,6 +1,7 @@
 package com.aresstack.audio.studio.render;
 
 import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.Dynamics;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.studio.project.TsvExport;
@@ -28,6 +29,8 @@ import javax.sound.midi.Track;
 public final class PartMidi {
     /** The program the part plays, as the model has it. */
     public static final int OWN_PROGRAM = -1;
+    /** The MIDI controller of expression, which the hairpins drive while notes are held. */
+    public static final int EXPRESSION = 11;
 
     private PartMidi() {
     }
@@ -62,6 +65,10 @@ public final class PartMidi {
             if (channel != 9) {
                 midi(notes, ShortMessage.PROGRAM_CHANGE, channel, program == OWN_PROGRAM ? part.program() : program,
                         0, 0);
+            }
+            for (Dynamics.ExpressionPoint point : composition.expression(part.id())) {
+                // Held notes swell and fade with the hairpins of the part (controller 11, expression).
+                midi(notes, ShortMessage.CONTROL_CHANGE, channel, EXPRESSION, point.value(), point.tick());
             }
             for (Composition.PlacedNote placed : composition.notesOf(part.id())) {
                 midi(notes, ShortMessage.NOTE_ON, channel, placed.note().pitch(), composition.playedVelocity(placed),

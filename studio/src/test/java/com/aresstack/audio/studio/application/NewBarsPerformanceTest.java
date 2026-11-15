@@ -128,9 +128,12 @@ public final class NewBarsPerformanceTest {
                 if (note.tick() < 8 * BAR) {
                     assertEquals(note.note().velocity(), played);
                 } else if (note.tick() == 8 * BAR) {
+                    // the crescendo starts pianissimo: the note starts at the loudest level of the
+                    // hairpin, and the expression brings it down to pianissimo while it is held
                     Dynamics.Scale scale = Dynamics.Scale.STANDARD;
-                    assertEquals(Math.round(note.note().velocity() * scale.velocity(Dynamics.Level.PP)
-                            / (double) scale.velocity(scale.reference())), played);
+                    assertEquals(scale.velocity(Dynamics.Level.PP) / (double) scale.velocity(Dynamics.Level.FF),
+                            after.dynamics().expression(part.id(), note.tick()), 1e-9);
+                    assertTrue(after.expression(part.id()).get(0).value() < 127 / 2);
                 } else if (note.tick() >= 12 * BAR) {
                     assertTrue(played + " from bar 13", played > note.note().velocity());
                 }

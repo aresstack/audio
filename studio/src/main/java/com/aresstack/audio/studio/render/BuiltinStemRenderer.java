@@ -1,6 +1,7 @@
 package com.aresstack.audio.studio.render;
 
 import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.Dynamics;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.music.synth.BuiltinSynthesis;
@@ -45,7 +46,39 @@ public final class BuiltinStemRenderer implements StemRenderer {
             tones.add(new BuiltinSynthesis.Tone(time.seconds(tick), heldSeconds(time, tick, composition.playedEnd(placed)),
                     placed.note().pitch(), composition.playedVelocity(placed), tick));
         }
-        return BuiltinSynthesis.part(role(part), tones, frames);
+        double[] samples = BuiltinSynthesis.part(role(part), tones, frames);
+        swell(samples, time, composition.expression(part.id()));
+        return samples;
+    }
+
+    /**
+     * Lets the samples follow the expression curve of the part, as a sampler follows controller
+     * 11: held notes swell and fade within a hairpin. Between two points of the curve the gain
+     * moves evenly, so that it does not jump in steps; without a curve nothing changes.
+     */
+    static void swell(double[] samples, TimeMap time, List<Dynamics.ExpressionPoint> curve) {
+        if (curve.isEmpty()) {
+            return;
+        }
+        int rate = BuiltinSynthesis.SAMPLE_RATE;
+        double gain = 1.0;
+        int at = 0;
+        for (int i = 0; i <= curve.size(); i++) {
+            int until = i < curve.size()
+                    ? (int) Math.min(samples.length, Math.round(time.seconds(curve.get(i).tick()) * rate))
+                    : samples.length;
+            double next = i < curve.size() ? curve.get(i).value() / 127.0 : gain;
+            // A point that follows the one before at the next step is reached gradually, the first
+            // point of a hairpin and the return to full expression at its end take effect at once.
+            boolean glides = i > 0 && i < curve.size()
+                    && curve.get(i).tick() - curve.get(i - 1).tick() <= TimeMap.GLIDE_STEP_TICKS;
+            for (int f = Math.max(0, at); f < until; f++) {
+                double share = glides && until > at ? (f - at) / (double) (until - at) : 0;
+                samples[f] *= gain + (next - gain) * share;
+            }
+            gain = next;
+            at = Math.max(at, until);
+        }
     }
 
     /**

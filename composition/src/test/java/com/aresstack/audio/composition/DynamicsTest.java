@@ -67,6 +67,24 @@ public final class DynamicsTest {
     }
 
     @Test
+    public void withinAHairpinNotesStartAtItsPeakAndTheExpressionCarriesTheCourse() {
+        Dynamics dynamics = new Dynamics(List.of(new Dynamics.Mark(0, Dynamics.Level.P, null)),
+                List.of(new Dynamics.Hairpin(BAR, 3 * BAR, Dynamics.Level.F, null)), SCALE);
+        double p = SCALE.velocity(Dynamics.Level.P);
+        double f = SCALE.velocity(Dynamics.Level.F);
+        int reference = SCALE.velocity(SCALE.reference());
+        assertEquals(1.0, dynamics.expression("piano", 0), 1e-9);
+        assertEquals(p / f, dynamics.expression("piano", BAR), 1e-9);
+        assertEquals((p + f) / 2 / f, dynamics.expression("piano", 2 * BAR), 1e-9);
+        assertEquals(1.0, dynamics.expression("piano", 3 * BAR), 1e-9);
+        assertEquals(Math.round(64.0 * f / reference), dynamics.velocity("piano", BAR, 64));
+        List<Dynamics.ExpressionPoint> curve = dynamics.expressionCurve("piano", TimeMap.GLIDE_STEP_TICKS);
+        assertEquals(new Dynamics.ExpressionPoint(BAR, (int) Math.round(127 * p / f)), curve.get(0));
+        assertEquals(new Dynamics.ExpressionPoint(3 * BAR, 127), curve.get(curve.size() - 1));
+        assertTrue(Dynamics.NONE.expressionCurve("piano", TimeMap.GLIDE_STEP_TICKS).isEmpty());
+    }
+
+    @Test
     public void aMarkOfOnePartLeavesTheOthers() {
         Dynamics dynamics = new Dynamics(List.of(new Dynamics.Mark(0, Dynamics.Level.PPP, "bass")), List.of(), SCALE);
         assertEquals(80, dynamics.velocity("piano", 0, 80));

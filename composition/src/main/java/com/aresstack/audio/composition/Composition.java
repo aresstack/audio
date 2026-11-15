@@ -41,6 +41,14 @@ public record Composition(Meta meta, TimeMap timeMap, List<Section> sections, Li
                 placed.note().articulation());
     }
 
+    /**
+     * How the loudness of a part follows its hairpins while notes are held, as MIDI expression
+     * (controller 11) in steps of {@link TimeMap#GLIDE_STEP_TICKS}; empty without a hairpin.
+     */
+    public List<Dynamics.ExpressionPoint> expression(String partId) {
+        return dynamics.expressionCurve(partId, TimeMap.GLIDE_STEP_TICKS);
+    }
+
     /** The ticks a placed note sounds: its written length, shortened or lengthened by its articulation. */
     public long playedLength(PlacedNote placed) {
         Note note = placed.note();
