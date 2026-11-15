@@ -1147,12 +1147,8 @@ public final class AudioStudioFrame extends JFrame {
             @Override
             public Path execute(Progress progress) throws Exception {
                 try {
-                    boolean planned = Files.isRegularFile(output.resolve("composition-plan.json"));
                     Path arrangement = composeIntoPiece(new GemmaMusicComposer(client, tokens, parallel),
                             prompt, output, chosen, progress);
-                    if (!planned) {
-                        songs.planned(output, prompt); // the words this plan follows
-                    }
                     return renderArrangement(arrangement, output, settings, progress);
                 } finally {
                     activeClient = null;
@@ -1162,16 +1158,16 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     /**
-     * Composes into the folder of the piece; what the composer wrote becomes part of the model
-     * of the piece. Besides renaming a track this is the only place where the model takes over
-     * the old files: rendering, playing, mixing and proposals never change the saved piece, so
-     * a file that was changed behind the model's back stays out of it.
+     * Composes into the folder of the piece; everything this writes (the arrangement, the plan,
+     * and for a first plan the words it follows) then becomes part of the model of the piece.
+     * Besides renaming a track this is the only place where the model takes over the old files:
+     * rendering, playing, mixing and proposals never change the saved piece, so a file that was
+     * changed behind the model's back stays out of it.
      */
-    private Path composeIntoPiece(GemmaMusicComposer composer, String prompt, Path output, TrackArrangement tracks,
-                                  Progress progress) throws Exception {
-        Path arrangement = composer.compose(prompt, output, tracks, progress);
-        pieceModel.synchronize();
-        return arrangement;
+    private Path composeIntoPiece(final GemmaMusicComposer composer, final String prompt, final Path output,
+                                  final TrackArrangement tracks, final Progress progress) throws Exception {
+        return com.aresstack.audio.studio.application.ComposingIntoPiece.run(
+                () -> composer.compose(prompt, output, tracks, progress), output, prompt, songs, pieceModel);
     }
 
     /** First ask the AI only for a proposal; optionally continue automatically. */
@@ -1230,12 +1226,8 @@ public final class AudioStudioFrame extends JFrame {
                         return null;
                     }
                     new TrackArrangementStore().save(output, selected);
-                    boolean planned = Files.isRegularFile(output.resolve("composition-plan.json"));
                     Path arrangement = composeIntoPiece(new GemmaMusicComposer(client, tokens, parallel),
                             prompt, output, selected, progress);
-                    if (!planned) {
-                        songs.planned(output, prompt); // the words this plan follows
-                    }
                     return renderArrangement(arrangement, output, rendering.get(), progress);
                 } finally {
                     activeClient = null;

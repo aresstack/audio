@@ -108,6 +108,19 @@ public final class SpatialStemMixerEquivalenceTest {
     }
 
     @Test
+    public void aMixWrittenOverOneOfItsOwnStemsIsTheSameAsBefore() throws Exception {
+        Path old = folder.getRoot().toPath().resolve("old-in-place.wav");
+        Path fresh = folder.getRoot().toPath().resolve("new-in-place.wav");
+        Signal signal = stereo(noise(RATE, 13), noise(RATE, 14), RATE);
+        writeTrack(signal, old, 16);
+        writeTrack(signal, fresh, 16);
+        new LegacySpatialStemMixer().mix(Arrays.asList(old), Arrays.asList(place(0.2, 0.3)), AcousticRoom.HALL, 2, old, 16);
+        new SpatialStemMixer().mix(Arrays.asList(fresh), Arrays.asList(place(0.2, 0.3)), AcousticRoom.HALL, 2, fresh, 16);
+        Assert.assertArrayEquals(Files.readAllBytes(old), Files.readAllBytes(fresh));
+        Assert.assertEquals(2, folder.getRoot().list().length); // no part file left behind
+    }
+
+    @Test
     public void readingAndWritingStayAsTheyWere() throws Exception {
         Signal signal = stereo(noise(RATE / 3, 12), tone(RATE / 3, 1000), RATE);
         for (int bits : new int[]{16, 24}) {

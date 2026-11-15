@@ -477,6 +477,63 @@ public final class ProjectSessionTest {
         assertEquals(session.composition(), ProjectSession.open(piece).orElseThrow().composition());
     }
 
+    /** PO edge case: a stage change is taken over for a piece with changes of tempo and meter too. */
+    @Test
+    public void aStageChangeIsTakenOverForAPieceBeyondTheTsv() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        Composition c = session.composition();
+        TimeMap time = new TimeMap(List.of(new TimeMap.Tempo(0, 108), new TimeMap.Tempo(4 * 1920, 90)),
+                List.of(new TimeMap.Meter(0, 4, 4), new TimeMap.Meter(4 * 1920, 3, 4)),
+                List.of(new TimeMap.KeyChange(0, Key.C_MAJOR)));
+        Composition beyond = new Composition(c.meta(), time, c.sections(), c.parts(), c.tracks(), c.assets());
+        CompositionJson.save(piece, beyond);
+        session = ProjectSession.open(piece).orElseThrow();
+        assertFalse(session.withinTsv());
+
+        String scene = new String(Files.readAllBytes(piece.resolve(ProjectFolder.SCENE)), StandardCharsets.UTF_8)
+                .replace("\"kind\":\"chamber\"", "\"kind\":\"cathedral\"");
+        Files.write(piece.resolve(ProjectFolder.SCENE), scene.getBytes(StandardCharsets.UTF_8));
+        assertTrue(session.synchronize());
+        assertEquals("cathedral", session.mix().room().kind());
+        assertEquals(beyond, session.composition());
+        assertEquals(beyond, CompositionJson.load(piece));
+        assertEquals("cathedral", MixJson.load(piece).room().kind());
+        assertFalse(session.externalChanges());
+        StemManifest.current(StemManifest.load(piece), beyond); // the stem check needs no TSV
+    }
+
+    /** PO edge case: taking over new old files keeps the form of the piece. */
+    @Test
+    public void takingOverNewOldFilesKeepsTheSections() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        Composition c = session.composition();
+        List<Section> form = List.of(
+                new Section("intro", "Intro", "intro", 0, 2 * 1920, 0.2, List.of("C", "G"), "leise beginnen"),
+                new Section("verse", "Strophe", "verse", 2 * 1920, 4 * 1920, 0.6, List.of("Am", "F", "C", "G"), null),
+                new Section("outro", "Schluss", "outro", 6 * 1920, 2 * 1920, 0.3, List.of("F", "G"), "ausklingen"));
+        Composition shaped = new Composition(c.meta(), c.timeMap(), form, c.parts(), c.tracks(), c.assets());
+        CompositionJson.save(piece, shaped);
+        session = ProjectSession.open(piece).orElseThrow();
+
+        List<String> lines = new ArrayList<>(Files.readAllLines(piece.resolve(ProjectFolder.ARRANGEMENT)));
+        lines.add("note\tdrums\t15240\t120\t42\t60");
+        Files.write(piece.resolve(ProjectFolder.ARRANGEMENT), lines, StandardCharsets.UTF_8);
+        assertTrue(session.synchronize());
+        assertEquals(form, session.composition().sections());
+        assertEquals(form, CompositionJson.load(piece).sections());
+
+        // Music beyond the form gets one more section; the form before it stays.
+        lines.add("note\tdrums\t16320\t120\t36\t80");
+        Files.write(piece.resolve(ProjectFolder.ARRANGEMENT), lines, StandardCharsets.UTF_8);
+        assertTrue(session.synchronize());
+        List<Section> after = session.composition().sections();
+        assertEquals(form, after.subList(0, 3));
+        assertEquals(4, after.size());
+        assertEquals(8 * 1920, after.get(3).startTick());
+        assertEquals(session.composition().endTick(), after.get(3).endTick());
+        assertEquals(List.of(), com.aresstack.audio.composition.CompositionValidator.validate(session.composition()));
+    }
+
     private static Composition withVelocity(Composition composition, String trackId, int index, int velocity) {
         Track track = composition.track(trackId);
         MidiClip clip = (MidiClip) track.clips().get(0);
