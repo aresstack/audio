@@ -2905,7 +2905,7 @@ public final class AudioStudioFrame extends JFrame {
         Path folder = Paths.get(directory.getText().trim());
         // A planned piece shows what it was planned with; only a new one can still be given its length, tempo and key.
         specFields.show(GemmaMusicComposer.specOf(folder));
-        arrangementView.setArrangement(shownArrangement(folder), ids,
+        arrangementView.setArrangement(shownArrangement(folder), withAudioLanes(ids),
                 there ? "" : "Noch nichts gerendert · Komponieren oder Demo laden");
         arrangementView.setMix(player.envelope(), soloTrack() == null ? "Mix" : "Solo", soloTrack(), player.length());
         trackTable.setAlone(soloTrack());
@@ -2929,6 +2929,30 @@ public final class AudioStudioFrame extends JFrame {
         java.util.Optional<com.aresstack.audio.composition.Composition> model = pieceEditing.composition();
         return model.isPresent() ? ArrangementView.Arrangement.of(model.get())
                 : ArrangementView.Arrangement.read(folder.resolve("arrangement.tsv"));
+    }
+
+    /**
+     * The rows of the arrangement: the tracks, and below them the audio lanes of the model (work
+     * package B3), whose heads the lanes show as well.
+     */
+    private List<String> withAudioLanes(List<String> trackIds) {
+        List<String> rows = new ArrayList<String>(trackIds);
+        List<String[]> audio = new ArrayList<String[]>();
+        java.util.Optional<com.aresstack.audio.composition.Composition> model = pieceEditing.composition();
+        if (model.isPresent()) {
+            for (com.aresstack.audio.composition.Track track : model.get().tracks()) {
+                if (track.kind() == com.aresstack.audio.composition.Track.Kind.AUDIO && !rows.contains(track.id())) {
+                    rows.add(track.id());
+                    audio.add(new String[]{track.id(), track.name()});
+                }
+            }
+        }
+        trackTable.setAudioLanes(audio, model.isPresent() ? () -> {
+            com.aresstack.audio.studio.application.PieceEditing.Outcome added =
+                    pieceEditing.addAudioTrack("Audio " + (audio.size() + 1));
+            notesEdited(added.said(), added.changed());
+        } : null);
+        return rows;
     }
 
     /** The open piece's model for the note editor; reading only, the editor changes it through the edit core. */
@@ -2963,7 +2987,7 @@ public final class AudioStudioFrame extends JFrame {
         for (MusicTrack track : trackTable.tracks()) {
             ids.add(track.id());
         }
-        arrangementView.setArrangement(shownArrangement(folder), ids, "");
+        arrangementView.setArrangement(shownArrangement(folder), withAudioLanes(ids), "");
         scoreView.setScore(com.aresstack.audio.studio.score.Score.read(folder.resolve("arrangement.tsv")), ids,
                 "Noch keine Noten: erst komponieren, dann steht hier die Partitur");
     }

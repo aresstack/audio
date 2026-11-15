@@ -81,10 +81,12 @@ public final class CompositionValidator {
                     if (!known) {
                         found.add(new Violation(audio.id(), "unknown asset " + audio.assetId()));
                     }
-                    // Its length is in samples, so where it ends in ticks depends on the tempo; the
-                    // overlap of audio clips is checked once audio tracks exist (work package B3).
-                    busyUntil = Math.max(busyUntil, audio.startTick() + 1);
-                    busyWith = audio.id();
+                    // Its length is in samples, so where it ends in ticks depends on the tempo (B3).
+                    long end = audio.endTick(composition.timeMap());
+                    if (end > busyUntil) {
+                        busyUntil = end;
+                        busyWith = audio.id();
+                    }
                 }
             }
         }

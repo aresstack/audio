@@ -84,8 +84,12 @@ final class ArrangementView extends JComponent {
         long barTicks = TICKS_PER_BEAT * 4L;
         /** Whether the notes carry ids, so that they can be edited. */
         boolean editable;
+        /** The time map of the model, to place audio clips, whose length is in samples; {@code null} for a file. */
+        com.aresstack.audio.composition.TimeMap timeMap;
         /** The clips of each lane, for a piece with a model (work package B2). */
         final Map<String, List<ClipBox>> clips = new LinkedHashMap<String, List<ClipBox>>();
+        /** The audio lanes of the model: rows of sound, without notes (work package B3). */
+        final java.util.Set<String> audioLanes = new java.util.HashSet<String>();
 
         Arrangement(int tempo) {
             this.tempo = tempo;
@@ -105,13 +109,22 @@ final class ArrangementView extends JComponent {
             Arrangement arrangement = new Arrangement((int) Math.round(piece.timeMap().tempoAt(0)));
             arrangement.editable = true;
             arrangement.barTicks = piece.timeMap().meterAt(0).barTicks();
+            arrangement.timeMap = piece.timeMap();
             long end = 0;
             for (Track track : piece.tracks()) {
                 List<Note> lane = new ArrayList<Note>();
                 List<ClipBox> boxes = new ArrayList<ClipBox>();
                 arrangement.lanes.put(track.id(), lane);
                 arrangement.clips.put(track.id(), boxes);
+                if (track.kind() == Track.Kind.AUDIO) {
+                    arrangement.audioLanes.add(track.id());
+                }
                 for (Clip clip : track.clips()) {
+                    if (clip instanceof com.aresstack.audio.composition.AudioClip audio) {
+                        ClipBox box = ClipBox.of(piece, track, audio);
+                        end = Math.max(end, box.end);
+                        boxes.add(box);
+                    }
                     if (clip instanceof MidiClip midi) {
                         end = Math.max(end, midi.endTick());
                         boxes.add(ClipBox.of(piece, track, midi, false));
@@ -201,6 +214,11 @@ final class ArrangementView extends JComponent {
         final int partIndex;
         final boolean foreign;
         final boolean mirrored;
+        /** For an audio clip (work package B3): where its fades end and begin, in ticks, and its gain. */
+        boolean audio;
+        long fadeInEnd;
+        long fadeOutStart;
+        double gainDb;
 
         ClipBox(String id, String trackId, String trackName, long start, long end, String partId, String partName,
                 int partIndex, boolean foreign, boolean mirrored) {
@@ -214,6 +232,20 @@ final class ArrangementView extends JComponent {
             this.partIndex = partIndex;
             this.foreign = foreign;
             this.mirrored = mirrored;
+        }
+
+        static ClipBox of(Composition piece, Track track, com.aresstack.audio.composition.AudioClip clip) {
+            com.aresstack.audio.composition.TimeMap time = piece.timeMap();
+            com.aresstack.audio.composition.Asset asset = piece.asset(clip.assetId());
+            double start = time.seconds(clip.startTick());
+            double rate = com.aresstack.audio.composition.AudioClip.SAMPLE_RATE;
+            ClipBox box = new ClipBox(clip.id(), track.id(), track.name(), clip.startTick(), clip.endTick(time), null,
+                    asset == null ? clip.assetId() : asset.name(), piece.tracks().indexOf(track), false, false);
+            box.audio = true;
+            box.fadeInEnd = time.tickAt(start + clip.fadeInSamples() / rate);
+            box.fadeOutStart = time.tickAt(start + (clip.lengthSamples() - clip.fadeOutSamples()) / rate);
+            box.gainDb = clip.gainDb();
+            return box;
         }
 
         static ClipBox of(Composition piece, Track track, MidiClip clip, boolean mirrored) {
@@ -359,7 +391,14 @@ final class ArrangementView extends JComponent {
         int lastBar = barAt(Math.max(x1, x2), bars);
         int firstLane = laneNear(Math.min(y1, y2));
         int lastLane = laneNear(Math.max(y1, y2));
-        mark(new Range(order.subList(firstLane, lastLane + 1), firstBar, lastBar));
+        // A passage is notes to write anew: an audio lane between the marked rows is not part of it.
+        List<String> tracks = new ArrayList<String>();
+        for (String id : order.subList(firstLane, lastLane + 1)) {
+            if (!isAudioLane(id)) {
+                tracks.add(id);
+            }
+        }
+        mark(tracks.isEmpty() ? null : new Range(tracks, firstBar, lastBar));
     }
 
     /** Draws the mark on to where the pointer is: from the ruler across every track, else across the lanes passed. */
@@ -679,7 +718,12 @@ final class ArrangementView extends JComponent {
             }
             g.setColor(picked ? Color.WHITE : AudioStudioTheme.withAlpha(color, 150));
             g.draw(body);
-            String label = box.mirrored ? box.partName + " · auf " + box.trackName
+            if (box.audio) {
+                paintAudio(g, box, x, w, top, color);
+            }
+            String label = box.audio ? box.partName + (box.gainDb == 0 ? ""
+                    : String.format(java.util.Locale.ROOT, " · %+.1f dB", box.gainDb))
+                    : box.mirrored ? box.partName + " · auf " + box.trackName
                     : box.foreign ? box.partName : several ? bars(box) : "";
             if (!label.isEmpty() && w > 24) {
                 g.setColor(picked ? Color.WHITE : AudioStudioTheme.TEXT);
@@ -689,6 +733,29 @@ final class ArrangementView extends JComponent {
         }
         g.setStroke(new BasicStroke(1f));
         return colors;
+    }
+
+    /** An audio clip: a flat body with its fades drawn as slopes, and the handles to drag them at the band. */
+    private void paintAudio(Graphics2D g, ClipBox box, float x, float w, int top, Color color) {
+        float bottom = top + lane - 3f;
+        float high = top + 2f + CLIP_BAND + 4f;
+        float in = Math.min(x + w, xOf(box.fadeInEnd));
+        float out = Math.max(x, xOf(box.fadeOutStart));
+        java.awt.geom.Path2D.Float shape = new java.awt.geom.Path2D.Float();
+        shape.moveTo(x, bottom);
+        shape.lineTo(in, high);
+        shape.lineTo(out, high);
+        shape.lineTo(x + w, bottom);
+        shape.closePath();
+        g.setColor(AudioStudioTheme.withAlpha(color, 70));
+        g.fill(shape);
+        g.setColor(AudioStudioTheme.withAlpha(color, 200));
+        g.setStroke(new BasicStroke(1.2f));
+        g.draw(new Line2D.Float(x, bottom, in, high));
+        g.draw(new Line2D.Float(out, high, x + w, bottom));
+        g.setColor(Color.WHITE);
+        g.fill(new Rectangle2D.Float(in - 2.5f, top + 2f + CLIP_BAND - 1f, 5f, 5f));
+        g.fill(new Rectangle2D.Float(out - 2.5f, top + 2f + CLIP_BAND - 1f, 5f, 5f));
     }
 
     /** The bars a clip covers, as the user counts them. */
@@ -721,6 +788,25 @@ final class ArrangementView extends JComponent {
 
     List<String> order() {
         return order;
+    }
+
+    /**
+     * The rows that hold notes, in their order: every row but the audio lanes. A selection of bars
+     * across the rows (a passage to replace or vary) takes these, since an audio lane has no notes.
+     */
+    public List<String> noteLanes() {
+        List<String> lanes = new ArrayList<String>();
+        for (String id : order) {
+            if (!isAudioLane(id)) {
+                lanes.add(id);
+            }
+        }
+        return lanes;
+    }
+
+    /** Whether a row is an audio lane of the model. */
+    public boolean isAudioLane(String id) {
+        return arrangement != null && arrangement.audioLanes.contains(id);
     }
 
     int laneHeight() {
