@@ -3237,14 +3237,7 @@ public final class AudioStudioFrame extends JFrame {
                 try {
                     Path renamed = albumMembers.renameTitle(albumId, trackId, typed.toString());
                     if (renamed != null) {
-                        if (renamed.equals(Paths.get(directory.getText().trim()))) {
-                            pieceModel.synchronize(); // the model follows the piece to its new name
-                        } else {
-                            com.aresstack.audio.studio.application.PieceModel other =
-                                    new com.aresstack.audio.studio.application.PieceModel(line -> { });
-                            other.open(renamed);
-                            other.synchronize();
-                        }
+                        titleRenamed(renamed);
                     }
                     if (albumsPanel != null && currentAlbum != null) {
                         albumsPanel.follow(currentAlbum);
@@ -3362,6 +3355,21 @@ public final class AudioStudioFrame extends JFrame {
             }
         });
         return albumTree;
+    }
+
+    /**
+     * A piece got another name from the album tree: its model follows it to the new name, as
+     * after a renamed track. A piece that is not open is brought in step on its own.
+     */
+    private void titleRenamed(Path renamed) {
+        if (renamed.equals(Paths.get(directory.getText().trim()))) {
+            pieceModel.synchronize();
+        } else {
+            com.aresstack.audio.studio.application.PieceModel other =
+                    new com.aresstack.audio.studio.application.PieceModel(line -> { });
+            other.open(renamed);
+            other.synchronize();
+        }
     }
 
     /** What the open project is called. */

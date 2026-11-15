@@ -41,7 +41,7 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
                         + " a drawn movement is kept, movements of the AI are kept once taken; nothing else reaches it",
                 new java.util.TreeSet<String>(List.of("askDirector", "composeIntoPiece", "loadArrangementForCurrentDirectory",
                         "loadDemo", "movementChanged", "pieceToEdit", "renamed", "renderArrangement", "savedPiece", "scoreOf",
-                        "showMovements", "takeWithMovements")), users);
+                        "showMovements", "takeWithMovements", "titleRenamed")), users);
         assertTrue("asking the AI for a mix only reads the model",
                 bodyOf(source, "private void askDirector()").replace("pieceModel.movements()", "")
                         .indexOf("pieceModel") < 0);
@@ -78,7 +78,8 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         assertEquals("the note editor only gets the open session; it changes it through the edit core alone",
                 "return pieceModel.session();",
                 bodyOf(source, "pieceToEdit() {").replace("{", "").trim());
-        assertEquals("renaming synchronizes itself, right after its files were written", List.of("renamed"),
+        assertEquals("renaming (a track, or a title in the album tree) synchronizes itself, right after its files"
+                        + " were written", List.of("renamed", "titleRenamed"),
                 callers(source, "pieceModel\\.synchronize\\(\\)"));
         assertEquals("opening only opens", List.of("loadArrangementForCurrentDirectory"),
                 callers(source, "pieceModel\\.open\\("));
