@@ -3,6 +3,7 @@ package com.aresstack.audio.studio.application;
 import com.aresstack.audio.composition.Clip;
 import com.aresstack.audio.composition.Composition;
 import com.aresstack.audio.composition.Composition.PlacedNote;
+import com.aresstack.audio.composition.MidiClip;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.Section;
 import com.aresstack.audio.composition.Track;
@@ -16,9 +17,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -35,7 +38,11 @@ import java.util.Set;
  * <p>What the shift does to the original, by design of {@code TimeShift}: clips and sections
  * after the point start later, a clip across the point is cut there into two, a section across
  * it is cut into two by the new form, tempo, meter and key events and automation points after the
- * point move along. A note that sounds across the point ends at it.
+ * point move along. A note that sounds across the point ends at it there; the insertion then
+ * gives it its length back (at most to the end of the room) and lets its clip grow with it
+ * ({@code ResizeClip}), so that it sounds on as in the original. For that the scope's transition
+ * zone reaches back to the start of the earliest such note; {@link #originalKept} checks that these
+ * notes are exactly as in the original.
  */
 public final class InsertPassage {
     private InsertPassage() {
@@ -57,9 +64,10 @@ public final class InsertPassage {
         Set<String> parts = new HashSet<>();
         task.parts().forEach(part -> parts.add(part.id()));
         insertion.newParts().forEach(part -> parts.add(part.id()));
+        insertion.holds().forEach(hold -> parts.add(hold.partId()));
         Set<String> tracks = new HashSet<>();
         insertion.newTracks().forEach(track -> tracks.add(track.id()));
-        long transition = task.newStart() - task.tailStart();
+        long transition = task.newStart() - insertion.editFrom();
         return new EditScope(false, parts, tracks, Set.of(), task.newStart(), task.newEnd(), kinds(transition > 0), true,
                 transition);
     }
@@ -72,24 +80,43 @@ public final class InsertPassage {
         operations.add(new EditOp.SetSections(insertion.form()));
         operations.addAll(AppendContinuation.body(insertion));
         var request = task.request();
+        int shortened = insertion.shortened().size();
         return new Patch(request.bars() + " Takte vor Takt " + request.insertBeforeBar() + " eingefügt ("
-                + request.preset().label() + ", " + request.transition().label() + ")", operations);
+                + request.preset().label() + ", " + request.transition().label() + ")"
+                + (shortened == 0 ? "" : "; " + shortened + " über den Einfügepunkt klingende Note(n) gekürzt,"
+                + " Originaldauer nicht erhaltbar"), operations);
     }
 
     /**
-     * What is different about the original between the piece before and after an insertion,
-     * measured against the original with the approved shift applied: a note of a part that plays
-     * that begins before {@code keptUntil} or after the room gone, new or changed; a note of
-     * another part changed; a part, track or clip frame changed; a section of the original that
-     * is neither kept nor only cut at the room; tempo, meter, key, words or assets changed beyond
-     * the shift; an unexpected new part. Empty when only the inserted bars came in.
+     * What is different about the original between the piece before and after an insertion: a
+     * note that begins before {@code keptUntil} (any note before the insertion point for a part
+     * that does not play) not as in the original, where a note that sounded across the point may
+     * only end earlier where the insertion lists it as shortened (it sounded beyond the end of the room); a note after the room not as in the
+     * original with the approved shift; a note of a part that does not play in the room; a part or
+     * track changed; a clip frame changed beyond the shift, except a clip that ended at the point
+     * and grew into the room for a held note; a section of the original that is neither kept nor
+     * only cut at the room; tempo, meter, key, words or assets changed beyond the shift; an
+     * unexpected new part. Empty when only the inserted bars came in.
      *
-     * @param keptUntil the first tick before the room that may change: the start of the room, or
-     *                  of the revised bars
+     * @param keptUntil the first tick before the room whose notes may change: the start of the
+     *                  room, or of the revised bars
      */
     public static List<String> originalKept(Composition before, Composition after, ContinuationTask task,
                                             long keptUntil, Set<String> playing, Set<String> newParts) {
+        return originalKept(before, after, task, keptUntil, playing, newParts, Map.of());
+    }
+
+    /**
+     * As {@link #originalKept(Composition, Composition, ContinuationTask, long, Set, Set)}, where
+     * each note named in {@code shortened} (by part and note id, see {@link #key}) may end earlier,
+     * at exactly the given length; every other note before the point keeps its full length.
+     */
+    public static List<String> originalKept(Composition before, Composition after, ContinuationTask task,
+                                            long keptUntil, Set<String> playing, Set<String> newParts,
+                                            Map<String, Long> shortened) {
         Composition reference = task.room(before);
+        long point = task.newStart();
+        long end = task.newEnd();
         List<String> differences = new ArrayList<>();
         for (Part part : reference.parts()) {
             if (!part.equals(after.part(part.id()))) {
@@ -97,9 +124,16 @@ public final class InsertPassage {
                 continue;
             }
             boolean plays = playing.contains(part.id());
-            if (!around(reference, part.id(), plays ? keptUntil : Long.MAX_VALUE, task.newEnd())
-                    .equals(around(after, part.id(), plays ? keptUntil : Long.MAX_VALUE, task.newEnd()))) {
-                differences.add("notes of part " + part.id() + " outside the inserted bars changed");
+            long until = plays ? keptUntil : point;
+            if (!lines(before, part.id(), 0, until, shortened).equals(lines(after, part.id(), 0, until, Map.of()))) {
+                differences.add("notes of part " + part.id() + " before the inserted bars changed");
+            }
+            if (!lines(reference, part.id(), end, Long.MAX_VALUE, Map.of())
+                    .equals(lines(after, part.id(), end, Long.MAX_VALUE, Map.of()))) {
+                differences.add("notes of part " + part.id() + " after the inserted bars changed");
+            }
+            if (!plays && !lines(after, part.id(), point, end, Map.of()).isEmpty()) {
+                differences.add("part " + part.id() + " plays in the inserted bars without being asked");
             }
         }
         for (Track track : reference.tracks()) {
@@ -111,16 +145,17 @@ public final class InsertPassage {
             }
             for (Clip clip : track.clips()) {
                 Clip kept = now.clips().stream().filter(c -> c.id().equals(clip.id())).findFirst().orElse(null);
-                if (kept == null || !AppendContinuation.frame(kept).equals(AppendContinuation.frame(clip))) {
+                if (kept == null || !AppendContinuation.frame(kept).equals(AppendContinuation.frame(clip))
+                        && !grown(clip, kept, point, end)) {
                     differences.add("clip " + clip.id() + " moved, resized or gone beyond the shift");
                 }
             }
         }
         for (Section section : reference.sections()) {
-            boolean stretched = section.startTick() < task.newStart() && section.endTick() > task.newStart();
+            boolean stretched = section.startTick() < point && section.endTick() > point;
             boolean kept = stretched
                     ? after.sections().stream().anyMatch(s -> s.id().equals(section.id())
-                    && s.startTick() == section.startTick() && s.endTick() == task.newStart()
+                    && s.startTick() == section.startTick() && s.endTick() == point
                     && s.name().equals(section.name()))
                     : after.sections().contains(section);
             if (!kept) {
@@ -137,6 +172,43 @@ public final class InsertPassage {
             }
         }
         return differences;
+    }
+
+    /** Whether a clip that ended at the insertion point only grew into the room. */
+    private static boolean grown(Clip clip, Clip kept, long point, long end) {
+        return clip instanceof MidiClip old && kept instanceof MidiClip now && old.endTick() == point
+                && old.startTick() == now.startTick() && Objects.equals(old.partId(), now.partId())
+                && now.endTick() > point && now.endTick() <= end;
+    }
+
+    /** The key of a note in the {@code shortened} map of {@link #originalKept}. */
+    public static String key(String partId, String noteId) {
+        return partId + "/" + noteId;
+    }
+
+    /** The approved shortenings of an insertion, for {@link #originalKept}. */
+    public static Map<String, Long> shortened(ComposedContinuation insertion) {
+        Map<String, Long> shortened = new HashMap<>();
+        insertion.shortened().forEach(hold -> shortened.put(key(hold.partId(), hold.noteId()),
+                insertion.keptLength(hold)));
+        return shortened;
+    }
+
+    /**
+     * The notes of a part that begin from {@code from} to before {@code to}, as lines (part, tick,
+     * length, pitch, velocity, voice, id); a note named in {@code lengths} with the length given there.
+     */
+    private static List<String> lines(Composition piece, String partId, long from, long to, Map<String, Long> lengths) {
+        List<String> lines = new ArrayList<>();
+        for (PlacedNote n : piece.notesOf(partId)) {
+            if (n.tick() >= from && n.tick() < to) {
+                long length = lengths.getOrDefault(key(partId, n.note().id()), n.note().length());
+                lines.add(partId + " " + n.tick() + " " + length + " " + n.note().pitch() + " " + n.note().velocity()
+                        + " " + n.note().voiceId() + " " + n.note().id());
+            }
+        }
+        lines.sort(null);
+        return lines;
     }
 
     /**
@@ -166,17 +238,6 @@ public final class InsertPassage {
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
         }
-    }
-
-    private static List<String> around(Composition piece, String partId, long until, long from) {
-        List<String> lines = new ArrayList<>();
-        for (String line : AppendContinuation.notes(piece, partId, Long.MAX_VALUE)) {
-            long tick = Long.parseLong(line.split(" ")[1]);
-            if (tick < until || tick >= from) {
-                lines.add(line);
-            }
-        }
-        return lines;
     }
 
     private static ContinuationTask requireInsertion(ComposedContinuation composed) {
