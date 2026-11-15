@@ -1,6 +1,7 @@
 package com.aresstack.audio.composition.edit;
 
 import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.mix.MixScene;
 
 /**
  * A lasting state of a piece (architecture review E5): a full copy, not a log of operations, so
@@ -13,9 +14,10 @@ import com.aresstack.audio.composition.Composition;
  * @param timeMillis  when it was made, in milliseconds since 1970
  * @param description what happened, in a few words for the user
  * @param runId       for a change by the AI the run it came from, else {@code null}
+ * @param mix         the mix as it was with the piece (a shift moves its automation), or {@code null} if none
  */
 public record Revision(String id, int sequence, String parentId, Author author, long timeMillis, String description,
-                       String runId, Composition composition) {
+                       String runId, Composition composition, MixScene mix) {
     /** Who made the state of a revision. */
     public enum Author {
         /** The user, by hand. */

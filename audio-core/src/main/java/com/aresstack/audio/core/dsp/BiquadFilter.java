@@ -37,7 +37,14 @@ public final class BiquadFilter {
 
     /** Filters {@code count} samples from {@code from} on, in place. */
     public void process(float[] samples, int from, int count) {
-        BiquadCoefficients c = coefficients;
+        process(samples, from, count, coefficients);
+    }
+
+    /**
+     * Filters with coefficients the caller has taken once for the whole block, so that filters
+     * that belong together (the two sides of {@link StereoBiquad}) use the same set.
+     */
+    void process(float[] samples, int from, int count, BiquadCoefficients c) {
         double b0 = c.b0;
         double b1 = c.b1;
         double b2 = c.b2;

@@ -19,7 +19,9 @@ import com.aresstack.audio.core.wav.WavFileSource;
 import com.aresstack.audio.studio.stage.AcousticRoom;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -147,11 +149,20 @@ public final class SpatialStemMixer {
         }
         long heard = length;
         long total = length + tail(length, room);
-        try (WavFileSink sink = new WavFileSink(output, RATE, bits, blockFrames)) {
-            OfflineMix.renderNormalized(() -> graph(files.size(), placements, room, secondsPerBar, heard, total, index -> {
-                WavFileSource source = new WavFileSource(files.get(index));
-                return LinearResampler.at(source, source.sampleRate(), RATE);
-            }), RATE, blockFrames, masterDb, sink);
+        // The mix goes to a file of its own first and replaces the output only when it is finished: the
+        // stems are read while the mix is written, and the output may be one of them.
+        Path fresh = output.toAbsolutePath().resolveSibling(output.getFileName() + "." + System.nanoTime() + ".part");
+        try {
+            try (WavFileSink sink = new WavFileSink(fresh, RATE, bits, blockFrames)) {
+                OfflineMix.renderNormalized(() -> graph(files.size(), placements, room, secondsPerBar, heard, total,
+                        index -> {
+                            WavFileSource source = new WavFileSource(files.get(index));
+                            return LinearResampler.at(source, source.sampleRate(), RATE);
+                        }), RATE, blockFrames, masterDb, sink);
+            }
+            Files.move(fresh, output, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(fresh);
         }
     }
 
