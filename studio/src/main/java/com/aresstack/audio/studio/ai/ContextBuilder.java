@@ -14,7 +14,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Predicate;
 
 /**
  * Builds the {@link MusicalContext} of a piece: a pure function of the piece and the window,
@@ -44,6 +46,23 @@ public final class ContextBuilder {
     }
 
     /**
+     * A region that is to be written anew ({@code REPLACE_REGION}, {@code VARIATE_REGION}): the
+     * notes it selects are left out of the fourth layer, which names the region in their place;
+     * notes of its parts that begin before it and sound into it are marked as held into it.
+     *
+     * @param partIds  the parts whose notes in the region are written anew
+     * @param rewritten which notes those are
+     */
+    public record Region(long fromTick, long toTick, Set<String> partIds, Predicate<PlacedNote> rewritten) {
+        public Region {
+            partIds = Set.copyOf(partIds);
+            if (fromTick < 0 || toTick <= fromTick) {
+                throw new IllegalArgumentException("A region covers at least one tick: " + fromTick + ".." + toTick);
+            }
+        }
+    }
+
+    /**
      * The context of a piece for a change within {@code fromTick..toTick}, with the notes of
      * {@code aroundBars} bars before and after given in full as well.
      *
@@ -51,6 +70,20 @@ public final class ContextBuilder {
      */
     public static MusicalContext build(Composition piece, long fromTick, long toTick, int aroundBars,
                                        String highlightPartId) {
+        return build(piece, fromTick, toTick, aroundBars, highlightPartId, null);
+    }
+
+    /**
+     * The context of a piece for writing a region anew: the window is the region with
+     * {@code aroundBars} bars before <em>and</em> after it, so that the model sees where the
+     * region comes from and where it must lead to; the notes to be rewritten are not shown.
+     */
+    public static MusicalContext build(Composition piece, Region region, int aroundBars) {
+        return build(piece, region.fromTick(), region.toTick(), aroundBars, null, region);
+    }
+
+    private static MusicalContext build(Composition piece, long fromTick, long toTick, int aroundBars,
+                                        String highlightPartId, Region region) {
         if (fromTick < 0 || toTick <= fromTick || aroundBars < 0) {
             throw new IllegalArgumentException("A window covers at least one tick: " + fromTick + ".." + toTick);
         }
@@ -65,7 +98,7 @@ public final class ContextBuilder {
         profile(text, piece, pieceBars);
         form(text, piece);
         parts(text, piece, pieceBars, highlightPartId, 1);
-        notes(text, piece, windowFrom, windowTo, highlightPartId);
+        notes(text, piece, windowFrom, windowTo, highlightPartId, region);
         String written = text.toString();
         return new MusicalContext(written, sha256(written), windowFrom, windowTo);
     }
@@ -86,7 +119,7 @@ public final class ContextBuilder {
             if (window.label() != null) {
                 text.append("# ").append(window.label().toUpperCase(Locale.ROOT)).append('\n');
             }
-            notes(text, piece, window.fromTick(), window.toTick(), highlightPartId);
+            notes(text, piece, window.fromTick(), window.toTick(), highlightPartId, null);
         }
         String written = text.toString();
         ContextTiers.Window end = tiers.end();
@@ -188,14 +221,18 @@ public final class ContextBuilder {
         text.append('\n');
     }
 
-    private static void notes(StringBuilder text, Composition piece, long from, long to, String highlight) {
+    private static void notes(StringBuilder text, Composition piece, long from, long to, String highlight,
+                              Region region) {
         TimeMap time = piece.timeMap();
         text.append("# NOTES bars ").append(time.barOf(from) + 1).append('-').append(time.barsCovering(to))
                 .append(" (bar beat dur pitch vel)\n");
         for (Part part : piece.parts()) {
             List<PlacedNote> inWindow = new ArrayList<>();
+            int rewritten = 0;
             for (PlacedNote n : piece.notesOf(part.id())) {
-                if (n.tick() < to && n.endTick() > from) {
+                if (region != null && region.rewritten().test(n)) {
+                    rewritten++;
+                } else if (n.tick() < to && n.endTick() > from) {
                     inWindow.add(n);
                 }
             }
@@ -206,6 +243,12 @@ public final class ContextBuilder {
                 text.append(" MOTIF-SOURCE");
             }
             text.append('\n');
+            boolean target = region != null && region.partIds().contains(part.id());
+            if (target) {
+                text.append("  REGION bars ").append(time.barOf(region.fromTick()) + 1).append('-')
+                        .append(time.barsCovering(region.toTick())).append(": ").append(rewritten)
+                        .append(" notes to be written anew, not shown\n");
+            }
             if (inWindow.isEmpty()) {
                 text.append("  rests\n");
                 continue;
@@ -213,7 +256,8 @@ public final class ContextBuilder {
             for (PlacedNote n : inWindow) {
                 int bar = time.barOf(n.tick());
                 long barStart = time.tickOfBar(bar);
-                text.append(n.tick() < from ? "  held " : "  ").append(bar + 1).append(' ')
+                boolean heldIn = target && n.tick() < region.fromTick() && n.endTick() > region.fromTick();
+                text.append(n.tick() < from ? "  held " : heldIn ? "  held-into-region " : "  ").append(bar + 1).append(' ')
                         .append(quarters(n.tick() - barStart)).append(' ').append(quarters(n.note().length())).append(' ')
                         .append(part.drums() ? drum(n.note().pitch()) : pitch(n.note().pitch())).append('/')
                         .append(n.note().pitch()).append(' ').append(n.note().velocity()).append('\n');

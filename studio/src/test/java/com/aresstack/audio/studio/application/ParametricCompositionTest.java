@@ -187,6 +187,17 @@ public final class ParametricCompositionTest {
         com.aresstack.audio.studio.render.RenderLimits.STANDARD.checkPiece(720, "A14");
     }
 
+    /** Eight bars in another key whose last bars are silent keep their length: the reader would infer fewer. */
+    @Test
+    public void eightBarsInAnotherKeyWithSilentLastBarsWriteTheirLength() {
+        CompositionSpec spec = CompositionSpec.of(8, 100, Key.parse("D minor"), 4, 4);
+        assertTrue(spec.headerLines(6).contains("bars\t8"));
+        assertFalse(spec.headerLines(8).contains("bars\t8"));
+        assertFalse("the legacy shape renders eight bars anyway",
+                CompositionSpec.of(8, 100, Key.C_MAJOR, 4, 4).headerLines(6).contains("bars\t8"));
+        assertTrue(CompositionSpec.of(3, 100, Key.C_MAJOR, 4, 4).headerLines(3).contains("bars\t3"));
+    }
+
     /** Files from before F2 have no bars line and still sound eight bars long, however short their notes. */
     @Test
     public void legacyFilesStayEightBarsLong() throws Exception {
