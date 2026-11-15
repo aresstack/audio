@@ -65,4 +65,45 @@ public final class ArrangementFileTest {
         Assert.assertEquals(Arrays.asList("﻿track\tflute\t73\t0", "tempo\t108", "note\tflute\t0\t480\t72\t90\t",
                 "note\tleader\t0\t1\t60\t90", "# lead", "other\tlead"), renamed);
     }
+
+    @Test
+    public void readsMeterKeyAndBarsSinceF2() {
+        ArrangementFile file = ArrangementFile.parse(Arrays.asList("tempo\t96", "meter\t6\t8", "key\tBb\tminor",
+                "bars\t24", "track\tlead\t73\t0\tmelody", "note\tlead\t0\t480\t72\t90"));
+        Assert.assertTrue(file.problems().isEmpty());
+        Assert.assertEquals(6, file.meter().get().numerator());
+        Assert.assertEquals(8, file.meter().get().denominator());
+        Assert.assertEquals(3.0, file.quartersPerBar(), 0);
+        Assert.assertEquals(1440L, file.barTicks());
+        Assert.assertEquals("Bb minor", file.key().get().name());
+        Assert.assertEquals(OptionalInt.of(24), file.bars());
+        Assert.assertEquals(1, file.barsCovering());
+    }
+
+    @Test
+    public void aPieceFromBeforeIsFourFourInCMajor() {
+        ArrangementFile file = ArrangementFile.parse(Arrays.asList("tempo\t108", "track\ta\t0\t0",
+                "note\ta\t1920\t1920\t60\t90"));
+        Assert.assertFalse(file.meter().isPresent());
+        Assert.assertFalse(file.key().isPresent());
+        Assert.assertFalse(file.bars().isPresent());
+        Assert.assertEquals(4.0, file.quartersPerBar(), 0);
+        Assert.assertEquals(2, file.barsCovering());
+    }
+
+    @Test
+    public void badMeterKeyAndBarsLinesAreProblems() {
+        ArrangementFile file = ArrangementFile.parse(Arrays.asList("meter\t3\t5", "meter\t3", "key\tH\tmajor",
+                "key\tD\tdorian", "bars\t0", "bars\tmany"));
+        Assert.assertEquals(6, file.problems().size());
+    }
+
+    @Test
+    public void onlyAPieceLongerThanItsNotesNeedsABarsLine() {
+        Assert.assertFalse(ArrangementFile.needsBarsLine(24, 24, true));
+        Assert.assertTrue(ArrangementFile.needsBarsLine(24, 22, true));
+        Assert.assertFalse("eight bars of four quarters is what every old piece was",
+                ArrangementFile.needsBarsLine(8, 7, true));
+        Assert.assertTrue(ArrangementFile.needsBarsLine(8, 7, false));
+    }
 }

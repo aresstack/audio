@@ -110,15 +110,21 @@ public final class ArrangementReadingCharacterizationTest {
         refuses("Invalid or duplicate track ID: Lead", "tempo\t108", "track\tLead\t0\t0", note);
         refuses("Unknown part: b", "tempo\t108", track, "note\tb\t0\t480\t60\t90");
         refuses("Unknown part: a", "tempo\t108", note, track);
-        refuses("Invalid note: note\ta\t15000\t480\t60\t90", "tempo\t108", track, "note\ta\t15000\t480\t60\t90");
+        // F2: no fixed eight bars any more; a note may not end after the bars the piece names.
+        refuses("A note ends after the 8 bars of the piece.", "tempo\t108", "bars\t8", track,
+                "note\ta\t15000\t480\t60\t90");
         refuses("Invalid note: note\ta\t0\t480\t60\t0", "tempo\t108", track, "note\ta\t0\t480\t60\t0");
         refuses("Invalid input line: chord\ta\tC", "tempo\t108", track, "chord\ta\tC", note);
         refuses("Invalid input line: track\ta\t0", "tempo\t108", "track\ta\t0", note);
         refuses("Invalid input line: note\ta\t0\t480\t60", "tempo\t108", track, "note\ta\t0\t480\t60");
         refuses("Invalid input line: note\ta\t0\t480\t60\t90\t1", "tempo\t108", track, "note\ta\t0\t480\t60\t90\t1");
-        refuses("Require tempo 60..180 and at least one track.", "tempo\t200", track, note);
-        refuses("Require tempo 60..180 and at least one track.", track, note);
-        refuses("Require tempo 60..180 and at least one track.", "tempo\t108");
+        // F2: the tempo is free within what every reader accepts, 20..400 (before: 60..180).
+        refuses("Require tempo 20..400 and at least one track.", "tempo\t401", track, note);
+        refuses("Require tempo 20..400 and at least one track.", "tempo\t19", track, note);
+        refuses("Require tempo 20..400 and at least one track.", track, note);
+        refuses("Require tempo 20..400 and at least one track.", "tempo\t108");
+        refuses("Invalid input line: meter\t3", "tempo\t108", "meter\t3", track, note);
+        refuses("Invalid input line: key\tH\tmajor", "tempo\t108", "key\tH\tmajor", track, note);
         refuses("Invalid or empty track: a", "tempo\t108", track);
         refuses("Invalid or empty track: a", "tempo\t108", "track\ta\t0\t9", "note\ta\t0\t480\t36\t90");
         refuses("Invalid or empty track: k", "tempo\t108", "track\tk\t0\t9\tdrums", track, note);
