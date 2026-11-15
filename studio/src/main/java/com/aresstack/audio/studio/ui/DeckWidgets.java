@@ -307,7 +307,9 @@ final class DeckWidgets {
             g.draw(body);
             float cx = getWidth() / 2f;
             float cy = getHeight() / 2f;
-            g.setColor(chosen ? lit : getModel().isRollover() ? AudioStudioTheme.TEXT : AudioStudioTheme.TEXT_DIM);
+            // The sign always has the colour of its key; the ring around the key says that its page is shown.
+            g.setColor(chosen || getModel().isRollover() ? lit
+                    : new Color(lit.getRed(), lit.getGreen(), lit.getBlue(), 190));
             if (sign == Sign.GEAR) {
                 // Eight teeth around a ring.
                 float ring = size * 0.24f;
