@@ -40,6 +40,11 @@ record SectionMark(String id, int firstBar, int bars, String name, String functi
         return marks;
     }
 
+    /** Whether the section is a gap: bars without music that the AI can fill or a section can be dragged into. */
+    boolean gap() {
+        return com.aresstack.audio.studio.application.SectionEdits.GAP.equals(function);
+    }
+
     /** The chord of a bar of the piece (from 0), or {@code null} if the section names none there. */
     String chordAt(int bar) {
         int index = bar - firstBar;
