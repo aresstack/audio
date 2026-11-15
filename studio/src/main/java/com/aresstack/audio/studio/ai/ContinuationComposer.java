@@ -11,7 +11,11 @@ import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.composition.Track;
 import com.aresstack.audio.composition.Voice;
 import com.aresstack.audio.studio.ai.VoiceNormalizer.ShapedNote;
+import com.aresstack.audio.studio.progress.FormSection;
 import com.aresstack.audio.studio.progress.Progress;
+import com.aresstack.audio.studio.progress.SketchProgress;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -122,12 +126,25 @@ public final class ContinuationComposer {
         // music after the room is where it will be once the patch has shifted it.
         Composition room = task.room(piece);
         ContinuationPlan plan;
+        // The room for the new bars is shown at once, and the sections as the plan names them.
+        EditSketch sketch = EditSketch.of(room, progress);
+        if (sketch != null) {
+            sketch.until(task.newEnd()).show();
+        }
         try (Listening.Scope planning = EditSketch.preparing(progress, task.inserts()
-                ? "Die KI plant die eingefügten Takte" : "Die KI plant die Fortsetzung")) {
+                ? "Die KI plant die eingefügten Takte" : "Die KI plant die Fortsetzung",
+                seen -> formWith(room, task, seenSections(seen)))) {
             plan = planner.plan(task, room, cacheDirectory);
         }
         if (plan.bars() != request.bars()) {
             throw new IOException("Der Plan deckt " + plan.bars() + " statt " + request.bars() + " Takte ab.");
+        }
+        if (progress instanceof SketchProgress) {
+            List<FormSection> whole = new ArrayList<>();
+            for (ContinuationPlan.PlannedSection s : plan.sections()) {
+                whole.add(new FormSection(0, s.bars(), s.name(), s.function(), s.intensity(), s.chords()));
+            }
+            ((SketchProgress) progress).form(formWith(room, task, whole));
         }
         for (String repair : plan.repairs()) {
             progress.update("Plan: " + repair);
@@ -138,7 +155,7 @@ public final class ContinuationComposer {
         plan.newParts().forEach(part -> voices.add(ContinuationVoice.of(part)));
 
         Map<String, Written> written = write(room, piece, task, plan, frames, voices, cacheDirectory, progress,
-                sketchUntil(EditSketch.of(room, progress), frames));
+                sketchUntil(sketch, frames));
         ComposedContinuation result = assemble(room, task, plan, frames, voices, written, new Fresh(room, ids),
                 task.inserts() ? holds(piece, task) : List.of());
         if (result.clips().stream().allMatch(c -> c.clip().notes().isEmpty())) {
@@ -149,6 +166,95 @@ public final class ContinuationComposer {
                 + result.sections().size() + " Abschnitt(en), " + result.newParts().size() + " neue Instrumente, " + result.corrections().size()
                 + " Korrekturen.");
         return result;
+    }
+
+    /**
+     * The sections a planning answer names as far as it has arrived, one behind the other from bar
+     * 0: a section whose length is not written yet is as long as its chords so far.
+     */
+    static List<FormSection> seenSections(JsonObject seen) {
+        List<FormSection> sections = new ArrayList<>();
+        JsonElement listed = seen.get("sections");
+        if (listed == null || !listed.isJsonArray()) {
+            return sections;
+        }
+        for (JsonElement element : listed.getAsJsonArray()) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject given = element.getAsJsonObject();
+            List<String> chords = new ArrayList<>();
+            if (given.has("chords") && given.get("chords").isJsonArray()) {
+                for (JsonElement chord : given.getAsJsonArray("chords")) {
+                    if (chord.isJsonPrimitive()) {
+                        chords.add(chord.getAsString().trim());
+                    }
+                }
+            }
+            int bars = chords.size();
+            Double intensity = null;
+            try {
+                if (given.has("bars") && given.get("bars").isJsonPrimitive()) {
+                    bars = (int) Math.round(given.get("bars").getAsDouble());
+                }
+                if (given.has("intensity") && given.get("intensity").isJsonPrimitive()) {
+                    intensity = Math.max(0, Math.min(1, given.get("intensity").getAsDouble()));
+                }
+            } catch (RuntimeException unreadable) {
+                // shown without it
+            }
+            if (bars < 1 && !given.has("name")) {
+                continue;
+            }
+            sections.add(new FormSection(0, bars, text(given, "name"), text(given, "function"), intensity, chords));
+        }
+        return sections;
+    }
+
+    private static String text(JsonObject given, String field) {
+        JsonElement value = given.get(field);
+        return value != null && value.isJsonPrimitive() ? value.getAsString() : null;
+    }
+
+    /**
+     * The form of the piece while the new bars are planned: the sections it has, cut at the edges
+     * of the new bars, and the planned ones in the room, one behind the other and no further than
+     * the room goes.
+     */
+    static List<FormSection> formWith(Composition room, ContinuationTask task, List<FormSection> planned) {
+        TimeMap time = task.time();
+        int from = task.firstNewBar();
+        int to = from + task.request().bars();
+        List<FormSection> form = new ArrayList<>();
+        for (Section s : room.sections()) {
+            int first = time.barOf(s.startTick());
+            int end = Math.max(first + 1, time.barsCovering(s.endTick()));
+            if (end <= from || first >= to) {
+                form.add(new FormSection(first, end - first, s.name(), s.function(), s.intensity(), s.harmony()));
+                continue;
+            }
+            if (first < from) {
+                form.add(new FormSection(first, from - first, s.name(), s.function(), s.intensity(),
+                        s.harmony().subList(0, Math.min(from - first, s.harmony().size()))));
+            }
+            if (end > to) {
+                int head = Math.max(0, Math.min(from - first, s.harmony().size()));
+                form.add(new FormSection(to, end - to, s.name(), s.function(), s.intensity(),
+                        s.harmony().subList(head, s.harmony().size())));
+            }
+        }
+        int bar = from;
+        for (FormSection section : planned) {
+            if (bar >= to) {
+                break;
+            }
+            int bars = Math.min(section.bars(), to - bar);
+            form.add(new FormSection(bar, bars, section.name(), section.function(), section.intensity(),
+                    section.chords().subList(0, Math.min(bars, section.chords().size()))));
+            bar += bars;
+        }
+        form.sort(java.util.Comparator.comparingInt(FormSection::firstBar));
+        return form;
     }
 
     private static EditSketch sketchUntil(EditSketch sketch, List<VoiceFrame> frames) {

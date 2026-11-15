@@ -563,6 +563,9 @@ public final class PieceExtensionTest {
         final List<String> steps = java.util.Collections.synchronizedList(new java.util.ArrayList<String>());
         final List<List<String>> sketches = java.util.Collections.synchronizedList(
                 new java.util.ArrayList<List<String>>());
+        final List<List<com.aresstack.audio.studio.progress.FormSection>> forms =
+                java.util.Collections.synchronizedList(
+                        new java.util.ArrayList<List<com.aresstack.audio.studio.progress.FormSection>>());
         com.aresstack.audio.studio.progress.SketchProgress watcher =
                 new com.aresstack.audio.studio.progress.SketchProgress() {
                     @Override
@@ -573,6 +576,11 @@ public final class PieceExtensionTest {
                     @Override
                     public void preparing(String what, long characters) {
                         steps.add(what);
+                    }
+
+                    @Override
+                    public void form(List<com.aresstack.audio.studio.progress.FormSection> sections) {
+                        forms.add(sections);
                     }
 
                     @Override
@@ -605,7 +613,14 @@ public final class PieceExtensionTest {
         List<String> last = sketches.get(sketches.size() - 1);
         long first = sketches.get(0).stream().filter(line -> line.startsWith("note\t")).count();
         long all = last.stream().filter(line -> line.startsWith("note\t")).count();
-        assertTrue("notes come in", first > had && all > first);
+        assertEquals("first the piece as it is, with room for the new bars", had, first);
+        assertTrue("notes come in", all > first);
+        assertTrue("the form is told before the plan and with it", forms.size() >= 2);
+        List<com.aresstack.audio.studio.progress.FormSection> planned = forms.get(forms.size() - 1);
+        com.aresstack.audio.studio.progress.FormSection end = planned.get(planned.size() - 1);
+        assertEquals("the planned sections reach the end of the new bars", 24, end.firstBar() + end.bars());
+        assertTrue("and begin where the piece ended", planned.stream().anyMatch(section -> section.firstBar() == 8));
+        assertTrue(planned.size() > forms.get(0).size());
         assertTrue("and they lie behind the original", last.stream().filter(line -> line.startsWith("note\t"))
                 .filter(line -> !original.contains(line))
                 .allMatch(line -> Long.parseLong(line.split("\t")[2]) >= ORIGINAL_END));

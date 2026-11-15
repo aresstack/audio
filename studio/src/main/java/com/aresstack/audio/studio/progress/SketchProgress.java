@@ -34,4 +34,11 @@ public interface SketchProgress extends TrackProgress {
     /** The plan is there: the chords of the piece, bar by bar. The notes come next. */
     default void planned(List<String> chords) {
     }
+
+    /**
+     * The form of the piece as far as the plan has said it: told again with every section and
+     * chord that arrives, and once more when the plan is whole.
+     */
+    default void form(List<FormSection> sections) {
+    }
 }
