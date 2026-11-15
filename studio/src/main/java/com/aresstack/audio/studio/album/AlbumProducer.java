@@ -29,21 +29,58 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class AlbumProducer implements AlbumProductionCoordinator {
     private final AlbumFiles albums;
     private final SongLibrary songs;
-    private final PieceProduction pieces;
+    private final java.util.function.Supplier<PieceProduction> perRun;
     private final int atOnce;
     private final Set<String> running = new HashSet<String>();
 
     /**
+     * A producer whose every start gets a production of pieces of its own. Cancelling a run stops
+     * the models of that run for good ({@code ModelLineup.cancel()}), so a later start in the same
+     * studio must not get them again: it asks {@code perRun} for a fresh production, with fresh
+     * models, and goes on where the queue stood.
+     *
+     * @param perRun makes the production of pieces of one run; called once per {@link #start}, on
+     *               the thread that starts
      * @param atOnce how many pieces are made at the same time
      */
-    public AlbumProducer(AlbumFiles albums, SongLibrary songs, PieceProduction pieces, int atOnce) {
+    public AlbumProducer(AlbumFiles albums, SongLibrary songs, java.util.function.Supplier<PieceProduction> perRun,
+                         int atOnce) {
         if (atOnce < 1) {
             throw new IllegalArgumentException("Mindestens ein Stück zugleich.");
         }
         this.albums = albums;
         this.songs = songs;
-        this.pieces = pieces;
+        this.perRun = java.util.Objects.requireNonNull(perRun, "perRun");
         this.atOnce = atOnce;
+    }
+
+    /**
+     * A producer that uses one production of pieces for every start: only for a production that
+     * can be used again after {@link PieceProduction#cancel()}.
+     */
+    public AlbumProducer(AlbumFiles albums, SongLibrary songs, PieceProduction pieces, int atOnce) {
+        this(albums, songs, () -> pieces, atOnce);
+    }
+
+    /**
+     * The folder of the piece of a title, directly in the library; never anything else, whatever
+     * the album file says.
+     */
+    private Path pieceFolder(AlbumTrack track) throws IOException {
+        Path root = songs.root().toAbsolutePath().normalize();
+        Path folder = root.resolve(track.piece()).normalize();
+        if (!AlbumTrack.isFolderName(track.piece()) || !root.equals(folder.getParent())) {
+            throw new IOException("Kein Ordner eines Stücks in der Bibliothek: " + track.piece());
+        }
+        return folder;
+    }
+
+    private boolean pieceThere(AlbumTrack track) {
+        try {
+            return track.hasPiece() && Files.isDirectory(pieceFolder(track));
+        } catch (IOException outside) {
+            return false;
+        }
     }
 
     /** How the production of an album stands, as it is kept. */
@@ -95,6 +132,9 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
         private AlbumProductionState state;
         private volatile boolean cancelled;
         private ExecutorService workers;
+        /** The production of pieces of this run alone; cancelling it does not reach the next run. */
+        private final PieceProduction pieces = java.util.Objects.requireNonNull(perRun.get(),
+                "the production of pieces of a run");
 
         Run(Album album, Listener listener) {
             this.album = album;
@@ -108,7 +148,7 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
                 state = AlbumProductionState.load(folder);
                 for (AlbumTrack track : album.tracks()) {
                     AlbumProductionState.Entry entry = state.of(track.id());
-                    boolean there = track.hasPiece() && Files.isDirectory(songs.root().resolve(track.piece()));
+                    boolean there = pieceThere(track);
                     if (entry.status() == Status.DONE && there) {
                         continue; // finished, and maybe changed by the user since: not touched
                     }
@@ -156,13 +196,13 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
             try {
                 synchronized (lock) {
                     track = album.track(trackId);
-                    if (!track.hasPiece() || !Files.isDirectory(songs.root().resolve(track.piece()))) {
+                    if (!pieceThere(track)) {
                         Path made = songs.create(track.title());
                         track = track.withPiece(made.getFileName().toString());
                         album = album.with(track);
                         albums.save(album); // first the album knows its piece, then the piece is filled
                     }
-                    piece = songs.root().resolve(track.piece());
+                    piece = pieceFolder(track);
                     songs.save(piece, track.title(), description(album, track));
                     set(trackId, Status.RUNNING, "", 0);
                 }

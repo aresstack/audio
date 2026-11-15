@@ -40,6 +40,10 @@ public final class AlbumFiles implements AlbumRepository {
 
     /** The folder of an album, where what belongs to it is kept (its plan, the state of its production). */
     public Path folder(String id) {
+        if (!Album.isId(id)) {
+            // "." or "a/.." would name the folder of all albums, or one outside of it.
+            throw new IllegalArgumentException("Keine Kennung eines Albums: " + id);
+        }
         return root.resolve(id);
     }
 
@@ -62,6 +66,9 @@ public final class AlbumFiles implements AlbumRepository {
 
     @Override
     public synchronized Optional<Album> album(String id) {
+        if (!Album.isId(id)) {
+            return Optional.empty();
+        }
         Path file = folder(id).resolve(FILE_NAME);
         if (!Files.isRegularFile(file)) {
             return Optional.empty();
@@ -107,8 +114,13 @@ public final class AlbumFiles implements AlbumRepository {
 
     @Override
     public synchronized void delete(String id) throws IOException {
-        Path folder = folder(id);
-        if (!Files.isDirectory(folder) || !folder.normalize().startsWith(root.normalize())) {
+        // Only the folder of one album, directly in the folder of the albums, is ever deleted.
+        Path folder = folder(id).toAbsolutePath().normalize();
+        Path albums = root.toAbsolutePath().normalize();
+        if (!albums.equals(folder.getParent()) || !folder.getFileName().toString().equals(id)) {
+            throw new IllegalArgumentException("Keine Kennung eines Albums: " + id);
+        }
+        if (!Files.isDirectory(folder, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
         try (Stream<Path> files = Files.walk(folder)) {
@@ -169,7 +181,8 @@ public final class AlbumFiles implements AlbumRepository {
                 tracks.add(new AlbumTrack(text(entry, "id"), text(entry, "title"), text(entry, "mood"),
                         number(entry, "tempoBpm", 100), text(entry, "key"), text(entry, "meter"),
                         text(entry, "instrumentation"), text(entry, "form"), number(entry, "targetSeconds", 180),
-                        text(entry, "piece")));
+                        // A folder name that is not one plain name in the library is not followed.
+                        AlbumTrack.isFolderName(text(entry, "piece")) ? text(entry, "piece") : ""));
             }
         }
         return new Album(id, text(json, "title"), new AlbumConcept(text(concept, "description"),
