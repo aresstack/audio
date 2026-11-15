@@ -73,7 +73,7 @@ public final class ReorchestrationTest {
     }
 
     /** The frame ids a planning prompt lists. */
-    private static List<String> frames(String prompt) {
+    static List<String> frames(String prompt) {
         Matcher m = Pattern.compile("\n  frame (f\\d+) ").matcher(prompt);
         List<String> ids = new java.util.ArrayList<>();
         while (m.find()) {
@@ -86,7 +86,7 @@ public final class ReorchestrationTest {
      * A model: the plan is made by {@code planner} from the frame ids; the generators write two
      * notes per bar, pitch after the part.
      */
-    private static FakeChatModel model(Function<List<String>, String> planner) {
+    static FakeChatModel model(Function<List<String>, String> planner) {
         return new FakeChatModel((instruction, prompt) -> {
             if (instruction.equals(ChatOrchestrationPlanner.INSTRUCTION)) {
                 return planner.apply(frames(prompt));
@@ -113,7 +113,7 @@ public final class ReorchestrationTest {
     }
 
     /** The melody hands its material to the harmony part, strings join, the bass keeps its line, the rest rests. */
-    private static String redistribute(List<String> frames) {
+    static String redistribute(List<String> frames) {
         StringBuilder text = new StringBuilder("{\"frames\":[");
         for (int i = 0; i < frames.size(); i++) {
             text.append(i == 0 ? "" : ",").append("{\"frame\":\"").append(frames.get(i)).append("\",\"assignments\":["
