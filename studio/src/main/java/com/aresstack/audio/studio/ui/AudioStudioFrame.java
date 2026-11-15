@@ -737,6 +737,18 @@ public final class AudioStudioFrame extends JFrame {
             public void askDirector() {
                 AudioStudioFrame.this.askDirector();
             }
+
+            @Override
+            public void movementWishChanged(boolean wanted) {
+                saveSettings(false);
+            }
+
+            @Override
+            public boolean takeWithMovements(com.aresstack.audio.studio.stage.SpatialScene before,
+                                             com.aresstack.audio.studio.stage.SpatialScene taken,
+                                             com.aresstack.audio.studio.application.MovementDirector.Proposal moves) {
+                return AudioStudioFrame.this.takeWithMovements(before, taken, moves);
+            }
         });
         listeningPanel = new ListeningPanel(new ListeningPanel.Host() {
             @Override
@@ -1188,6 +1200,9 @@ public final class AudioStudioFrame extends JFrame {
         final String prompt = description.getText().trim();
         final int tokens = (Integer) tokenLimit.getValue();
         final com.aresstack.audio.studio.stage.SpatialScene current = scene;
+        // Movements are a request of their own, only when the user switched them on (off by default).
+        final boolean withMovements = stagePanel.movementsWanted();
+        final com.aresstack.audio.studio.application.StageMovements movements = pieceModel.movements();
         if (!saveSettings(false)) {
             return;
         }
@@ -1206,7 +1221,12 @@ public final class AudioStudioFrame extends JFrame {
                                     : new com.aresstack.audio.studio.application.MixDirector(
                                             models.model(com.aresstack.audio.studio.ai.ModelRoles.MIX), tokens)
                                             .direct(prompt, arrangement, current, output, progress);
-                    SwingUtilities.invokeLater(() -> stagePanel.setProposal(proposed));
+                    final com.aresstack.audio.studio.application.MovementDirector.Proposal moves =
+                            withMovements ? proposeMovements(
+                                    models.model(com.aresstack.audio.studio.ai.ModelRoles.MOVEMENTS), tokens, prompt, model, arrangement, current,
+                                    proposed, movements, output, progress)
+                                    : com.aresstack.audio.studio.application.MovementDirector.Proposal.NONE;
+                    SwingUtilities.invokeLater(() -> stagePanel.setProposal(proposed, moves));
                     progress.update("Abmischung vorgeschlagen: auf der Bühne ansehen, dann übernehmen oder verwerfen.");
                     return null;
                 } finally {
@@ -1214,6 +1234,71 @@ public final class AudioStudioFrame extends JFrame {
                 }
             }
         });
+    }
+
+    /**
+     * The second request of "KI mischt ab", when the user wants movements: how tracks that are not
+     * protected move, starting from where the mix proposal puts them. Like the mix proposal it reads
+     * the model of the piece where there is one, else the written arrangement. If it fails, the mix proposal
+     * stands without movements and the reason is said; the mix is not lost for it.
+     */
+    private com.aresstack.audio.studio.application.MovementDirector.Proposal proposeMovements(
+            com.aresstack.audio.studio.ai.ChatModel client, int tokens, String prompt,
+            com.aresstack.audio.composition.Composition model, Path arrangement,
+            com.aresstack.audio.studio.stage.SpatialScene current,
+            com.aresstack.audio.studio.stage.SpatialScene proposed,
+            com.aresstack.audio.studio.application.StageMovements movements, Path output, Progress progress)
+            throws IOException {
+        // From the model where the piece has one, as the mix proposal (no fall-back to the file, #14).
+        com.aresstack.audio.studio.application.MovementDirector.Piece piece = model != null
+                ? com.aresstack.audio.studio.application.MovementDirector.of(model)
+                : com.aresstack.audio.studio.application.MovementDirector.of(arrangement);
+        java.util.Set<String> movable = com.aresstack.audio.studio.application.MovementDirector.movable(
+                current, movements, piece);
+        if (movable.isEmpty()) {
+            append("Bewegungen: keine Spur kann sich bewegen (alle geschützt, oder das Stück hat noch kein Werkmodell).");
+            return com.aresstack.audio.studio.application.MovementDirector.Proposal.NONE;
+        }
+        try {
+            com.aresstack.audio.studio.application.MovementDirector.Proposal moves =
+                    new com.aresstack.audio.studio.application.MovementDirector(client, tokens)
+                            .propose(prompt, piece, current.taking(proposed), movable, output, progress);
+            append(moves.empty() ? "Bewegungen: die KI lässt alle Spuren stehen."
+                    : "Bewegungen vorgeschlagen für " + String.join(", ", moves.curves().keySet()) + ".");
+            return moves;
+        } catch (IOException failed) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw failed;
+            }
+            append("WARN: Bewegungen nicht vorgeschlagen, die Abmischung gilt ohne sie: " + failed.getMessage());
+            return com.aresstack.audio.studio.application.MovementDirector.Proposal.NONE;
+        }
+    }
+
+    /**
+     * The user took a mix proposal with movements: stage file and model take it together, as one
+     * step that one undo takes back ({@link com.aresstack.audio.studio.application.MixProposalTaking}).
+     * If it cannot be kept, nothing of it is taken and the proposal stays.
+     */
+    private boolean takeWithMovements(com.aresstack.audio.studio.stage.SpatialScene before,
+                                      com.aresstack.audio.studio.stage.SpatialScene taken,
+                                      com.aresstack.audio.studio.application.MovementDirector.Proposal moves) {
+        int kept;
+        try {
+            kept = com.aresstack.audio.studio.application.MixProposalTaking.take(pieceModel, stageFollowsMix,
+                    sceneStore, before, taken, moves);
+        } catch (IOException | RuntimeException failed) {
+            message("Der Vorschlag ließ sich nicht übernehmen, die Bühne bleibt, wie sie war: " + failed.getMessage());
+            return false;
+        }
+        scene = taken;
+        trackTable.refreshStage();
+        showStage();
+        player.movementsChanged(); // heard at once where the stage is played live
+        remixTimer.restart();
+        append("Abmischung der KI übernommen, mit " + kept + (kept == 1 ? " Bewegung." : " Bewegungen.")
+                + " Rückgängig nimmt beides zurück.");
+        return true;
     }
 
     /** The page of the albums: several pieces planned and made together, beside the single piece. */
@@ -2635,6 +2720,7 @@ public final class AudioStudioFrame extends JFrame {
         saveScene();
         trackTable.refreshStage();
         showStage();
+        player.movementsChanged(); // the movements of the mix that came back are heard live too
         return true;
     }
 
@@ -2886,6 +2972,9 @@ public final class AudioStudioFrame extends JFrame {
             }
             ownTracks.setSelected("own".equals(saved.getProperty("instrumentMode")));
             listening = com.aresstack.audio.studio.application.StageListening.from(saved);
+            if (stagePanel != null) {
+                stagePanel.setMovementsWanted(com.aresstack.audio.studio.application.MovementDirector.wanted(saved));
+            }
             loadArrangementForCurrentDirectory(saved);
             refreshSongs();
             append("Einstellungen geladen: " + settingsStore.location());
@@ -2925,6 +3014,9 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("parallel", parallelRequests.getValue().toString());
             saved.setProperty("instrumentMode", ownTracks.isSelected() ? "own" : "ai");
             listening.into(saved);
+            if (stagePanel != null) {
+                com.aresstack.audio.studio.application.MovementDirector.into(saved, stagePanel.movementsWanted());
+            }
             if (trackTable != null && !loadingTracks && trackTable.arrangement() != null) {
                 trackStore.save(Paths.get(directory.getText().trim()), trackTable.currentArrangement());
             }

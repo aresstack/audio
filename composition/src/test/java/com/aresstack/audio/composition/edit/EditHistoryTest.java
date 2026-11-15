@@ -83,4 +83,20 @@ public final class EditHistoryTest {
         assertEquals(b, history.current());
         assertEquals(start, history.undo());
     }
+
+    @Test
+    public void anAmendedStateIsWhereAnUndoComesBackToAndMakesNoStepOfItsOwn() {
+        EditHistory<String> history = new EditHistory<>("start");
+        history.push("stage as the model knew it", "Bühne");
+        history.amend("stage as the user saw it");
+        assertEquals("stage as the user saw it", history.current());
+        assertEquals("the step keeps its name", "Bühne", history.undoDescription());
+        history.push("proposal taken", "Übernommen");
+        assertEquals("stage as the user saw it", history.undo());
+        assertEquals("start", history.undo());
+        assertFalse(history.canUndo());
+        history.redo();
+        history.amend("corrected");
+        assertFalse("a redo made from the old state is forgotten", history.canRedo());
+    }
 }

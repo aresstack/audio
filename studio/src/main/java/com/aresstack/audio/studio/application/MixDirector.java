@@ -78,6 +78,13 @@ public final class MixDirector {
     /** The prompt for a piece with a model: tempo, meter and key at its start, and the notes of every part. */
     static String prompt(String description, List<MusicTrack> tracks, Composition model, SpatialScene current) {
         TimeMap time = model.timeMap();
+        return prompt(description, tracks, (int) Math.round(time.tempoAt(0)), meterAndKey(model),
+                summaries(tracks, model), current);
+    }
+
+    /** What each part of a model plays, by track id; also told to the AI that proposes movements. */
+    static Map<String, Summary> summaries(List<MusicTrack> tracks, Composition model) {
+        TimeMap time = model.timeMap();
         Map<String, Summary> played = new LinkedHashMap<String, Summary>();
         for (MusicTrack track : tracks) {
             Summary summary = new Summary();
@@ -86,9 +93,14 @@ public final class MixDirector {
             }
             played.put(track.id(), summary);
         }
+        return played;
+    }
+
+    /** Meter and key at the start of a model, as {@code "3/4, D minor"}. */
+    static String meterAndKey(Composition model) {
+        TimeMap time = model.timeMap();
         TimeMap.Meter meter = time.meterAt(0);
-        return prompt(description, tracks, (int) Math.round(time.tempoAt(0)),
-                meter.numerator() + "/" + meter.denominator() + ", " + time.keyAt(0).name(), played, current);
+        return meter.numerator() + "/" + meter.denominator() + ", " + time.keyAt(0).name();
     }
 
     private static String prompt(String description, List<MusicTrack> tracks, int tempo, String meterAndKey,
@@ -127,13 +139,14 @@ public final class MixDirector {
     }
 
     /** {@code "4/4"} for a piece from before F2; since then also the key, as {@code "3/4, D minor"}. */
-    private static String meterAndKey(Path arrangement) throws IOException {
+    static String meterAndKey(Path arrangement) throws IOException {
         ArrangementFile file = ArrangementFile.read(arrangement);
         String meter = file.meter().map(m -> m.numerator() + "/" + m.denominator()).orElse("4/4");
         return file.key().map(key -> meter + ", " + key.name()).orElse(meter);
     }
 
-    private static Map<String, Summary> summaries(Path arrangement) throws IOException {
+    /** What each track of a written arrangement plays, by track id; also told to the AI that proposes movements. */
+    static Map<String, Summary> summaries(Path arrangement) throws IOException {
         Map<String, Summary> played = new LinkedHashMap<String, Summary>();
         ArrangementFile file = ArrangementFile.read(arrangement);
         long barTicks = file.barTicks();
@@ -148,12 +161,12 @@ public final class MixDirector {
         return played;
     }
 
-    private static final class Summary {
-        private int notes;
-        private int lowest = 127;
-        private int highest;
-        private int velocity;
-        private final TreeMap<Integer, Integer> bars = new TreeMap<Integer, Integer>();
+    static final class Summary {
+        int notes;
+        int lowest = 127;
+        int highest;
+        int velocity;
+        final TreeMap<Integer, Integer> bars = new TreeMap<Integer, Integer>();
 
         private void add(int bar, int pitch, int loudness) {
             notes++;
@@ -164,7 +177,7 @@ public final class MixDirector {
             bars.put(bar, before == null ? 1 : before + 1);
         }
 
-        private String perBar() {
+        String perBar() {
             List<String> counts = new ArrayList<String>();
             int last = Math.min(63, bars.isEmpty() ? 0 : bars.lastKey());
             for (int bar = 0; bar <= last; bar++) {

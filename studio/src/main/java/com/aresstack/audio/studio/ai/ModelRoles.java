@@ -29,11 +29,14 @@ public final class ModelRoles {
     /** The AI mix proposal. */
     public static final ModelRole MIX = new ModelRole("mix", "Abmischung",
             "Pegel, Verläufe, Plätze und Raum vorschlagen", PLANNING.key(), false);
+    /** The optional movements on the stage, a request of its own after the mix ("Mit Bewegungen"). */
+    public static final ModelRole MOVEMENTS = new ModelRole("movements", "Bühnenbewegungen",
+            "Bewegungen der Spuren über die Takte vorschlagen", MIX.key(), false);
 
     private static final Map<String, ModelRole> ROLES = new LinkedHashMap<>();
 
     static {
-        for (ModelRole role : List.of(PLANNING, COMPOSITION, INSTRUMENTS, REWORK, ARRANGING, MIX)) {
+        for (ModelRole role : List.of(PLANNING, COMPOSITION, INSTRUMENTS, REWORK, ARRANGING, MIX, MOVEMENTS)) {
             ROLES.put(role.key(), role);
         }
     }
