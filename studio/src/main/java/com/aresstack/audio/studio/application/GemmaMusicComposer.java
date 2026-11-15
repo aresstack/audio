@@ -163,7 +163,6 @@ public final class GemmaMusicComposer {
             Files.write(directory.resolve(SPEC_FILE), new GsonBuilder().setPrettyPrinting().create()
                     .toJson(toJson(piece)).getBytes(StandardCharsets.UTF_8));
         }
-        progress.update("Composition plan ...");
         JsonObject plan = plan(description, tracks, spec, directory, progress);
         Map<String, List<JsonObject>> responses = generateTracks(tracks, plan, spec, directory, progress);
         return assemble(tracks, responses, spec, chords(plan, spec), directory, progress);
@@ -230,6 +229,10 @@ public final class GemmaMusicComposer {
                     + (shapePerformance ? performancePlan(tracks, spec) : "")
                     + "\nKeep tempoBpm, key, timeSignature and bars exactly as given. No notes yet. Return only JSON.";
         }
+        // A piece made again keeps its plan: the answer kept with it is used, the AI is not asked.
+        progress.update(planner.hasAnswer("Return valid JSON only, no Markdown.", prompt,
+                Math.min(spec.isLegacy() ? 2048 : 4096, maxTokens), directory.resolve("composition-plan.json"))
+                ? "Composition plan (aus dem Speicher dieses Stücks) ..." : "Composition plan ...");
         final SketchProgress watched = progress instanceof SketchProgress ? (SketchProgress) progress : null;
         final String step = "Die KI plant Struktur und Harmonien";
         final int[] chordsShown = {-1};
@@ -722,8 +725,13 @@ public final class GemmaMusicComposer {
 
     private static void validateResponse(MusicTrack track, JsonObject response) throws IOException {
         try {
-            if (!track.id().equals(response.get("part").getAsString())
-                    || track.program() != response.get("program").getAsInt()) {
+            // An answer that leaves out part or program is the answer to this track's request;
+            // only one that names another track or program is turned down.
+            JsonElement part = response.get("part");
+            JsonElement program = response.get("program");
+            if ((part != null && part.isJsonPrimitive() && !track.id().equals(part.getAsString()))
+                    || (program != null && program.isJsonPrimitive() && program.getAsJsonPrimitive().isNumber()
+                    && track.program() != program.getAsInt())) {
                 throw new IOException("Model returned an unexpected ID or program for " + track.id()
                         + "; keep cached JSON for diagnostics.");
             }

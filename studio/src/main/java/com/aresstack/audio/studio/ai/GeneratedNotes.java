@@ -67,10 +67,9 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
      */
     public static GeneratedNotes read(JsonObject answer, String partId, String sectionId) throws IOException {
         String part = text(answer, "part");
-        if (part == null) {
-            throw new IOException("Die Antwort nennt keinen Part; erwartet war \"" + partId + "\".");
-        }
-        if (!partId.equals(part)) {
+        // An answer that names no part is the answer to this request, for this part: only an answer
+        // that names another part is turned down.
+        if (part != null && !partId.equals(part)) {
             throw new ForeignPartException("Antwort für fremden Part \"" + part + "\" statt \"" + partId
                     + "\" abgelehnt.");
         }

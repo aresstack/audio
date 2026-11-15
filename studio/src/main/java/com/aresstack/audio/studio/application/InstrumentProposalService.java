@@ -119,7 +119,6 @@ public final class InstrumentProposalService {
 
     public Staged proposeStaged(String description, Path directory,
                                 Progress progress) throws IOException {
-        progress.update("KI entwirft eine Instrumentenbesetzung ...");
         String prompt = "Suggest an ORIGINAL instrumental arrangement for this music description: "
                 + description
                 + "\nReturn one JSON object with an array 'tracks'. Each track must contain "
@@ -132,6 +131,11 @@ public final class InstrumentProposalService {
                 + "Use the GM drum kit on channel 10 for drums, with program=0. "
                 + STAGE_FORMAT
                 + " Do not include libraryId, channel numbers, notes or commentary. Return only JSON.";
+        // A piece made again keeps its instruments: the answer kept with it is used, the AI is not asked.
+        progress.update(client.hasAnswer("Return valid JSON only, no Markdown.", prompt, Math.min(maxTokens, 4096),
+                directory.resolve("instrument-proposal.json"))
+                ? "Instrumentenbesetzung aus dem Speicher dieses Stücks ..."
+                : "KI entwirft eine Instrumentenbesetzung ...");
         final com.aresstack.audio.studio.progress.SketchProgress watched =
                 progress instanceof com.aresstack.audio.studio.progress.SketchProgress
                         ? (com.aresstack.audio.studio.progress.SketchProgress) progress : null;
