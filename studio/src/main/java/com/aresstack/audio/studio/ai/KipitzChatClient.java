@@ -20,7 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /** Isolate the authenticated OpenAI-compatible KIPITZ protocol from music composition. */
-public final class KipitzChatClient {
+public final class KipitzChatClient implements ChatModel {
     private final Gson gson = new Gson();
     private final String endpoint;
     private final String apiKey;

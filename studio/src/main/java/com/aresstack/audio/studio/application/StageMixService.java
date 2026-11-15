@@ -93,7 +93,7 @@ public final class StageMixService {
         progress.update("Mische " + tracks.size() + " Spuren auf der Bühne · " + fitting.room().name()
                 + (heard ? "" : " · alle Spuren sind stumm") + " ...");
         int tempo = tempo(arrangement);
-        double secondsPerBar = 4 * 60.0 / tempo;
+        double secondsPerBar = secondsPerBar(arrangement);
         StageAutomation automation = StageAutomation.of(placements, secondsPerBar)
                 .movingAs(movements(directory, tempo, progress));
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
@@ -124,6 +124,7 @@ public final class StageMixService {
         if (document == null || document.automation().isEmpty()) {
             return StageAutomation.NONE;
         }
+        // Seconds depend on the tempo alone, so one tempo is enough when the model does not fit.
         TimeMap time = TimeMap.of(tempo);
         if (Files.isRegularFile(directory.resolve(CompositionJson.FILE_NAME))) {
             try {
@@ -244,6 +245,12 @@ public final class StageMixService {
             throw new IllegalArgumentException("Arrangement must contain at least one track.");
         }
         return tracks;
+    }
+
+    /** How long one bar of a written arrangement lasts: its meter at its tempo (4/4 for pieces from before F2). */
+    public static double secondsPerBar(Path arrangement) throws IOException {
+        ArrangementFile file = ArrangementFile.read(arrangement);
+        return file.quartersPerBar() * 60.0 / file.tempoOrDefault();
     }
 
     /** The tempo of a written arrangement, kept within 20..400; 108 if it names none that can be read. */

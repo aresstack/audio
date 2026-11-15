@@ -38,13 +38,30 @@ public final class MultiTrackMusicRenderer {
     /**
      * Reads the arrangement with the shared reader and refuses anything it cannot play: an
      * unknown line, a track or note with the wrong number of columns, a bad or repeated track ID,
-     * a note of a track not named before it, or a note outside the eight bars.
+     * a note of a track not named before it, a note beyond the bars the piece says it has, or a
+     * tempo outside 20..400. How long a piece may be is decided by whoever renders it; here
+     * only the length the built-in sound can hold is a limit.
      */
     private static Arrangement parseArrangement(Path input) throws IOException {
         Arrangement arrangement = new Arrangement();
+        Integer bars = null;
         for (ArrangementFile.Entry entry : ArrangementFile.read(input).entries()) {
             if (entry instanceof ArrangementFile.Tempo tempo) {
                 arrangement.tempo = Integer.parseInt(tempo.value().trim());
+            } else if (entry instanceof ArrangementFile.Meter meter) {
+                if (meter.numerator() < 1 || meter.numerator() > 32 || meter.denominator() > 32) {
+                    throw new IllegalArgumentException("Invalid meter: " + meter.text());
+                }
+                arrangement.numerator = meter.numerator();
+                arrangement.denominator = meter.denominator();
+            } else if (entry instanceof ArrangementFile.Key key) {
+                arrangement.keyFifths = fifths(key.tonic(), "minor".equals(key.mode()));
+                arrangement.minor = "minor".equals(key.mode());
+            } else if (entry instanceof ArrangementFile.Bars line) {
+                if (line.value() > 4096) {
+                    throw new IllegalArgumentException("Too many bars: " + line.text());
+                }
+                bars = line.value();
             } else if (entry instanceof ArrangementFile.Track track && track.columns() <= 5) {
                 if (!track.id().matches("[a-z][a-z0-9_-]{0,28}")
                         || arrangement.parts.containsKey(track.id())) {
@@ -60,7 +77,7 @@ public final class MultiTrackMusicRenderer {
                 }
                 if (line.tick() < 0 || line.length() < 1 || line.pitch() < 0 || line.pitch() > 127
                         || line.velocity() < 1 || line.velocity() > 127
-                        || line.tick() + line.length() > PPQ * 4 * 8) {
+                        || line.tick() + line.length() > Integer.MAX_VALUE) {
                     throw new IllegalArgumentException("Invalid note: " + line.text());
                 }
                 part.notes.add(new Note((int) line.tick(), (int) line.length(), line.pitch(), line.velocity()));
@@ -68,9 +85,26 @@ public final class MultiTrackMusicRenderer {
                 throw new IllegalArgumentException("Invalid input line: " + entry.text());
             }
         }
-        if (arrangement.tempo < 60 || arrangement.tempo > 180
+        if (arrangement.tempo < 20 || arrangement.tempo > 400
                 || arrangement.parts.isEmpty()) {
-            throw new IllegalArgumentException("Require tempo 60..180 and at least one track.");
+            throw new IllegalArgumentException("Require tempo 20..400 and at least one track.");
+        }
+        long end = 0;
+        for (Part part : arrangement.parts.values()) {
+            for (Note note : part.notes) {
+                end = Math.max(end, note.tick + (long) note.length);
+            }
+        }
+        int covering = ArrangementFile.barsCovering(end, arrangement.barTicks());
+        if (bars != null) {
+            if (covering > bars) {
+                throw new IllegalArgumentException("A note ends after the " + bars + " bars of the piece.");
+            }
+            arrangement.bars = bars;
+        } else {
+            // Pieces from before F2 (four quarters, C major, no bars line) were always made eight bars long.
+            arrangement.bars = ArrangementFile.defaultBars(covering,
+                    arrangement.keyFifths == null && arrangement.numerator == 4 && arrangement.denominator == 4);
         }
         // More tracks than a port has channels share channels; each then goes to a port of its own.
         java.util.Map<Integer, Integer> used = new java.util.HashMap<Integer, Integer>();
@@ -90,13 +124,32 @@ public final class MultiTrackMusicRenderer {
         return arrangement;
     }
 
+    /** The key signature of a written tonic on the circle of fifths: sharps positive, flats negative. */
+    static int fifths(String tonic, boolean minor) {
+        int[] ofLetter = {0, 2, 4, -1, 1, 3, 5}; // C D E F G A B
+        int fifths = ofLetter["CDEFGAB".indexOf(tonic.charAt(0))];
+        for (int i = 1; i < tonic.length(); i++) {
+            fifths += tonic.charAt(i) == '#' ? 7 : -7;
+        }
+        fifths -= minor ? 3 : 0;
+        if (fifths < -7 || fifths > 7) {
+            throw new IllegalArgumentException("No key signature for " + tonic + (minor ? " minor" : " major"));
+        }
+        return fifths;
+    }
+
     private static void writeMidi(Arrangement arrangement, Path output) throws Exception {
         Sequence sequence = new Sequence(Sequence.PPQ, PPQ);
         Track tempoTrack = sequence.createTrack();
         int microseconds = 60000000 / arrangement.tempo;
         addMeta(tempoTrack, 0x51, new byte[]{(byte) (microseconds >>> 16),
                 (byte) (microseconds >>> 8), (byte) microseconds}, 0);
-        addMeta(tempoTrack, 0x58, new byte[]{4, 2, 24, 8}, 0);
+        addMeta(tempoTrack, 0x58, new byte[]{(byte) arrangement.numerator,
+                (byte) Integer.numberOfTrailingZeros(arrangement.denominator), 24, 8}, 0);
+        if (arrangement.keyFifths != null) {
+            addMeta(tempoTrack, 0x59, new byte[]{(byte) (int) arrangement.keyFifths,
+                    (byte) (arrangement.minor ? 1 : 0)}, 0);
+        }
         for (Part part : arrangement.parts.values()) {
             Track track = sequence.createTrack();
             addMeta(track, 0x03, part.name.getBytes(StandardCharsets.UTF_8), 0);
@@ -133,7 +186,8 @@ public final class MultiTrackMusicRenderer {
     }
 
     private static void renderAudio(Arrangement arrangement, Path output) throws IOException {
-        double totalSeconds = 8 * 4 * (60.0 / arrangement.tempo);
+        // As long as the piece: its bars, however many and in whatever meter.
+        double totalSeconds = arrangement.quarters() * (60.0 / arrangement.tempo);
         int frames = BuiltinSynthesis.frames(totalSeconds);
         double[] mixed = new double[frames];
         for (Part part : arrangement.parts.values()) {
@@ -158,7 +212,21 @@ public final class MultiTrackMusicRenderer {
 
     private static final class Arrangement {
         private int tempo;
+        private int numerator = 4;
+        private int denominator = 4;
+        private Integer keyFifths;
+        private boolean minor;
+        private int bars;
         private final Map<String, Part> parts = new LinkedHashMap<String, Part>();
+
+        private long barTicks() {
+            return (long) PPQ * 4 * numerator / denominator;
+        }
+
+        /** The length of the piece in quarter notes. */
+        private double quarters() {
+            return bars * (double) barTicks() / PPQ;
+        }
     }
 
     private static final class Part {
