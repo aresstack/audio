@@ -40,4 +40,32 @@ public final class ModelChoicePanelTest {
             assertEquals(2, changes.get());
         });
     }
+
+    /** The album page: the model that plans the album beside those of its pieces; it follows planning until it gets its own. */
+    @Test
+    public void theAlbumPageChoosesThreeModelsAndTheAlbumFollowsPlanningUntilItHasItsOwn() throws Exception {
+        javax.swing.UIManager.put("defaultFont", new java.awt.Font("Dialog", java.awt.Font.PLAIN, 12));
+        AtomicInteger changes = new AtomicInteger();
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+            com.aresstack.audio.studio.ai.ModelRole album = com.aresstack.audio.studio.album.AlbumRoles.ALBUM;
+            ModelChoicePanel panel = new ModelChoicePanel(List.of(album, ModelRoles.PLANNING, ModelRoles.COMPOSITION),
+                    changes::incrementAndGet, () -> { });
+            panel.setModels(List.of("gpt-oss:20b", "qwen3:32b", AiDefaults.MODEL));
+            assertEquals(AiDefaults.MODEL, panel.choice(album).getSelectedItem());
+
+            panel.choice(ModelRoles.PLANNING).setSelectedItem("gpt-oss:20b");
+            assertEquals("the album follows planning, and its choice shows that", "gpt-oss:20b",
+                    panel.choice(album).getSelectedItem());
+            assertNull(panel.assignment().ownModel(album));
+
+            panel.choice(album).setSelectedItem("qwen3:32b");
+            assertEquals("qwen3:32b", panel.assignment().modelFor(album));
+            assertEquals("gpt-oss:20b", panel.assignment().modelFor(ModelRoles.PLANNING));
+            assertEquals(AiDefaults.MODEL, panel.assignment().modelFor(ModelRoles.COMPOSITION));
+
+            panel.choice(album).setSelectedItem("gpt-oss:20b");
+            assertNull("the model of planning again: the album follows it", panel.assignment().ownModel(album));
+            assertEquals(3, changes.get());
+        });
+    }
 }

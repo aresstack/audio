@@ -138,8 +138,27 @@ public final class AudioStudioFrame extends JFrame {
     /** The models of the production that runs; cancelling stops all of them. */
     private volatile com.aresstack.audio.studio.ai.ModelLineup activeModels;
     /** Which model answers for which role, as last chosen; taken over unchanged when a production starts. */
-    private final ModelChoicePanel modelChoices = new ModelChoicePanel(() -> saveSettings(false),
+    private final ModelChoicePanel modelChoices = new ModelChoicePanel(() -> modelsChosen(false),
             () -> loadModelNames(false));
+    /**
+     * The same assignment on the album page, with the model that plans the album in front: an
+     * album needs that one beside those that plan and compose its pieces.
+     */
+    private final ModelChoicePanel albumModelChoices = new ModelChoicePanel(
+            java.util.List.of(com.aresstack.audio.studio.album.AlbumRoles.ALBUM,
+                    com.aresstack.audio.studio.ai.ModelRoles.PLANNING,
+                    com.aresstack.audio.studio.ai.ModelRoles.COMPOSITION),
+            () -> modelsChosen(true), () -> loadModelNames(false));
+
+    /** A model was chosen on one of the two pages: the other shows the same, and it is kept. */
+    private void modelsChosen(boolean onAlbumPage) {
+        if (onAlbumPage) {
+            modelChoices.setAssignment(albumModelChoices.assignment());
+        } else {
+            albumModelChoices.setAssignment(modelChoices.assignment());
+        }
+        saveSettings(false);
+    }
     private String preferredKeePassEntry = "";
     // The desk: display, transport, waveform, master meters, and the pages behind the keys under the display.
     private final StageDeck player = new StageDeck();
@@ -1428,6 +1447,7 @@ public final class AudioStudioFrame extends JFrame {
                 refreshSongs();
             }
         }, songs, registry);
+        albums.setBesideConcept(albumModelChoices);
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
         page.add(new DeckWidgets.Module("Alben · mehrere Stücke in einem Zug", albums),
@@ -1479,6 +1499,7 @@ public final class AudioStudioFrame extends JFrame {
         model.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             private void follow() {
                 modelChoices.setBase(model.getText());
+                albumModelChoices.setBase(model.getText());
             }
 
             @Override
@@ -2213,7 +2234,8 @@ public final class AudioStudioFrame extends JFrame {
                         return;
                     }
                     modelChoices.setModels(models);
-                    append(models.size() + " Modelle geladen; sie stehen in der Modellauswahl der Komposition.");
+                    albumModelChoices.setModels(models);
+                    append(models.size() + " Modelle geladen; sie stehen in der Modellauswahl der Komposition und der Alben.");
                     if (!ask) {
                         return;
                     }
@@ -3093,6 +3115,7 @@ public final class AudioStudioFrame extends JFrame {
             apiKey.setText(saved.getProperty("apiKey", ""));
             model.setText(saved.getProperty("model", model.getText()));
             modelChoices.setAssignment(com.aresstack.audio.studio.settings.ModelSettings.read(saved));
+            albumModelChoices.setAssignment(modelChoices.assignment());
             tokenLimit.setValue(AiDefaults.maxTokens(saved));
             proxyHost.setText(saved.getProperty("proxyHost", ""));
             proxyPort.setText(saved.getProperty("proxyPort", ""));

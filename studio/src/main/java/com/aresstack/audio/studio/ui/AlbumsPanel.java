@@ -167,6 +167,15 @@ final class AlbumsPanel extends JPanel {
     private final Timer afterDescription = pause(() -> propose(Field.STYLE));
     private final Timer afterStyle = pause(() -> propose(Field.STYLE));
 
+    /** The concept of the album, and beside it what the window adds (the choice of the models). */
+    private final JPanel conceptRow = new JPanel(new BorderLayout(16, 0));
+
+    /** Something that belongs beside the concept of the album: the models that plan and compose it. */
+    void setBesideConcept(javax.swing.JComponent component) {
+        conceptRow.add(component, BorderLayout.EAST);
+        conceptRow.revalidate();
+    }
+
     AlbumsPanel(Host host, SongLibrary songs, InstrumentRegistry registry) {
         super(new BorderLayout(14, 0));
         this.host = host;
@@ -282,7 +291,9 @@ final class AlbumsPanel extends JPanel {
 
         JPanel right = new JPanel(new BorderLayout(0, 12));
         right.setOpaque(false);
-        right.add(concept, BorderLayout.NORTH);
+        conceptRow.setOpaque(false);
+        conceptRow.add(concept, BorderLayout.CENTER);
+        right.add(conceptRow, BorderLayout.NORTH);
         right.add(tableScroll, BorderLayout.CENTER);
         right.add(bottom, BorderLayout.SOUTH);
         add(right, BorderLayout.CENTER);
