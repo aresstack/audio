@@ -145,6 +145,9 @@ public final class AudioStudioFrame extends JFrame {
     private final ScoreView scoreView = new ScoreView();
     private final com.aresstack.audio.studio.application.SongLibrary songs =
             com.aresstack.audio.studio.application.SongLibrary.standard();
+    /** The model of the open piece; it follows what the studio still writes the old way. */
+    private final com.aresstack.audio.studio.application.PieceModel pieceModel =
+            new com.aresstack.audio.studio.application.PieceModel(this::append);
     private final JComboBox<com.aresstack.audio.studio.application.SongLibrary.Song> songChoice =
             new JComboBox<com.aresstack.audio.studio.application.SongLibrary.Song>();
     private boolean fillingSongs;
@@ -422,6 +425,7 @@ public final class AudioStudioFrame extends JFrame {
                 try {
                     com.aresstack.audio.studio.application.StageMixService.rename(
                             Paths.get(directory.getText().trim()), from, to);
+                    pieceModel.synchronize(); // the files were written: the model follows them to the new name
                 } catch (IOException failed) {
                     append("WARN: Die Dateien der Spur ließen sich nicht umbenennen: " + failed.getMessage());
                 }
@@ -1181,18 +1185,27 @@ public final class AudioStudioFrame extends JFrame {
             @Override
             public Path execute(Progress progress) throws Exception {
                 try {
-                    boolean planned = Files.isRegularFile(output.resolve("composition-plan.json"));
-                    Path arrangement = new GemmaMusicComposer(client, tokens, parallel)
-                            .compose(prompt, output, chosen, progress);
-                    if (!planned) {
-                        songs.planned(output, prompt); // the words this plan follows
-                    }
+                    Path arrangement = composeIntoPiece(new GemmaMusicComposer(client, tokens, parallel),
+                            prompt, output, chosen, progress);
                     return renderArrangement(arrangement, output, settings, progress);
                 } finally {
                     activeClient = null;
                 }
             }
         });
+    }
+
+    /**
+     * Composes into the folder of the piece; everything this writes (the arrangement, the plan,
+     * and for a first plan the words it follows) then becomes part of the model of the piece.
+     * Besides renaming a track this is the only place where the model takes over the old files:
+     * rendering, playing, mixing and proposals never change the saved piece, so a file that was
+     * changed behind the model's back stays out of it.
+     */
+    private Path composeIntoPiece(final GemmaMusicComposer composer, final String prompt, final Path output,
+                                  final TrackArrangement tracks, final Progress progress) throws Exception {
+        return com.aresstack.audio.studio.application.ComposingIntoPiece.run(
+                () -> composer.compose(prompt, output, tracks, progress), output, prompt, songs, pieceModel);
     }
 
     /** First ask the AI only for a proposal; optionally continue automatically. */
@@ -1251,12 +1264,8 @@ public final class AudioStudioFrame extends JFrame {
                         return null;
                     }
                     new TrackArrangementStore().save(output, selected);
-                    boolean planned = Files.isRegularFile(output.resolve("composition-plan.json"));
-                    Path arrangement = new GemmaMusicComposer(client, tokens, parallel)
-                            .compose(prompt, output, selected, progress);
-                    if (!planned) {
-                        songs.planned(output, prompt); // the words this plan follows
-                    }
+                    Path arrangement = composeIntoPiece(new GemmaMusicComposer(client, tokens, parallel),
+                            prompt, output, selected, progress);
                     return renderArrangement(arrangement, output, rendering.get(), progress);
                 } finally {
                     activeClient = null;
@@ -2310,6 +2319,9 @@ public final class AudioStudioFrame extends JFrame {
         } finally {
             loadingTracks = false;
         }
+        // The piece as a model: an old piece is taken into it here, its old files stay as they are.
+        String chosen = directory.getText().trim();
+        pieceModel.open(chosen.isEmpty() ? null : Paths.get(chosen));
     }
 
     private void tracksChanged() {
