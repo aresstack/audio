@@ -25,7 +25,7 @@ public enum AppIcon {
     DIRIGENT("dirigent", "Dirigent");
 
     /** The icon a fresh installation shows; changing the standard is this one line. */
-    public static final AppIcon DEFAULT = AS;
+    public static final AppIcon DEFAULT = DIRIGENT;
 
     /** The key under which {@code studio.properties} remembers the chosen icon. */
     public static final String SETTING = "appIcon";

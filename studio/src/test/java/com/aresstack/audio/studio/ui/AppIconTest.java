@@ -31,8 +31,8 @@ public class AppIconTest {
     }
 
     @Test
-    public void asIsTheStandard() {
-        assertSame(AppIcon.AS, AppIcon.DEFAULT);
+    public void dirigentIsTheStandard() {
+        assertSame(AppIcon.DIRIGENT, AppIcon.DEFAULT);
     }
 
     @Test

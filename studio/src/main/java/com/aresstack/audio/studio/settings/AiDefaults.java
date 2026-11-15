@@ -65,10 +65,6 @@ public final class AiDefaults {
         }
     }
 
-    /** How many titles of an album are made at the same time ({@code albumPiecesAtOnce}, 1 to 16; 2 by default). */
-    public static int albumPiecesAtOnce(Properties settings) {
-        return number(settings, "albumPiecesAtOnce", 2, 1, 16);
-    }
 
     /** How often an answer cut off at its limit is asked for again ({@code longerAnswers}, 0 to 6). */
     public static int longerAnswers(Properties settings) {

@@ -254,8 +254,6 @@ public final class AudioStudioFrame extends JFrame {
     /** How often a cut-off answer is asked for again, and by how much its room grows (studio.properties). */
     private int longerAnswers = KipitzChatClient.LONGER_ANSWERS;
     private int longerAnswerFactor = KipitzChatClient.LONGER_FACTOR;
-    /** How many titles of an album are made at the same time (studio.properties). */
-    private int albumPiecesAtOnce = 2;
 
     /** How many requests to the models are open right now, from whatever part of the studio. */
     private int aiRequests;
@@ -1587,11 +1585,6 @@ public final class AudioStudioFrame extends JFrame {
             @Override
             public int parallelRequests() {
                 return (Integer) parallelRequests.getValue();
-            }
-
-            @Override
-            public int piecesAtOnce() {
-                return albumPiecesAtOnce;
             }
 
             @Override
@@ -4129,7 +4122,6 @@ public final class AudioStudioFrame extends JFrame {
             detailedLog.setSelected(Boolean.parseBoolean(saved.getProperty("detailedLog", "false")));
             growBars.setValue(AiDefaults.growBars(saved));
             longerAnswers = AiDefaults.longerAnswers(saved);
-            albumPiecesAtOnce = AiDefaults.albumPiecesAtOnce(saved);
             longerAnswerFactor = AiDefaults.longerAnswerFactor(saved);
             specFields.suggestBars((Integer) growBars.getValue());
             proxyHost.setText(saved.getProperty("proxyHost", ""));
@@ -4215,7 +4207,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("detailedLog", Boolean.toString(detailedLog.isSelected()));
             saved.setProperty("pieceBars", growBars.getValue().toString());
             saved.setProperty("longerAnswers", Integer.toString(longerAnswers));
-            saved.setProperty("albumPiecesAtOnce", Integer.toString(albumPiecesAtOnce));
+            saved.remove("albumPiecesAtOnce"); // no more: the parallel requests alone set how much runs at once
             saved.setProperty("longerAnswerFactor", Integer.toString(longerAnswerFactor));
             saved.setProperty("proxyHost", proxyHost.getText().trim());
             saved.setProperty("proxyPort", proxyPort.getText().trim());
