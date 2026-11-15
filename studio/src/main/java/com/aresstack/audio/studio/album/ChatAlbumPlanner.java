@@ -39,6 +39,14 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         return this;
     }
 
+    /** How many movements of a work that is rebuilt are planned at once (setting "Parallel"). */
+    private int atOnce = 1;
+
+    public ChatAlbumPlanner parallel(int requests) {
+        this.atOnce = Math.max(1, requests);
+        return this;
+    }
+
     public ChatAlbumPlanner(ChatModel model, int maxTokens) {
         this.model = model;
         this.maxTokens = maxTokens;
@@ -159,44 +167,85 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         for (AlbumTrack track : kept) {
             ids.add(track.id());
         }
-        List<AlbumTrack> tracks = new ArrayList<AlbumTrack>();
+        // Every movement has its row at once, in the order of the work; the rows are filled as their
+        // answers come, several at a time.
+        AlbumTrack[] rows = new AlbumTrack[movements.size()];
+        List<Integer> open = new ArrayList<Integer>();
         for (int i = 0; i < movements.size(); i++) {
-            String title = movements.get(i);
             AlbumTrack same = null;
             for (AlbumTrack track : kept) {
-                if (track.title().equalsIgnoreCase(title)) {
+                if (track.title().equalsIgnoreCase(movements.get(i))) {
                     same = track;
                 }
             }
             if (same != null) {
-                tracks.add(same);
+                rows[i] = same;
                 kept.remove(same);
-                continue;
-            }
-            progress.update("KI plant Satz " + (i + 1) + " von " + movements.size() + ": " + title + " ...");
-            Path answer = cache == null ? null : cache.resolve("album-movement-" + (i + 1) + ".json");
-            if (answer != null) {
-                Files.deleteIfExists(answer);
-            }
-            JsonObject entry = model.generate(INSTRUCTION, movementPrompt(album, movements, i), maxTokens, answer);
-            entry = entry == null ? new JsonObject() : entry;
-            if (AlbumFiles.text(entry, "title").isBlank()) {
-                entry.addProperty("title", title);
-            }
-            String id = freshId(ids);
-            ids.add(id);
-            tracks.add(track(id, entry, i + 1, concept));
-            if (watcher != null) {
-                List<AlbumTrack> seen = new ArrayList<AlbumTrack>(tracks);
-                seen.addAll(kept);
-                watcher.accept(seen);
+            } else {
+                String id = freshId(ids);
+                ids.add(id);
+                JsonObject placeholder = new JsonObject();
+                placeholder.addProperty("title", movements.get(i));
+                rows[i] = track(id, placeholder, i + 1, concept);
+                open.add(i);
             }
         }
+        show(rows, kept);
+        java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(
+                Math.min(atOnce, Math.max(1, open.size())), task -> {
+                    Thread thread = new Thread(task, "album-movement");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+        List<java.util.concurrent.Future<?>> asked = new ArrayList<java.util.concurrent.Future<?>>();
+        for (int i : open) {
+            asked.add(workers.submit(() -> {
+                Path answer = cache == null ? null : cache.resolve("album-movement-" + (i + 1) + ".json");
+                if (answer != null) {
+                    Files.deleteIfExists(answer);
+                }
+                progress.update("KI plant Satz " + (i + 1) + " von " + movements.size() + ": " + movements.get(i)
+                        + " ...");
+                JsonObject entry = model.generate(INSTRUCTION, movementPrompt(album, movements, i), maxTokens, answer);
+                entry = entry == null ? new JsonObject() : entry;
+                if (AlbumFiles.text(entry, "title").isBlank()) {
+                    entry.addProperty("title", movements.get(i));
+                }
+                synchronized (rows) {
+                    rows[i] = track(rows[i].id(), entry, i + 1, concept);
+                    show(rows, kept);
+                }
+                return null;
+            }));
+        }
+        workers.shutdown();
+        try {
+            for (java.util.concurrent.Future<?> each : asked) {
+                each.get();
+            }
+        } catch (InterruptedException interrupted) {
+            workers.shutdownNow();
+            Thread.currentThread().interrupt();
+            throw new java.io.InterruptedIOException("Planen abgebrochen.");
+        } catch (java.util.concurrent.ExecutionException failed) {
+            workers.shutdownNow();
+            Throwable cause = failed.getCause();
+            throw cause instanceof IOException io ? io : new IOException(cause.getMessage(), cause);
+        }
+        List<AlbumTrack> tracks = new ArrayList<AlbumTrack>(java.util.Arrays.asList(rows));
         tracks.addAll(kept);
         progress.update("Trackliste bereit: " + tracks.size() + " Sätze des Originals.");
         AlbumConcept counted = new AlbumConcept(concept.description(), concept.style(), Math.max(1, tracks.size()),
                 concept.minSeconds(), concept.maxSeconds(), true);
         return album.withConcept(counted).withTracks(tracks);
+    }
+
+    private void show(AlbumTrack[] rows, List<AlbumTrack> kept) {
+        if (watcher != null) {
+            List<AlbumTrack> seen = new ArrayList<AlbumTrack>(java.util.Arrays.asList(rows));
+            seen.addAll(kept);
+            watcher.accept(seen);
+        }
     }
 
     static String movementsPrompt(Album album) {

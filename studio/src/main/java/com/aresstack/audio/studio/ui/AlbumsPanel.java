@@ -898,6 +898,7 @@ final class AlbumsPanel extends JPanel {
         }
         final Album asked = album;
         final int tokens = host.tokens();
+        final int requests = Math.max(1, host.parallelRequests());
         busy = true;
         table.requestFocusInWindow(); // the key that was pressed is locked now: the focus goes to the list, not to a choice
         keys();
@@ -908,7 +909,7 @@ final class AlbumsPanel extends JPanel {
             String problem = null;
             try {
                 // Every title shows in the list as soon as the AI has written it.
-                planned = new ChatAlbumPlanner(model, tokens).watching(seen -> SwingUtilities.invokeLater(() -> {
+                planned = new ChatAlbumPlanner(model, tokens).parallel(requests).watching(seen -> SwingUtilities.invokeLater(() -> {
                     if (busy && album != null && album.id().equals(asked.id())) {
                         preview = seen;
                         tracks.fireTableDataChanged();
