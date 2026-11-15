@@ -148,17 +148,19 @@ public final class PieceAutopilot {
         String opening = first == spec ? description : description + "\nCompose only the opening " + growBars
                 + " bars of a piece of " + spec.bars() + " bars: introduce the themes and do not end;"
                 + " the piece is continued afterwards.";
-        // A long piece that was interrupted after it had begun to grow goes on from the bars it has:
-        // composing its opening again would write the short arrangement over the grown piece.
-        java.util.Optional<ProjectSession> saved = first == spec || model == null ? java.util.Optional.empty()
+        // A piece that was interrupted on its way goes on from the bars it has, in portions of the
+        // size set now: no portion size is kept with the piece, only its whole length (its spec)
+        // and the bars it has. Composing its opening again would write over what it has.
+        java.util.Optional<ProjectSession> saved = spec == null || model == null ? java.util.Optional.empty()
                 : model.of(folder);
-        boolean grown = saved.isPresent() && bars(saved.get()) > growBars;
-        Path arrangement = grown ? folder.resolve("arrangement.tsv") : ComposingIntoPiece.run(
+        int has = saved.isPresent() ? bars(saved.get()) : 0;
+        boolean begun = has > 0 && has < spec.bars();
+        Path arrangement = begun ? folder.resolve("arrangement.tsv") : ComposingIntoPiece.run(
                 () -> first == null ? composer.compose(opening, folder, tracks, progress)
-                        // the piece keeps its whole length as its spec; only the notes come in steps
+                        // the piece keeps its whole length as its spec; only the notes come in portions
                         : composer.compose(opening, folder, tracks, first, spec, progress),
                 folder, description, songs, model);
-        if (first != spec) {
+        if (begun || first != spec) {
             arrangement = grow(folder, model, description, spec.bars(), progress);
         }
         return new Result(arrangement, render(arrangement, folder, model, assignments, programs, progress), tracks,
