@@ -1,4 +1,5 @@
 import com.aresstack.audio.music.arrangement.ArrangementFile;
+import com.aresstack.audio.music.synth.BuiltinSynthesis;
 import javax.sound.midi.InvalidMidiDataException;
 import javax.sound.midi.MetaMessage;
 import javax.sound.midi.MidiEvent;
@@ -6,28 +7,20 @@ import javax.sound.midi.MidiSystem;
 import javax.sound.midi.Sequence;
 import javax.sound.midi.ShortMessage;
 import javax.sound.midi.Track;
-import javax.sound.sampled.AudioFileFormat;
-import javax.sound.sampled.AudioFormat;
-import javax.sound.sampled.AudioInputStream;
-import javax.sound.sampled.AudioSystem;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 
 /** Render an original multitrack arrangement to a MIDI file and synthesized preview WAVs. */
 public final class MultiTrackMusicRenderer {
     private static final int PPQ = 480;
-    private static final int SAMPLE_RATE = 22050;
-    private static final double TWO_PI = Math.PI * 2.0;
+    private static final int SAMPLE_RATE = BuiltinSynthesis.SAMPLE_RATE;
 
     public static void main(String[] args) throws Exception {
         if (args.length != 2) {
@@ -140,102 +133,27 @@ public final class MultiTrackMusicRenderer {
     }
 
     private static void renderAudio(Arrangement arrangement, Path output) throws IOException {
-        double totalSeconds = 8 * 4 * (60.0 / arrangement.tempo) + 0.75;
-        int frames = (int) Math.ceil(totalSeconds * SAMPLE_RATE);
+        double totalSeconds = 8 * 4 * (60.0 / arrangement.tempo);
+        int frames = BuiltinSynthesis.frames(totalSeconds);
         double[] mixed = new double[frames];
         for (Part part : arrangement.parts.values()) {
-            double[] samples = new double[frames];
+            List<BuiltinSynthesis.Tone> tones = new ArrayList<BuiltinSynthesis.Tone>();
             for (Note note : part.notes) {
-                synthesize(part, note, arrangement.tempo, samples);
+                tones.add(new BuiltinSynthesis.Tone(note.tick / (double) PPQ * 60.0 / arrangement.tempo,
+                        note.length / (double) PPQ * 60.0 / arrangement.tempo, note.pitch, note.velocity, note.tick));
             }
-            double gain = "harmony".equals(part.role) ? 0.55 : "drums".equals(part.role) ? 0.67 : 0.75;
+            double[] samples = BuiltinSynthesis.part(part.role, tones, frames);
             for (int i = 0; i < frames; i++) {
-                samples[i] *= gain;
                 mixed[i] += samples[i];
             }
-            writeWave(output.resolve(part.name + ".wav"), samples);
+            BuiltinSynthesis.writeWave(output.resolve(part.name + ".wav"), samples);
         }
         // Add a quiet single-tap echo to glue the generated timbres together.
         int delay = (int) (0.19 * SAMPLE_RATE);
         for (int i = frames - 1; i >= delay; i--) {
             mixed[i] += mixed[i - delay] * 0.11;
         }
-        writeWave(output.resolve("arrangement.wav"), mixed);
-    }
-
-    private static void synthesize(Part part, Note note, int tempo, double[] samples) {
-        double startSeconds = note.tick / (double) PPQ * 60.0 / tempo;
-        double noteSeconds = note.length / (double) PPQ * 60.0 / tempo;
-        int first = (int) Math.round(startSeconds * SAMPLE_RATE);
-        double frequency = 440.0 * Math.pow(2.0, (note.pitch - 69) / 12.0);
-        double volume = (note.velocity / 127.0) * 0.22;
-        double tail = "harmony".equals(part.role) ? 0.30 : 0.14;
-        int count = Math.min(samples.length - first, (int) ((noteSeconds + tail) * SAMPLE_RATE));
-        Random noise = new Random(note.pitch * 97L + note.tick * 31L);
-        double previousNoise = 0;
-        double kickPhase = 0;
-        for (int i = 0; i < count; i++) {
-            double t = i / (double) SAMPLE_RATE;
-            double env = envelope(part.role, t, noteSeconds, tail);
-            double value;
-            if ("drums".equals(part.role)) {
-                double white = noise.nextDouble() * 2.0 - 1.0;
-                double highPassed = white - previousNoise * 0.85;
-                previousNoise = white;
-                if (note.pitch == 36) {
-                    kickPhase += TWO_PI * (55 + 105 * Math.exp(-t * 22)) / SAMPLE_RATE;
-                    value = Math.sin(kickPhase) * Math.exp(-t * 19);
-                } else if (note.pitch == 38) {
-                    value = (highPassed * 0.75 + Math.sin(TWO_PI * 175 * t) * 0.25)
-                            * Math.exp(-t * 18);
-                } else {
-                    value = highPassed * Math.exp(-t * 45) * 0.43;
-                }
-                env = 1.0;
-            } else if ("melody".equals(part.role)) {
-                value = (Math.sin(TWO_PI * frequency * t) * 0.70
-                        + Math.sin(TWO_PI * frequency * 2.01 * t) * 0.22
-                        + Math.sin(TWO_PI * frequency * 3.98 * t) * 0.08);
-                env *= Math.exp(-t * 2.2);
-            } else if ("harmony".equals(part.role)) {
-                value = Math.sin(TWO_PI * frequency * t) * 0.71
-                        + Math.sin(TWO_PI * frequency * 2.003 * t) * 0.18
-                        + Math.sin(TWO_PI * frequency * 0.999 * t + 0.4) * 0.11;
-            } else {
-                value = Math.sin(TWO_PI * frequency * t) * 0.80
-                        + Math.sin(TWO_PI * frequency * 2 * t) * 0.20;
-            }
-            samples[first + i] += value * volume * env;
-        }
-    }
-
-    private static double envelope(String part, double t, double duration, double tail) {
-        double attack = "harmony".equals(part) ? 0.15 : 0.012;
-        double value = Math.min(1.0, t / attack);
-        if (t > duration) {
-            value *= Math.max(0.0, 1.0 - (t - duration) / tail);
-        }
-        return value;
-    }
-
-    private static void writeWave(Path output, double[] samples) throws IOException {
-        double peak = 0;
-        for (double sample : samples) {
-            peak = Math.max(peak, Math.abs(sample));
-        }
-        double gain = peak > 0.93 ? 0.93 / peak : 1.0;
-        byte[] data = new byte[samples.length * 2];
-        for (int i = 0; i < samples.length; i++) {
-            double sample = Math.max(-1.0, Math.min(1.0, samples[i] * gain));
-            short pcm = (short) Math.round(sample * 32767.0);
-            data[i * 2] = (byte) pcm;
-            data[i * 2 + 1] = (byte) (pcm >> 8);
-        }
-        AudioFormat format = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
-        try (ByteArrayInputStream input = new ByteArrayInputStream(data);
-             AudioInputStream audio = new AudioInputStream(input, format, samples.length)) {
-            AudioSystem.write(audio, AudioFileFormat.Type.WAVE, output.toFile());
-        }
+        BuiltinSynthesis.writeWave(output.resolve("arrangement.wav"), mixed);
     }
 
     private static final class Arrangement {
