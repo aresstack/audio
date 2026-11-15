@@ -142,7 +142,10 @@ public final class AlbumProducerTest {
         assertEquals(30, second.spec().bars());
         assertTrue(second.description(), second.description().startsWith("Track 2: mood 2")
                 && second.description().contains("track 2 of 6") && second.description().contains("\"Track 5\""));
-        assertEquals(second.description(), songs.description(second.folder()));
+        // The piece keeps only its own words; the album is told to the AI beside them.
+        assertEquals("Track 2: mood 2.", songs.description(second.folder()).substring(0,
+                Math.min(songs.description(second.folder()).length(), "Track 2: mood 2.".length())));
+        assertFalse(songs.description(second.folder()), songs.description(second.folder()).contains("track 2 of 6"));
 
         // Started again: only the failed title is made, in the folder it has; the finished ones are not touched.
         pieces.failing = "";

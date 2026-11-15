@@ -153,4 +153,46 @@ public final class AlbumMembershipTest {
         assertFalse("a produced title says what it was made from", members.refresh(piece));
         assertEquals("Eisblume", files.album(album.id()).get().tracks().get(0).title());
     }
+
+    @Test
+    public void aTitleMovesIntoAnotherAlbumWithItsPieceAndTheAlbumContextIsToldApart() throws Exception {
+        Path library = temporary.newFolder("compositions").toPath();
+        SongLibrary songs = new SongLibrary(library);
+        AlbumFiles files = new AlbumFiles(library);
+        AlbumMembership members = new AlbumMembership(files, songs);
+        Album winter = files.create("Winter", new AlbumConcept("Snow and silence", "", 12, 300));
+        Album summer = files.create("Sommer", new AlbumConcept("", "", 12, 300));
+        Path one = songs.create("Eins");
+        Path two = songs.create("Zwei");
+        members.add(winter.id(), one);
+        members.add(winter.id(), two);
+
+        assertTrue(members.albumContext(two).contains("track 2 of 2") && members.albumContext(two).contains("\"Eins\""));
+        assertTrue(members.move(winter.id(), "t2", winter.id(), 0));
+        assertEquals(List.of(two.getFileName().toString(), one.getFileName().toString()),
+                pieces(files.album(winter.id()).get()));
+
+        AlbumProductionState.load(files.folder(winter.id())).with("t1", AlbumProductionState.Status.FAILED, "abgebrochen", 0)
+                .save(files.folder(winter.id()));
+        assertTrue(members.move(winter.id(), "t1", summer.id(), -1));
+        String arrived = files.album(summer.id()).get().tracks().get(0).id();
+        assertEquals("an unfinished piece stays unfinished in its new album", AlbumProductionState.Status.FAILED,
+                AlbumProductionState.load(files.folder(summer.id())).status(arrived));
+        assertEquals(AlbumProductionState.Status.PLANNED,
+                AlbumProductionState.load(files.folder(winter.id())).status("t1"));
+        assertEquals(List.of("Winter", "Unbenanntes Album", "Unbenanntes Album 2"), new ArrayList<String>(
+                AlbumMembership.labels(List.of(winter, members.untitled(), files.create(AlbumMembership.UNTITLED,
+                        new AlbumConcept("", "", 12, 300)))).values()));
+        assertEquals(List.of(two.getFileName().toString()), pieces(files.album(winter.id()).get()));
+        assertEquals(List.of(one.getFileName().toString()), pieces(files.album(summer.id()).get()));
+        assertEquals(summer.id(), members.albumOf(one).get().id());
+        assertEquals(0, members.adoptLoosePieces());
+
+        // An unnamed album tells the AI nothing about itself; old descriptions lose the album part.
+        Path loose = songs.create("Lose");
+        members.adoptLoosePieces();
+        assertEquals("", members.albumContext(loose));
+        assertEquals("Eins: ruhig.", Album.withoutBrief("Eins: ruhig.\nThis piece is track 1 of 2 of the album ..."));
+        assertEquals("nur eigene Worte", Album.withoutBrief("nur eigene Worte"));
+    }
 }

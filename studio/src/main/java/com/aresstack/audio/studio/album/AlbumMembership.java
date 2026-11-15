@@ -41,6 +41,20 @@ public final class AlbumMembership {
         return albums;
     }
 
+    /**
+     * What each album is called where the user chooses among them, by id, in their order: its
+     * title, and for the second and every further unnamed album a number, so that two unnamed
+     * albums can be told apart.
+     */
+    public static java.util.Map<String, String> labels(List<Album> all) {
+        java.util.Map<String, String> labels = new java.util.LinkedHashMap<String, String>();
+        int untitled = 0;
+        for (Album album : all) {
+            labels.put(album.id(), isUntitled(album) && ++untitled > 1 ? album.title() + " " + untitled : album.title());
+        }
+        return labels;
+    }
+
     /** Whether this is the unnamed album, the one the pieces without an album land in. */
     public static boolean isUntitled(Album album) {
         return album != null && UNTITLED.equals(album.title());
@@ -209,6 +223,76 @@ public final class AlbumMembership {
             }
         }
         return false;
+    }
+
+    /**
+     * Moves a title from one album into another, or to another place in its own album, with its
+     * piece. In the other album it gets an id of its own there.
+     *
+     * @param index where in the target album it goes; -1 or beyond the end: at the end
+     * @return whether anything changed
+     */
+    public synchronized boolean move(String fromId, String trackId, String toId, int index) throws IOException {
+        Album from = albums.album(fromId).orElse(null);
+        Album to = albums.album(toId).orElse(null);
+        if (from == null || to == null || from.track(trackId) == null) {
+            return false;
+        }
+        AlbumTrack moved = from.track(trackId);
+        int at = from.tracks().indexOf(moved);
+        if (fromId.equals(toId)) {
+            List<AlbumTrack> tracks = new ArrayList<AlbumTrack>(from.tracks());
+            tracks.remove(at);
+            int place = index < 0 || index > tracks.size() + 1 ? tracks.size() : (index > at ? index - 1 : index);
+            place = Math.min(place, tracks.size());
+            if (place == at) {
+                return false;
+            }
+            tracks.add(place, moved);
+            albums.save(from.withTracks(tracks));
+            return true;
+        }
+        List<AlbumTrack> left = new ArrayList<AlbumTrack>(from.tracks());
+        left.remove(at);
+        List<AlbumTrack> into = new ArrayList<AlbumTrack>(to.tracks());
+        AlbumTrack arriving = new AlbumTrack(to.freshTrackId(), moved.title(), moved.mood(), moved.bpm(), moved.key(),
+                moved.meter(), moved.instrumentation(), moved.form(), moved.targetSeconds(), moved.piece());
+        into.removeIf(track -> moved.hasPiece() && moved.piece().equals(track.piece()));
+        into.add(index < 0 || index > into.size() ? into.size() : index, arriving);
+        // First the album that takes it, so that the piece is never in no album.
+        albums.save(to.withTracks(into));
+        albums.save(from.withTracks(left));
+        // How far its production got goes with it, so that the other album takes up an unfinished piece.
+        AlbumProductionState fromState = AlbumProductionState.load(albums.folder(fromId));
+        AlbumProductionState.Entry entry = fromState.of(trackId);
+        if (entry.status() != AlbumProductionState.Status.PLANNED) {
+            AlbumProductionState.load(albums.folder(toId))
+                    .with(arriving.id(), entry.status(), entry.reason(), entry.seconds()).save(albums.folder(toId));
+            fromState.with(trackId, AlbumProductionState.Status.PLANNED).save(albums.folder(fromId));
+        }
+        return true;
+    }
+
+    /**
+     * What the AI is told about the album of a piece, beside the piece's own words: the album in
+     * a few lines and the other titles. Empty for a piece of an unnamed album or of none.
+     */
+    public synchronized String albumContext(Path piece) {
+        String name = folderName(piece);
+        if (name == null) {
+            return "";
+        }
+        for (Album album : albums.albums()) {
+            if (isUntitled(album)) {
+                continue;
+            }
+            for (AlbumTrack track : album.tracks()) {
+                if (name.equals(track.piece())) {
+                    return album.brief(track);
+                }
+            }
+        }
+        return "";
     }
 
     /** The name of the folder of a piece directly in the library, or {@code null} for any other folder. */

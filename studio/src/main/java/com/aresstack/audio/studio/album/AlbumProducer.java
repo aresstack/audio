@@ -205,7 +205,8 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
                         albums.save(album); // first the album knows its piece, then the piece is filled
                     }
                     piece = pieceFolder(track);
-                    songs.save(piece, track.title(), description(album, track));
+                    // The piece keeps its own words; what it is told about its album is added for the AI only.
+                    songs.save(piece, track.title(), own(track));
                     set(trackId, Status.RUNNING, "", 0);
                 }
             } catch (IOException | RuntimeException failed) {
@@ -292,6 +293,11 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
 
     /** The music wish of a piece: its own title and mood first, then what it is told about its album. */
     static String description(Album album, AlbumTrack track) {
+        return own(track) + "\n" + album.brief(track);
+    }
+
+    /** The piece's own words: its title, mood and players, as its description shows them. */
+    static String own(AlbumTrack track) {
         StringBuilder text = new StringBuilder(track.title());
         if (!track.mood().isEmpty()) {
             text.append(": ").append(track.mood());
@@ -299,6 +305,6 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
         if (!track.instrumentation().isEmpty()) {
             text.append(". Players: ").append(track.instrumentation());
         }
-        return text.append(".\n").append(album.brief(track)).toString();
+        return text.append('.').toString();
     }
 }
