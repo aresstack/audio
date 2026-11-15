@@ -69,4 +69,25 @@ public final class CompositionNoteNormalizerTest {
         assertEquals("cut at the end of the section", 240, note.durationTicks());
         assertNull(normalizer.normalize(note(32, 1, 62), "melody", "melody", 2, 8, 8));
     }
+
+    /** PO F2: C9 holds D, Cmaj9 holds B and D; a wrong reading of the chord must not move correct notes. */
+    @Test
+    public void ninthChordsKeepTheirNinthAndTheirSeventh() {
+        CompositionSpec spec = CompositionSpec.of(4, 100, Key.C_MAJOR, 4, 4).withSnapToHarmony(true);
+        CompositionNoteNormalizer normalizer = new CompositionNoteNormalizer(m -> { }, spec,
+                List.of("C9", "Cmaj9", "Cmaj9", "C7alt"));
+        // C9 in bar 1: C E G B flat D all stay.
+        for (int pitch : new int[]{60, 64, 67, 70, 62}) {
+            assertEquals("C9 " + pitch, pitch, normalizer.normalize(note(0, 1, pitch), "harmony", "harmony", 1).pitch());
+        }
+        // Cmaj9 in bar 2: C E G B D all stay.
+        for (int pitch : new int[]{60, 64, 67, 71, 62}) {
+            assertEquals("Cmaj9 " + pitch, pitch, normalizer.normalize(note(4, 1, pitch), "harmony", "harmony", 2).pitch());
+        }
+        assertEquals(0, normalizer.correctionCount());
+        // A B flat is no tone of Cmaj9: it moves to the major seventh B.
+        assertEquals(71, normalizer.normalize(note(8, 1, 70), "harmony", "harmony", 3).pitch());
+        // An unknown symbol is no chord: the scale of the key applies, D stays.
+        assertEquals(62, normalizer.normalize(note(12, 1, 62), "harmony", "harmony", 4).pitch());
+    }
 }
