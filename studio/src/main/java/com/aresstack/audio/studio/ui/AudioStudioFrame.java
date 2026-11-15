@@ -153,6 +153,8 @@ public final class AudioStudioFrame extends JFrame {
     private final JComboBox<String> playbackSelection = new JComboBox<String>(new String[]{
             "Mixed sampled arrangement"
     });
+    /** Sums up the lines about AI requests tried again, see {@link TroubleDigest}. */
+    private final TroubleDigest troubleDigest = new TroubleDigest(this::append);
     private final JSpinner parallelRequests = new JSpinner(
             new SpinnerNumberModel(32, 1, 1024, 1));
     /** The first pause before an AI request is tried again, in seconds. */
@@ -1849,7 +1851,13 @@ public final class AudioStudioFrame extends JFrame {
                 (Integer) retryFirst.getValue(), (Integer) retryMost.getValue());
         retryFirst.addChangeListener(retry);
         retryMost.addChangeListener(retry);
-        com.aresstack.audio.studio.ai.Backoff.tellTo(line -> SwingUtilities.invokeLater(() -> append(line)));
+        com.aresstack.audio.studio.ai.Backoff.tellTo(line -> SwingUtilities.invokeLater(() -> troubleDigest.add(line)));
+        // Many requests that break off together are said in one line per model and cause.
+        new javax.swing.Timer(TroubleDigest.EVERY_MILLIS, event -> troubleDigest.flush()).start();
+        // As many requests at once per model as the connections hold, up to "Parallel".
+        parallelRequests.addChangeListener(event -> com.aresstack.audio.studio.ai.ConnectionGate.configure(
+                (Integer) parallelRequests.getValue()));
+        com.aresstack.audio.studio.ai.ConnectionGate.configure((Integer) parallelRequests.getValue());
         // A window that stops answering leaves a note of where it hung, next to the settings.
         new EdtWatch(settingsStore.location().toAbsolutePath().getParent()
                 .resolve("logs"), this::append).start();
@@ -2505,7 +2513,7 @@ public final class AudioStudioFrame extends JFrame {
                             showAiLamp();
                         }))
                         // A connection that breaks off or is tried again is said at once, in the protocol and below.
-                        .troubles(line -> SwingUtilities.invokeLater(() -> append(line))));
+                        .troubles(line -> SwingUtilities.invokeLater(() -> troubleDigest.add(line))));
     }
 
     /** The assignment as chosen now: the roles as set, the base model from the settings page. */

@@ -128,7 +128,7 @@ public final class KipitzChatClient implements ChatModel {
             request.addProperty("max_tokens", budget);
             String trouble;
             try {
-                Answer answer = exchange(gson.toJson(request).getBytes(StandardCharsets.UTF_8), heard);
+                Answer answer = gated(gson.toJson(request).getBytes(StandardCharsets.UTF_8), heard);
                 if ("length".equals(answer.finishReason) && longer < longerAnswers
                         && !cancelled && !Thread.currentThread().isInterrupted()) {
                     // Cut off at the limit: a model that thinks before it answers spends the tokens of
@@ -192,6 +192,29 @@ public final class KipitzChatClient implements ChatModel {
             tell("Verbindung zur KI: " + trouble + " · Versuch " + (troubled + 1) + " in " + Backoff.words(wait)
                     + " (" + name() + ").");
             Backoff.pause(troubled, () -> cancelled);
+        }
+    }
+
+    /**
+     * One exchange through the gate of the model: no more requests at once than the connections
+     * hold now; one that breaks off or finds the service busy makes the gate narrower.
+     */
+    private Answer gated(byte[] body, java.util.function.Consumer<String> heard) throws IOException {
+        ConnectionGate gate = ConnectionGate.of(model);
+        long entered = gate.enter(() -> cancelled);
+        boolean broke = false;
+        try {
+            return exchange(body, heard);
+        } catch (Refused refused) {
+            broke = refused.status == 408 || refused.status == 429 || refused.status >= 500;
+            throw refused;
+        } catch (Unusable unusable) {
+            throw unusable; // the connection held; the answer is the trouble
+        } catch (IOException failed) {
+            broke = !cancelled && !Thread.currentThread().isInterrupted();
+            throw failed;
+        } finally {
+            gate.leave(entered, broke);
         }
     }
 
