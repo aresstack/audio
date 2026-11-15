@@ -158,6 +158,17 @@ public final class NewBarsPerformanceTest {
     }
 
     @Test
+    public void aLengthenedPieceGrowsIntoItsNewLevelInsteadOfJumping() throws Exception {
+        FakeChatModel model = model("\"dynamics\":[{\"bar\":9,\"level\":\"f\"}]");
+        PieceExtension extension = PieceExtension.start(session, ContinuationComposer.with(model),
+                ContinuationRequest.of(8, ContinuationPreset.STANDALONE, ContinuationEnding.OPEN), Ids.seeded(5), QUIET);
+        Dynamics dynamics = extension.proposal().result().dynamics();
+        // mezzoforte at the join (the piece had no marks), forte reached at the end of the first new bar
+        assertEquals(List.of(new Dynamics.Hairpin(8 * BAR, 9 * BAR, Dynamics.Level.F, null)), dynamics.hairpins());
+        assertEquals(List.of(new Dynamics.Mark(9 * BAR, Dynamics.Level.F, null)), dynamics.marks());
+    }
+
+    @Test
     public void insertedBarsAreQuietAndSlowAndTheOriginalGoesOnAsBefore() throws Exception {
         Composition before = session.composition();
         double bpm = before.timeMap().tempos().get(0).bpm();
