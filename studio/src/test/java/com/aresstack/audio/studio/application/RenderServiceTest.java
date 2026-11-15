@@ -178,6 +178,30 @@ public final class RenderServiceTest {
         assertTrue(Files.size(mix) > 1000);
     }
 
+    /** A piece the old arrangement file cannot hold (3/4, a tempo change) renders and gets its manifest. */
+    @Test
+    public void rendersAPieceBeyondTheOldFileFormat() throws Exception {
+        com.aresstack.audio.composition.TimeMap time = new com.aresstack.audio.composition.TimeMap(
+                List.of(new com.aresstack.audio.composition.TimeMap.Tempo(0, 90),
+                        new com.aresstack.audio.composition.TimeMap.Tempo(1440, 132.5)),
+                List.of(new com.aresstack.audio.composition.TimeMap.Meter(0, 3, 4)),
+                List.of(new com.aresstack.audio.composition.TimeMap.KeyChange(0,
+                        com.aresstack.audio.composition.Key.C_MAJOR)));
+        Part part = new Part("lead", "Lead", "melody", null, 0, "builtin", Part.StaffLayout.SINGLE,
+                List.of(new com.aresstack.audio.composition.Voice("v1", null, null, null)), null);
+        com.aresstack.audio.composition.Track track = new com.aresstack.audio.composition.Track("t1", "Lead",
+                com.aresstack.audio.composition.Track.Kind.MIDI, "lead",
+                List.<com.aresstack.audio.composition.Clip>of(new com.aresstack.audio.composition.MidiClip("c1", 0,
+                        2880, null, List.of(new com.aresstack.audio.composition.Note("n1", 0, 480, 60, 90, "v1"),
+                        new com.aresstack.audio.composition.Note("n2", 1920, 480, 64, 90, "v1")))));
+        Composition piece = new Composition(null, time, List.of(), List.of(part), List.of(track), List.of());
+        Path home = folder.newFolder("beyond").toPath();
+        RenderService.Result result = service(new BuiltinStemRenderer()).render(home, piece, message -> { });
+        assertEquals(List.of("lead"), result.rendered());
+        assertEquals(1, StemManifest.load(home).size());
+        assertTrue(Files.isRegularFile(StageMixService.stem(home, "lead")));
+    }
+
     @Test
     public void aSamplerThatCannotStartLeavesTheJavaSound() throws Exception {
         ProjectSession session = RenderFixtures.open("district-dawn", folder.getRoot().toPath().resolve("piece"));

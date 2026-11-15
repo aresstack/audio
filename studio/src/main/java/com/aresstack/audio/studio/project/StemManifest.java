@@ -55,12 +55,25 @@ public final class StemManifest {
 
     /**
      * The hash of what sounds of a part: the time map (a tempo change moves every note in time),
-     * and its line and its notes as {@code arrangement.tsv} writes them.
+     * and its line and its notes as {@code arrangement.tsv} writes them. A piece the old file
+     * cannot express (tempo changes, another meter) is hashed from the model instead: the part
+     * and where each of its notes sounds.
      */
     public static String digest(Composition composition, String partId) {
         try {
             MessageDigest sha = MessageDigest.getInstance("SHA-256");
-            String sounding = composition.timeMap() + "\n" + String.join("\n", TsvExport.linesOf(composition, partId));
+            String sounding;
+            try {
+                sounding = composition.timeMap() + "\n" + String.join("\n", TsvExport.linesOf(composition, partId));
+            } catch (TsvExport.NotExpressible beyond) {
+                StringBuilder model = new StringBuilder("model\n").append(composition.timeMap()).append('\n')
+                        .append(composition.part(partId));
+                for (Composition.PlacedNote placed : composition.notesOf(partId)) {
+                    model.append('\n').append(placed.tick()).append('\t').append(placed.note().length())
+                            .append('\t').append(placed.note().pitch()).append('\t').append(placed.note().velocity());
+                }
+                sounding = model.toString();
+            }
             return HexFormat.of().formatHex(sha.digest(sounding.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);

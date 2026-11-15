@@ -34,13 +34,33 @@ public abstract class SamplerStemRenderer implements StemRenderer {
     protected abstract void run(Path soundbank, Path midi, Path output, RenderLimits limits, double seconds)
             throws Exception;
 
-    /** A sound bank as the cache knows it: name, size and time of the last change. */
+    /**
+     * A sound bank as the cache knows it: name, size and time of the last change. An SFZ file
+     * only describes the instrument; its samples and included definitions lie beside it, so for
+     * SFZ every file in its folder and below counts too (number, total size, latest change).
+     */
     static String fingerprint(Path soundbank) throws IOException {
         if (soundbank == null) {
             return "none";
         }
         FileTime changed = Files.getLastModifiedTime(soundbank);
-        return soundbank.getFileName() + "\t" + Files.size(soundbank) + "\t" + changed.toMillis();
+        String own = soundbank.getFileName() + "\t" + Files.size(soundbank) + "\t" + changed.toMillis();
+        Path folder = soundbank.toAbsolutePath().getParent();
+        if (!soundbank.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".sfz")
+                || folder == null) {
+            return own;
+        }
+        long count = 0;
+        long size = 0;
+        long latest = 0;
+        try (var files = Files.walk(folder)) {
+            for (Path file : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator) {
+                count++;
+                size += Files.size(file);
+                latest = Math.max(latest, Files.getLastModifiedTime(file).toMillis());
+            }
+        }
+        return own + "\tfolder " + count + " files\t" + size + "\t" + latest;
     }
 
     static double midiSeconds(Path midi) throws IOException {
