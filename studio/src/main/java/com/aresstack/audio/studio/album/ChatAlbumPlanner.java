@@ -22,6 +22,11 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
             + "Return valid JSON only, no Markdown.";
     /** The file the answer is kept in, in the folder of the album. */
     public static final String ANSWER_FILE = "album-plan.json";
+    /** What the plan is told about the main theme of an album that has none yet. */
+    static final String THEME_GUIDANCE = "Give the album ONE memorable main theme (leitmotif) that ties the tracks "
+            + "together: a melody of 4 to 8 bars, written out as notes. Let it come back in several tracks, each "
+            + "time in a variant that fits the track (e.g. hopeful at first, mysterious or dramatic on the way, "
+            + "triumphant at the end); calm or very different tracks may leave it out.";
     private static final String DEFAULT_FORM = "intro, main theme, variation, contrasting middle part, reprise, outro";
 
     private final ChatModel model;
@@ -59,12 +64,39 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
             return rebuild(album, cache, progress);
         }
         List<AlbumTrack> kept = new ArrayList<AlbumTrack>();
+        List<AlbumTrack> given = new ArrayList<AlbumTrack>();
         for (AlbumTrack track : album.tracks()) {
             if (track.hasPiece()) {
                 kept.add(track);
+            } else if (track.given()) {
+                given.add(track);
             }
         }
-        int wanted = Math.max(0, concept.trackCount() - kept.size());
+        List<String> ids = new ArrayList<String>();
+        for (AlbumTrack track : album.tracks()) {
+            ids.add(track.id());
+        }
+        // Without titles given in the list, a list of titles in the wish is taken: they replace
+        // the titles planned before that have no piece yet.
+        boolean listed = false;
+        if (given.isEmpty()) {
+            List<String> free = new ArrayList<String>();
+            for (AlbumTrack track : kept) {
+                free.add(track.id());
+            }
+            for (TitleList.Entry entry : TitleList.in(concept.description())) {
+                String id = freshId(free);
+                free.add(id);
+                given.add(AlbumTrack.given(id, entry.title(), entry.direction()));
+            }
+            listed = !given.isEmpty();
+            if (listed) {
+                ids = free;
+                progress.update("Die Beschreibung nennt " + given.size() + " Titel; sie werden übernommen.");
+            }
+        }
+        int fresh = Math.max(0, concept.trackCount() - kept.size() - given.size());
+        int wanted = given.size() + fresh;
         if (wanted == 0) {
             return album.withTracks(kept);
         }
@@ -77,8 +109,9 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         java.util.function.Consumer<String> heard = null;
         if (watcher != null) {
             String[] shown = {""};
+            List<AlbumTrack> before = given;
             heard = text -> {
-                List<AlbumTrack> seen = seenTracks(text, kept, wanted, concept);
+                List<AlbumTrack> seen = seenTracks(text, kept, before, wanted, concept);
                 StringBuilder key = new StringBuilder();
                 for (AlbumTrack track : seen) {
                     key.append(track).append('\n');
@@ -88,32 +121,46 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
                     watcher.accept(seen);
                 }
             };
+            watcher.accept(seenTracks("", kept, given, wanted, concept));
         }
-        JsonObject said = model.generate(INSTRUCTION, prompt(album, kept, wanted), maxTokens, answer, heard);
+        JsonObject said = model.generate(INSTRUCTION, prompt(album, kept, given, wanted), maxTokens, answer, heard);
         JsonArray planned = said != null && said.has("tracks") && said.get("tracks").isJsonArray()
                 ? said.getAsJsonArray("tracks") : new JsonArray();
-
-        // Kept titles stay at their places; the planned ones fill the places between and after them.
-        List<AlbumTrack> fresh = new ArrayList<AlbumTrack>();
-        List<String> ids = new ArrayList<String>();
-        for (AlbumTrack track : kept) {
-            ids.add(track.id());
+        AlbumTheme theme = album.theme();
+        if (theme.isEmpty() && said != null && said.has("mainTheme") && said.get("mainTheme").isJsonObject()) {
+            theme = AlbumFiles.readTheme(said.getAsJsonObject("mainTheme"));
         }
+
+        // Kept titles stay at their places, given ones too; the planned ones fill the places between and after them.
+        List<AlbumTrack> givenPlanned = new ArrayList<AlbumTrack>();
+        List<AlbumTrack> freshPlanned = new ArrayList<AlbumTrack>();
         for (int i = 0; i < wanted; i++) {
             JsonObject entry = i < planned.size() && planned.get(i).isJsonObject()
                     ? planned.get(i).getAsJsonObject() : new JsonObject();
-            String id = freshId(ids);
-            ids.add(id);
-            fresh.add(track(id, entry, kept.size() + i + 1, concept));
+            if (i < given.size()) {
+                givenPlanned.add(filled(given.get(i), entry, kept.size() + i + 1, concept));
+            } else {
+                String id = freshId(ids);
+                ids.add(id);
+                freshPlanned.add(track(id, entry, kept.size() + i + 1, concept));
+            }
         }
+        List<AlbumTrack> queue = new ArrayList<AlbumTrack>();
+        if (listed) {
+            queue.addAll(givenPlanned);
+        }
+        queue.addAll(freshPlanned);
+        int total = kept.size() + wanted;
         List<AlbumTrack> tracks = new ArrayList<AlbumTrack>();
         int next = 0;
-        for (int place = 0; place < album.tracks().size() && tracks.size() < concept.trackCount(); place++) {
+        for (int place = 0; place < album.tracks().size() && tracks.size() < total; place++) {
             AlbumTrack before = album.tracks().get(place);
             if (before.hasPiece()) {
                 tracks.add(before);
-            } else if (next < fresh.size()) {
-                tracks.add(fresh.get(next++));
+            } else if (!listed && before.given()) {
+                tracks.add(givenPlanned.get(given.indexOf(before)));
+            } else if (next < queue.size()) {
+                tracks.add(queue.get(next++));
             }
         }
         for (AlbumTrack track : kept) {
@@ -121,11 +168,32 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
                 tracks.add(track);
             }
         }
-        while (next < fresh.size()) {
-            tracks.add(fresh.get(next++));
+        if (!listed) {
+            for (AlbumTrack track : givenPlanned) {
+                if (!tracks.contains(track)) {
+                    tracks.add(track);
+                }
+            }
         }
-        progress.update("Trackliste bereit: " + tracks.size() + " Titel.");
-        return album.withTracks(tracks);
+        while (next < queue.size()) {
+            tracks.add(queue.get(next++));
+        }
+        progress.update("Trackliste bereit: " + tracks.size() + " Titel"
+                + (theme.isEmpty() ? "." : ", mit dem Hauptthema „" + theme.name() + "“."));
+        Album result = album.withTracks(tracks).withTheme(theme);
+        if (tracks.size() > concept.trackCount() && tracks.size() <= AlbumConcept.MAX_TRACKS) {
+            result = result.withConcept(new AlbumConcept(concept.description(), concept.style(), tracks.size(),
+                    concept.minSeconds(), concept.maxSeconds(), concept.original()));
+        }
+        return result;
+    }
+
+    /** A given title with what the plan says about the rest: its name stays, and its mood if the user said one. */
+    private static AlbumTrack filled(AlbumTrack given, JsonObject entry, int number, AlbumConcept concept) {
+        AlbumTrack planned = track(given.id(), entry, number, concept);
+        return new AlbumTrack(given.id(), given.title(), given.mood().isEmpty() ? planned.mood() : given.mood(),
+                planned.bpm(), planned.key(), planned.meter(), planned.instrumentation(), planned.form(),
+                planned.targetSeconds(), "", true, planned.theme());
     }
 
     /**
@@ -286,32 +354,60 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
      * title has arrived, with what has arrived of the rest.
      */
     static List<AlbumTrack> seenTracks(String text, List<AlbumTrack> kept, int wanted, AlbumConcept concept) {
+        return seenTracks(text, kept, List.of(), wanted, concept);
+    }
+
+    /** As above, with the given titles first, each shown at once and filled as the plan arrives. */
+    static List<AlbumTrack> seenTracks(String text, List<AlbumTrack> kept, List<AlbumTrack> given, int wanted,
+                                       AlbumConcept concept) {
         List<AlbumTrack> seen = new ArrayList<AlbumTrack>(kept);
+        JsonArray tracks = new JsonArray();
         try {
-            JsonObject partial = com.aresstack.audio.studio.ai.PartialJson.read(text);
-            if (partial == null || !partial.has("tracks") || !partial.get("tracks").isJsonArray()) {
-                return seen;
+            JsonObject partial = text == null || text.isEmpty() ? null
+                    : com.aresstack.audio.studio.ai.PartialJson.read(text);
+            if (partial != null && partial.has("tracks") && partial.get("tracks").isJsonArray()) {
+                tracks = partial.getAsJsonArray("tracks");
             }
-            List<String> ids = new ArrayList<String>();
-            for (AlbumTrack track : kept) {
-                ids.add(track.id());
+        } catch (RuntimeException unreadable) {
+            // a look at the plan on its way
+        }
+        List<String> ids = new ArrayList<String>();
+        for (AlbumTrack track : kept) {
+            ids.add(track.id());
+        }
+        for (AlbumTrack track : given) {
+            ids.add(track.id());
+        }
+        for (int i = 0; i < given.size(); i++) {
+            try {
+                seen.add(i < tracks.size() && tracks.get(i).isJsonObject()
+                        ? filled(given.get(i), tracks.get(i).getAsJsonObject(), kept.size() + i + 1, concept)
+                        : given.get(i));
+            } catch (RuntimeException odd) {
+                seen.add(given.get(i));
             }
-            JsonArray tracks = partial.getAsJsonArray("tracks");
-            for (int i = 0; i < Math.min(wanted, tracks.size()); i++) {
-                if (!tracks.get(i).isJsonObject() || AlbumFiles.text(tracks.get(i).getAsJsonObject(), "title").isBlank()) {
+        }
+        for (int i = given.size(); i < Math.min(wanted, tracks.size()); i++) {
+            try {
+                if (!tracks.get(i).isJsonObject()
+                        || AlbumFiles.text(tracks.get(i).getAsJsonObject(), "title").isBlank()) {
                     continue;
                 }
                 String id = freshId(ids);
                 ids.add(id);
                 seen.add(track(id, tracks.get(i).getAsJsonObject(), kept.size() + i + 1, concept));
+            } catch (RuntimeException odd) {
+                // a look at the plan on its way
             }
-        } catch (RuntimeException unreadable) {
-            // a look at the plan on its way
         }
         return seen;
     }
 
     static String prompt(Album album, List<AlbumTrack> kept, int wanted) {
+        return prompt(album, kept, List.of(), wanted);
+    }
+
+    static String prompt(Album album, List<AlbumTrack> kept, List<AlbumTrack> given, int wanted) {
         AlbumConcept concept = album.concept();
         StringBuilder prompt = new StringBuilder();
         prompt.append(concept.original() ? "Plan an instrumental album that rebuilds an existing work.\n"
@@ -332,6 +428,27 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
                         .append(track.bpm()).append(" BPM, ").append(track.key()).append('\n');
             }
         }
+        if (!given.isEmpty()) {
+            prompt.append("The user gives the first ").append(given.size()).append(" tracks, in this order. Keep each "
+                    + "title exactly as given and follow what the user says about it; plan the rest of each:\n");
+            for (int i = 0; i < given.size(); i++) {
+                AlbumTrack track = given.get(i);
+                prompt.append(i + 1).append(". \"").append(escape(track.title())).append('"');
+                if (!track.mood().isEmpty()) {
+                    prompt.append(": ").append(escape(track.mood()));
+                }
+                prompt.append('\n');
+            }
+        }
+        if (!concept.original()) {
+            if (album.theme().isEmpty()) {
+                prompt.append(THEME_GUIDANCE).append('\n');
+            } else {
+                prompt.append("The album has this main theme (leitmotif), \"").append(escape(album.theme().name()))
+                        .append("\": ").append(escape(album.theme().description())).append(". Notes: ")
+                        .append(album.theme().notesText()).append(". Say for each track how it appears there.\n");
+            }
+        }
         if (concept.original()) {
             prompt.append(com.aresstack.audio.studio.application.OriginalWork.ALBUM_GUIDANCE).append('\n');
         } else {
@@ -350,7 +467,17 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
                 .append(concept.original() ? "the length of a usual performance of the movement"
                         : concept.minSeconds() == concept.maxSeconds() ? "about " + concept.secondsPerTrack()
                         : "between " + concept.minSeconds() + " and " + concept.maxSeconds()
-                        + "; let the lengths differ from track to track, as the music needs").append(").");
+                        + "; let the lengths differ from track to track, as the music needs").append(")");
+        if (concept.original()) {
+            prompt.append('.');
+        } else {
+            prompt.append(", theme (how the main theme appears in this track, e.g. \"hopeful, on solo horn\" or "
+                    + "\"dark variant in minor, low strings\"; empty if it does not appear).");
+            if (album.theme().isEmpty()) {
+                prompt.append(" Also return 'mainTheme': {name, description, key, notes: [{beat, duration, pitch}, "
+                        + "...]}, beats in quarters from the start of the theme, MIDI pitches 55-84.");
+            }
+        }
         return prompt.toString();
     }
 
@@ -372,7 +499,8 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         int bpm = AlbumFiles.number(entry, "tempoBpm", 100);
         return new AlbumTrack(id, title.isBlank() ? "Titel " + number : title, AlbumFiles.text(entry, "mood"),
                 bpm < 40 || bpm > 200 ? 100 : bpm, AlbumFiles.text(entry, "key"), AlbumFiles.text(entry, "meter"),
-                text(entry.get("instrumentation")), form.isBlank() ? DEFAULT_FORM : form, seconds, "");
+                text(entry.get("instrumentation")), form.isBlank() ? DEFAULT_FORM : form, seconds, "", false,
+                concept.original() ? "" : AlbumFiles.text(entry, "theme"));
     }
 
     /** The players as words, also if the model gave a list. */

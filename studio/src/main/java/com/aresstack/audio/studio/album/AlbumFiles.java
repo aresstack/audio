@@ -171,9 +171,18 @@ public final class AlbumFiles implements AlbumRepository {
             if (track.hasPiece()) {
                 entry.addProperty("piece", track.piece());
             }
+            if (track.given()) {
+                entry.addProperty("given", true);
+            }
+            if (!track.theme().isEmpty()) {
+                entry.addProperty("theme", track.theme());
+            }
             tracks.add(entry);
         }
         json.add("tracks", tracks);
+        if (!album.theme().isEmpty()) {
+            json.add("theme", writeTheme(album.theme()));
+        }
         return json;
     }
 
@@ -187,7 +196,9 @@ public final class AlbumFiles implements AlbumRepository {
                         number(entry, "tempoBpm", 100), text(entry, "key"), text(entry, "meter"),
                         text(entry, "instrumentation"), text(entry, "form"), number(entry, "targetSeconds", 180),
                         // A folder name that is not one plain name in the library is not followed.
-                        AlbumTrack.isFolderName(text(entry, "piece")) ? text(entry, "piece") : ""));
+                        AlbumTrack.isFolderName(text(entry, "piece")) ? text(entry, "piece") : "",
+                        entry.has("given") && entry.get("given").isJsonPrimitive() && entry.get("given").getAsBoolean(),
+                        text(entry, "theme")));
             }
         }
         // An album from before the range has one length for all pieces, meant as "about": it
@@ -199,7 +210,43 @@ public final class AlbumFiles implements AlbumRepository {
         return new Album(id, text(json, "title"), new AlbumConcept(text(concept, "description"),
                 text(concept, "style"), number(concept, "trackCount", Math.max(1, tracks.size())),
                 low, high).withOriginal(concept.has("original") && concept.get("original").isJsonPrimitive()
-                && concept.get("original").getAsBoolean()), tracks);
+                && concept.get("original").getAsBoolean()), tracks,
+                json.has("theme") && json.get("theme").isJsonObject() ? readTheme(json.getAsJsonObject("theme"))
+                        : AlbumTheme.NONE);
+    }
+
+    static JsonObject writeTheme(AlbumTheme theme) {
+        JsonObject json = new JsonObject();
+        json.addProperty("name", theme.name());
+        json.addProperty("description", theme.description());
+        json.addProperty("key", theme.key());
+        JsonArray notes = new JsonArray();
+        for (AlbumTheme.Note note : theme.notes()) {
+            JsonObject entry = new JsonObject();
+            entry.addProperty("beat", note.beat());
+            entry.addProperty("duration", note.duration());
+            entry.addProperty("pitch", note.pitch());
+            notes.add(entry);
+        }
+        json.add("notes", notes);
+        return json;
+    }
+
+    /** A theme as the plan or the file says it; notes that cannot be read are left out. */
+    static AlbumTheme readTheme(JsonObject json) {
+        List<AlbumTheme.Note> notes = new ArrayList<AlbumTheme.Note>();
+        if (json.has("notes") && json.get("notes").isJsonArray()) {
+            for (JsonElement element : json.getAsJsonArray("notes")) {
+                try {
+                    JsonObject note = element.getAsJsonObject();
+                    notes.add(new AlbumTheme.Note(note.get("beat").getAsDouble(), note.get("duration").getAsDouble(),
+                            note.get("pitch").getAsInt()));
+                } catch (RuntimeException unreadable) {
+                    // not a note
+                }
+            }
+        }
+        return new AlbumTheme(text(json, "name"), text(json, "description"), text(json, "key"), notes);
     }
 
     static String text(JsonObject json, String name) {
