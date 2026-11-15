@@ -95,6 +95,36 @@ public final class PieceModel {
         }
     }
 
+    /**
+     * How the instruments of the open piece move on its stage (work package D3), as its mix
+     * document says; nothing for a piece without a model.
+     */
+    public synchronized StageMovements movements() {
+        return session == null ? StageMovements.NONE
+                : StageMovements.of(session.mix(), session.composition().timeMap());
+    }
+
+    /**
+     * The user drew how a track moves: the curve of one parameter is kept in the mix document of
+     * the piece. Only {@code mix.json} is written; the notes and the rendered sound stay.
+     *
+     * @param movements the movements as the stage page shows them now
+     * @return whether the curve is kept; if not, the reason was said as a warning
+     */
+    public synchronized boolean move(StageMovements movements, String trackId, String parameter) {
+        if (session == null) {
+            log.accept("WARN: Der Verlauf lässt sich nicht speichern: das Stück hat noch kein Werkmodell.");
+            return false;
+        }
+        try {
+            session.automate(trackId, parameter, movements.ticks(trackId, parameter));
+            return true;
+        } catch (IOException | RuntimeException failed) {
+            log.accept("WARN: Der Verlauf lässt sich nicht speichern: " + said(failed));
+            return false;
+        }
+    }
+
     /** The model of the open piece, if it has one. */
     public synchronized Optional<ProjectSession> session() {
         return Optional.ofNullable(session);

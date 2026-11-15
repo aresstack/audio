@@ -584,6 +584,12 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
+            public void movementChanged(com.aresstack.audio.studio.application.StageMovements movements,
+                                        String trackId, String parameter, boolean settled) {
+                AudioStudioFrame.this.movementChanged(movements, trackId, parameter, settled);
+            }
+
+            @Override
             public void askDirector() {
                 AudioStudioFrame.this.askDirector();
             }
@@ -617,6 +623,31 @@ public final class AudioStudioFrame extends JFrame {
         if (stagePanel != null && trackTable != null) {
             stagePanel.setScene(scene, trackTable.tracks());
         }
+        showMovements();
+    }
+
+    /** Shows on the stage page how the instruments move over the bars, as the model of the piece says. */
+    private void showMovements() {
+        if (stagePanel != null) {
+            stagePanel.setMovements(pieceModel.movements());
+        }
+    }
+
+    /**
+     * A curve of the place or of the room share of a track was drawn on the stage page (work
+     * package D3). When the change has settled, it is kept in the mix document of the piece and
+     * the rendered tracks are mixed again; the notes and the rendered sound stay as they are.
+     */
+    private void movementChanged(com.aresstack.audio.studio.application.StageMovements movements, String trackId,
+                                 String parameter, boolean settled) {
+        if (!settled) {
+            return;
+        }
+        if (!pieceModel.move(movements, trackId, parameter)) {
+            showMovements(); // not kept: the page shows again what the piece says
+            return;
+        }
+        remixTimer.restart();
     }
 
     private void saveScene() {
@@ -1998,6 +2029,7 @@ public final class AudioStudioFrame extends JFrame {
                 com.aresstack.audio.studio.score.Score.read(folder.resolve("arrangement.tsv"));
         if (stagePanel != null) {
             stagePanel.setBars(written == null ? 8 : written.bars());
+            showMovements(); // after composing, the model of the piece may be new
         }
         scoreView.setScore(com.aresstack.audio.studio.score.Score.read(folder.resolve("arrangement.tsv")), ids,
                 "Noch keine Noten: erst komponieren, dann steht hier die Partitur");
@@ -2284,6 +2316,7 @@ public final class AudioStudioFrame extends JFrame {
         // The piece as a model: an old piece is taken into it here, its old files stay as they are.
         String chosen = directory.getText().trim();
         pieceModel.open(chosen.isEmpty() ? null : Paths.get(chosen));
+        showMovements();
     }
 
     private void tracksChanged() {
