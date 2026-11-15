@@ -74,6 +74,37 @@ public final class KipitzChatClient implements ChatModel {
         if (apiKey == null || apiKey.trim().isEmpty()) {
             throw new IOException("Enter an API key to generate the missing composition part.");
         }
+        // From here on the model is asked: the studio's AI lamp is on for as long as that lasts.
+        busy(+1);
+        try {
+            return ask(instruction, prompt, maxTokens, cache, heard, origin);
+        } finally {
+            busy(-1);
+        }
+    }
+
+    /** Hears when a request to the model begins (+1) and ends (-1); e.g. the AI lamp of the studio. */
+    private volatile java.util.function.IntConsumer activity;
+
+    /** Tells this listener when a request to the model begins (+1) and ends (-1), whatever asks. */
+    public KipitzChatClient activity(java.util.function.IntConsumer listener) {
+        this.activity = listener;
+        return this;
+    }
+
+    private void busy(int change) {
+        java.util.function.IntConsumer listener = activity;
+        if (listener != null) {
+            try {
+                listener.accept(change);
+            } catch (RuntimeException unheard) {
+                // the lamp must never break a request
+            }
+        }
+    }
+
+    private JsonObject ask(String instruction, String prompt, int maxTokens, Path cache,
+                           java.util.function.Consumer<String> heard, AnswerOrigin origin) throws IOException {
         JsonObject request = new JsonObject();
         request.addProperty("model", model);
         request.addProperty("temperature", TEMPERATURE);
