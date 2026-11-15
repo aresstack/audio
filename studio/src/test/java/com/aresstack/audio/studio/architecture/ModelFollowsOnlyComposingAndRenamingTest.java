@@ -33,9 +33,13 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         while (use.find()) {
             users.add(methodAround(source, use.start()));
         }
-        assertEquals("opening loads the model, composing and renaming bring it in step; nothing else reaches it",
+        assertEquals("opening loads the model, composing and renaming bring it in step, rendering reads it;"
+                        + " nothing else reaches it",
                 new java.util.TreeSet<String>(List.of("composeIntoPiece", "loadArrangementForCurrentDirectory",
-                        "pieceToEdit", "renamed")), users);
+                        "pieceToEdit", "renamed", "renderArrangement")), users);
+        assertEquals("rendering only reads the saved model", List.of("renderArrangement"),
+                callers(source, "pieceModel\\.of\\("));
+        assertEquals(1, callers(source, "pieceModel\\.").stream().filter("renderArrangement"::equals).count());
         assertEquals("the note editor only gets the open session; it changes it through the edit core alone",
                 "return pieceModel.session();",
                 bodyOf(source, "pieceToEdit() {").replace("{", "").trim());

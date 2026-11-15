@@ -112,7 +112,7 @@ public final class AudioStudioFrame extends JFrame {
             "A charming pastel city slowly grows; compose a playful, cozy, uplifting orchestral theme.", 3, 54);
     private final JTextArea log = new JTextArea(10, 70);
     private final JComboBox<String> playbackSelection = new JComboBox<String>(new String[]{
-            "Mixed sampled arrangement", "Java reference mix"
+            "Mixed sampled arrangement"
     });
     private final JSpinner parallelRequests = new JSpinner(
             new SpinnerNumberModel(32, 1, 1024, 1));
@@ -642,12 +642,42 @@ public final class AudioStudioFrame extends JFrame {
         return Files.isRegularFile(file) ? file : null;
     }
 
+    /**
+     * What mixing, listening to one track and saving the mix work from: the model of the open
+     * piece, with its parts and its time map. A written arrangement is read only for a piece
+     * without a model, or when the user chose an arrangement from elsewhere. {@code null} if
+     * nothing is written yet.
+     */
+    private com.aresstack.audio.studio.application.StageMixService.Piece pieceToMix() {
+        try {
+            com.aresstack.audio.composition.Composition model = modelToMix();
+            if (model != null) {
+                return com.aresstack.audio.studio.application.StageMixService.Piece.of(model);
+            }
+            Path written = writtenArrangement();
+            return written == null ? null : com.aresstack.audio.studio.application.StageMixService.Piece.written(written);
+        } catch (IOException | RuntimeException unreadable) {
+            return null;
+        }
+    }
+
+    /** The model of the open piece as it is mixed; {@code null} without one, or with an arrangement from elsewhere. */
+    private com.aresstack.audio.composition.Composition modelToMix() {
+        Path folder = Paths.get(directory.getText().trim()).toAbsolutePath().normalize();
+        String named = arrangementFile.getText().trim();
+        boolean elsewhere = !named.isEmpty() && !Paths.get(named).toAbsolutePath().normalize()
+                .equals(folder.resolve("arrangement.tsv"));
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> model = pieceToEdit();
+        return !elsewhere && model.isPresent() && model.get().folder().toAbsolutePath().normalize().equals(folder)
+                ? model.get().composition() : null;
+    }
+
     /** Mixes the rendered tracks again on the stage as it stands, in the background. */
     private void remix() {
         if (stagePanel == null || (worker != null && !worker.isDone())) {
             return; // what is running mixes on the saved stage when it gets there
         }
-        final Path arrangement = writtenArrangement();
+        final com.aresstack.audio.studio.application.StageMixService.Piece arrangement = pieceToMix();
         final Path folder = Paths.get(directory.getText().trim());
         if (arrangement == null) {
             stagePanel.setStatus("Noch nichts komponiert: die Bühne gilt, sobald gerendert wird.");
@@ -687,7 +717,7 @@ public final class AudioStudioFrame extends JFrame {
                     "Neu gemischt in %.1f s · ohne KI, ohne Synthese", seconds));
         }
         String selected = (String) playbackSelection.getSelectedItem();
-        if (selected == null || "Java reference mix".equals(selected)) {
+        if (selected == null) {
             return;
         }
         // What plays goes on at the same place with the new mix; a track that plays alone is mixed anew too.
@@ -707,7 +737,7 @@ public final class AudioStudioFrame extends JFrame {
 
     /** Writes the mix on the stage to a WAV file of the user's choice, with 24 bits. */
     private void exportMix() {
-        final Path arrangement = writtenArrangement();
+        final com.aresstack.audio.studio.application.StageMixService.Piece arrangement = pieceToMix();
         if (arrangement == null) {
             message("Erst komponieren und rendern: dann gibt es eine Mischung zu speichern.");
             return;
@@ -780,8 +810,9 @@ public final class AudioStudioFrame extends JFrame {
 
     /** The AI is told what each track plays and proposes levels, their course, places and the room. */
     private void askDirector() {
+        final com.aresstack.audio.composition.Composition model = modelToMix();
         final Path arrangement = writtenArrangement();
-        if (arrangement == null) {
+        if (model == null && arrangement == null) {
             message("Erst komponieren oder die Demo laden: die KI mischt ab, was geschrieben ist.");
             return;
         }
@@ -807,8 +838,11 @@ public final class AudioStudioFrame extends JFrame {
             public Path execute(Progress progress) throws Exception {
                 try {
                     final com.aresstack.audio.studio.stage.SpatialScene proposed =
-                            new com.aresstack.audio.studio.application.MixDirector(client, tokens)
-                                    .direct(prompt, arrangement, current, output, progress);
+                            model != null
+                                    ? new com.aresstack.audio.studio.application.MixDirector(client, tokens)
+                                            .direct(prompt, model, current, output, progress)
+                                    : new com.aresstack.audio.studio.application.MixDirector(client, tokens)
+                                            .direct(prompt, arrangement, current, output, progress);
                     SwingUtilities.invokeLater(() -> stagePanel.setProposal(proposed));
                     progress.update("Abmischung vorgeschlagen: auf der Bühne ansehen, dann übernehmen oder verwerfen.");
                     return null;
@@ -1535,8 +1569,32 @@ public final class AudioStudioFrame extends JFrame {
         return null;
     }
 
+    /**
+     * Renders the piece and mixes its stage. A piece with a model is rendered from the model as
+     * it is saved (rendering never brings the model in step with the old files; only composing
+     * and renaming do), with the instruments chosen in the table: only the parts that changed
+     * are rendered, the others come from the stem cache. An arrangement that is
+     * not the open piece (a file chosen from elsewhere) or a piece whose model cannot be used is
+     * rendered from its file as before.
+     */
     private Path renderArrangement(Path source, Path destination, RenderSettings settings,
                                    Progress progress) throws Exception {
+        if (source.toAbsolutePath().normalize()
+                .equals(destination.resolve("arrangement.tsv").toAbsolutePath().normalize())) {
+            java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece =
+                    pieceModel.of(destination);
+            if (piece.isPresent()) {
+                Map<String, String> libraries = new HashMap<String, String>();
+                for (String track : settings.programs.keySet()) {
+                    InstrumentLibrary bank = settings.assignments.get(track);
+                    libraries.put(track, bank == null ? "builtin" : bank.id());
+                }
+                return new com.aresstack.audio.studio.application.PieceRendering(registry).render(piece.get(),
+                        libraries, settings.sf2Engine, settings.fluidSynthExecutable, settings.sfizzExecutable,
+                        settings.programs, progress).mix();
+            }
+        }
+        progress.update("Dieses Arrangement wird aus seiner Datei gerendert (kein Werkmodell).");
         return new StudioMusicRenderer(registry).render(source, destination, settings.assignments,
                 settings.programs, settings.sf2Engine,
                 settings.fluidSynthExecutable, settings.sfizzExecutable, progress);
@@ -1958,11 +2016,8 @@ public final class AudioStudioFrame extends JFrame {
         if ("Mixed sampled arrangement".equals(selected)) {
             return folder.resolve("arrangement-instruments.wav");
         }
-        if ("Java reference mix".equals(selected)) {
-            return folder.resolve("arrangement.wav");
-        }
         // One track alone is heard as it stands on the stage: with its level, its place and the room.
-        Path arrangement = writtenArrangement();
+        com.aresstack.audio.studio.application.StageMixService.Piece arrangement = pieceToMix();
         Path raw = com.aresstack.audio.studio.application.StageMixService.stem(folder, selected);
         if (arrangement != null && Files.isRegularFile(raw)) {
             try {
@@ -1978,8 +2033,7 @@ public final class AudioStudioFrame extends JFrame {
     /** The track that plays alone, or {@code null} when a mix is chosen. */
     private String soloTrack() {
         String selected = (String) playbackSelection.getSelectedItem();
-        return selected == null || "Mixed sampled arrangement".equals(selected)
-                || "Java reference mix".equals(selected) ? null : selected;
+        return selected == null || "Mixed sampled arrangement".equals(selected) ? null : selected;
     }
 
     /** Shows what is chosen under playback on the display and as a waveform, without playing it. */
@@ -2052,14 +2106,11 @@ public final class AudioStudioFrame extends JFrame {
 
     /** What a choice of the playback is called in the list. */
     private static String playbackLabel(String selected) {
-        return "Mixed sampled arrangement".equals(selected) ? "Mix · Bühne"
-                : "Java reference mix".equals(selected) ? "Referenz · Java-Synthese, ohne Bühne"
-                : "Solo · " + selected;
+        return "Mixed sampled arrangement".equals(selected) ? "Mix · Bühne" : "Solo · " + selected;
     }
 
     private static String playbackName(String selected) {
         return "Mixed sampled arrangement".equals(selected) ? "MIX · BÜHNE"
-                : "Java reference mix".equals(selected) ? "REFERENZ · OHNE BÜHNE"
                 : "SOLO · " + selected.toUpperCase(java.util.Locale.ROOT);
     }
 
@@ -2353,7 +2404,6 @@ public final class AudioStudioFrame extends JFrame {
         choosingPlayback = true;
         playbackSelection.removeAllItems();
         playbackSelection.addItem("Mixed sampled arrangement");
-        playbackSelection.addItem("Java reference mix");
         if (trackTable != null) {
             try {
                 for (MusicTrack track : trackTable.currentArrangement().tracks()) {
