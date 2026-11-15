@@ -1,5 +1,6 @@
 package com.aresstack.audio.studio.ai;
 
+import com.aresstack.audio.composition.Articulation;
 import com.aresstack.audio.composition.Key;
 import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.studio.ai.GeneratedNotes.RawNote;
@@ -28,9 +29,14 @@ public final class VoiceNormalizer {
      * @param tick  ticks from the start of the frame
      * @param voice the voice the model named for the note, as written, or {@code null}
      */
-    public record ShapedNote(long tick, long length, int pitch, int velocity, String voice) {
+    public record ShapedNote(long tick, long length, int pitch, int velocity, String voice,
+                             Articulation articulation) {
         public ShapedNote(long tick, long length, int pitch, int velocity) {
-            this(tick, length, pitch, velocity, null);
+            this(tick, length, pitch, velocity, null, null);
+        }
+
+        public ShapedNote(long tick, long length, int pitch, int velocity, String voice) {
+            this(tick, length, pitch, velocity, voice, null);
         }
     }
 
@@ -116,7 +122,7 @@ public final class VoiceNormalizer {
                 corrections.add(where + "\t" + index + "\tpitch\t" + pitch + "\t" + pitch + "\tleiterfremd in "
                         + ContextBuilder.key(time.keyAt(tick)) + " (nicht verändert)");
             }
-            shaped.add(new ShapedNote(tick - frame.startTick(), length, pitch, velocity, raw.voice()));
+            shaped.add(new ShapedNote(tick - frame.startTick(), length, pitch, velocity, raw.voice(), raw.articulation()));
         }
         return shaped;
     }

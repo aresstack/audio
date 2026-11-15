@@ -25,9 +25,10 @@ import java.util.Set;
  * @param motifs  how the continuation relates to the motifs of the piece, in words; may be empty
  * @param arc     the overall dramaturgy in words; may be empty
  * @param repairs what was repaired in the planning answer, one line each, in German
+ * @param performance how the new bars are played: tempo, dynamic marks, hairpins
  */
 public record ContinuationPlan(List<PlannedSection> sections, List<NewPart> newParts, String motifs, String arc,
-                               List<String> repairs) {
+                               List<String> repairs, ContinuationPerformance performance) {
     /** The longest section one generator call writes (architecture review E4: 8 to 16 bars). */
     public static final int MAX_SECTION_BARS = 16;
     private static final String[] NAMES = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
@@ -80,7 +81,19 @@ public record ContinuationPlan(List<PlannedSection> sections, List<NewPart> newP
         }
     }
 
+    /** As the canonical constructor, without a planned performance. */
+    public ContinuationPlan(List<PlannedSection> sections, List<NewPart> newParts, String motifs, String arc,
+                            List<String> repairs) {
+        this(sections, newParts, motifs, arc, repairs, ContinuationPerformance.NONE);
+    }
+
+    /** This plan with the new bars played this way. */
+    public ContinuationPlan withPerformance(ContinuationPerformance changed) {
+        return new ContinuationPlan(sections, newParts, motifs, arc, repairs, changed);
+    }
+
     public ContinuationPlan {
+        performance = performance == null ? ContinuationPerformance.NONE : performance;
         sections = List.copyOf(sections);
         newParts = List.copyOf(newParts);
         motifs = motifs == null ? "" : motifs.strip();

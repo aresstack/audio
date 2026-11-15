@@ -3,14 +3,17 @@ package com.aresstack.audio.studio.application;
 import com.aresstack.audio.composition.Clip;
 import com.aresstack.audio.composition.Composition;
 import com.aresstack.audio.composition.Composition.PlacedNote;
+import com.aresstack.audio.composition.Dynamics;
 import com.aresstack.audio.composition.MidiClip;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.Section;
+import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.composition.Track;
 import com.aresstack.audio.composition.edit.EditOp;
 import com.aresstack.audio.composition.edit.EditScope;
 import com.aresstack.audio.composition.edit.Patch;
 import com.aresstack.audio.studio.ai.ComposedContinuation;
+import com.aresstack.audio.studio.ai.ContinuationPerformance;
 import com.aresstack.audio.studio.ai.TransitionMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -62,7 +65,7 @@ public final class AppendContinuation {
         continuation.newTracks().forEach(track -> tracks.add(track.id()));
         long transition = continuation.task().newStart() - continuation.task().tailStart();
         return new EditScope(false, parts, tracks, Set.of(), continuation.task().newStart(), EditScope.END,
-                kinds(transition > 0), false, transition);
+                performed(kinds(transition > 0), continuation), false, transition);
     }
 
     /**
@@ -73,9 +76,89 @@ public final class AppendContinuation {
         List<EditOp> operations = new ArrayList<>();
         operations.add(new EditOp.SetSections(continuation.form()));
         operations.addAll(body(continuation));
+        List<String> said = new ArrayList<>();
+        operations.addAll(performance(piece, continuation, said));
         var request = continuation.task().request();
         return new Patch("Stück um " + request.bars() + " Takte verlängert (" + request.preset().label() + ", "
-                + request.ending().label() + ", " + request.transition().label() + ")", operations);
+                + request.ending().label() + ", " + request.transition().label() + ")" + told(said), operations);
+    }
+
+    /** The kinds of a scope, with tempo and dynamics when the plan says how the new bars are played. */
+    static Set<EditOp.Kind> performed(Set<EditOp.Kind> kinds, ComposedContinuation continuation) {
+        if (continuation.plan().performance().isEmpty()) {
+            return kinds;
+        }
+        EnumSet<EditOp.Kind> more = EnumSet.copyOf(kinds);
+        more.add(EditOp.Kind.SET_TIME_MAP);
+        more.add(EditOp.Kind.SET_DYNAMICS);
+        return Set.copyOf(more);
+    }
+
+    /**
+     * The operations that play the new bars as the plan says: the tempo and the dynamics of
+     * {@code room} (the piece the new bars go into) with the planned points in the new bars.
+     * What cannot be placed goes to {@code said}.
+     */
+    static List<EditOp> performance(Composition room, ComposedContinuation continuation, List<String> said) {
+        ContinuationPerformance planned = continuation.plan().performance();
+        if (planned.isEmpty()) {
+            return List.of();
+        }
+        ContinuationPerformance.Applied applied = planned.applied(room, continuation.task().newStart(),
+                continuation.task().newEnd(), said);
+        List<EditOp> operations = new ArrayList<>();
+        if (applied.timeMap() != null) {
+            operations.add(new EditOp.SetTimeMap(applied.timeMap()));
+        }
+        if (applied.dynamics() != null) {
+            operations.add(new EditOp.SetDynamics(applied.dynamics()));
+        }
+        return operations;
+    }
+
+    /** What was left out of the planned performance, for the words of a patch. */
+    static String told(List<String> said) {
+        return said.isEmpty() ? "" : "; " + String.join(" ", said);
+    }
+
+    /**
+     * Whether two time maps are the same apart from tempo points of {@code after} that are not in
+     * {@code before} and lie from {@code from} to {@code to}: the tempo the new bars were given.
+     */
+    static boolean sameTimeApartFrom(TimeMap before, TimeMap after, long from, long to) {
+        if (!before.meters().equals(after.meters()) || !before.keys().equals(after.keys())) {
+            return false;
+        }
+        List<TimeMap.Tempo> kept = new ArrayList<>();
+        for (TimeMap.Tempo tempo : after.tempos()) {
+            if (before.tempos().contains(tempo) || tempo.tick() < from || tempo.tick() > to) {
+                kept.add(tempo);
+            }
+        }
+        return kept.equals(before.tempos());
+    }
+
+    /**
+     * Whether two dynamics are the same apart from marks and hairpins of {@code after} that are not
+     * in {@code before} and lie from {@code from} to {@code to}: the dynamics of the new bars.
+     */
+    static boolean sameDynamicsApartFrom(Dynamics before, Dynamics after, long from, long to) {
+        if (!before.scale().equals(after.scale()) || !before.articulations().equals(after.articulations())) {
+            return false;
+        }
+        List<Dynamics.Mark> marks = new ArrayList<>();
+        for (Dynamics.Mark mark : after.marks()) {
+            if (before.marks().contains(mark) || mark.tick() < from || mark.tick() > to) {
+                marks.add(mark);
+            }
+        }
+        List<Dynamics.Hairpin> pins = new ArrayList<>();
+        for (Dynamics.Hairpin pin : after.hairpins()) {
+            if (before.hairpins().contains(pin) || pin.startTick() < from || pin.endTick() > to) {
+                pins.add(pin);
+            }
+        }
+        return marks.equals(before.marks()) && pins.equals(before.hairpins());
     }
 
     /** What every patch of new bars holds after the form: new parts and tracks, the transition notes, the new clips. */
@@ -150,9 +233,14 @@ public final class AppendContinuation {
                 || !form.subList(0, before.sections().size()).equals(before.sections())) {
             differences.add("sections of the original changed");
         }
-        if (!before.timeMap().equals(after.timeMap()) || !before.meta().equals(after.meta())
-                || !before.assets().equals(after.assets())) {
+        long originalEnd = before.timeMap().tickOfBar(before.timeMap().barsCovering(before.endTick()));
+        long newFrom = Math.max(keptUntil, originalEnd);
+        if (!sameTimeApartFrom(before.timeMap(), after.timeMap(), newFrom, Long.MAX_VALUE)
+                || !before.meta().equals(after.meta()) || !before.assets().equals(after.assets())) {
             differences.add("time map, meta or assets changed");
+        }
+        if (!sameDynamicsApartFrom(before.dynamics(), after.dynamics(), newFrom, Long.MAX_VALUE)) {
+            differences.add("dynamics of the original changed");
         }
         for (Part part : after.parts()) {
             if (before.part(part.id()) == null && !newParts.contains(part.id())) {

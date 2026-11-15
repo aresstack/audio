@@ -236,7 +236,8 @@ public final class OrchestrationComposer {
                 List<Note> notes = new ArrayList<>();
                 for (int i = 0; i < shaped.size(); i++) {
                     ShapedNote n = shaped.get(i);
-                    notes.add(new Note(fresh.next(), ticks.get(i) - from, n.length(), n.pitch(), n.velocity(), voiceId));
+                    notes.add(new Note(fresh.next(), ticks.get(i) - from, n.length(), n.pitch(), n.velocity(), voiceId,
+                            n.articulation()));
                 }
                 clips.add(new ComposedContinuation.PlacedClip(track.id(),
                         new MidiClip(fresh.next(), from, to - from, null, notes)));
@@ -278,7 +279,7 @@ public final class OrchestrationComposer {
                     long length = Math.min(n.length(), Math.min(holder.endTick(), to) - tick);
                     cut(corrections, player.id(), n.length(), length);
                     added.computeIfAbsent(holder.id(), id -> new ArrayList<>()).add(new Note(fresh.next(),
-                            tick - holder.startTick(), length, n.pitch(), n.velocity(), voiceId));
+                            tick - holder.startTick(), length, n.pitch(), n.velocity(), voiceId, n.articulation()));
                     continue;
                 }
                 Gap gap = gaps.stream().filter(g -> tick >= g.start && tick < g.end).findFirst().orElse(null);
@@ -289,7 +290,8 @@ public final class OrchestrationComposer {
                 }
                 long length = Math.min(n.length(), gap.end - tick);
                 cut(corrections, player.id(), n.length(), length);
-                gap.notes.add(new Note(fresh.next(), tick - gap.start, length, n.pitch(), n.velocity(), voiceId));
+                gap.notes.add(new Note(fresh.next(), tick - gap.start, length, n.pitch(), n.velocity(), voiceId,
+                        n.articulation()));
             }
             boolean needsHome = false;
             for (Gap gap : gaps) {

@@ -314,7 +314,8 @@ public final class ContinuationComposer {
                 Track track = trackOf.get(voice.key());
                 List<Note> notes = new ArrayList<>();
                 for (ShapedNote n : shaped) {
-                    notes.add(new Note(fresh.next(), n.tick(), n.length(), n.pitch(), n.velocity(), voiceId));
+                    notes.add(new Note(fresh.next(), n.tick(), n.length(), n.pitch(), n.velocity(), voiceId,
+                            n.articulation()));
                 }
                 String clipPart = player.id().equals(track.defaultPartId()) ? null : player.id();
                 clips.add(new ComposedContinuation.PlacedClip(track.id(),
@@ -433,7 +434,7 @@ public final class ContinuationComposer {
                 ends.merge(home.id(), tick + length, Math::max);
             }
             added.computeIfAbsent(home.id(), id -> new ArrayList<>()).add(new Note(fresh.next(), tick - home.startTick(),
-                    length, n.pitch(), n.velocity(), voiceId));
+                    length, n.pitch(), n.velocity(), voiceId, n.articulation()));
         }
         List<ComposedContinuation.TailChange> changes = new ArrayList<>();
         Set<String> clips = new java.util.LinkedHashSet<>(removed.keySet());

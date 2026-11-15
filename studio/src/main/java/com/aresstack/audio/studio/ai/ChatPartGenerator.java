@@ -57,6 +57,7 @@ public final class ChatPartGenerator implements PartGenerator {
                 : "The new voice ended its previous section with (bar beat dur pitch vel, bars of the piece):\n"
                 + connection + "Continue smoothly from there.\n");
         prompt.append(rules(task.request().role())).append('\n');
+        prompt.append(GeneratedNotes.articulationRule()).append('\n');
         String voices = voiceRule(task);
         if (!voices.isEmpty()) {
             prompt.append(voices).append('\n');

@@ -1,5 +1,6 @@
 package com.aresstack.audio.studio.ai;
 
+import com.aresstack.audio.composition.Articulation;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -25,7 +26,24 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
      * @param index the position of the note in the answer, from 1
      * @param voice the voice named by the model, or {@code null}
      */
-    public record RawNote(int index, double bar, double beat, double duration, int pitch, int velocity, String voice) {
+    public record RawNote(int index, double bar, double beat, double duration, int pitch, int velocity, String voice,
+                          Articulation articulation) {
+        public RawNote(int index, double bar, double beat, double duration, int pitch, int velocity, String voice) {
+            this(index, bar, beat, duration, pitch, velocity, voice, null);
+        }
+    }
+
+    /**
+     * The sentence of a note prompt that lets a note carry an articulation, as a score marks it;
+     * an articulation the studio does not know is left out when reading.
+     */
+    public static String articulationRule() {
+        StringBuilder names = new StringBuilder();
+        for (Articulation articulation : Articulation.values()) {
+            names.append(names.length() == 0 ? "" : ", ").append('"').append(articulation.token()).append('"');
+        }
+        return "A note may also carry \"articulation\": one of " + names + ", where the music asks for it as in a "
+                + "score (short notes, weight, bound lines); leave it out for plain notes.";
     }
 
     public GeneratedNotes {
@@ -80,7 +98,7 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
                 double bar = note.has("bar") ? note.get("bar").getAsDouble() : 1;
                 notes.add(new RawNote(i + 1, bar, note.get("beat").getAsDouble(), note.get("duration").getAsDouble(),
                         note.get("pitch").getAsInt(), note.has("velocity") ? note.get("velocity").getAsInt() : 80,
-                        text(note, "voice")));
+                        text(note, "voice"), Articulation.parse(text(note, "articulation"))));
             } catch (RuntimeException malformed) {
                 skipped.add(sectionId + "\t" + (i + 1) + "\tnote\tpresent\tskipped\tfehlende oder ungültige Werte");
             }
