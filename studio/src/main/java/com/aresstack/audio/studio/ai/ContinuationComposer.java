@@ -60,8 +60,17 @@ public final class ContinuationComposer {
      * from the rework role (follows composition), four parts at a time.
      */
     public static ContinuationComposer with(ModelLineup models) {
+        return with(models, 4);
+    }
+
+    /**
+     * As {@link #with(ModelLineup)}, with as many parts at a time as the user allows requests at
+     * once (setting "Parallel"). The sections of one part are always written one after another:
+     * each is told how the one before ended.
+     */
+    public static ContinuationComposer with(ModelLineup models, int partsAtOnce) {
         return new ContinuationComposer(new ChatContinuationPlanner(models.model(ModelRoles.ARRANGING), 4096),
-                new ChatSectionGenerator(models.model(ModelRoles.REWORK), 16384), 4);
+                new ChatSectionGenerator(models.model(ModelRoles.REWORK), 16384), Math.max(1, partsAtOnce));
     }
 
     /** A composer that asks a model for plan and notes, four parts at a time. */
@@ -160,6 +169,9 @@ public final class ContinuationComposer {
             return thread;
         });
         Map<String, Future<Written>> running = new LinkedHashMap<>();
+        int atOnce = Math.min(threads, Math.max(1, voices.size()));
+        progress.update(voices.size() + " Stimmen, " + atOnce + " davon gleichzeitig (Einstellung „Parallel“: höchstens "
+                + threads + "); jede Stimme schreibt ihre Abschnitte nacheinander, weil jeder an den vorigen anschließt.");
         try {
             for (ContinuationVoice voice : voices) {
                 running.put(voice.key(), pool.submit(() -> writePart(piece, original, task, plan, frames, voice, cache,
@@ -203,7 +215,8 @@ public final class ContinuationComposer {
                 connection = "";
                 continue;
             }
-            progress.update("Komponiere " + voice.name() + " für " + frame.name() + " ...");
+            progress.update("Angefragt: " + voice.name() + " für " + frame.name() + " ...");
+            long asked = System.currentTimeMillis();
             GeneratedNotes generated;
             try (Listening.Scope watching = Listening.to(sketch == null ? null
                     : sketch.hearing(voice.key(), voice.program(), voice.role(), frame))) {
@@ -212,6 +225,8 @@ public final class ContinuationComposer {
             if (sketch != null) {
                 sketch.written(voice.key(), voice.program(), voice.role(), frame, generated);
             }
+            progress.update("Komponiert: " + voice.name() + " für " + frame.name() + " (" + generated.notes().size()
+                    + " Noten, " + (System.currentTimeMillis() - asked + 500) / 1000 + " s)");
             List<ShapedNote> shaped = normalizer.shape(frame, generated, transition ? ringOut(task) : 0);
             if (frame.intensity() != null) {
                 List<String> thinned = new ArrayList<>();

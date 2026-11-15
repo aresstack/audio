@@ -198,7 +198,7 @@ public final class PieceAutopilot {
                             last ? com.aresstack.audio.studio.ai.ContinuationEnding.CLOSED
                                     : com.aresstack.audio.studio.ai.ContinuationEnding.OPEN, words);
             ExtensionOffer offer = ExtensionOffer.start(session,
-                    com.aresstack.audio.studio.ai.ContinuationComposer.with(models), request, progress);
+                    com.aresstack.audio.studio.ai.ContinuationComposer.with(models, maxParallel), request, progress);
             offer.confirm(); // nothing of the original is shortened when appending; no one to ask here
             offer.accept();
             int now = bars(session);
