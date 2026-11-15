@@ -97,6 +97,18 @@ public final class AiDefaults {
         return number(settings, "retryFirstSeconds", com.aresstack.audio.studio.ai.Backoff.FIRST_SECONDS, 1, 600);
     }
 
+    /** How long the first text of an AI answer may take, in seconds ({@code firstTextSeconds}, 10 to 3600). */
+    public static int firstTextSeconds(Properties settings) {
+        return number(settings, "firstTextSeconds", com.aresstack.audio.studio.ai.KipitzChatClient.FIRST_TEXT_SECONDS,
+                10, 3600);
+    }
+
+    /** How long an AI answer may stay silent once its text flows, in seconds ({@code silenceSeconds}, 10 to 3600). */
+    public static int silenceSeconds(Properties settings) {
+        return number(settings, "silenceSeconds", com.aresstack.audio.studio.ai.KipitzChatClient.SILENCE_SECONDS,
+                10, 3600);
+    }
+
     /** The longest pause before an AI request is tried again, in seconds ({@code retryMostSeconds}, 1 to 3600). */
     public static int retryMostSeconds(Properties settings) {
         return number(settings, "retryMostSeconds", com.aresstack.audio.studio.ai.Backoff.MOST_SECONDS, 1, 3600);
