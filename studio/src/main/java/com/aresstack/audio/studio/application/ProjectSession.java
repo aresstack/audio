@@ -529,8 +529,8 @@ public final class ProjectSession {
     /**
      * The model after a new import of the old files: a part (with its track) whose notes sound
      * as before stays as the model has it; meta fields the old files do not say keep their
-     * value; the sections stay where they still cover the piece; the time map stays where the
-     * file names the same tempo.
+     * value; the sections (the form of the piece) stay, and only music beyond their end gets a
+     * section of its own; the time map stays where the file names the same tempo.
      */
     private static Composition keepingModel(Composition imported, Composition model) {
         List<Part> parts = new ArrayList<>();
@@ -550,9 +550,7 @@ public final class ProjectSession {
         Meta b = model.meta();
         Meta meta = new Meta(or(a.title(), b.title()), or(a.genre(), b.genre()), or(a.mood(), b.mood()),
                 or(a.brief(), b.brief()), or(a.plannedFrom(), b.plannedFrom()), or(a.remarks(), b.remarks()));
-        List<Section> sections = model.sections().isEmpty()
-                || model.sections().get(model.sections().size() - 1).endTick() != imported.endTick()
-                ? imported.sections() : model.sections();
+        List<Section> sections = keepingSections(imported, model);
         TimeMap time = imported.timeMap().tempoAt(0) == model.timeMap().tempoAt(0) ? model.timeMap() : imported.timeMap();
         return new Composition(meta, time, sections, parts, tracks, model.assets());
     }
@@ -569,8 +567,35 @@ public final class ProjectSession {
             return imported;
         }
         if (stage) {
-            return new MixScene(imported.room(), imported.masterDb(), model.levelMode(), imported.channels(),
-                    imported.automation());
+            // The stage file says the places and levels anew, for the parts it knows; a part of the
+            // model it does not know keeps its channel and its curve.
+            List<MixChannel> channels = new ArrayList<>();
+            List<String> fromStage = new ArrayList<>();
+            for (Part part : composition.parts()) {
+                MixChannel.Owner owner = MixChannel.Owner.part(part.id());
+                MixChannel fresh = imported.channelOf(owner);
+                MixChannel channel = fresh != null ? fresh : model.channelOf(owner);
+                if (channel != null) {
+                    channels.add(channel);
+                    if (fresh != null) {
+                        fromStage.add(channel.id());
+                    }
+                }
+            }
+            List<AutomationLane> automation = new ArrayList<>();
+            for (AutomationLane lane : imported.automation()) {
+                if (fromStage.contains(lane.channelId())) {
+                    automation.add(lane);
+                }
+            }
+            for (AutomationLane lane : model.automation()) {
+                boolean stays = channels.stream().anyMatch(c -> c.id().equals(lane.channelId()))
+                        && !fromStage.contains(lane.channelId());
+                if (lane.channelId() == null || stays) {
+                    automation.add(lane);
+                }
+            }
+            return new MixScene(imported.room(), imported.masterDb(), model.levelMode(), channels, automation);
         }
         List<MixChannel> channels = new ArrayList<>();
         List<String> kept = new ArrayList<>();
@@ -597,6 +622,31 @@ public final class ProjectSession {
             }
         }
         return new MixScene(model.room(), model.masterDb(), model.levelMode(), channels, automation);
+    }
+
+    /**
+     * The form of the piece after a new import: the old files know only one section over the
+     * whole piece, so the sections of the model stay as they are. Music that now goes beyond them
+     * gets one more section from their end to its end; a piece that got shorter keeps its form.
+     */
+    private static List<Section> keepingSections(Composition imported, Composition model) {
+        if (model.sections().isEmpty()) {
+            return imported.sections();
+        }
+        List<Section> sections = new ArrayList<>(model.sections());
+        long end = sections.get(sections.size() - 1).endTick();
+        long music = imported.endTick();
+        if (music > end) {
+            java.util.Set<String> taken = new java.util.HashSet<>();
+            sections.forEach(section -> taken.add(section.id()));
+            com.aresstack.audio.composition.Ids ids = com.aresstack.audio.composition.Ids.random();
+            String id = ids.next();
+            while (taken.contains(id)) {
+                id = ids.next();
+            }
+            sections.add(new Section(id, "Neu", null, end, music - end, null, List.of(), null));
+        }
+        return sections;
     }
 
     private static String or(String first, String second) {
