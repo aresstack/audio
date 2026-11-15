@@ -571,26 +571,24 @@ public final class AudioStudioFrame extends JFrame {
         sectionBar.setListener((section, intensity) -> sectionIntensity(section, intensity));
         arrangementView.setCompanion(sectionBar);
         arrangementView.setEditing(pieceEditing);
-        // What the AI can do with the piece as it is stands in sight above the tracks, not only in the menu.
+        // What the AI can do with the piece as it is stands in sight in the head of the arrangement,
+        // right after its name: flat keys as on a player, not a row of their own above the tracks.
         JPanel pieceActions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         pieceActions.setOpaque(false);
-        pieceActions.setBorder(BorderFactory.createEmptyBorder(0, 0, 8, 0));
-        JLabel byAi = new JLabel("KI am Stück:");
-        byAi.setForeground(AudioStudioTheme.TEXT_DIM);
-        pieceActions.add(byAi);
-        pieceActions.add(pieceAction("Verlängern …",
+        pieceActions.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 0));
+        pieceActions.add(pieceAction("Verlängern",
                 "Die KI plant und schreibt weitere Takte ans Ende; das bisherige Stück bleibt erhalten",
                 this::extendPiece));
-        pieceActions.add(pieceAction("Takte einfügen …",
+        pieceActions.add(pieceAction("Takte einfügen",
                 "Die KI schreibt neue Takte vor einem Takt; alles ab dort rückt unverändert nach hinten",
                 this::insertBars));
-        pieceActions.add(pieceAction("Stimme hinzu …",
+        pieceActions.add(pieceAction("Stimme hinzu",
                 "Die KI schreibt eine neue Stimme zu den vorhandenen; die anderen bleiben unverändert",
                 this::addVoice));
-        pieceActions.add(pieceAction("Passage neu …",
+        pieceActions.add(pieceAction("Passage neu",
                 "Die KI schreibt markierte Takte gewählter Spuren neu; mit Umschalt und Ziehen im Taktlineal markieren",
                 this::reworkRegion));
-        pieceActions.add(pieceAction("Umorchestrieren …",
+        pieceActions.add(pieceAction("Umorchestrieren",
                 "Die KI verteilt das Material markierter Takte neu auf die Stimmen", this::reorchestrate));
         undoKey.setToolTipText("Nimmt die letzte Änderung am Stück zurück (Strg+Z)");
         undoKey.setFocusable(false);
@@ -602,11 +600,11 @@ public final class AudioStudioFrame extends JFrame {
         proposalHolder.setOpaque(false);
         JPanel aboveTracks = new JPanel(new BorderLayout());
         aboveTracks.setOpaque(false);
-        aboveTracks.add(pieceActions, BorderLayout.NORTH);
         aboveTracks.add(proposalHolder, BorderLayout.CENTER);
         arrangementBody.add(aboveTracks, BorderLayout.NORTH);
         arrangementBody.add(trackTable, BorderLayout.CENTER);
         DeckWidgets.Module output = new DeckWidgets.Module("Arrangement", arrangementBody);
+        output.setHeadStart(pieceActions);
         output.setHeadEnd(withPieceMenu(sourceChoice));
 
         // The piece: which one, and what it shall be. What is seldom needed is in the menu "Mehr".
@@ -2604,12 +2602,11 @@ public final class AudioStudioFrame extends JFrame {
 
     /** A key above the tracks for something the AI does with the piece; every such change is a proposal first. */
     /** Takes the last change of the piece back, in sight beside the keys of the AI. */
-    private final JButton undoKey = new JButton("↶ Rückgängig");
+    private final JButton undoKey = new DeckWidgets.HeadKey("↶ Rückgängig");
 
     private static JButton pieceAction(String label, String hint, Runnable action) {
-        JButton key = new JButton(label);
-        key.setToolTipText(hint);
-        key.setFocusable(false);
+        JButton key = new DeckWidgets.HeadKey(label);
+        key.setToolTipText("KI: " + hint);
         key.addActionListener(event -> action.run());
         return key;
     }
@@ -3486,9 +3483,7 @@ public final class AudioStudioFrame extends JFrame {
 
     /** A head of a page with the key of the piece's menu beside what it shows already. */
     private javax.swing.JComponent withPieceMenu(javax.swing.JComponent shown) {
-        JButton key = new JButton("Stück ▾");
-        key.setFocusable(false);
-        key.setMargin(new Insets(2, 8, 2, 8));
+        JButton key = new DeckWidgets.HeadKey("Stück ▾");
         key.setToolTipText("Rückgängig, Revisionen, Intensitätsverlauf, Dateien öffnen, Plan der KI, Export, Demo");
         key.addActionListener(event -> pieceMenu.show(key, 0, key.getHeight()));
         JPanel line = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
