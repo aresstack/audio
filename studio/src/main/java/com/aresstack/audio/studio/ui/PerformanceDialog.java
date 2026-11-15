@@ -217,11 +217,11 @@ final class PerformanceDialog extends JDialog {
         for (int row = 0; row < tempoRows.getRowCount(); row++) {
             long tick = tick(tempoRows, row, 0, 1, "Tempo");
             double bpm = number(tempoRows.getValueAt(row, 2), "BPM in Zeile " + (row + 1));
-            if (bpm < com.aresstack.audio.studio.project.PlanShape.MIN_BPM
-                    || bpm > com.aresstack.audio.studio.project.PlanShape.MAX_BPM) {
+            if (bpm < com.aresstack.audio.studio.performance.PlanShape.MIN_BPM
+                    || bpm > com.aresstack.audio.studio.performance.PlanShape.MAX_BPM) {
                 throw new IllegalArgumentException("Das Tempo in Zeile " + (row + 1) + " liegt nicht zwischen "
-                        + com.aresstack.audio.studio.project.PlanShape.MIN_BPM + " und "
-                        + com.aresstack.audio.studio.project.PlanShape.MAX_BPM + " BPM.");
+                        + com.aresstack.audio.studio.performance.PlanShape.MIN_BPM + " und "
+                        + com.aresstack.audio.studio.performance.PlanShape.MAX_BPM + " BPM.");
             }
             byTick.put(tick, new TimeMap.Tempo(tick, bpm, Boolean.TRUE.equals(tempoRows.getValueAt(row, 3))));
         }

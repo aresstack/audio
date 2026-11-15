@@ -4,7 +4,7 @@ import com.aresstack.audio.composition.Composition;
 import com.aresstack.audio.composition.Dynamics;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.TimeMap;
-import com.aresstack.audio.studio.project.PlanShape;
+import com.aresstack.audio.studio.performance.PlanShape;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;

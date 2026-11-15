@@ -1,4 +1,4 @@
-package com.aresstack.audio.studio.project;
+package com.aresstack.audio.studio.performance;
 
 import com.aresstack.audio.composition.Dynamics;
 import com.aresstack.audio.composition.TimeMap;

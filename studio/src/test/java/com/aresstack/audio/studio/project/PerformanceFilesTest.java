@@ -1,5 +1,6 @@
 package com.aresstack.audio.studio.project;
 
+import com.aresstack.audio.studio.performance.PlanShape;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
