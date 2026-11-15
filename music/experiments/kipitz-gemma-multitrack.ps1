@@ -366,7 +366,7 @@ $FullPlan = @{ composition = $Plan; tracks = $Parts }
 Set-Content -Path (Join-Path $OutputDirectory "full-composition.json") -Value ($FullPlan | ConvertTo-Json -Depth 20) -Encoding UTF8
 
 # Prefer the local Gradle-built JAR when running from a saved script.
-# When pasted interactively, PSScriptRoot is empty, so use the public rolling release instead.
+# When pasted interactively, PSScriptRoot is empty, so use a previously copied JAR in the temp cache.
 $RendererJar = $null
 if ($PSScriptRoot) {
     $LocalRenderer = Join-Path $PSScriptRoot "..\build\libs\music-renderer.jar"
@@ -379,18 +379,7 @@ if (-not $RendererJar) {
     New-Item -ItemType Directory -Path $RendererDirectory -Force | Out-Null
     $RendererJar = Join-Path $RendererDirectory "music-renderer.jar"
     if (-not (Test-Path $RendererJar -PathType Leaf) -or (Get-Item $RendererJar).Length -lt 1000) {
-        $RendererUrl = "https://github.com/aresstack/audio/releases/download/latest/music-renderer.jar"
-        Write-Host "Downloading the music renderer from $RendererUrl"
-        try {
-            Invoke-WebRequest -Uri $RendererUrl -OutFile $RendererJar -UseBasicParsing -ErrorAction Stop
-        } catch {
-            if (Test-Path $RendererJar) { Remove-Item $RendererJar -Force }
-            throw "Could not download music-renderer.jar from the rolling release: $($_.Exception.Message)"
-        }
-        if ((Get-Item $RendererJar).Length -lt 1000) {
-            Remove-Item $RendererJar -Force
-            throw "Downloaded music-renderer.jar is unexpectedly small."
-        }
+        throw "music-renderer.jar not found. Build it with 'gradlew :music:jar' and run the saved script, or copy the JAR to $RendererJar. The release only publishes audio-studio.jar."
     }
 }
 if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
