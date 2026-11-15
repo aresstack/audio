@@ -137,6 +137,7 @@ final class ArrangementView extends JComponent {
     private double audioSeconds;
     private String hint = "";
     private Range marked;
+    private javax.swing.JComponent companion;
     /** Where a mark began, in pixels; {@code null} while none is drawn. */
     private java.awt.Point markFrom;
 
@@ -233,6 +234,22 @@ final class ArrangementView extends JComponent {
         return Math.max(0, Math.min(bars - 1, bar)) + 1;
     }
 
+    /** Where a bar begins across the view, bars counted from 0; the end of the last bar is the end of the music. */
+    float xOfBar(int bar) {
+        if (arrangement == null) {
+            return GUTTER;
+        }
+        double total = totalSeconds();
+        int span = Math.max(1, getWidth() - GUTTER - 10);
+        double musicSpan = total <= 0 ? span : span * arrangement.seconds() / total;
+        return (float) (GUTTER + musicSpan * Math.max(0, bar) / Math.max(1, arrangement.bars()));
+    }
+
+    /** A component that lies over the same bars (the section bar) and is drawn anew when they move. */
+    void setCompanion(javax.swing.JComponent other) {
+        companion = other;
+    }
+
     private int laneAt(int y) {
         return Math.max(0, Math.min(order.size() - 1, (y - RULER) / Math.max(1, lane)));
     }
@@ -248,6 +265,9 @@ final class ArrangementView extends JComponent {
         hint = emptyHint == null ? "" : emptyHint;
         revalidate();
         repaint();
+        if (companion != null) {
+            companion.repaint();
+        }
     }
 
     /** The file that is loaded for playing, as the waveform below the lanes. */
@@ -257,6 +277,9 @@ final class ArrangementView extends JComponent {
         alone = aloneTrack;
         audioSeconds = length;
         repaint();
+        if (companion != null) {
+            companion.repaint();
+        }
     }
 
     void setSecond(double played) {
