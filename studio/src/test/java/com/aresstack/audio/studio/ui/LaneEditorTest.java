@@ -162,7 +162,7 @@ public final class LaneEditorTest {
     public void aFrameOverEmptyLaneSelectsAndArrowsMoveTheSelection() {
         int index = lane("melody");
         int top = view.laneTop(index);
-        drag((int) view.xOf(0) + 1, top + 1, (int) view.xOf(1920) - 2, top + view.laneHeight() - 2);
+        drag((int) view.xOf(0) + 1, top + view.clipBand() + 3, (int) view.xOf(1920) - 2, top + view.laneHeight() - 2);
         Note first = melody().notes().get(0);
         key(KeyEvent.VK_RIGHT, 0);
         assertEquals(first.tick() + 120, melody().notes().get(0).tick());
@@ -184,5 +184,40 @@ public final class LaneEditorTest {
         assertTrue("a selected note is drawn white: " + drawn,
                 drawn.getRed() > 235 && drawn.getGreen() > 235 && drawn.getBlue() > 235);
         mouse(MouseEvent.MOUSE_RELEASED, (int) bounds.x + 2, (int) (bounds.y + 2), 0, 1);
+    }
+
+    @Test
+    public void aClipIsGrabbedAtItsBandMovedAndCut() throws Exception {
+        String clip = melody().id();
+        int index = lane("melody");
+        int band = view.laneTop(index) + 5;
+        // Cut at bar 5 with the cursor and S.
+        mouse(MouseEvent.MOUSE_PRESSED, (int) view.xOf(4 * 1920) + 1, band, 0, 1);
+        mouse(MouseEvent.MOUSE_RELEASED, (int) view.xOf(4 * 1920) + 1, band, 0, 1);
+        key(KeyEvent.VK_S, 0);
+        List<com.aresstack.audio.composition.Clip> clips = session.composition().track("melody").clips();
+        assertEquals(2, clips.size());
+        assertEquals(clip, clips.get(0).id());
+        // Take the second half away and drag the first one bar later: one step, on the grid.
+        String second = clips.get(1).id();
+        mouse(MouseEvent.MOUSE_PRESSED, (int) view.xOf(5 * 1920), band, 0, 1);
+        mouse(MouseEvent.MOUSE_RELEASED, (int) view.xOf(5 * 1920), band, 0, 1);
+        key(KeyEvent.VK_DELETE, 0);
+        assertEquals(1, session.composition().track("melody").clips().size());
+        int x = (int) view.xOf(1920);
+        drag(x, band, x + (int) Math.round(1930 / view.ticksPerPixel()), band);
+        assertEquals(1920, session.composition().track("melody").clips().get(0).startTick());
+        assertEquals(second.isEmpty(), false);
+    }
+
+    @Test
+    public void clipsCutByAnInsertOfBarsShowWithTheirDerivedIds() { // C4 INSERT, "<clip>-2"
+        Composition shifted = com.aresstack.audio.composition.edit.TimeShift.shift(session.composition(), 4 * 1920, 2 * 1920);
+        ArrangementView.Arrangement shown = ArrangementView.Arrangement.of(shifted);
+        List<ArrangementView.ClipBox> boxes = shown.clips.get("melody");
+        assertEquals(2, boxes.size());
+        assertEquals(melody().id() + "-2", boxes.get(1).id);
+        assertEquals(6 * 1920, boxes.get(1).start);
+        assertTrue(shown.ticks >= boxes.get(1).end);
     }
 }

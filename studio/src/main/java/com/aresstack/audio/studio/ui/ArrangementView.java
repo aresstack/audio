@@ -41,6 +41,8 @@ final class ArrangementView extends JComponent {
     private static final int GUTTER = 0;
     static final int RULER = 24;
     static final int MIX = 54;
+    /** The band at the top of a lane that carries the clips' names and is where a clip is grabbed. */
+    static final int CLIP_BAND = 12;
     /** How high a lane is; the heads of the lanes are given the same height. */
     private int lane = 60;
 
@@ -82,6 +84,8 @@ final class ArrangementView extends JComponent {
         long barTicks = TICKS_PER_BEAT * 4L;
         /** Whether the notes carry ids, so that they can be edited. */
         boolean editable;
+        /** The clips of each lane, for a piece with a model (work package B2). */
+        final Map<String, List<ClipBox>> clips = new LinkedHashMap<String, List<ClipBox>>();
 
         Arrangement(int tempo) {
             this.tempo = tempo;
@@ -104,16 +108,41 @@ final class ArrangementView extends JComponent {
             long end = 0;
             for (Track track : piece.tracks()) {
                 List<Note> lane = new ArrayList<Note>();
+                List<ClipBox> boxes = new ArrayList<ClipBox>();
                 arrangement.lanes.put(track.id(), lane);
+                arrangement.clips.put(track.id(), boxes);
                 for (Clip clip : track.clips()) {
                     if (clip instanceof MidiClip midi) {
                         end = Math.max(end, midi.endTick());
+                        boxes.add(ClipBox.of(piece, track, midi, false));
                         for (com.aresstack.audio.composition.Note note : midi.notes()) {
                             lane.add(new Note(midi.startTick() + note.tick(), note.length(), note.pitch(), midi.id(),
                                     note.id()));
                         }
                     }
                 }
+            }
+            // A part that plays clips on lanes of others (a clip got another instrument) has a head of
+            // its own, as every player has; its row repeats those clips, marked as lying elsewhere.
+            for (com.aresstack.audio.composition.Part part : piece.parts()) {
+                if (piece.track(part.id()) != null) {
+                    continue;
+                }
+                List<Note> lane = new ArrayList<Note>();
+                List<ClipBox> boxes = new ArrayList<ClipBox>();
+                for (Track track : piece.tracks()) {
+                    for (Clip clip : track.clips()) {
+                        if (clip instanceof MidiClip midi && part.id().equals(track.partOf(midi))) {
+                            boxes.add(ClipBox.of(piece, track, midi, true));
+                            for (com.aresstack.audio.composition.Note note : midi.notes()) {
+                                lane.add(new Note(midi.startTick() + note.tick(), note.length(), note.pitch(),
+                                        midi.id(), note.id()));
+                            }
+                        }
+                    }
+                }
+                arrangement.lanes.put(part.id(), lane);
+                arrangement.clips.put(part.id(), boxes);
             }
             end = Math.max(end, piece.endTick());
             long bar = arrangement.barTicks;
@@ -153,6 +182,47 @@ final class ArrangementView extends JComponent {
             } catch (Exception unreadable) {
                 return null;
             }
+        }
+    }
+
+    /**
+     * A MIDI clip as a lane shows it: where it lies, which part plays it, and whether that is not the
+     * lane's own part (then it is labelled with the instrument). A clip in the row of a part without a
+     * lane of its own is a mirror of the clip on the lane it lies on.
+     */
+    static final class ClipBox {
+        final String id;
+        final String trackId;
+        final String trackName;
+        final long start;
+        final long end;
+        final String partId;
+        final String partName;
+        final int partIndex;
+        final boolean foreign;
+        final boolean mirrored;
+
+        ClipBox(String id, String trackId, String trackName, long start, long end, String partId, String partName,
+                int partIndex, boolean foreign, boolean mirrored) {
+            this.id = id;
+            this.trackId = trackId;
+            this.trackName = trackName;
+            this.start = start;
+            this.end = end;
+            this.partId = partId;
+            this.partName = partName;
+            this.partIndex = partIndex;
+            this.foreign = foreign;
+            this.mirrored = mirrored;
+        }
+
+        static ClipBox of(Composition piece, Track track, MidiClip clip, boolean mirrored) {
+            String partId = track.partOf(clip);
+            com.aresstack.audio.composition.Part part = partId == null ? null : piece.part(partId);
+            int index = part == null ? 0 : piece.parts().indexOf(part);
+            return new ClipBox(clip.id(), track.id(), track.name(), clip.startTick(), clip.endTick(), partId,
+                    part == null ? "?" : part.name(), index,
+                    partId != null && !partId.equals(track.defaultPartId()), mirrored);
         }
     }
 
@@ -454,6 +524,7 @@ final class ArrangementView extends JComponent {
             }
             g.setColor(new Color(255, 255, 255, 14));
             g.fillRect(left, top + LANE - 1, width - left, 1);
+            Map<String, Color> clipColors = paintClips(g, index, id);
             List<Note> notes = arrangement == null ? null : arrangement.lanes.get(id);
             if (notes == null || notes.isEmpty()) {
                 continue;
@@ -461,7 +532,8 @@ final class ArrangementView extends JComponent {
             Color shade = chosen ? color : AudioStudioTheme.withAlpha(color, 215);
             for (Note note : notes) {
                 boolean picked = editor != null && editor.selected(note);
-                g.setColor(picked ? Color.WHITE : shade);
+                Color own = note.clipId == null ? null : clipColors.get(note.clipId);
+                g.setColor(picked ? Color.WHITE : own != null ? AudioStudioTheme.withAlpha(own, 215) : shade);
                 g.fill(noteBounds(index, note));
                 if (picked) {
                     g.setColor(AudioStudioTheme.withAlpha(color, 230));
@@ -565,6 +637,81 @@ final class ArrangementView extends JComponent {
         g.dispose();
     }
 
+    /** The color of a part: the color of its head if it has one, else by its place among the parts. */
+    Color partColor(String partId, int partIndex) {
+        int at = order.indexOf(partId);
+        return AudioStudioTheme.channel(at >= 0 ? at : partIndex);
+    }
+
+    /**
+     * The clips of a lane as boxes behind the notes, with the clip band on top. A clip played by
+     * another part than the lane's own carries that part's color and name; a mirrored one (in the
+     * row of a part without a lane) is dashed and says on which lane it lies. Returns the color of
+     * each clip whose notes take the color of another part.
+     */
+    private Map<String, Color> paintClips(Graphics2D g, int index, String laneId) {
+        Map<String, Color> colors = new LinkedHashMap<String, Color>();
+        List<ClipBox> boxes = arrangement == null ? null : arrangement.clips.get(laneId);
+        if (boxes == null || boxes.isEmpty()) {
+            return colors;
+        }
+        int top = laneTop(index);
+        boolean several = boxes.size() > 1;
+        g.setFont(AudioStudioTheme.lettering(9f));
+        FontMetrics letters = g.getFontMetrics();
+        for (ClipBox box : boxes) {
+            Color color = partColor(box.partId, box.partIndex);
+            if (box.foreign) {
+                colors.put(box.id, color);
+            }
+            float x = xOf(box.start);
+            float w = Math.max(3f, xOf(box.end) - x - 1f);
+            boolean picked = editor != null && editor.selectedClip(box.id);
+            RoundRectangle2D.Float body = new RoundRectangle2D.Float(x, top + 2f, w, lane - 4f, 5f, 5f);
+            g.setColor(AudioStudioTheme.withAlpha(color, picked ? 44 : box.foreign || several ? 22 : 12));
+            g.fill(body);
+            g.setColor(AudioStudioTheme.withAlpha(color, picked ? 120 : 60));
+            g.fill(new RoundRectangle2D.Float(x, top + 2f, w, CLIP_BAND, 5f, 5f));
+            if (box.mirrored) {
+                g.setStroke(new BasicStroke(1f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 1f, new float[]{4f, 3f}, 0f));
+            } else {
+                g.setStroke(new BasicStroke(picked ? 1.6f : 1f));
+            }
+            g.setColor(picked ? Color.WHITE : AudioStudioTheme.withAlpha(color, 150));
+            g.draw(body);
+            String label = box.mirrored ? box.partName + " · auf " + box.trackName
+                    : box.foreign ? box.partName : several ? bars(box) : "";
+            if (!label.isEmpty() && w > 24) {
+                g.setColor(picked ? Color.WHITE : AudioStudioTheme.TEXT);
+                g.drawString(fit(letters, label.toUpperCase(java.util.Locale.ROOT), (int) w - 8), x + 5,
+                        top + 2f + CLIP_BAND - 3f);
+            }
+        }
+        g.setStroke(new BasicStroke(1f));
+        return colors;
+    }
+
+    /** The bars a clip covers, as the user counts them. */
+    private String bars(ClipBox box) {
+        long bar = Math.max(1, arrangement.barTicks);
+        long first = box.start / bar + 1;
+        long last = Math.max(first, (box.end - 1) / bar + 1);
+        return first == last ? "T. " + first : "T. " + first + "–" + last;
+    }
+
+    /** The clip of a lane at a tick, or {@code null}. */
+    ClipBox clipAt(int index, long tick) {
+        List<ClipBox> boxes = arrangement == null || index < 0 ? null : arrangement.clips.get(order.get(index));
+        if (boxes != null) {
+            for (ClipBox box : boxes) {
+                if (tick >= box.start && tick < box.end) {
+                    return box;
+                }
+            }
+        }
+        return null;
+    }
+
     // ---------------------------------------------------------------------------------------
     // Where things are, for painting and for the editor
 
@@ -665,26 +812,37 @@ final class ArrangementView extends JComponent {
 
     float yOf(int index, int pitch) {
         int[] window = pitchWindow(order.get(index));
-        float usable = lane - 14f;
-        return laneTop(index) + 5f + usable * (1f - (pitch - window[0]) / (float) window[1]);
+        return noteTop(index) + usable() * (1f - (pitch - window[0]) / (float) window[1]);
     }
 
     /** The pitch at a height within a lane. */
     int pitchAt(int index, int y) {
         int[] window = pitchWindow(order.get(index));
-        float usable = lane - 14f;
-        float share = 1f - (y - laneTop(index) - 5f - noteThickness(index) / 2f) / usable;
+        float share = 1f - (y - noteTop(index) - noteThickness(index) / 2f) / usable();
         return Math.max(0, Math.min(127, Math.round(window[0] + share * window[1])));
     }
 
     /** How many pixels one semitone is in a lane. */
     float semitone(int index) {
-        return (lane - 14f) / pitchWindow(order.get(index))[1];
+        return usable() / pitchWindow(order.get(index))[1];
     }
 
     float noteThickness(int index) {
         int[] window = pitchWindow(order.get(index));
-        return Math.max(3.4f, Math.min(7f, (lane - 14f) / (window[1] + 1f)));
+        return Math.max(3.4f, Math.min(7f, usable() / (window[1] + 1f)));
+    }
+
+    /** How high the band at the top of a lane is, where clips are grabbed; none without a model. */
+    int clipBand() {
+        return arrangement != null && arrangement.editable ? CLIP_BAND : 0;
+    }
+
+    private float noteTop(int index) {
+        return laneTop(index) + 5f + clipBand();
+    }
+
+    private float usable() {
+        return lane - 14f - clipBand();
     }
 
     RoundRectangle2D.Float noteBounds(int index, Note note) {

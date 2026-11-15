@@ -21,7 +21,12 @@ import java.util.function.Supplier;
  */
 public final class PieceEditing {
     /** What became of an action of the editor. */
-    public record Outcome(boolean changed, String said, List<NoteEdits.NoteRef> selected, ChangeSet changes) {
+    public record Outcome(boolean changed, String said, List<NoteEdits.NoteRef> selected, ChangeSet changes,
+                          String selectedClip) {
+        public Outcome(boolean changed, String said, List<NoteEdits.NoteRef> selected, ChangeSet changes) {
+            this(changed, said, selected, changes, null);
+        }
+
         public Outcome {
             said = said == null ? "" : said;
             selected = List.copyOf(selected == null ? List.of() : selected);
@@ -77,6 +82,61 @@ public final class PieceEditing {
         } catch (IOException | RuntimeException failed) {
             return Outcome.nothing("Die Änderung ließ sich nicht speichern: " + failed.getMessage());
         }
+    }
+
+    /**
+     * Makes a change of clips from the piece as it is now and applies it (work package B2): one
+     * undoable step. A change that is refused before the edit core is asked says why.
+     */
+    public Outcome applyClips(Function<Composition, ClipEdits.ClipEdit> making) {
+        Optional<ProjectSession> open = piece.get();
+        if (open.isEmpty()) {
+            return Outcome.nothing("Dieses Stück hat noch kein Werkmodell; erst komponieren oder öffnen.");
+        }
+        ProjectSession session = open.get();
+        ClipEdits.ClipEdit edit = making.apply(session.composition());
+        if (edit.refusal() != null) {
+            return Outcome.nothing(edit.refusal());
+        }
+        if (edit.isEmpty()) {
+            return Outcome.nothing("");
+        }
+        try {
+            ChangeSet changes = session.apply(edit.patch(), edit.scope());
+            return new Outcome(true, edit.patch().description(), List.of(), changes, edit.selected());
+        } catch (EditRefusedException refused) {
+            return Outcome.nothing("Nicht möglich: " + refused.violations());
+        } catch (IOException | RuntimeException failed) {
+            return Outcome.nothing("Die Änderung ließ sich nicht speichern: " + failed.getMessage());
+        }
+    }
+
+    public Outcome moveClip(String clipId, long startTick, String trackId) {
+        return applyClips(piece -> ClipEdits.move(piece, clipId, startTick, trackId));
+    }
+
+    public Outcome copyClip(String clipId, long startTick, String trackId) {
+        return applyClips(piece -> ClipEdits.copy(piece, clipId, startTick, trackId, ids));
+    }
+
+    public Outcome splitClip(String clipId, long atTick) {
+        return applyClips(piece -> ClipEdits.split(piece, clipId, atTick, ids));
+    }
+
+    public Outcome deleteClip(String clipId) {
+        return applyClips(piece -> ClipEdits.delete(piece, clipId));
+    }
+
+    public Outcome createClip(String trackId, long startTick, long lengthTicks) {
+        return applyClips(piece -> ClipEdits.create(piece, trackId, startTick, lengthTicks, ids));
+    }
+
+    public Outcome playClipBy(String clipId, String partId) {
+        return applyClips(piece -> ClipEdits.playBy(piece, clipId, partId));
+    }
+
+    public Outcome playClipByNew(String clipId, ClipEdits.Instrument instrument) {
+        return applyClips(piece -> ClipEdits.playByNew(piece, clipId, instrument, ids));
     }
 
     public Outcome move(Collection<NoteEdits.NoteRef> notes, long ticks, int semitones) {
