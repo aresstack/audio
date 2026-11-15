@@ -9,6 +9,7 @@ import com.aresstack.audio.composition.Note;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.Role;
 import com.aresstack.audio.composition.Section;
+import com.aresstack.audio.composition.Key;
 import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.composition.Track;
 import com.aresstack.audio.composition.Voice;
@@ -111,7 +112,7 @@ public final class LegacyImport {
         for (ArrangementFile.Problem problem : file.problems()) {
             warn("arrangement.tsv, Zeile " + problem.line() + " übergangen (" + problem.reason() + "): " + problem.text());
         }
-        TimeMap time = TimeMap.of(tempo(file));
+        TimeMap time = timeMap(file);
         Map<String, JsonObject> listed = tracksJson();
         JsonObject plan = json(ProjectFolder.PLAN);
         Properties song = properties();
@@ -144,9 +145,22 @@ public final class LegacyImport {
         }
 
         int bars = Math.max(MIN_BARS, time.barsCovering(end));
-        int planned = planBars(plan);
-        if (planned > bars) {
-            bars = planned;
+        if (file.bars().isPresent()) {
+            // Since F2 the file may say how long the piece is.
+            if (file.bars().getAsInt() < bars) {
+                warn("arrangement.tsv nennt " + file.bars().getAsInt() + " Takte, die Noten reichen bis Takt "
+                        + bars + "; es gilt " + bars + ".");
+            }
+            bars = Math.max(bars, file.bars().getAsInt());
+            planBars(plan, time); // only for its warning
+        } else {
+            int planned = planBars(plan, time);
+            if (planned > bars) {
+                bars = planned;
+            }
+            // Without a bars line a piece in four quarters and C major sounds at least eight bars long.
+            bars = ArrangementFile.defaultBars(bars, time.meters().get(0).barTicks() == 1920
+                    && time.meters().get(0).numerator() == 4 && time.keys().get(0).key().equals(Key.C_MAJOR));
         }
         long length = time.tickOfBar(bars);
 
@@ -369,14 +383,52 @@ public final class LegacyImport {
         return ArrangementFile.DEFAULT_TEMPO;
     }
 
-    private int planBars(JsonObject plan) {
+    /**
+     * The time map the file says: its tempo and, since F2, its meter and key; four quarters and
+     * C major where it names none, as every piece from before.
+     */
+    private TimeMap timeMap(ArrangementFile file) {
+        double tempo = tempo(file);
+        int numerator = 4;
+        int denominator = 4;
+        if (file.meter().isPresent()) {
+            ArrangementFile.Meter meter = file.meter().get();
+            if (meter.numerator() <= 64 && meter.denominator() <= 64) {
+                numerator = meter.numerator();
+                denominator = meter.denominator();
+            } else {
+                warn("arrangement.tsv, Zeile " + meter.line() + ": Taktart " + meter.text() + " übergangen; es gilt 4/4.");
+            }
+        }
+        Key key = Key.C_MAJOR;
+        if (file.key().isPresent()) {
+            try {
+                key = Key.parse(file.key().get().name());
+            } catch (IllegalArgumentException odd) {
+                warn("arrangement.tsv, Zeile " + file.key().get().line() + ": Tonart übergangen; es gilt C-Dur.");
+            }
+        }
+        return new TimeMap(List.of(new TimeMap.Tempo(0, tempo)), List.of(new TimeMap.Meter(0, numerator, denominator)),
+                List.of(new TimeMap.KeyChange(0, key)));
+    }
+
+    private int planBars(JsonObject plan, TimeMap time) {
         if (plan == null) {
             return 0;
         }
         String key = text(plan, "key");
         String meter = text(plan, "timeSignature");
-        if ((key != null && !"C major".equals(key)) || (meter != null && !"4/4".equals(meter))) {
-            warn("composition-plan.json nennt " + key + " " + meter + "; der Altbestand kennt nur C-Dur im 4/4-Takt.");
+        TimeMap.Meter written = time.meters().get(0);
+        Key keyOfFile = time.keys().get(0).key();
+        boolean sameKey;
+        try {
+            sameKey = key == null || Key.parse(key).equals(keyOfFile);
+        } catch (IllegalArgumentException odd) {
+            sameKey = false;
+        }
+        if (!sameKey || (meter != null && !(written.numerator() + "/" + written.denominator()).equals(meter.trim()))) {
+            warn("composition-plan.json nennt " + key + " " + meter + "; arrangement.tsv sagt "
+                    + keyOfFile.name() + " " + written.numerator() + "/" + written.denominator() + "; es gilt arrangement.tsv.");
         }
         try {
             return plan.has("bars") ? Math.max(0, Math.min(4096, plan.get("bars").getAsInt())) : 0;
