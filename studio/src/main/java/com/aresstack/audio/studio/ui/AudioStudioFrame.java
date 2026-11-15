@@ -243,6 +243,11 @@ public final class AudioStudioFrame extends JFrame {
     private final JLabel songFacts = new JLabel(" ");
     private final javax.swing.JRadioButton aiChooses = new javax.swing.JRadioButton("die KI wählt sie");
     private final javax.swing.JRadioButton ownTracks = new javax.swing.JRadioButton("meine Spuren aus dem Arrangement");
+    /** How many instruments the AI may choose: the fewest and the most; the same twice is an exact number. */
+    private final JSpinner voicesMin = new JSpinner(new SpinnerNumberModel(3, InstrumentProposalService.MIN_VOICES,
+            InstrumentProposalService.MAX_VOICES, 1));
+    private final JSpinner voicesMax = new JSpinner(new SpinnerNumberModel(8, InstrumentProposalService.MIN_VOICES,
+            InstrumentProposalService.MAX_VOICES, 1));
     private final JButton composeButton = new JButton("Komponieren");
     private final DeckDisplays.Meter masterLeft = new DeckDisplays.Meter(false);
     private final DeckDisplays.Meter masterRight = new DeckDisplays.Meter(false);
@@ -825,6 +830,40 @@ public final class AudioStudioFrame extends JFrame {
         aiChooses.addActionListener(event -> updateComposeKey());
         ownTracks.addActionListener(event -> updateComposeKey());
         whoRow.add(aiChooses);
+        // How many it may choose: from ... to ...; the same number twice asks for exactly that many.
+        final JLabel fromVoices = new JLabel("mit");
+        final JLabel toVoices = new JLabel("bis");
+        final JLabel voicesWord = new JLabel("Stimmen");
+        for (JLabel word : new JLabel[]{fromVoices, toVoices, voicesWord}) {
+            word.setForeground(AudioStudioTheme.TEXT_DIM);
+        }
+        voicesMin.setPreferredSize(new Dimension(58, 28));
+        voicesMax.setPreferredSize(new Dimension(58, 28));
+        voicesMin.setToolTipText("So viele Instrumente wählt die KI mindestens");
+        voicesMax.setToolTipText("So viele Instrumente wählt die KI höchstens; gleich dem Minimum ergibt genau diese Zahl");
+        // The two never cross: raising the fewest pulls the most along, lowering the most pulls the fewest.
+        voicesMin.addChangeListener(event -> {
+            if ((Integer) voicesMin.getValue() > (Integer) voicesMax.getValue()) {
+                voicesMax.setValue(voicesMin.getValue());
+            }
+        });
+        voicesMax.addChangeListener(event -> {
+            if ((Integer) voicesMax.getValue() < (Integer) voicesMin.getValue()) {
+                voicesMin.setValue(voicesMax.getValue());
+            }
+        });
+        Runnable voicesFollow = () -> {
+            for (java.awt.Component part : new java.awt.Component[]{fromVoices, voicesMin, toVoices, voicesMax, voicesWord}) {
+                part.setEnabled(aiChooses.isSelected());
+            }
+        };
+        aiChooses.addChangeListener(event -> voicesFollow.run());
+        voicesFollow.run();
+        whoRow.add(fromVoices);
+        whoRow.add(voicesMin);
+        whoRow.add(toVoices);
+        whoRow.add(voicesMax);
+        whoRow.add(voicesWord);
         whoRow.add(ownTracks);
         composeButton.setPreferredSize(new Dimension(310, 44));
         JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
@@ -1471,6 +1510,12 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
+            public int[] voices() {
+                int fewest = (Integer) voicesMin.getValue();
+                return new int[]{fewest, Math.max(fewest, (Integer) voicesMax.getValue())};
+            }
+
+            @Override
             public PieceAutopilot.Rendering rendering() {
                 return new PieceAutopilot.Rendering(
                         sf2Engine.getSelectedIndex() == 1 ? Sf2Engine.FLUIDSYNTH : Sf2Engine.GERVILL,
@@ -2028,6 +2073,8 @@ public final class AudioStudioFrame extends JFrame {
         final int parallel = (Integer) parallelRequests.getValue();
         final int sections = (Integer) sectionBars.getValue();
         final int grow = (Integer) growBars.getValue();
+        final int fewest = (Integer) voicesMin.getValue();
+        final int most = Math.max(fewest, (Integer) voicesMax.getValue());
         if (!saveSettings(false)) {
             return;
         }
@@ -2053,12 +2100,13 @@ public final class AudioStudioFrame extends JFrame {
                     recordModels(output, autopilot ? "Autopilot" : "Instrumentenvorschlag", models);
                     if (autopilot) {
                         // The AI decides everything: the same steps the production of an album runs.
-                        PieceAutopilot pilot = new PieceAutopilot(registry, models, tokens, parallel, rendering).sectionBars(sections).growBars(grow);
+                        PieceAutopilot pilot = new PieceAutopilot(registry, models, tokens, parallel, rendering).sectionBars(sections).growBars(grow)
+                                .voices(fewest, most);
                         return composeIntoPiece(pilot, prompt, output, stageBefore, progress);
                     }
                     final InstrumentProposalService.Staged staged = new InstrumentProposalService(
                             models.model(com.aresstack.audio.studio.ai.ModelRoles.INSTRUMENTS), tokens)
-                            .proposeStaged(prompt, output, progress);
+                            .voices(fewest, most).proposeStaged(prompt, output, progress);
                     final TrackArrangement selected = withPreferredSoundbanks(staged.tracks());
                     SwingUtilities.invokeAndWait(new Runnable() {
                         @Override
@@ -3884,6 +3932,16 @@ public final class AudioStudioFrame extends JFrame {
                 description.setText(keptDescription);
             }
             ownTracks.setSelected("own".equals(saved.getProperty("instrumentMode")));
+            try {
+                int fewestSaved = Integer.parseInt(saved.getProperty("voicesMin", "3").trim());
+                int mostSaved = Integer.parseInt(saved.getProperty("voicesMax", "8").trim());
+                voicesMax.setValue(Math.max(InstrumentProposalService.MIN_VOICES,
+                        Math.min(InstrumentProposalService.MAX_VOICES, Math.max(fewestSaved, mostSaved))));
+                voicesMin.setValue(Math.max(InstrumentProposalService.MIN_VOICES,
+                        Math.min((Integer) voicesMax.getValue(), fewestSaved)));
+            } catch (NumberFormatException unreadable) {
+                // the fields keep 3 to 8
+            }
             updateComposeKey();
             listening = com.aresstack.audio.studio.application.StageListening.from(saved);
             if (stagePanel != null) {
@@ -3936,6 +3994,8 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("description", description.getText());
             saved.setProperty("parallel", parallelRequests.getValue().toString());
             saved.setProperty("instrumentMode", ownTracks.isSelected() ? "own" : "ai");
+            saved.setProperty("voicesMin", voicesMin.getValue().toString());
+            saved.setProperty("voicesMax", voicesMax.getValue().toString());
             listening.into(saved);
             if (stagePanel != null) {
                 com.aresstack.audio.studio.application.MovementDirector.into(saved, stagePanel.movementsWanted());
