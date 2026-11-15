@@ -154,6 +154,26 @@ public final class MixLevelTest {
     }
 
     @Test
+    public void theFixedLevelHearsTheAutomationOfAMixDocument() throws Exception {
+        // a swell given as automation sounds exactly like the same swell on the placement, in FIXED as well
+        List<SoundSourcePlacement.LevelPoint> swell = Arrays.asList(new SoundSourcePlacement.LevelPoint(0, -18),
+                new SoundSourcePlacement.LevelPoint(1, 0));
+        SoundSourcePlacement still = new SoundSourcePlacement("a", -0.2, 0, 6, 1, 0.3, false, false, null);
+        SoundSourcePlacement swelling = new SoundSourcePlacement("a", -0.2, 0, 6, 1, 0.3, false, false, swell);
+        List<Path> one = Arrays.asList(files.get(0));
+        MixLevel level = MixLevel.fixed(-2, LookaheadLimiter.Settings.DEFAULT, ExportNormalization.peak(-1));
+        Path automated = file("automated.wav");
+        Path placed = file("placed.wav");
+        Path plain = file("plain.wav");
+        new SpatialStemMixer().withAutomation(StageAutomation.of(Arrays.asList(swelling), 2))
+                .mix(one, Arrays.asList(still), AcousticRoom.HALL, 2, level, automated, 24);
+        new SpatialStemMixer().mix(one, Arrays.asList(swelling), AcousticRoom.HALL, 2, level, placed, 24);
+        new SpatialStemMixer().mix(one, Arrays.asList(still), AcousticRoom.HALL, 2, level, plain, 24);
+        Assert.assertArrayEquals(Files.readAllBytes(placed), Files.readAllBytes(automated));
+        Assert.assertFalse(Arrays.equals(Files.readAllBytes(plain), Files.readAllBytes(automated)));
+    }
+
+    @Test
     public void liveLevelHasNoNormalization() {
         MixLevel export = MixLevel.fixed(-3, LookaheadLimiter.Settings.DEFAULT, ExportNormalization.loudness(-14));
         Assert.assertEquals(ExportNormalization.Kind.NONE, export.live().normalization().kind());

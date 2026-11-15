@@ -153,7 +153,10 @@ public final class ProjectSessionTest {
 
         Map<String, byte[]> restored = contents(piece);
         assertTrue("legacy/ stays", restored.keySet().stream().anyMatch(name -> name.startsWith("legacy/")));
-        restored.keySet().removeIf(name -> name.startsWith("legacy/") || name.startsWith("render/"));
+        // revisions/ stays too: it holds the history of the model with its original, which is never
+        // deleted (work package F3); the old studio does not read it.
+        restored.keySet().removeIf(name -> name.startsWith("legacy/") || name.startsWith("render/")
+                || name.startsWith(ProjectFolder.REVISIONS + "/"));
         Map<String, byte[]> expected = new TreeMap<>(original);
         // Renaming moved the rendered files; they are not source files, and the way back leaves them alone.
         for (String moved : List.of("bass.wav")) {
@@ -502,6 +505,35 @@ public final class ProjectSessionTest {
         StemManifest.current(StemManifest.load(piece), beyond); // the stem check needs no TSV
     }
 
+    /**
+     * A piece in 3/4 from the first bar, at a tempo the TSV cannot write: a pure stage change is
+     * taken over whole, model, mix and stem manifest, with no part of it applied halfway.
+     */
+    @Test
+    public void aStageChangeIsTakenOverForAPieceInThreeFour() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        Composition c = session.composition();
+        TimeMap time = new TimeMap(List.of(new TimeMap.Tempo(0, 96.5)), List.of(new TimeMap.Meter(0, 3, 4)),
+                List.of(new TimeMap.KeyChange(0, Key.C_MAJOR)));
+        Composition waltz = new Composition(c.meta(), time, c.sections(), c.parts(), c.tracks(), c.assets());
+        CompositionJson.save(piece, waltz);
+        StemManifest.save(piece, List.of(new StemManifest.Entry("melody", "melody.wav", "reference",
+                StemManifest.ADOPTED, StemManifest.digest(waltz, "melody"))));
+        session = ProjectSession.open(piece).orElseThrow();
+        assertFalse(session.withinTsv());
+
+        String scene = new String(Files.readAllBytes(piece.resolve(ProjectFolder.SCENE)), StandardCharsets.UTF_8)
+                .replace("\"kind\":\"chamber\"", "\"kind\":\"cathedral\"");
+        Files.write(piece.resolve(ProjectFolder.SCENE), scene.getBytes(StandardCharsets.UTF_8));
+        assertTrue(session.synchronize());
+        assertEquals(waltz, session.composition());
+        assertEquals(waltz, CompositionJson.load(piece));
+        assertEquals("cathedral", session.mix().room().kind());
+        assertEquals("cathedral", MixJson.load(piece).room().kind());
+        assertEquals(1, StemManifest.load(piece).size());
+        assertFalse(session.externalChanges());
+    }
+
     /** PO edge case: taking over new old files keeps the form of the piece. */
     @Test
     public void takingOverNewOldFilesKeepsTheSections() throws Exception {
@@ -532,6 +564,59 @@ public final class ProjectSessionTest {
         assertEquals(8 * 1920, after.get(3).startTick());
         assertEquals(session.composition().endTick(), after.get(3).endTick());
         assertEquals(List.of(), com.aresstack.audio.composition.CompositionValidator.validate(session.composition()));
+    }
+
+    @Test
+    public void aSoundBankWithoutInstrumentInTracksJsonIsTakenOverToo() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        Path tracks = piece.resolve(ProjectFolder.TRACKS);
+        String json = new String(Files.readAllBytes(tracks), StandardCharsets.UTF_8)
+                .replace("\"instrument\":\"Music box\",\"program\":10,\"libraryId\":\"builtin\"",
+                        "\"program\":10,\"libraryId\":\"generaluser::8\"");
+        Files.write(tracks, json.getBytes(StandardCharsets.UTF_8));
+        assertTrue(session.synchronize());
+        assertEquals("generaluser::8", session.composition().part("melody").libraryId());
+        assertEquals("the instrument the model had stays", "Music box", session.composition().part("melody").instrument());
+        assertEquals("the others stay", "String ensemble", session.composition().part("harmony").instrument());
+        assertEquals(session.composition(), ProjectSession.open(piece).orElseThrow().composition());
+    }
+
+    @Test
+    public void aSoundBankChangedBackToBuiltinWithoutInstrumentIsTakenOverToo() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        assertEquals("generaluser::48", session.composition().part("harmony").libraryId());
+        assertTrue(StemManifest.load(piece).stream().anyMatch(entry -> entry.partId().equals("harmony")));
+        Path tracks = piece.resolve(ProjectFolder.TRACKS);
+        String json = new String(Files.readAllBytes(tracks), StandardCharsets.UTF_8)
+                .replace("\"instrument\":\"String ensemble\",\"program\":48,\"libraryId\":\"generaluser::48\"",
+                        "\"program\":48,\"libraryId\":\"builtin\"");
+        Files.write(tracks, json.getBytes(StandardCharsets.UTF_8));
+        assertTrue(session.synchronize());
+        assertEquals("builtin", session.composition().part("harmony").libraryId());
+        assertEquals("the instrument the model had stays", "String ensemble",
+                session.composition().part("harmony").instrument());
+        assertEquals("the others stay", "Music box", session.composition().part("melody").instrument());
+        assertFalse("the stem of the harmony no longer fits",
+                StemManifest.load(piece).stream().anyMatch(entry -> entry.partId().equals("harmony")));
+        assertTrue(StemManifest.load(piece).stream().anyMatch(entry -> entry.partId().equals("melody")));
+        assertFalse("taken over once", session.synchronize());
+        session.save();
+        ProjectSession reopened = ProjectSession.open(piece).orElseThrow();
+        assertEquals(session.composition(), reopened.composition());
+        assertEquals("builtin", reopened.composition().part("harmony").libraryId());
+        assertFalse(reopened.externalChanges());
+    }
+
+    @Test
+    public void aTracksJsonEntryThatNamesNoSoundBankLeavesTheModelsOne() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        Path tracks = piece.resolve(ProjectFolder.TRACKS);
+        String json = new String(Files.readAllBytes(tracks), StandardCharsets.UTF_8)
+                .replace("\"program\":48,\"libraryId\":\"generaluser::48\"", "\"program\":48");
+        Files.write(tracks, json.getBytes(StandardCharsets.UTF_8));
+        session.synchronize();
+        assertEquals("generaluser::48", session.composition().part("harmony").libraryId());
+        assertEquals("String ensemble", session.composition().part("harmony").instrument());
     }
 
     private static Composition withVelocity(Composition composition, String trackId, int index, int velocity) {
