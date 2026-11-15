@@ -96,6 +96,11 @@ public final class PassageMarkBesideNoteEditorTest {
         mouse(MouseEvent.MOUSE_RELEASED, toX, toY, modifiers);
     }
 
+    /** A place at the top of a lane below its clip band (B2): a press in the band grabs the clip instead. */
+    private int belowBand(int index) {
+        return laneTop(index) + ArrangementView.CLIP_BAND + 4;
+    }
+
     private int laneTop(int index) {
         return ArrangementView.RULER + index * LANE;
     }
@@ -105,11 +110,11 @@ public final class PassageMarkBesideNoteEditorTest {
         editable();
         Composition before = session.composition();
         // A frame over the first lane without Shift selects the notes in it ...
-        drag(2, laneTop(0) + 2, 400, laneTop(0) + LANE - 2, 0);
+        drag(2, belowBand(0), 400, laneTop(0) + LANE - 2, 0);
         int chosen = view.editor().selection().size();
         assertTrue("the frame of the editor selects notes", chosen > 0);
         // ... and one with Shift over the second lane adds to them: the editor's multiple selection.
-        drag(2, laneTop(1) + 2, 400, laneTop(1) + LANE - 2, InputEvent.SHIFT_DOWN_MASK);
+        drag(2, belowBand(1), 400, laneTop(1) + LANE - 2, InputEvent.SHIFT_DOWN_MASK);
         assertTrue("Shift adds to the selection of the editor", view.editor().selection().size() > chosen);
         assertNull("and marks no passage", view.marked());
         assertTrue(marks.isEmpty());
@@ -122,7 +127,7 @@ public final class PassageMarkBesideNoteEditorTest {
     @Test
     public void shiftAndDragInTheRulerMarksBarsAcrossAllTracksAndLeavesTheSelectionAlone() {
         editable();
-        drag(2, laneTop(0) + 2, 400, laneTop(0) + LANE - 2, 0);
+        drag(2, belowBand(0), 400, laneTop(0) + LANE - 2, 0);
         List<?> chosen = new ArrayList<Object>(view.editor().selection());
         assertFalse(chosen.isEmpty());
         int bars = view.bars();

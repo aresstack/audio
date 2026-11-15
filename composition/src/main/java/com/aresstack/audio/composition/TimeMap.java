@@ -124,6 +124,25 @@ public record TimeMap(List<Tempo> tempos, List<Meter> meters, List<KeyChange> ke
         return bar + 1;
     }
 
+    /** The first tick at or after a time in seconds from the start of the piece. */
+    public long tickAt(double seconds) {
+        if (seconds <= 0) {
+            return 0;
+        }
+        double passed = 0;
+        for (int i = 0; i < tempos.size(); i++) {
+            Tempo tempo = tempos.get(i);
+            double ticksPerSecond = PPQ * tempo.bpm() / 60.0;
+            boolean last = i + 1 == tempos.size();
+            double length = last ? Double.MAX_VALUE : (tempos.get(i + 1).tick() - tempo.tick()) / ticksPerSecond;
+            if (seconds - passed <= length) {
+                return tempo.tick() + (long) Math.ceil((seconds - passed) * ticksPerSecond - 1e-9);
+            }
+            passed += length;
+        }
+        return 0;
+    }
+
     /** The time from the start of the piece to a tick, in seconds. */
     public double seconds(long tick) {
         double seconds = 0;

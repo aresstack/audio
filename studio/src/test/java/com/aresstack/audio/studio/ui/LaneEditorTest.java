@@ -220,4 +220,46 @@ public final class LaneEditorTest {
         assertEquals(6 * 1920, boxes.get(1).start);
         assertTrue(shown.ticks >= boxes.get(1).end);
     }
+
+    @Test
+    public void theFadeOfAnAudioClipIsDraggedAtItsHandle() throws Exception { // B3
+        PieceEditing editing = new PieceEditing(() -> Optional.of(session));
+        String lane = editing.addAudioTrack("Effekte").selectedClip();
+        int frames = 44100;
+        java.nio.ByteBuffer bytes = java.nio.ByteBuffer.allocate(frames * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < frames; i++) {
+            bytes.putShort((short) 12000);
+        }
+        Path wav = temporary.getRoot().toPath().resolve("tone.wav");
+        try (javax.sound.sampled.AudioInputStream in = new javax.sound.sampled.AudioInputStream(
+                new java.io.ByteArrayInputStream(bytes.array()), new javax.sound.sampled.AudioFormat(44100, 16, 1, true, false),
+                frames)) {
+            javax.sound.sampled.AudioSystem.write(in, javax.sound.sampled.AudioFileFormat.Type.WAVE, wav.toFile());
+        }
+        assertTrue(editing.placeFile(lane, 1920, wav).changed());
+        List<String> order = new ArrayList<String>();
+        for (com.aresstack.audio.composition.Track track : session.composition().tracks()) {
+            order.add(track.id());
+        }
+        view.setArrangement(ArrangementView.Arrangement.of(session.composition()), order, "");
+        int index = order.indexOf(lane);
+        ArrangementView.ClipBox box = view.arrangement().clips.get(lane).get(0);
+        assertTrue(box.audio);
+        // A passage across the rows takes the rows with notes only, not the audio lane.
+        assertTrue(view.isAudioLane(lane));
+        List<String> noteLanes = new ArrayList<String>(order);
+        noteLanes.remove(lane);
+        assertEquals(noteLanes, view.noteLanes());
+        view.mark(0, ArrangementView.RULER, 200, view.laneTop(order.size() - 1) + 5);
+        assertEquals("a marked passage leaves the audio lane out", noteLanes, view.marked().trackIds());
+        view.mark(null);
+        int band = view.laneTop(index) + ArrangementView.CLIP_BAND - 1;
+        int x = (int) view.xOf(box.start);
+        drag(x, band, (int) view.xOf(box.start + 480), band);
+        com.aresstack.audio.composition.AudioClip clip =
+                (com.aresstack.audio.composition.AudioClip) session.composition().track(lane).clips().get(0);
+        double quarter = 60.0 / session.composition().timeMap().tempoAt(0);
+        assertEquals("a fade-in of a quarter note", quarter * 44100, clip.fadeInSamples(), 44100 * 0.02);
+        assertEquals(1920, clip.startTick());
+    }
 }
