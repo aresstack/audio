@@ -33,8 +33,16 @@ public final class GeneratedNotesTest {
     }
 
     @Test
-    public void anAnswerWithoutPartOrNotesIsNoAnswer() {
-        for (String text : new String[]{"{\"notes\":[]}", "{\"part\":\"tp\"}"}) {
+    public void anAnswerWithoutPartIsTheAnswerForThePartAskedFor() throws IOException {
+        // Flockentanz, 2026-11-15: the model left out "part"; the answer is to this request.
+        GeneratedNotes read = GeneratedNotes.read(json(
+                "{\"notes\":[{\"bar\":1,\"beat\":1,\"duration\":1,\"pitch\":60}]}"), "tp", "a");
+        assertEquals(1, read.notes().size());
+    }
+
+    @Test
+    public void anAnswerWithoutNotesIsNoAnswer() {
+        for (String text : new String[]{"{\"part\":\"tp\"}"}) {
             try {
                 GeneratedNotes.read(json(text), "tp", "a");
                 fail("accepted " + text);
