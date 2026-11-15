@@ -15,8 +15,27 @@ public record AudioClip(String id, long startTick, long lengthSamples, String as
         }
     }
 
+    /**
+     * The rate the lengths and fades of audio clips count in: samples at 44.1 kHz, the rate the studio
+     * renders and mixes at. An asset of another rate is converted when it is played.
+     */
+    public static final int SAMPLE_RATE = 44100;
+
     @Override
     public Track.Kind kind() {
         return Track.Kind.AUDIO;
+    }
+
+    /** How long the clip lasts in seconds. */
+    public double seconds() {
+        return lengthSamples / (double) SAMPLE_RATE;
+    }
+
+    /**
+     * The tick at which the clip ends at the tempo of the piece: an audio clip is anchored at its
+     * start in ticks and keeps its length in time when the tempo changes (architecture review 2.2).
+     */
+    public long endTick(TimeMap timeMap) {
+        return Math.max(startTick + 1, timeMap.tickAt(timeMap.seconds(startTick) + seconds()));
     }
 }
