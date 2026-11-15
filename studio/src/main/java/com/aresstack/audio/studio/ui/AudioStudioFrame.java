@@ -1645,11 +1645,11 @@ public final class AudioStudioFrame extends JFrame {
         accessOllama.setToolTipText("Ollama wird noch nicht unterstützt und kommt später");
         showAccess(); // the note has its words before the row is laid out
         addRow(ai, row++, "Zugang", line(accessKeePass, accessManual, accessOllama, accessNote));
-        JButton keepassList = new JButton("KeePass verbinden");
+        JButton keepassList = new DeckWidgets.HeadKey("KeePass verbinden");
         keepassList.setToolTipText("Mit KeePassRPC verbinden und die Einträge laden");
         keepassList.addActionListener(event -> loadKeePassEntries());
         keePassEntries.setPreferredSize(new Dimension(260, 30));
-        JButton keepassUse = new JButton("Eintrag übernehmen");
+        JButton keepassUse = new DeckWidgets.HeadKey("Eintrag übernehmen");
         keepassUse.addActionListener(event -> useKeePassEntry());
         JPanel credentialButtons = line(keepassList, keePassEntries, keepassUse);
         keePassRow = credentialButtons;
@@ -1705,7 +1705,7 @@ public final class AudioStudioFrame extends JFrame {
         JPanel network = form();
         row = 0;
         addRow(network, row++, "Proxy-Modus", proxyMode);
-        JButton testProxy = new JButton("Proxyweg prüfen");
+        JButton testProxy = new DeckWidgets.HeadKey("Proxyweg prüfen");
         testProxy.addActionListener(event -> testProxyRoute());
         proxyHost.setPreferredSize(new Dimension(260, 30));
         proxyPort.setPreferredSize(new Dimension(80, 30));
@@ -1721,11 +1721,11 @@ public final class AudioStudioFrame extends JFrame {
         JPanel sound = form();
         row = 0;
         addRow(sound, row++, "SF2-Synthesizer", sf2Engine);
-        JButton fluidHelp = new JButton("Installieren …");
+        JButton fluidHelp = new DeckWidgets.HeadKey("Installieren");
         fluidHelp.addActionListener(event -> openEngineWebsite("https://www.fluidsynth.org/download/"));
         fluidSynth.setPreferredSize(new Dimension(260, 30));
         addRow(sound, row++, "FluidSynth", line(fluidSynth, fluidHelp));
-        JButton sfizzHelp = new JButton("Installieren …");
+        JButton sfizzHelp = new DeckWidgets.HeadKey("Installieren");
         sfizzHelp.addActionListener(event -> openEngineWebsite("https://github.com/sfztools/sfizz/releases"));
         sfizz.setPreferredSize(new Dimension(260, 30));
         addRow(sound, row++, "sfizz", line(sfizz, sfizzHelp));
@@ -1735,7 +1735,7 @@ public final class AudioStudioFrame extends JFrame {
         column.setOpaque(false);
         column.setLayout(new javax.swing.BoxLayout(column, javax.swing.BoxLayout.Y_AXIS));
         DeckWidgets.Module aiModule = new DeckWidgets.Module("KI-Zugang", ai);
-        JButton save = new JButton("Einstellungen speichern");
+        JButton save = new DeckWidgets.HeadKey("Einstellungen speichern");
         save.addActionListener(event -> saveSettings(true));
         aiModule.setHeadEnd(save);
         column.add(aiModule);
