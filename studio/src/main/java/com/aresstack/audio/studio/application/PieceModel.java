@@ -30,7 +30,7 @@ public final class PieceModel {
      * The piece in this folder is the open one now. A piece from before the model is taken into
      * it here; a folder without a piece is no piece yet, and nothing is written into it.
      */
-    public void open(Path opened) {
+    public synchronized void open(Path opened) {
         load(opened);
     }
 
@@ -75,26 +75,53 @@ public final class PieceModel {
      * track. A piece that was composed for the first time gets its model here. A model that
      * says more than {@code arrangement.tsv} can is not replaced; that is a warning.
      */
-    public void synchronize() {
+    public synchronized void synchronize() {
+        follow();
+    }
+
+    /**
+     * The model of the piece in this folder, brought in step with what was just written the old
+     * way, for work that goes on from the model (rendering). Empty if the folder is not the open
+     * piece, if it has no model, or if the model could not follow its files: then the piece
+     * works from its old files as before.
+     */
+    public synchronized Optional<ProjectSession> inStep(Path wanted) {
+        if (wanted == null || folder == null
+                || !wanted.toAbsolutePath().normalize().equals(folder.toAbsolutePath().normalize())) {
+            return Optional.empty();
+        }
+        return follow() ? Optional.of(session) : Optional.empty();
+    }
+
+    /** Returns whether the model now says what the files say. */
+    private boolean follow() {
         if (session == null) {
             // Nothing in memory: the piece is new, or the last attempt failed. A piece without a
             // model is imported from the files as they are now, which already is the new state.
-            if (folder == null || load(folder) || session == null) {
-                return;
+            if (folder == null) {
+                return false;
+            }
+            if (load(folder)) {
+                return true;
+            }
+            if (session == null) {
+                return false;
             }
         }
         try {
             session.synchronize();
+            return true;
         } catch (IOException | RuntimeException failed) {
             // What is in memory may be ahead of what was written; the next attempt starts from the
             // saved model again, so that a write that failed is tried once more.
             session = null;
             log.accept("WARN: Das Werkmodell ließ sich nicht nachführen: " + said(failed));
+            return false;
         }
     }
 
     /** The model of the open piece, if it has one. */
-    public Optional<ProjectSession> session() {
+    public synchronized Optional<ProjectSession> session() {
         return Optional.ofNullable(session);
     }
 
