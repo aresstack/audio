@@ -277,7 +277,7 @@ public final class SpatialStemMixer {
     private static StemChannel channel(AudioSource source, SoundSourcePlacement placement,
                                        StageAutomation.Lanes lanes, AcousticRoom room, long length, boolean rings) {
         // Level, also over time, and width: the middle stays, the difference of the sides is scaled.
-        float level = (float) Math.pow(10, placement.levelDb() / 20);
+        float level = (float) Math.pow(10, (placement.levelDb() + lanes.trimDb()) / 20);
         float width = (float) placement.width();
         StereoStrip.LevelCurve curve = lanes.level() == null ? null
                 : frame -> (float) Math.pow(10, lanes.level().valueAt(frame) / 20);
