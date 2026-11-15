@@ -160,7 +160,9 @@ final class AlbumTree extends JPanel {
                 }
             }
         });
-        tree.setDragEnabled(true);
+        if (!java.awt.GraphicsEnvironment.isHeadless()) {
+            tree.setDragEnabled(true); // throws HeadlessException without a screen (CI)
+        }
         tree.setDropMode(javax.swing.DropMode.ON_OR_INSERT);
         tree.setTransferHandler(new Moving());
 
