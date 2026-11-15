@@ -103,9 +103,31 @@ public final class PieceAutopilot {
                 () -> spec == null ? composer.compose(description, folder, tracks, progress)
                         : composer.compose(description, folder, tracks, spec, progress),
                 folder, description, songs, model);
-        Path rendered = new StudioMusicRenderer(registry).render(arrangement, folder, assignments, programs,
+        return new Result(arrangement, render(arrangement, folder, model, assignments, programs, progress), tracks,
+                scene);
+    }
+
+    /**
+     * Makes the composed piece audible the way the studio's render key does: from the model of
+     * the piece ({@link PieceRendering}), so that stems that are still right come from the stem
+     * cache. A production that was interrupted therefore renders only what is missing. A piece
+     * whose model cannot be used is rendered from its file as before.
+     */
+    private Path render(Path arrangement, Path folder, PieceModel model, Map<String, InstrumentLibrary> assignments,
+                        Map<String, Integer> programs, Progress progress) throws Exception {
+        java.util.Optional<ProjectSession> piece = model == null ? java.util.Optional.empty() : model.of(folder);
+        if (piece.isPresent()) {
+            Map<String, String> libraries = new HashMap<String, String>();
+            for (String track : programs.keySet()) {
+                InstrumentLibrary bank = assignments.get(track);
+                libraries.put(track, bank == null ? "builtin" : bank.id());
+            }
+            return new PieceRendering(registry).render(piece.get(), libraries, rendering.sf2Engine(),
+                    rendering.fluidSynth(), rendering.sfizz(), programs, progress).mix();
+        }
+        progress.update("Dieses Stück wird aus seiner Datei gerendert (kein Werkmodell).");
+        return new StudioMusicRenderer(registry).render(arrangement, folder, assignments, programs,
                 rendering.sf2Engine(), rendering.fluidSynth(), rendering.sfizz(), progress);
-        return new Result(arrangement, rendered, tracks, scene);
     }
 
     /** Stops the requests to the models that are running. */

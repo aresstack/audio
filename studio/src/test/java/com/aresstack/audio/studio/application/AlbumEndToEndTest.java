@@ -128,5 +128,21 @@ public final class AlbumEndToEndTest {
         producer.start(album.id(), (now, at) -> { }).await();
         assertEquals(asked, model.piece.prompts.size());
         assertEquals(2, model.proposals.get());
+        // A piece made once more (as after an interruption) renders from its model and keeps the
+        // stems that are still right: nothing is synthesized a second time.
+        AlbumTrack first = produced.tracks().get(0);
+        Path folder = library.resolve(first.piece());
+        PieceModel piece = new PieceModel(line -> { });
+        piece.open(folder);
+        java.util.List<String> said = new java.util.ArrayList<String>();
+        autopilot.run(produced.brief(first), folder, first.spec(), null, songs, piece,
+                line -> {
+                    synchronized (said) {
+                        said.add(line);
+                    }
+                }, null);
+        assertTrue("the stems come from the stem cache: " + said,
+                said.stream().anyMatch(line -> line.contains("unverändert übernommen")));
+        assertEquals("and the model is not asked again", asked, model.piece.prompts.size());
     }
 }
