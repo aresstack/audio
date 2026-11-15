@@ -270,16 +270,11 @@ public final class StageMixService {
             if (track.kind() != com.aresstack.audio.composition.Track.Kind.AUDIO || track.clips().isEmpty()) {
                 continue;
             }
-            Path stem = directory.resolve("render").resolve("audio").resolve(track.id() + ".wav");
+            Path stem = audioStem(directory, track.id());
             for (String warning : com.aresstack.audio.studio.render.AudioTrackStem.write(model, directory, track, stem)) {
                 progress.update("WARN: " + warning);
             }
-            com.aresstack.audio.composition.mix.MixChannel channel = document == null ? null
-                    : document.channelOf(new com.aresstack.audio.composition.mix.MixChannel.Owner(
-                    com.aresstack.audio.composition.mix.MixChannel.Owner.Kind.AUDIO_TRACK, track.id()));
-            SoundSourcePlacement placement = channel == null ? new SoundSourcePlacement(track.id(), 0, 0.35)
-                    : new SoundSourcePlacement(track.id(), channel.x(), channel.depth(), channel.levelDb(),
-                    channel.width(), channel.reverb(), channel.muted(), channel.locked(), null);
+            SoundSourcePlacement placement = audioPlacement(document, track.id());
             if (only != null) {
                 placement = placement.withMuted(!only.equals(track.id()));
             }
@@ -288,6 +283,44 @@ public final class StageMixService {
             placements.add(placement);
         }
         return heard;
+    }
+
+    /** Where the mix writes the stem of an audio lane. */
+    static Path audioStem(Path directory, String trackId) {
+        return directory.resolve("render").resolve("audio").resolve(trackId + ".wav");
+    }
+
+    /** Where an audio lane stands on the stage: as its channel strip in the mix document says, else in front in the middle. */
+    static SoundSourcePlacement audioPlacement(MixScene document, String trackId) {
+        com.aresstack.audio.composition.mix.MixChannel channel = document == null ? null
+                : document.channelOf(new com.aresstack.audio.composition.mix.MixChannel.Owner(
+                com.aresstack.audio.composition.mix.MixChannel.Owner.Kind.AUDIO_TRACK, trackId));
+        return channel == null ? new SoundSourcePlacement(trackId, 0, 0.35)
+                : new SoundSourcePlacement(trackId, channel.x(), channel.depth(), channel.levelDb(),
+                channel.width(), channel.reverb(), channel.muted(), channel.locked(), null);
+    }
+
+    /**
+     * The audio lanes of a model that the mix adds beside its parts, each with its place; reads the
+     * mix document, writes nothing. Empty for a piece without a model or without audio lanes.
+     */
+    static List<SoundSourcePlacement> audioLanes(Composition model, Path directory) {
+        List<SoundSourcePlacement> lanes = new ArrayList<SoundSourcePlacement>();
+        if (model == null) {
+            return lanes;
+        }
+        MixScene document;
+        try {
+            document = MixJson.load(directory);
+        } catch (IOException | RuntimeException unreadable) {
+            document = null;
+        }
+        for (com.aresstack.audio.composition.Track track : model.tracks()) {
+            if (track.kind() == com.aresstack.audio.composition.Track.Kind.AUDIO && !track.clips().isEmpty()) {
+                lanes.add(audioPlacement(document, track.id()));
+            }
+        }
+        return lanes;
     }
 
     /**

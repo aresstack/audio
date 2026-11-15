@@ -1501,6 +1501,9 @@ public final class AudioStudioFrame extends JFrame {
         if (player.ready()) {
             try {
                 player.swap(file); // goes on at the same place, without a gap
+                if (!player.live()) {
+                    lightsOfFile(soloTrack()); // the stage lights follow the stage that was mixed
+                }
             } catch (Exception noSound) {
                 player.show(file);
             }

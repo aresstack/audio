@@ -71,6 +71,14 @@ public final class StageLights {
             }
             levels.add(level);
         }
+        // The audio lanes the mix adds beside the parts, from the stems it wrote for them.
+        for (SoundSourcePlacement lane : StageMixService.audioLanes(model, directory)) {
+            SoundSourcePlacement placement = only == null ? lane : lane.withMuted(!only.equals(lane.trackId()));
+            float[] level = fromFile(StageMixService.audioStem(directory, lane.trackId()));
+            ids.add(lane.trackId());
+            placements.add(placement);
+            levels.add(level == null ? new float[0] : level);
+        }
         StageAutomation moving;
         try {
             moving = piece.levels(placements).movingAs(piece.movements(directory, message -> { }));
