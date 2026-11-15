@@ -6,6 +6,7 @@ import com.aresstack.audio.instruments.InstrumentRegistry;
 import com.aresstack.audio.instruments.network.AudioProxyRoutes;
 import com.aresstack.audio.studio.ai.KipitzChatClient;
 import com.aresstack.audio.studio.album.Album;
+import com.aresstack.audio.studio.album.AlbumTrack;
 import com.aresstack.audio.studio.album.AlbumFiles;
 import com.aresstack.audio.studio.album.AlbumMembership;
 import com.aresstack.audio.studio.application.GemmaMusicComposer;
@@ -904,6 +905,12 @@ public final class AudioStudioFrame extends JFrame {
         composing.add(scoreKey);
         composing.add(javax.swing.Box.createHorizontalStrut(12));
         composing.add(composeButton);
+        JButton inAlbum = new DeckWidgets.HeadKey("Im Album produzieren");
+        inAlbum.setToolTipText("Macht dieses Stück neu als Titel seines Albums, mit dem, was das Album ihm sagt;"
+                + " die Albumseite zeigt, wie es vorangeht.");
+        inAlbum.addActionListener(event -> produceOpenPieceInAlbum());
+        composing.add(javax.swing.Box.createHorizontalStrut(8));
+        composing.add(inAlbum);
 
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
@@ -3485,6 +3492,32 @@ public final class AudioStudioFrame extends JFrame {
         }
     }
 
+    /**
+     * Produces one title of an album now, with the album as its context: the album page shows how
+     * it goes, as its "Titel neu produzieren" does.
+     */
+    private void produceInAlbum(String albumId, String trackId) {
+        keepSong();
+        showAlbum(albumId);
+        if (albumsPanel != null && albumsPanel.album() != null && albumsPanel.album().id().equals(albumId)) {
+            albumsPanel.produceTitle(trackId);
+        }
+    }
+
+    /** The key in the head of the composition: the open piece made anew as the title of its album. */
+    private void produceOpenPieceInAlbum() {
+        Path open = Paths.get(directory.getText().trim());
+        Album album = albumMembers.albumOf(open).orElse(null);
+        String name = open.getFileName() == null ? "" : open.getFileName().toString();
+        AlbumTrack track = album == null ? null : album.tracks().stream()
+                .filter(each -> name.equals(each.piece())).findFirst().orElse(null);
+        if (track == null) {
+            message("Dieses Stück steht in keinem Album; im Album produzieren geht nur mit einem Titel eines Albums.");
+            return;
+        }
+        produceInAlbum(album.id(), track.id());
+    }
+
     /** Shows the page of an album: its settings, its titles and its production. */
     private void showAlbum(String id) {
         if (id == null || !albumMembers.albums().album(id).isPresent()) {
@@ -3539,6 +3572,11 @@ public final class AudioStudioFrame extends JFrame {
             public void newCompositionIn(String albumId) {
                 currentAlbum = albumId;
                 newComposition();
+            }
+
+            @Override
+            public void produceTitle(String albumId, String trackId) {
+                produceInAlbum(albumId, trackId);
             }
 
             @Override
