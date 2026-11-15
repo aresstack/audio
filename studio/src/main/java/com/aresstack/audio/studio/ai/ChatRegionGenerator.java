@@ -74,6 +74,11 @@ public final class ChatRegionGenerator implements RegionGenerator {
         }
         prompt.append(ChatPartGenerator.rules(task.part().role() == null ? "" : task.part().role())).append('\n');
         prompt.append(GeneratedNotes.articulationRule()).append('\n');
+        if (task.plansPerformance(frame)) {
+            prompt.append(ContinuationPerformance.request("passage of the parts " + String.join(", ", task.performs())
+                    + ", bars", task.firstBar(), task.lastBar(), "after the passage the piece goes on in its own tempo "
+                    + "and loudness"));
+        }
         int middle = (task.range().low() + task.range().high()) / 2;
         prompt.append("Return exactly one JSON object: {\"part\":\"").append(task.part().id()).append("\",\"section\":\"")
                 .append(frame.sectionId()).append("\",\"notes\":[{\"bar\":1,\"beat\":0,\"duration\":1,\"pitch\":")

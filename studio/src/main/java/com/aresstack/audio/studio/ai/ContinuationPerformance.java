@@ -42,15 +42,23 @@ public record ContinuationPerformance(List<TimeMap.Tempo> tempos, List<Dynamics.
     public static String request(ContinuationTask task) {
         int first = task.firstNewBar() + 1;
         int last = task.firstNewBar() + task.request().bars();
-        return "Plan the performance of the new bars " + first + "-" + last + " like the marks of a score, all "
+        return request("new bars", first, last, task.inserts() ? "after the inserted bars the original goes on in its "
+                + "own tempo and loudness" : "");
+    }
+
+    /**
+     * The sentence of a prompt that asks for the performance of bars {@code first..last} of the
+     * piece (counted from 1), called {@code what}, with an optional remark on what follows them.
+     */
+    public static String request(String what, int first, int last, String after) {
+        return "Plan the performance of the " + what + " " + first + "-" + last + " like the marks of a score, all "
                 + "optional: \"tempoChanges\":[{\"bar\":<" + first + "-" + last + ">,\"bpm\":<" + PlanShape.MIN_BPM
                 + "-" + PlanShape.MAX_BPM + ">,\"glide\":<true for an accelerando or ritardando that changes evenly "
                 + "until the next tempo change>}], \"dynamics\":[{\"bar\":<n>,\"beat\":<from 1>,\"level\":\"ppp|pp|p|mp|"
                 + "mf|f|ff|fff\",\"part\":\"<id, leave out for all parts>\"}], \"hairpins\":[{\"fromBar\":<n>,\"fromBeat\":"
                 + "<from 1>,\"toBar\":<n>,\"toBeat\":<from 1>,\"to\":\"<level reached>\",\"part\":\"<id or left out>\"}] "
                 + "as keys of the same JSON object. Bars count in the piece; give marks only where the music asks for "
-                + "them" + (task.inserts() ? "; after the inserted bars the original goes on in its own tempo and "
-                + "loudness" : "") + ".\n";
+                + "them" + (after.isEmpty() ? "" : "; " + after) + ".\n";
     }
 
     /**
@@ -58,12 +66,22 @@ public record ContinuationPerformance(List<TimeMap.Tempo> tempos, List<Dynamics.
      * that go on; every entry left out is said in {@code repairs}.
      */
     public static ContinuationPerformance read(JsonObject answer, ContinuationTask task, List<String> repairs) {
+        Set<String> parts = new HashSet<>();
+        task.parts().forEach(part -> parts.add(part.id()));
+        return read(answer, task.time(), task.newStart(), task.newEnd(), parts, !task.inserts(), repairs);
+    }
+
+    /**
+     * The performance an answer names, kept to the ticks {@code from} to {@code to} and to the
+     * given parts; every entry left out is said in {@code repairs}.
+     *
+     * @param lastStays whether nothing follows: then a glide of the last tempo point has no target
+     */
+    public static ContinuationPerformance read(JsonObject answer, TimeMap time, long from, long to, Set<String> parts,
+                                               boolean lastStays, List<String> repairs) {
         if (answer == null) {
             return NONE;
         }
-        long from = task.newStart();
-        long to = task.newEnd();
-        TimeMap time = task.time();
         List<TimeMap.Tempo> tempos = new ArrayList<>();
         JsonElement points = answer.get("tempoChanges");
         if (points != null && points.isJsonArray()) {
@@ -78,7 +96,7 @@ public record ContinuationPerformance(List<TimeMap.Tempo> tempos, List<Dynamics.
                         repairs.add("Tempo " + bpm + " liegt nicht zwischen " + PlanShape.MIN_BPM + " und "
                                 + PlanShape.MAX_BPM + " BPM und wird übergangen.");
                     } else if (tick < from || tick >= to) {
-                        repairs.add("Tempowechsel außerhalb der neuen Takte übergangen: " + point);
+                        repairs.add("Tempowechsel außerhalb der geplanten Takte übergangen: " + point);
                     } else {
                         byTick.put(tick, new TimeMap.Tempo(tick, bpm, glide));
                     }
@@ -87,14 +105,12 @@ public record ContinuationPerformance(List<TimeMap.Tempo> tempos, List<Dynamics.
                 }
             }
             tempos.addAll(byTick.values());
-            if (!task.inserts() && !tempos.isEmpty() && tempos.get(tempos.size() - 1).glide()) {
+            if (lastStays && !tempos.isEmpty() && tempos.get(tempos.size() - 1).glide()) {
                 TimeMap.Tempo last = tempos.remove(tempos.size() - 1);
                 tempos.add(new TimeMap.Tempo(last.tick(), last.bpm()));
                 repairs.add("Der letzte Tempowechsel hat kein Ziel zum Gleiten; er gilt als fester Wechsel.");
             }
         }
-        Set<String> parts = new HashSet<>();
-        task.parts().forEach(part -> parts.add(part.id()));
         JsonObject marksOnly = answer.deepCopy();
         marksOnly.remove("tempoChanges");
         Dynamics planned = PlanShape.read(marksOnly, time, parts, PlanShape.MIN_BPM, PlanShape.MAX_BPM, Long.MAX_VALUE,
@@ -104,7 +120,7 @@ public record ContinuationPerformance(List<TimeMap.Tempo> tempos, List<Dynamics.
             if (mark.tick() >= from && mark.tick() < to) {
                 marks.add(mark);
             } else {
-                repairs.add("Dynamikzeichen außerhalb der neuen Takte übergangen (Tick " + mark.tick() + ").");
+                repairs.add("Dynamikzeichen außerhalb der geplanten Takte übergangen (Tick " + mark.tick() + ").");
             }
         }
         List<Dynamics.Hairpin> hairpins = new ArrayList<>();
@@ -113,7 +129,7 @@ public record ContinuationPerformance(List<TimeMap.Tempo> tempos, List<Dynamics.
                 hairpins.add(pin.endTick() <= to ? pin
                         : new Dynamics.Hairpin(pin.startTick(), to, pin.target(), pin.partId()));
             } else {
-                repairs.add("Gabel außerhalb der neuen Takte übergangen (Tick " + pin.startTick() + ").");
+                repairs.add("Gabel außerhalb der geplanten Takte übergangen (Tick " + pin.startTick() + ").");
             }
         }
         return new ContinuationPerformance(tempos, marks, hairpins);
@@ -127,6 +143,35 @@ public record ContinuationPerformance(List<TimeMap.Tempo> tempos, List<Dynamics.
 
     public boolean isEmpty() {
         return tempos.isEmpty() && marks.isEmpty() && hairpins.isEmpty();
+    }
+
+    /**
+     * The same performance where a mark or hairpin for all parts holds for each of these parts
+     * instead: for a passage of some parts, so that the parts that are not rewritten keep their
+     * level. With no parts given, the same performance.
+     */
+    public ContinuationPerformance forParts(List<String> parts) {
+        if (parts.isEmpty()) {
+            return this;
+        }
+        List<Dynamics.Mark> ownMarks = new ArrayList<>();
+        for (Dynamics.Mark mark : marks) {
+            if (mark.partId() != null) {
+                ownMarks.add(mark);
+            } else {
+                parts.forEach(part -> ownMarks.add(new Dynamics.Mark(mark.tick(), mark.level(), part)));
+            }
+        }
+        List<Dynamics.Hairpin> ownPins = new ArrayList<>();
+        for (Dynamics.Hairpin pin : hairpins) {
+            if (pin.partId() != null) {
+                ownPins.add(pin);
+            } else {
+                parts.forEach(part -> ownPins.add(new Dynamics.Hairpin(pin.startTick(), pin.endTick(), pin.target(),
+                        part)));
+            }
+        }
+        return new ContinuationPerformance(tempos, ownMarks, ownPins);
     }
 
     /**

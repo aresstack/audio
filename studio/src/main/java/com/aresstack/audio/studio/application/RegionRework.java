@@ -15,6 +15,7 @@ import com.aresstack.audio.composition.edit.Proposal;
 import com.aresstack.audio.composition.edit.Revision;
 import com.aresstack.audio.studio.ai.RegionComposer;
 import com.aresstack.audio.studio.ai.RegionRequest;
+import com.aresstack.audio.studio.ai.ContinuationPerformance;
 import com.aresstack.audio.studio.ai.RewrittenRegion;
 import com.aresstack.audio.studio.progress.Progress;
 import com.aresstack.audio.studio.project.MidiExport;
@@ -192,6 +193,24 @@ public final class RegionRework {
             scope = scope.allowing(EditOp.Kind.SET_SECTIONS);
             expected = new Composition(base.meta(), base.timeMap(), form, base.parts(), base.tracks(), base.assets(),
                     base.dynamics());
+        }
+        if (!written.performance().isEmpty()) {
+            // how the passage is played, as the AI planned it; before and after it the piece stays as it was
+            List<String> said = new ArrayList<>();
+            ContinuationPerformance.Applied applied = written.performance().applied(base,
+                    request.selection().fromTick(), request.selection().toTick(), said);
+            List<EditOp> operations = new ArrayList<>(patch.operations());
+            if (applied.timeMap() != null) {
+                operations.add(new EditOp.SetTimeMap(applied.timeMap()));
+                expected = expected.withTimeMap(applied.timeMap());
+            }
+            if (applied.dynamics() != null) {
+                operations.add(new EditOp.SetDynamics(applied.dynamics()));
+                expected = expected.withDynamics(applied.dynamics());
+            }
+            log.addAll(said);
+            patch = new Patch(patch.description(), operations);
+            scope = scope.allowing(EditOp.Kind.SET_TIME_MAP).allowing(EditOp.Kind.SET_DYNAMICS);
         }
         Proposal made = session.propose(patch, scope, Revision.Author.AI, written.runId());
         List<String> differences = RegionEdit.outsideChanges(expected, made.result(), request.selection());

@@ -58,6 +58,14 @@ public final class RegionComposer {
     }
 
     /**
+     * The parts a mark for all parts of a passage holds for: all parts of the piece when the
+     * passage has them all (then such a mark stays one for all), else only its own.
+     */
+    private static List<String> playing(Composition piece, List<String> passage) {
+        return passage.size() >= piece.parts().size() ? List.of() : passage;
+    }
+
+    /**
      * Writes the passage anew.
      *
      * @param attempt        1 for the first, more to write it again differently
@@ -72,6 +80,7 @@ public final class RegionComposer {
         Map<String, List<NewNote>> passages = new LinkedHashMap<>();
         List<String> corrections = new ArrayList<>();
         final EditSketch sketch = EditSketch.of(piece, progress);
+        ContinuationPerformance performance = ContinuationPerformance.NONE;
         for (String partId : request.selection().parts(piece)) {
             RegionTask task = RegionTask.of(piece, request, context, partId, attempt);
             VoiceNormalizer normalizer = new VoiceNormalizer(piece.timeMap(), task.range(), task.part().drums());
@@ -94,6 +103,14 @@ public final class RegionComposer {
                 if (sketch != null) {
                     sketch.written(partId, task.part().program(), task.part().role(), frame, generated);
                 }
+                if (task.plansPerformance(frame)) {
+                    List<String> said = new ArrayList<>();
+                    performance = ContinuationPerformance.read(generated.answer(), piece.timeMap(),
+                            request.selection().fromTick(), request.selection().toTick(),
+                            new HashSet<>(task.performs()), false, said)
+                            .forParts(playing(piece, task.performs()));
+                    said.forEach(line -> corrections.add(partId + "\t" + line));
+                }
                 List<ShapedNote> shaped = normalizer.shape(frame, generated);
                 for (ShapedNote n : shaped) {
                     notes.add(new NewNote(frame.startTick() + n.tick(), n.length(), n.pitch(), n.velocity(), n.articulation()));
@@ -108,7 +125,7 @@ public final class RegionComposer {
             }
             passages.put(partId, notes);
         }
-        RewrittenRegion region = new RewrittenRegion(request, passages, context, corrections, attempt);
+        RewrittenRegion region = new RewrittenRegion(request, passages, context, corrections, attempt, performance);
         progress.update("Passage neu geschrieben: " + region.noteCount() + " Noten in " + passages.size()
                 + " Part(s), " + corrections.size() + " Korrekturen.");
         return region;
