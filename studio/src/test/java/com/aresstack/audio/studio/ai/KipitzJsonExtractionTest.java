@@ -40,4 +40,14 @@ public class KipitzJsonExtractionTest {
         String text = "x".repeat(500);
         assertTrue(KipitzChatClient.glimpse(text).length() < 210);
     }
+
+    @Test
+    public void wholeAnswerWithoutContentIsEmptyNotUnreadable() {
+        KipitzChatClient.Answer cut = KipitzChatClient.wholeAnswer(
+                "{\"choices\":[{\"message\":{\"content\":null,\"reasoning_content\":\"thinking\"},"
+                        + "\"finish_reason\":\"length\"}]}");
+        assertEquals("", cut.text);
+        assertEquals("length", cut.finishReason);
+        assertNull(KipitzChatClient.wholeAnswer("<html>gateway</html>"));
+    }
 }

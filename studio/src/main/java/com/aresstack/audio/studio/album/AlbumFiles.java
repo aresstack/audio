@@ -187,11 +187,15 @@ public final class AlbumFiles implements AlbumRepository {
                         AlbumTrack.isFolderName(text(entry, "piece")) ? text(entry, "piece") : ""));
             }
         }
-        // An album from before the range has one length for all pieces.
+        // An album from before the range has one length for all pieces, meant as "about": it
+        // becomes a range of a minute below and above it.
         int seconds = number(concept, "secondsPerTrack", 180);
+        boolean ranged = concept.has("minSeconds") || concept.has("maxSeconds");
+        int low = ranged ? number(concept, "minSeconds", seconds) : Math.max(10, seconds - 60);
+        int high = ranged ? number(concept, "maxSeconds", seconds) : Math.min(AlbumConcept.MAX_SECONDS, seconds + 60);
         return new Album(id, text(json, "title"), new AlbumConcept(text(concept, "description"),
                 text(concept, "style"), number(concept, "trackCount", Math.max(1, tracks.size())),
-                number(concept, "minSeconds", seconds), number(concept, "maxSeconds", seconds)), tracks);
+                low, high), tracks);
     }
 
     static String text(JsonObject json, String name) {

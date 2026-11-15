@@ -155,7 +155,8 @@ public final class PieceAutopilot {
         boolean grown = saved.isPresent() && bars(saved.get()) > growBars;
         Path arrangement = grown ? folder.resolve("arrangement.tsv") : ComposingIntoPiece.run(
                 () -> first == null ? composer.compose(opening, folder, tracks, progress)
-                        : composer.compose(opening, folder, tracks, first, progress),
+                        // the piece keeps its whole length as its spec; only the notes come in steps
+                        : composer.compose(opening, folder, tracks, first, spec, progress),
                 folder, description, songs, model);
         if (first != spec) {
             arrangement = grow(folder, model, description, spec.bars(), progress);

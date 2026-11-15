@@ -142,15 +142,26 @@ public final class GemmaMusicComposer {
 
     public Path compose(String description, Path directory, TrackArrangement tracks, CompositionSpec spec,
                         Progress progress) throws IOException {
+        return compose(description, directory, tracks, spec, spec, progress);
+    }
+
+    /**
+     * Composes {@code spec} (for a long piece only its first bars) into a piece that is planned as
+     * {@code piece}: the piece keeps its whole length as its spec, the bars after the first come by
+     * continuation. A folder planned with the piece's spec, or with the spec of this step (as a
+     * run of before wrote it), is the same piece and goes on.
+     */
+    public Path compose(String description, Path directory, TrackArrangement tracks, CompositionSpec spec,
+                        CompositionSpec piece, Progress progress) throws IOException {
         Files.createDirectories(directory);
         CompositionSpec planned = specOf(directory);
-        if (planned != null && !planned.equals(spec)) {
+        if (planned != null && !planned.equals(piece) && !planned.equals(spec)) {
             throw new IOException("Dieses Stück ist als " + planned.label() + " geplant, verlangt ist "
-                    + spec.label() + ". Für andere Vorgaben ein neues Stück beginnen.");
+                    + piece.label() + ". Für andere Vorgaben ein neues Stück beginnen.");
         }
-        if (!spec.isLegacy()) {
+        if (!piece.isLegacy()) {
             Files.write(directory.resolve(SPEC_FILE), new GsonBuilder().setPrettyPrinting().create()
-                    .toJson(toJson(spec)).getBytes(StandardCharsets.UTF_8));
+                    .toJson(toJson(piece)).getBytes(StandardCharsets.UTF_8));
         }
         progress.update("Composition plan ...");
         JsonObject plan = plan(description, tracks, spec, directory, progress);

@@ -317,8 +317,16 @@ final class AlbumsPanel extends JPanel {
         table.setFillsViewportHeight(true);
         table.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
         int[] widths = {34, 210, 170, 56, 90, 56, 200, 120, 190};
+        // The columns keep their widths; only the state at the end takes what is left. A long
+        // message there is cut with "…" and shows whole as the tooltip, instead of squeezing the others.
+        table.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
         for (int column = 0; column < widths.length; column++) {
-            table.getColumnModel().getColumn(column).setPreferredWidth(widths[column]);
+            javax.swing.table.TableColumn each = table.getColumnModel().getColumn(column);
+            each.setPreferredWidth(widths[column]);
+            each.setWidth(widths[column]);
+            if (column != Tracks.STATE) {
+                each.setMinWidth(widths[column] * 3 / 4);
+            }
         }
         table.getColumnModel().getColumn(Tracks.STATE).setCellRenderer(new DefaultTableCellRenderer() {
             @Override
