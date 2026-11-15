@@ -44,9 +44,20 @@ public final class PieceRendering {
     public Outcome render(ProjectSession session, Map<String, String> libraries, Sf2Engine sf2Engine,
                           String fluidSynthExecutable, String sfizzExecutable, Map<String, Integer> programs,
                           Progress progress) throws Exception {
-        Path folder = session.folder();
+        return render(session.folder(), session.composition(), libraries, sf2Engine, fluidSynthExecutable,
+                sfizzExecutable, programs, progress);
+    }
+
+    /**
+     * The same for a piece that is not the saved one: the preview of a proposal, in its own
+     * folder, with its own stage and its own stem cache.
+     */
+    public Outcome render(Path folder, com.aresstack.audio.composition.Composition composition,
+                          Map<String, String> libraries, Sf2Engine sf2Engine, String fluidSynthExecutable,
+                          String sfizzExecutable, Map<String, Integer> programs, Progress progress)
+            throws Exception {
         Set<String> open = new LinkedHashSet<String>();
-        for (Part part : session.composition().parts()) {
+        for (Part part : composition.parts()) {
             open.add(part.id());
             TrackProgress.tell(progress, part.id(), TrackProgress.Stage.RENDER, TrackProgress.State.WAITING, "");
         }
@@ -56,7 +67,7 @@ public final class PieceRendering {
                     fluidSynthExecutable, sfizzExecutable, programs);
             RenderService.Instrumentation chosen = part -> usual.of(withLibrary(part,
                     libraries == null ? null : libraries.get(part.id())));
-            stems = new RenderService(chosen, RenderLimits.STANDARD).render(session, message -> {
+            stems = new RenderService(chosen, RenderLimits.STANDARD).render(folder, composition, message -> {
                 String part = partBeingRendered(message, open);
                 if (part != null) {
                     TrackProgress.tell(progress, part, TrackProgress.Stage.RENDER, TrackProgress.State.WORKING, "");
@@ -77,8 +88,9 @@ public final class PieceRendering {
             progress.update(stems.rendered().size() + " Spuren neu gerendert, " + stems.reused().size()
                     + " unverändert übernommen.");
         }
-        session.exportMidi(folder.resolve(MIDI_FILE));
-        Path mix = new StageMixService().mix(folder.resolve("arrangement.tsv"), folder, progress);
+        com.aresstack.audio.studio.project.MidiExport.write(composition, folder.resolve(MIDI_FILE));
+        // The tracks and the time of the mix are those of the model: arrangement.tsv is not read.
+        Path mix = new StageMixService().mix(StageMixService.Piece.of(composition), folder, progress);
         return new Outcome(mix, stems);
     }
 

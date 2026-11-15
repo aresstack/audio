@@ -28,9 +28,10 @@ import java.util.Map;
 /**
  * The piece as a conductor's score: all tracks one below the other on a dark sheet, each
  * on its staff with its clef, the bars side by side, the notes with their heads,
- * stems, flags and beams, rests, dots, sharps, ledger lines and ties. Several
- * systems follow one another down the sheet. While the piece plays, a line shows
- * where it is and the sheet turns along.
+ * stems, flags and beams, rests, dots, accidentals, ledger lines and ties, in the
+ * meter and with the key signature of the piece, every note spelled as its key writes
+ * it. Several systems follow one another down the sheet. While the piece plays, a line
+ * shows where it is and the sheet turns along.
  */
 final class ScoreView extends JComponent implements Scrollable {
     // Dark as the rest of the desk: light notes on a dark sheet. A picture for printing is the other way round.
@@ -43,6 +44,11 @@ final class ScoreView extends JComponent implements Scrollable {
     private static final float SPACE = 9f;
     private static final int NAMES = 132;
     private static final int LEAD = 74;
+    /** From one sign of the key signature to the next. */
+    private static final float KEY_STEP = 1.05f * SPACE;
+    /** Where the sharps of a key signature stand in the treble clef, in their order; the bass clef has them two places lower. */
+    private static final int[] SHARP_PLACES = {8, 5, 9, 6, 3, 7, 4};
+    private static final int[] FLAT_PLACES = {4, 7, 3, 6, 2, 5, 1};
     private static final int STAFF_STEP = 86;
     private static final int SYSTEM_GAP = 46;
     private static final int TOP = 54;
@@ -95,6 +101,8 @@ final class ScoreView extends JComponent implements Scrollable {
         boolean beamed;
         /** How far a rest is moved from the middle of the staff, in places: up for the upper of two voices. */
         int shift;
+        /** A rest that fills its bar: written as a whole rest in every meter. */
+        boolean wholeBar;
 
         Placed(Score.Event event, float x, float staffTop, boolean stemUp) {
             this.event = event;
@@ -217,8 +225,29 @@ final class ScoreView extends JComponent implements Scrollable {
         return shown;
     }
 
+    /** The sharps or flats of the key signature: positive for sharps, negative for flats, none without a score. */
+    private int fifths() {
+        return score == null ? 0 : Math.max(-7, Math.min(7, score.keySignature()));
+    }
+
+    /** How wide the key signature is at the head of a staff. */
+    private float keyWidth() {
+        return fifths() == 0 ? 0 : Math.abs(fifths()) * KEY_STEP + 5; // and a little air before the meter
+    }
+
+    /** The room at the head of every staff for clef, key signature and meter, before the first bar. */
+    private int lead() {
+        boolean wide = score != null && (score.meterNumerator() > 9 || score.meterDenominator() > 9);
+        return LEAD + Math.round(keyWidth()) + (wide ? 16 : 0);
+    }
+
+    /** Sixteenths that are beamed together: a dotted quarter in 6/8, 9/8 and 12/8, else a quarter. */
+    private int beamGroup() {
+        return score != null && score.meterDenominator() == 8 && score.meterNumerator() % 3 == 0 ? 6 : 4;
+    }
+
     private int barsPerSystem() {
-        int fitting = Math.max(1, (getWidth() - NAMES - LEAD - 24) / 250);
+        int fitting = Math.max(1, (getWidth() - NAMES - lead() - 24) / 250);
         return fitting >= 8 ? 8 : fitting >= 4 ? 4 : fitting >= 2 ? 2 : 1;
     }
 
@@ -278,6 +307,9 @@ final class ScoreView extends JComponent implements Scrollable {
         int systems = (score.bars() + perSystem - 1) / perSystem;
         float left = NAMES;
         float right = getWidth() - 24f;
+        final int LEAD = lead();
+        final int barLength = Math.max(1, score.barLength());
+        final int beat = beamGroup();
         float barWidth = (right - left - LEAD) / perSystem;
         Rectangle visible = g.getClipBounds();
 
@@ -346,9 +378,11 @@ final class ScoreView extends JComponent implements Scrollable {
                 } else {
                     glyph(g, "percussionClef", left + 12, top + 2 * SPACE);
                 }
+                if (staff.clef() != Score.Clef.PERCUSSION) {
+                    keySignature(g, left + 38, top, staff.clef());
+                }
                 if (system == 0) {
-                    glyph(g, "time4", left + 42, top + SPACE);
-                    glyph(g, "time4", left + 42, top + 3 * SPACE);
+                    meter(g, left + 42 + keyWidth(), top);
                 }
                 for (int bar = firstBar; bar < lastBar; bar++) {
                     float barRight = left + LEAD + (bar - firstBar + 1) * barWidth;
@@ -362,7 +396,6 @@ final class ScoreView extends JComponent implements Scrollable {
                 }
 
                 // The notes of this staff in this system, one voice after the other.
-                Map<Integer, Map<Integer, Boolean>> sharps = new HashMap<Integer, Map<Integer, Boolean>>();
                 for (int voice = 0; voice < staff.voices(); voice++) {
                     List<Placed> placed = new ArrayList<Placed>();
                     for (int bar = firstBar; bar < lastBar; bar++) {
@@ -377,24 +410,29 @@ final class ScoreView extends JComponent implements Scrollable {
                         }
                         Boolean forced = both ? Boolean.valueOf(voice == 0) : null;
                         List<Score.Event> events = staff.bar(voice, bar);
-                        Map<Integer, Boolean> sharpened = sharps.get(bar);
-                        if (sharpened == null) {
-                            sharpened = new HashMap<Integer, Boolean>();
-                            sharps.put(bar, sharpened);
-                        }
                         List<Placed> inBar = new ArrayList<Placed>();
+                        // A bar of nothing but rests is one whole rest in its middle, in every meter.
+                        boolean silentBar = !events.isEmpty();
                         for (Score.Event event : events) {
-                            float x = events.size() == 1 && event.rest() ? barLeft + barWidth / 2 - 6
-                                    : barLeft + 18 + inner * event.start() / Score.BAR;
+                            silentBar &= event.rest();
+                        }
+                        for (Score.Event event : events) {
+                            if (silentBar && event != events.get(0)) {
+                                continue;
+                            }
+                            boolean wholeBar = silentBar;
+                            float x = wholeBar ? barLeft + barWidth / 2 - 6
+                                    : barLeft + 18 + inner * event.start() / barLength;
                             Placed place = new Placed(event, x, top,
                                     forced != null ? forced.booleanValue() : stemUp(event, staff.clef()));
                             place.shift = !both ? 0 : voice == 0 ? 4 : -4;
+                            place.wholeBar = wholeBar;
                             inBar.add(place);
                             if (!event.rest()) {
-                                accidentals(g, place, staff.clef(), sharpened);
+                                accidentals(g, place, staff.clef());
                             }
                         }
-                        beam(g, inBar, staff.clef(), forced);
+                        beam(g, inBar, staff.clef(), forced, beat);
                         placed.addAll(inBar);
                     }
                     for (int index = 0; index < placed.size(); index++) {
@@ -441,9 +479,8 @@ final class ScoreView extends JComponent implements Scrollable {
         if (clef == Score.Clef.PERCUSSION) {
             return true;
         }
-        int[] pitches = event.pitches();
-        int low = Score.position(pitches[0], clef);
-        int high = Score.position(pitches[pitches.length - 1], clef);
+        int low = place(event, 0, clef);
+        int high = place(event, event.pitches().length - 1, clef);
         return (low + high) / 2f < 4; // below the middle line the stem goes up
     }
 
@@ -457,33 +494,79 @@ final class ScoreView extends JComponent implements Scrollable {
         g.fill(place.createTransformedShape(outline));
     }
 
-    /** Sharps before the notes that need one, and a natural where a sharp earlier in the bar no longer holds. */
-    private void accidentals(Graphics2D g, Placed place, Score.Clef clef, Map<Integer, Boolean> sharpened) {
+    /**
+     * Where a note of an event sits on its staff: as the key of the piece spells it (B flat, not
+     * A sharp, in D minor), or by its pitch where it has no spelling, as on a percussion staff.
+     */
+    private static int place(Score.Event event, int index, Score.Clef clef) {
+        com.aresstack.audio.composition.Key.Spelling spelling =
+                clef == Score.Clef.PERCUSSION ? null : event.spelling(index);
+        return spelling != null ? Score.position(spelling, clef) : Score.position(event.pitches()[index], clef);
+    }
+
+    /** The sharps or flats of the key at the head of a staff. */
+    private void keySignature(Graphics2D g, float x, float staffTop, Score.Clef clef) {
+        int fifths = fifths();
+        int lower = clef == Score.Clef.BASS ? 2 : 0;
+        for (int i = 0; i < Math.abs(fifths); i++) {
+            int position = (fifths > 0 ? SHARP_PLACES[i] : FLAT_PLACES[i]) - lower;
+            glyph(g, fifths > 0 ? "sharp" : "flat", x + i * KEY_STEP, y(staffTop, position));
+        }
+    }
+
+    /** The meter: its two numbers above one another, centred on each other. */
+    private void meter(Graphics2D g, float x, float staffTop) {
+        String upper = Integer.toString(score.meterNumerator());
+        String lower = Integer.toString(score.meterDenominator());
+        float width = Math.max(digitsWidth(upper), digitsWidth(lower));
+        digits(g, upper, x + (width - digitsWidth(upper)) / 2, staffTop + SPACE);
+        digits(g, lower, x + (width - digitsWidth(lower)) / 2, staffTop + 3 * SPACE);
+    }
+
+    /** As wide as a digit of the meter is, on the scale of the sheet. */
+    private static final float DIGIT = 470 * SPACE / 250f;
+
+    private static float digitsWidth(String number) {
+        return number.length() * DIGIT * 0.92f;
+    }
+
+    private static void digits(Graphics2D g, String number, float x, float y) {
+        for (int i = 0; i < number.length(); i++) {
+            glyph(g, "time" + number.charAt(i), x + i * DIGIT * 0.92f, y);
+        }
+    }
+
+    /** The signs before the notes that need one in their bar, as the score says it. */
+    private void accidentals(Graphics2D g, Placed place, Score.Clef clef) {
         if (clef == Score.Clef.PERCUSSION) {
             return;
         }
-        for (int pitch : place.event.pitches()) {
-            int position = Score.position(pitch, clef);
-            boolean sharp = Score.sharp(pitch);
-            boolean before = Boolean.TRUE.equals(sharpened.get(position));
-            if (sharp != before) {
-                g.setColor(ink);
-                glyph(g, sharp ? "sharp" : "natural", place.x - (sharp ? 11.5f : 9f), y(place.staffTop, position));
-                sharpened.put(position, sharp);
+        for (int i = 0; i < place.event.pitches().length; i++) {
+            String sign;
+            float before;
+            switch (place.event.accidental(i)) {
+                case SHARP: sign = "sharp"; before = 11.5f; break;
+                case FLAT: sign = "flat"; before = 10f; break;
+                case NATURAL: sign = "natural"; before = 9f; break;
+                case DOUBLE_SHARP: sign = "doubleSharp"; before = 11.5f; break;
+                case DOUBLE_FLAT: sign = "doubleFlat"; before = 17f; break;
+                default: continue;
             }
+            g.setColor(ink);
+            glyph(g, sign, place.x - before, y(place.staffTop, place(place.event, i, clef)));
         }
     }
 
     /** Joins eighths and sixteenths of one beat with a beam; the stems of a group all go the same way. */
-    private void beam(Graphics2D g, List<Placed> bar, Score.Clef clef, Boolean forced) {
+    private void beam(Graphics2D g, List<Placed> bar, Score.Clef clef, Boolean forced, int beatLength) {
         int index = 0;
         while (index < bar.size()) {
             Placed first = bar.get(index);
-            int beat = first.event.start() / 4;
+            int beat = first.event.start() / beatLength;
             List<Placed> group = new ArrayList<Placed>();
             int next = index;
             while (next < bar.size() && !bar.get(next).event.rest() && bar.get(next).event.length() <= 3
-                    && bar.get(next).event.start() / 4 == beat) {
+                    && bar.get(next).event.start() / beatLength == beat) {
                 group.add(bar.get(next));
                 next++;
             }
@@ -495,9 +578,8 @@ final class ScoreView extends JComponent implements Scrollable {
             int highest = Integer.MIN_VALUE;
             int lowest = Integer.MAX_VALUE;
             for (Placed place : group) {
-                int[] pitches = place.event.pitches();
-                int low = Score.position(pitches[0], clef);
-                int high = Score.position(pitches[pitches.length - 1], clef);
+                int low = place(place.event, 0, clef);
+                int high = place(place.event, place.event.pitches().length - 1, clef);
                 sum += (low + high) / 2f;
                 highest = Math.max(highest, high);
                 lowest = Math.min(lowest, low);
@@ -508,8 +590,8 @@ final class ScoreView extends JComponent implements Scrollable {
             float[] reach = new float[group.size()];
             float[] xs = new float[group.size()];
             for (int i = 0; i < group.size(); i++) {
-                int[] pitches = group.get(i).event.pitches();
-                int outer = Score.position(up ? pitches[pitches.length - 1] : pitches[0], clef);
+                Score.Event grouped = group.get(i).event;
+                int outer = place(grouped, up ? grouped.pitches().length - 1 : 0, clef);
                 reach[i] = y(top, outer) + (up ? -3.2f : 3.2f) * SPACE;
                 xs[i] = stemX(group.get(i).x, up);
             }
@@ -536,6 +618,7 @@ final class ScoreView extends JComponent implements Scrollable {
                 Placed place = group.get(i);
                 Placed stemmed = new Placed(place.event, place.x, place.staffTop, up);
                 stemmed.shift = place.shift;
+                stemmed.wholeBar = place.wholeBar;
                 stemmed.beamed = true;
                 stemmed.stemEnd = start + slope * (xs[i] - firstX);
                 bar.set(bar.indexOf(place), stemmed);
@@ -586,7 +669,7 @@ final class ScoreView extends JComponent implements Scrollable {
         for (int step = 1; step < pitches.length; step++) {
             int i = place.stemUp ? step : pitches.length - 1 - step;
             int before = place.stemUp ? i - 1 : i + 1;
-            if (Math.abs(Score.position(pitches[i], clef) - Score.position(pitches[before], clef)) == 1
+            if (Math.abs(place(event, i, clef) - place(event, before, clef)) == 1
                     && !aside[before]) {
                 aside[i] = true;
                 any = true;
@@ -595,7 +678,7 @@ final class ScoreView extends JComponent implements Scrollable {
         float headWidth = (length == 16 ? 1.69f : 1.18f) * SPACE;
         for (int i = 0; i < pitches.length; i++) {
             int pitch = pitches[i];
-            int position = Score.position(pitch, clef);
+            int position = place(event, i, clef);
             low = Math.min(low, position);
             high = Math.max(high, position);
             float y = y(place.staffTop, position);
@@ -636,7 +719,7 @@ final class ScoreView extends JComponent implements Scrollable {
         int length = place.event.length();
         g.setColor(ink);
         float top = place.staffTop;
-        if (length == 16) {
+        if (place.wholeBar || length >= 16) {
             glyph(g, "restWhole", place.x, y(top, 6 + place.shift));
         } else if (length >= 8) {
             glyph(g, "restHalf", place.x, y(top, 4 + place.shift));
@@ -658,8 +741,7 @@ final class ScoreView extends JComponent implements Scrollable {
             if (!place.event.tied(i)) {
                 continue;
             }
-            int pitch = pitches[i];
-            float y = y(place.staffTop, Score.position(pitch, clef)) + (place.stemUp ? 0.75f : -0.75f) * SPACE;
+            float y = y(place.staffTop, place(place.event, i, clef)) + (place.stemUp ? 0.75f : -0.75f) * SPACE;
             float from = place.x + 1.25f * SPACE;
             float end = Math.max(from + 6, to - 2);
             float bulge = (place.stemUp ? 0.55f : -0.55f) * SPACE;
