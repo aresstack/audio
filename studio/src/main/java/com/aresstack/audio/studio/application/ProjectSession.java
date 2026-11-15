@@ -529,6 +529,20 @@ public final class ProjectSession {
     }
 
     /**
+     * As {@link #apply(Patch, EditScope)}, and the mix follows in the same step: {@code mixFollows}
+     * moves its automation curves along with the music (a section dragged or bars taken out). A
+     * shift of the patch moves them as always, before.
+     */
+    public ChangeSet apply(Patch patch, EditScope scope, java.util.function.UnaryOperator<MixScene> mixFollows)
+            throws EditRefusedException, IOException {
+        Proposal.Outcome outcome = Proposal.make(ids.next(), composition, patch, scope, Revision.Author.USER, null);
+        if (!outcome.made()) {
+            throw new EditRefusedException(outcome.result().violations());
+        }
+        return commit(outcome.proposal(), outcome.proposal().patch().description(), mixFollows);
+    }
+
+    /**
      * Makes a proposal: the patch is applied and checked, but the piece stays as it is until the
      * proposal is accepted. One proposal at a time; a new one replaces one still open, whose
      * preview is deleted.
@@ -676,10 +690,18 @@ public final class ProjectSession {
     }
 
     private ChangeSet commit(Proposal proposal, String description) throws IOException {
+        return commit(proposal, description, null);
+    }
+
+    private ChangeSet commit(Proposal proposal, String description,
+                             java.util.function.UnaryOperator<MixScene> mixFollows) throws IOException {
         MixScene shifted = mix;
         if (shifted != null) {
             for (EditOp.ShiftTime shift : proposal.patch().shifts()) {
                 shifted = TimeShift.shift(shifted, shift.fromTick(), shift.ticks());
+            }
+            if (mixFollows != null) {
+                shifted = mixFollows.apply(shifted);
             }
         }
         shifted = PartSeats.seatNewParts(shifted, proposal.base(), proposal.result(), ids);

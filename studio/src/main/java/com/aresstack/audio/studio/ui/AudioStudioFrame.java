@@ -2751,7 +2751,7 @@ public final class AudioStudioFrame extends JFrame {
         }
         try {
             stopPlayback();
-            com.aresstack.audio.composition.edit.ChangeSet changes = piece.get().apply(edit.patch(), edit.scope());
+            com.aresstack.audio.composition.edit.ChangeSet changes = piece.get().apply(edit.patch(), edit.scope(), edit.mix());
             arrangementView.mark(null);
             pieceChanged(edit.patch().description() + ". Zurücknehmen mit „Rückgängig“ (Strg+Z).", changes);
         } catch (com.aresstack.audio.studio.application.EditRefusedException refused) {

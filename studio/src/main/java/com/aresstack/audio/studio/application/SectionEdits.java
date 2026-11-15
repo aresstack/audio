@@ -12,6 +12,8 @@ import com.aresstack.audio.composition.Track;
 import com.aresstack.audio.composition.edit.EditOp;
 import com.aresstack.audio.composition.edit.EditScope;
 import com.aresstack.audio.composition.edit.Patch;
+import com.aresstack.audio.composition.mix.AutomationLane;
+import com.aresstack.audio.composition.mix.MixScene;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -20,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 
 /**
  * What the section bar above the lanes does to the form of a piece, as patches for the edit core:
@@ -43,8 +46,15 @@ public final class SectionEdits {
     private SectionEdits() {
     }
 
-    /** One action on the form: the patch and its scope, or why it cannot be. */
-    public record SectionEdit(Patch patch, EditScope scope, String refusal) {
+    /**
+     * One action on the form: the patch and its scope, or why it cannot be, and how the automation
+     * curves of the mix follow the music ({@code null}: they stay; a shift of the patch moves them anyway).
+     */
+    public record SectionEdit(Patch patch, EditScope scope, String refusal, UnaryOperator<MixScene> mix) {
+        public SectionEdit(Patch patch, EditScope scope, String refusal) {
+            this(patch, scope, refusal, null);
+        }
+
         public boolean isEmpty() {
             return patch == null || patch.isEmpty();
         }
@@ -54,7 +64,11 @@ public final class SectionEdits {
         }
 
         static SectionEdit of(String description, List<EditOp> operations) {
-            return new SectionEdit(new Patch(description, operations), EditScope.everything(), null);
+            return of(description, operations, null);
+        }
+
+        static SectionEdit of(String description, List<EditOp> operations, UnaryOperator<MixScene> mix) {
+            return new SectionEdit(new Patch(description, operations), EditScope.everything(), null, mix);
         }
     }
 
@@ -162,7 +176,8 @@ public final class SectionEdits {
             }
         }
         operations.add(new EditOp.SetSections(withGaps(kept, ids, used)));
-        return SectionEdit.of(bars + (close ? " gelöscht" : " gelöscht, Lücke bleibt"), operations);
+        return SectionEdit.of(bars + (close ? " gelöscht" : " gelöscht, Lücke bleibt"), operations,
+                close ? mix -> closedMix(mix, from, to) : null);
     }
 
     /** Deletes a section with its music; see {@link #deleteBars}. */
@@ -179,7 +194,7 @@ public final class SectionEdits {
         }
         String what = isGap(section) ? "Lücke" : "Abschnitt „" + section.name() + "“";
         return new SectionEdit(new Patch(what + (close || isGap(section) ? " gelöscht" : " gelöscht, Lücke bleibt"),
-                edit.patch().operations()), edit.scope(), null);
+                edit.patch().operations()), edit.scope(), null, edit.mix());
     }
 
     // Moving a section ----------------------------------------------------------------------
@@ -261,12 +276,17 @@ public final class SectionEdits {
         for (Section other : music(piece)) {
             kept.add(other.id().equals(sectionId) ? moved(other, target) : other);
         }
+        TimeMap movedTime = movedTime(time, from, to, target);
+        if (!movedTime.equals(time)) {
+            operations.add(new EditOp.SetTimeMap(movedTime));
+        }
         Dynamics dynamics = movedDynamics(piece.dynamics(), from, to, shift);
         if (!dynamics.equals(piece.dynamics())) {
             operations.add(new EditOp.SetDynamics(dynamics));
         }
         operations.add(new EditOp.SetSections(withGaps(kept, ids, used)));
-        return SectionEdit.of("Abschnitt „" + section.name() + "“ nach Takt " + (toBar + 1) + " verschoben", operations);
+        return SectionEdit.of("Abschnitt „" + section.name() + "“ nach Takt " + (toBar + 1) + " verschoben", operations,
+                mix -> movedMix(mix, from, to, target));
     }
 
     // Empty bars ----------------------------------------------------------------------------
@@ -591,25 +611,195 @@ public final class SectionEdits {
         return new Dynamics(marks, pins, dynamics.scale(), dynamics.articulations());
     }
 
-    /** The marks and hairpins within the ticks {@code from} to {@code to} moved by {@code shift}, with the section. */
+    /**
+     * The marks and hairpins of the section from {@code from} to {@code to} moved by {@code shift}:
+     * each part begins there at the level it had, and after it the level that held there goes on.
+     * Hairpins wholly within the section move with it; others within the bars it lands on go.
+     */
     static Dynamics movedDynamics(Dynamics dynamics, long from, long to, long shift) {
         if (dynamics.isEmpty()) {
             return dynamics;
         }
-        List<Dynamics.Mark> marks = new ArrayList<>();
+        long target = from + shift;
+        long targetEnd = to + shift;
+        Map<String, List<Dynamics.Mark>> byPart = new LinkedHashMap<>();
         for (Dynamics.Mark mark : dynamics.marks()) {
-            boolean inside = mark.tick() > 0 && mark.tick() >= from && mark.tick() < to;
-            marks.add(inside ? new Dynamics.Mark(mark.tick() + shift, mark.level(), mark.partId()) : mark);
+            byPart.computeIfAbsent(String.valueOf(mark.partId()), k -> new ArrayList<>()).add(mark);
+        }
+        List<Dynamics.Mark> marks = new ArrayList<>();
+        for (List<Dynamics.Mark> ofPart : byPart.values()) {
+            marks.addAll(moved(ofPart, Dynamics.Mark::tick, (m, tick) -> new Dynamics.Mark(tick, m.level(), m.partId()),
+                    from, to, target));
         }
         marks.sort(Comparator.comparingLong(Dynamics.Mark::tick));
         List<Dynamics.Hairpin> pins = new ArrayList<>();
         for (Dynamics.Hairpin pin : dynamics.hairpins()) {
             boolean inside = pin.startTick() >= from && pin.endTick() <= to;
-            pins.add(inside ? new Dynamics.Hairpin(pin.startTick() + shift, pin.endTick() + shift, pin.target(),
-                    pin.partId()) : pin);
+            if (inside) {
+                pins.add(new Dynamics.Hairpin(pin.startTick() + shift, pin.endTick() + shift, pin.target(), pin.partId()));
+            } else if (pin.endTick() <= target || pin.startTick() >= targetEnd) {
+                pins.add(pin);
+            }
         }
         pins.sort(Comparator.comparingLong(Dynamics.Hairpin::startTick));
         return new Dynamics(marks, pins, dynamics.scale(), dynamics.articulations());
+    }
+
+    /**
+     * Tempo and key with the section from {@code from} to {@code to}: the changes within it move to
+     * {@code target}, it begins there with the tempo and key it had, and after it what held there
+     * before goes on. The meter stays where it is, so that bars keep their place.
+     */
+    static TimeMap movedTime(TimeMap time, long from, long to, long target) {
+        List<TimeMap.Tempo> tempos = moved(time.tempos(), TimeMap.Tempo::tick,
+                (t, tick) -> new TimeMap.Tempo(tick, t.bpm(), t.glide()), from, to, target);
+        List<TimeMap.KeyChange> keys = moved(time.keys(), TimeMap.KeyChange::tick,
+                (k, tick) -> new TimeMap.KeyChange(tick, k.key()), from, to, target);
+        return new TimeMap(tempos, time.meters(), keys);
+    }
+
+    /** Events in time (each holds until the next) with those from {@code from} to {@code to} moved to {@code target}. */
+    private static <T> List<T> moved(List<T> events, java.util.function.ToLongFunction<T> tickOf,
+                                     java.util.function.BiFunction<T, Long, T> at, long from, long to, long target) {
+        long length = to - from;
+        long targetEnd = target + length;
+        T entering = holding(events, tickOf, from);
+        List<T> rest = new ArrayList<>();
+        List<T> moving = new ArrayList<>();
+        for (T event : events) {
+            long tick = tickOf.applyAsLong(event);
+            if (tick >= from && tick < to) {
+                moving.add(event);
+                if (tick == 0) {
+                    rest.add(event); // the start of the piece keeps its tempo and key
+                }
+            } else {
+                rest.add(event);
+            }
+        }
+        T resuming = holding(rest, tickOf, targetEnd);
+        List<T> result = new ArrayList<>();
+        for (T event : rest) {
+            long tick = tickOf.applyAsLong(event);
+            if (tick < target || tick >= targetEnd) {
+                result.add(event);
+            }
+        }
+        for (T event : moving) {
+            result.add(at.apply(event, tickOf.applyAsLong(event) - from + target));
+        }
+        if (entering != null && result.stream().noneMatch(e -> tickOf.applyAsLong(e) == target)) {
+            result.add(at.apply(entering, target));
+        }
+        if (resuming != null && result.stream().noneMatch(e -> tickOf.applyAsLong(e) == targetEnd)) {
+            T now = holding(result, tickOf, targetEnd);
+            if (now == null || !at.apply(now, 0L).equals(at.apply(resuming, 0L))) {
+                result.add(at.apply(resuming, targetEnd)); // after the section, what held there goes on
+            }
+        }
+        if (result.stream().noneMatch(e -> tickOf.applyAsLong(e) == 0) && entering != null) {
+            result.add(at.apply(entering, 0L));
+        }
+        result.sort(Comparator.comparingLong(tickOf));
+        return result;
+    }
+
+    /** The event that holds at a tick: the last at or before it, or {@code null}. */
+    private static <T> T holding(List<T> events, java.util.function.ToLongFunction<T> tickOf, long tick) {
+        T found = null;
+        long best = -1;
+        for (T event : events) {
+            long at = tickOf.applyAsLong(event);
+            if (at <= tick && at >= best) {
+                found = event;
+                best = at;
+            }
+        }
+        return found;
+    }
+
+    /**
+     * The automation curves of the mix with the ticks from {@code from} to {@code to} taken out:
+     * what follows moves forward, and each curve goes on from {@code from} with the value it had at
+     * {@code to}.
+     */
+    public static MixScene closedMix(MixScene mix, long from, long to) {
+        if (mix == null) {
+            return null;
+        }
+        long length = to - from;
+        List<AutomationLane> lanes = new ArrayList<>();
+        for (AutomationLane lane : mix.automation()) {
+            List<AutomationLane.Point> points = new ArrayList<>();
+            boolean reaches = false;
+            boolean atTo = false;
+            for (AutomationLane.Point point : lane.points()) {
+                if (point.tick() < from) {
+                    points.add(point);
+                } else {
+                    if (!reaches) {
+                        points.add(new AutomationLane.Point(from, lane.valueAt(from))); // the bars before end as they were
+                    }
+                    reaches = true;
+                    if (point.tick() >= to) {
+                        atTo |= point.tick() == to;
+                        points.add(new AutomationLane.Point(point.tick() - length, point.value()));
+                    }
+                }
+            }
+            if (reaches && !atTo) {
+                points.add(new AutomationLane.Point(from, lane.valueAt(to)));
+            }
+            points.sort(Comparator.comparingLong(AutomationLane.Point::tick));
+            lanes.add(new AutomationLane(lane.id(), lane.channelId(), lane.parameter(), points));
+        }
+        return new MixScene(mix.room(), mix.masterDb(), mix.levelMode(), mix.channels(), lanes);
+    }
+
+    /**
+     * The automation curves of the mix with the section from {@code from} to {@code to} moved to
+     * {@code target}: within it each curve runs as it ran, and after it the curve goes on as it
+     * went there before.
+     */
+    public static MixScene movedMix(MixScene mix, long from, long to, long target) {
+        if (mix == null) {
+            return null;
+        }
+        long length = to - from;
+        long targetEnd = target + length;
+        List<AutomationLane> lanes = new ArrayList<>();
+        for (AutomationLane lane : mix.automation()) {
+            if (lane.points().isEmpty()) {
+                lanes.add(lane);
+                continue;
+            }
+            List<AutomationLane.Point> rest = new ArrayList<>();
+            List<AutomationLane.Point> moving = new ArrayList<>();
+            moving.add(new AutomationLane.Point(target, lane.valueAt(from)));
+            for (AutomationLane.Point point : lane.points()) {
+                if (point.tick() > from && point.tick() < to) {
+                    moving.add(new AutomationLane.Point(point.tick() - from + target, point.value()));
+                } else {
+                    rest.add(point);
+                }
+            }
+            moving.add(new AutomationLane.Point(targetEnd - 1, lane.valueAt(to - 1)));
+            AutomationLane remaining = rest.isEmpty() ? null
+                    : new AutomationLane(lane.id(), lane.channelId(), lane.parameter(), rest);
+            List<AutomationLane.Point> points = new ArrayList<>();
+            for (AutomationLane.Point point : rest) {
+                if (point.tick() < target || point.tick() > targetEnd) {
+                    points.add(point);
+                }
+            }
+            points.addAll(moving);
+            if (remaining != null) {
+                points.add(new AutomationLane.Point(targetEnd, remaining.valueAt(targetEnd)));
+            }
+            points.sort(Comparator.comparingLong(AutomationLane.Point::tick));
+            lanes.add(new AutomationLane(lane.id(), lane.channelId(), lane.parameter(), points));
+        }
+        return new MixScene(mix.room(), mix.masterDb(), mix.levelMode(), mix.channels(), lanes);
     }
 
     private static Section find(Composition piece, String sectionId) {
