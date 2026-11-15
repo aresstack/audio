@@ -457,6 +457,12 @@ public final class AudioStudioFrame extends JFrame {
         moreMenu.add(redoItem);
         moreMenu.add(revisionsItem);
         moreMenu.addSeparator();
+        // What the AI can add to the piece as it is; every such change comes as a proposal first.
+        javax.swing.JMenuItem addVoiceItem = new javax.swing.JMenuItem("Stimme hinzukomponieren …");
+        addVoiceItem.setToolTipText("Die KI schreibt eine neue Stimme zu den vorhandenen; die anderen bleiben unverändert");
+        addVoiceItem.addActionListener(event -> addVoice());
+        moreMenu.add(addVoiceItem);
+        moreMenu.addSeparator();
         moreMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
             @Override
             public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent event) {
@@ -1787,6 +1793,152 @@ public final class AudioStudioFrame extends JFrame {
             if (take) {
                 com.aresstack.audio.composition.edit.ChangeSet changes = offer.accept();
                 pieceChanged("Vorschlag übernommen: Spur " + offer.trackId() + " neu komponiert.", changes);
+            } else {
+                offer.discard();
+                append("Vorschlag verworfen; das Stück ist unverändert.");
+            }
+        } catch (Exception failed) {
+            message("Der Vorschlag ließ sich nicht abschließen: " + failed.getMessage());
+        }
+    }
+
+    /** Asks which voice the AI shall add to the piece, and has it composed as a proposal. */
+    private void addVoice() {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent()) {
+            message("Erst ein Stück komponieren: eine Stimme kommt zu den vorhandenen hinzu.");
+            return;
+        }
+        if (busy()) {
+            return;
+        }
+        final com.aresstack.audio.studio.ai.AddVoiceRequest request =
+                AddVoiceForm.ask(this, piece.get().composition());
+        if (request == null) {
+            return;
+        }
+        offerFromAi(piece.get(), "Die Stimme „" + request.name() + "“ wird als Vorschlag hinzukomponiert; das Stück"
+                + " bleibt, wie es ist, bis der Vorschlag übernommen wird.", (session, model, progress) ->
+                com.aresstack.audio.studio.application.VoiceOffer.start(session,
+                        com.aresstack.audio.studio.ai.VoiceComposer.with(model), request, progress));
+    }
+
+    /** Has the AI make a proposal for the saved piece; what was asked for decides how. */
+    private interface OfferStart {
+        com.aresstack.audio.studio.application.AiOffer start(
+                com.aresstack.audio.studio.application.ProjectSession piece,
+                com.aresstack.audio.studio.ai.ChatModel model, Progress progress) throws Exception;
+    }
+
+    /**
+     * Runs a request to the AI in the background and offers what comes of it: the proposal is
+     * rendered in its own folder to be heard, and the piece changes only if the user takes it.
+     */
+    private void offerFromAi(final com.aresstack.audio.studio.application.ProjectSession piece, String said,
+                             final OfferStart starter) {
+        final KipitzChatClient client;
+        final RenderSettings settings;
+        try {
+            client = createAiClient();
+            settings = captureRenderSettings();
+        } catch (Exception invalid) {
+            message(invalid.getMessage());
+            return;
+        }
+        if (!saveSettings(false)) {
+            return;
+        }
+        append(said);
+        activeClient = client;
+        start(new Operation() {
+            @Override
+            public Path execute(Progress progress) throws Exception {
+                com.aresstack.audio.studio.application.AiOffer offer = null;
+                try {
+                    offer = starter.start(piece, com.aresstack.audio.studio.ai.ChatModel.of(client), progress);
+                    hearOffer(offer, client, settings, progress);
+                    return null;
+                } catch (com.aresstack.audio.studio.application.EditRefusedException refused) {
+                    throw new IOException("Der Vorschlag wurde nicht angenommen, weil er mehr geändert hätte als"
+                            + " verlangt: " + refused.violations());
+                } catch (Exception failed) {
+                    if (offer != null) {
+                        offer.discard();
+                    }
+                    throw failed;
+                } finally {
+                    activeClient = null;
+                }
+            }
+        });
+    }
+
+    /** Renders the preview of an offer (only what is new; the rest comes from the stems of the piece) and then asks. */
+    private void hearOffer(final com.aresstack.audio.studio.application.AiOffer offer, final KipitzChatClient client,
+                           final RenderSettings settings, Progress progress) throws Exception {
+        Path preview = offer.preview();
+        progress.update("Der Vorschlag wird zum Anhören gerendert ...");
+        Map<String, Integer> programs = new HashMap<String, Integer>(settings.programs);
+        programs.putAll(offer.newPrograms());
+        com.aresstack.audio.studio.application.PieceRendering.Outcome heard =
+                new com.aresstack.audio.studio.application.PieceRendering(registry).render(preview, offer.proposed(),
+                        librariesOf(settings), settings.sf2Engine, settings.fluidSynthExecutable,
+                        settings.sfizzExecutable, programs, progress);
+        final Path whole = heard.mix();
+        final Path alone = offer.soloPartId() == null ? null : heard.stems().stems().get(offer.soloPartId());
+        afterWork = () -> decideOffer(offer, whole, alone, client, settings);
+    }
+
+    /** The offer is ready: the user hears it, has it made again, takes it or throws it away. */
+    private void decideOffer(final com.aresstack.audio.studio.application.AiOffer offer, final Path whole,
+                             final Path alone, final KipitzChatClient client, final RenderSettings settings) {
+        try {
+            ProposalDialog.Verdict verdict = new ProposalDialog(this, "Vorschlag der KI", offer.what(), offer.notes(),
+                    alone == null ? null : "Nur das Neue anhören", true, new ProposalDialog.Listening() {
+                        @Override
+                        public void proposal() {
+                            listenTo(whole, "VORSCHLAG");
+                        }
+
+                        @Override
+                        public void alone() {
+                            listenTo(alone, "VORSCHLAG · NUR DAS NEUE");
+                        }
+
+                        @Override
+                        public void current() {
+                            playbackSelection.setSelectedItem("Mixed sampled arrangement");
+                            play();
+                        }
+
+                        @Override
+                        public void stop() {
+                            stopPlayback();
+                        }
+                    }).decide();
+            stopPlayback();
+            showPlaybackChoice(); // the player lets go of the preview before its folder goes
+            if (verdict == ProposalDialog.Verdict.TAKE) {
+                String what = offer.what();
+                pieceChanged("Vorschlag übernommen. " + what, offer.accept());
+            } else if (verdict == ProposalDialog.Verdict.AGAIN) {
+                append("Die KI schreibt den Vorschlag noch einmal, anders.");
+                activeClient = client;
+                start(new Operation() {
+                    @Override
+                    public Path execute(Progress progress) throws Exception {
+                        try {
+                            offer.again(progress);
+                            hearOffer(offer, client, settings, progress);
+                            return null;
+                        } catch (Exception failed) {
+                            offer.discard();
+                            throw failed;
+                        } finally {
+                            activeClient = null;
+                        }
+                    }
+                });
             } else {
                 offer.discard();
                 append("Vorschlag verworfen; das Stück ist unverändert.");

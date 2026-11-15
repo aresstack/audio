@@ -89,7 +89,7 @@ public final class RecompositionOffer {
     public Path propose(String runId) throws EditRefusedException, IOException {
         proposal = session.proposeRecomposition(trackId, staging, runId);
         preview = session.preview(proposal);
-        carryStems(session.folder(), preview);
+        PreviewStems.carry(session.folder(), preview);
         return preview;
     }
 
@@ -113,7 +113,7 @@ public final class RecompositionOffer {
     public ChangeSet accept() throws IOException {
         requireProposed();
         Path piece = session.folder();
-        carryStems(preview, piece); // before the preview goes: what was heard need not be rendered again
+        PreviewStems.carry(preview, piece); // before the preview goes: what was heard need not be rendered again
         ChangeSet changes = session.accept(proposal);
         Pattern answers = answersOf(trackId);
         List<Path> fresh = new ArrayList<Path>();
@@ -171,22 +171,5 @@ public final class RecompositionOffer {
     /** The kept answers of the AI for a track: {@code <track>.json} and {@code <track>-<hash>.json}. */
     private static Pattern answersOf(String trackId) {
         return Pattern.compile(Pattern.quote(trackId) + "(-[0-9a-f]{12})?\\.json");
-    }
-
-    /** Copies the stems one folder has to another that lacks them; stems are named by their content. */
-    private static void carryStems(Path from, Path to) throws IOException {
-        Path source = from.resolve(ProjectFolder.RENDER).resolve("stems");
-        if (!Files.isDirectory(source)) {
-            return;
-        }
-        Path target = Files.createDirectories(to.resolve(ProjectFolder.RENDER).resolve("stems"));
-        try (Stream<Path> files = Files.list(source)) {
-            for (Path file : (Iterable<Path>) files::iterator) {
-                Path copy = target.resolve(file.getFileName());
-                if (Files.isRegularFile(file) && !Files.exists(copy)) {
-                    Files.copy(file, copy);
-                }
-            }
-        }
     }
 }
