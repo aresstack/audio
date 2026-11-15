@@ -218,6 +218,8 @@ public final class MusicXmlTemplate {
             Map<String, Integer> tied = new HashMap<String, Integer>();
             int divisions = 1;
             int velocity = UNMARKED_VELOCITY;
+            // A transposing instrument (clarinet in B flat, double bass) is written away from where it sounds.
+            int transpose = 0;
             long measureStart = 0;
             // A part that names no meter of its own is in the meter an earlier part named.
             int partNumerator = numerator > 0 ? numerator : 4;
@@ -241,7 +243,12 @@ public final class MusicXmlTemplate {
                             }
                             Element time = first(element, "time");
                             if (time != null && first(time, "beats") != null) {
-                                int beats = number(text(first(time, "beats")).split("\\+")[0], 4);
+                                // An additive meter such as 3+2/8 has the sum of its groups.
+                                int beats = 0;
+                                for (String group : text(first(time, "beats")).split("\\+")) {
+                                    beats += Math.max(0, number(group, 0));
+                                }
+                                beats = beats > 0 ? beats : 4;
                                 int type = number(text(first(time, "beat-type")), 4);
                                 partNumerator = Math.max(1, beats);
                                 partDenominator = Math.max(1, type);
@@ -252,6 +259,12 @@ public final class MusicXmlTemplate {
                                 } else if (partNumerator != numerator || partDenominator != denominator) {
                                     meters++;
                                 }
+                            }
+                            Element shift = first(element, "transpose");
+                            if (shift != null) {
+                                transpose = number(text(first(shift, "chromatic")), 0)
+                                        + 12 * number(text(first(shift, "octave-change")), 0)
+                                        + (first(shift, "double") != null ? -12 : 0);
                             }
                             String count = text(first(element, "staves"));
                             if (!count.isEmpty()) {
@@ -304,6 +317,12 @@ public final class MusicXmlTemplate {
                             int pitch = pitch(element);
                             if (pitch < 0) {
                                 continue;
+                            }
+                            if (first(element, "pitch") != null) {
+                                pitch += transpose;
+                                if (pitch < 0 || pitch > 127) {
+                                    continue;
+                                }
                             }
                             String voice = text(first(element, "voice"));
                             int staff = number(text(first(element, "staff")), 1);

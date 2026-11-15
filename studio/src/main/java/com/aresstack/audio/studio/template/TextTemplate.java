@@ -162,6 +162,10 @@ public final class TextTemplate {
                     notes.add(new ArrayList<ScoreNote>());
                 }
                 long tick = Math.round((at + note[1]) * TemplateScore.PPQ);
+                if (tick < 0) {
+                    dropped++;
+                    continue;
+                }
                 long length = Math.round(note[2] * TemplateScore.PPQ);
                 notes.get(part).add(new ScoreNote(tick, length, (int) note[3], (int) note[4]));
                 furthest = Math.max(furthest, note[1] + note[2]);
@@ -221,10 +225,18 @@ public final class TextTemplate {
                 .append(" \"notes\": [[part, start, length, pitch, velocity], ...],\n")
                 .append(" \"portionQuarters\": how many quarter notes this portion lasts}\n")
                 .append("start and length are in quarter notes (decimals allowed, a triplet eighth is 0.3333), ")
-                .append("start counted from the beginning of THIS portion. pitch is the MIDI number (middle C = 60). ")
+                .append("start counted from the beginning of THIS portion, which begins ").append(fmt(at))
+                .append(" quarter notes into the piece; a voice written in a block of its own that begins earlier ")
+                .append("(together with a voice of an earlier portion) gets a negative start. ")
+                .append("portionQuarters is how far the NEXT portion begins after this one's beginning. pitch is the MIDI number (middle C = 60). ")
                 .append("velocity 1-127 from the dynamics, 80 if none are written. A tie is one longer note. ")
                 .append("Rests are no notes but take their time. Leave nothing out and add nothing.");
         return prompt.toString();
+    }
+
+    private static String fmt(double quarters) {
+        return quarters == Math.rint(quarters) ? Long.toString((long) quarters)
+                : String.format(Locale.ROOT, "%.4f", quarters);
     }
 
     private static String again(String problem) {
@@ -271,7 +283,8 @@ public final class TextTemplate {
                 return null;
             }
         }
-        if (values[0] < 0 || values[1] < 0 || values[3] < 0 || values[3] > 127) {
+        // A start may be negative: a voice written in a block of its own begins before the portion does.
+        if (values[0] < 0 || values[3] < 0 || values[3] > 127) {
             return null;
         }
         values[0] = Math.floor(values[0]);

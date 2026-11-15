@@ -78,6 +78,33 @@ public final class MusicXmlTemplateTest {
         check(MusicXmlTemplate.read(bytes.toByteArray(), "file"));
     }
 
+    @Test
+    public void transposingInstrumentsSoundWhereTheyAreMeantToAndAdditiveMetersAddUp() throws Exception {
+        String clarinet = """
+                <score-partwise version="4.0">
+                  <part-list><score-part id="P1"><part-name>Clarinetto in B</part-name></score-part>
+                    <score-part id="P2"><part-name>Fagotto</part-name></score-part></part-list>
+                  <part id="P1"><measure number="1">
+                    <attributes><divisions>2</divisions><time><beats>3+2</beats><beat-type>8</beat-type></time>
+                      <transpose><diatonic>-1</diatonic><chromatic>-2</chromatic></transpose></attributes>
+                    <note><pitch><step>C</step><octave>4</octave></pitch><duration>5</duration></note>
+                  </measure></part>
+                  <part id="P2"><measure number="1">
+                    <attributes><divisions>2</divisions></attributes>
+                    <note><pitch><step>C</step><octave>3</octave></pitch><duration>5</duration></note>
+                  </measure></part>
+                </score-partwise>
+                """;
+        TemplateScore score = MusicXmlTemplate.read(clarinet.getBytes(StandardCharsets.UTF_8), "file");
+        assertEquals(5, score.numerator());
+        assertEquals(8, score.denominator());
+        assertEquals("written C4 on a clarinet in B flat sounds B flat 3", 58,
+                score.parts().get(0).notes().get(0).pitch());
+        assertEquals("a part without a meter of its own is in the one named before: no false upbeat",
+                0, score.parts().get(1).notes().get(0).tick());
+        assertEquals(48, score.parts().get(1).notes().get(0).pitch());
+    }
+
     private static void check(TemplateScore score) {
         assertEquals("MusicXML", score.format());
         assertEquals("Winter", score.title());

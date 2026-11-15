@@ -2112,6 +2112,11 @@ public final class AudioStudioFrame extends JFrame {
         if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
             return;
         }
+        // The notes go where the piece is made: a composed piece first asks whether beside it or in its
+        // place, and cancelling leaves it, and the template it follows, as it was.
+        if (!startAfresh()) {
+            return;
+        }
         Path folder = Paths.get(directory.getText().trim());
         try {
             com.aresstack.audio.studio.application.ScoreTemplates.put(folder, chooser.getSelectedFile().toPath());
@@ -2121,7 +2126,8 @@ public final class AudioStudioFrame extends JFrame {
         }
         append("Notenvorlage für dieses Stück: " + chooser.getSelectedFile().getName());
         updateComposeKey();
-        compose();
+        showSongView(true);
+        proposeInstruments(true);
     }
 
     private void dropTemplate() {

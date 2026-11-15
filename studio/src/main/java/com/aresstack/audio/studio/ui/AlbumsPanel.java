@@ -1095,7 +1095,12 @@ final class AlbumsPanel extends JPanel {
             return;
         }
         try {
-            new AlbumTemplates(files).remove(album.id(), album.tracks().get(row).id());
+            AlbumTrack track = album.tracks().get(row);
+            new AlbumTemplates(files).remove(album.id(), track.id());
+            // The piece made from it got a copy; without it the title is composed freely again.
+            if (track.hasPiece() && AlbumTrack.isFolderName(track.piece())) {
+                com.aresstack.audio.studio.application.ScoreTemplates.remove(songs.root().resolve(track.piece()));
+            }
             say("„" + album.tracks().get(row).title() + "“ wird wieder frei komponiert.");
         } catch (IOException | RuntimeException failed) {
             say("Die Notenvorlage ließ sich nicht entfernen: " + failed.getMessage());
