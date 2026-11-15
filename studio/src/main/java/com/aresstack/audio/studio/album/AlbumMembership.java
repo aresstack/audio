@@ -274,6 +274,85 @@ public final class AlbumMembership {
     }
 
     /**
+     * The piece of a title, made now if the title has none yet (a planned title): a new, empty
+     * piece called like the title, with the title's own words as its description. The album
+     * production fills that piece later instead of making another one.
+     *
+     * @return the folder of the piece, or {@code null} if the album has no such title
+     */
+    public synchronized Path pieceFor(String albumId, String trackId) throws IOException {
+        Album album = albums.album(albumId).orElse(null);
+        AlbumTrack track = album == null ? null : album.track(trackId);
+        if (track == null) {
+            return null;
+        }
+        if (track.hasPiece() && Files.isDirectory(songs.root().resolve(track.piece()))) {
+            return songs.root().resolve(track.piece());
+        }
+        Path made = songs.create(track.title());
+        songs.save(made, track.title(), AlbumProducer.own(track));
+        albums.save(album.with(track.withPiece(made.getFileName().toString())));
+        return made;
+    }
+
+    /**
+     * Gives a title another name, in its album and on its piece.
+     *
+     * @return the folder of its piece if that was renamed as well, else {@code null}
+     */
+    public synchronized Path renameTitle(String albumId, String trackId, String name) throws IOException {
+        String clean = name == null ? "" : name.trim();
+        Album album = albums.album(albumId).orElse(null);
+        AlbumTrack track = album == null ? null : album.track(trackId);
+        if (track == null || clean.isEmpty()) {
+            return null;
+        }
+        albums.save(album.with(track.withTitle(clean)));
+        Path piece = track.hasPiece() ? songs.root().resolve(track.piece()) : null;
+        if (piece != null && Files.isDirectory(piece)) {
+            songs.save(piece, clean, null);
+            return piece;
+        }
+        return null;
+    }
+
+    /** Gives an album another name; an empty one makes it an unnamed album. */
+    public synchronized boolean renameAlbum(String albumId, String name) throws IOException {
+        Album album = albums.album(albumId).orElse(null);
+        if (album == null) {
+            return false;
+        }
+        String clean = name == null || name.isBlank() ? UNTITLED : name.trim();
+        if (clean.equals(album.title())) {
+            return false;
+        }
+        albums.save(album.withTitle(clean));
+        return true;
+    }
+
+    /**
+     * Takes a title out of its album. Its piece, if it has one, is not touched here: the caller
+     * puts it away, or it lands in the unnamed album at the next look.
+     *
+     * @return the folder of the title's piece, or {@code null} if it had none
+     */
+    public synchronized Path removeTitle(String albumId, String trackId) throws IOException {
+        Album album = albums.album(albumId).orElse(null);
+        AlbumTrack track = album == null ? null : album.track(trackId);
+        if (track == null) {
+            return null;
+        }
+        List<AlbumTrack> left = new ArrayList<AlbumTrack>(album.tracks());
+        left.remove(track);
+        albums.save(album.withTracks(left));
+        // A later title may get this id again: it must not inherit how far this one got.
+        AlbumProductionState.load(albums.folder(albumId)).with(trackId, AlbumProductionState.Status.PLANNED)
+                .save(albums.folder(albumId));
+        Path piece = track.hasPiece() ? songs.root().resolve(track.piece()) : null;
+        return piece != null && Files.isDirectory(piece) ? piece : null;
+    }
+
+    /**
      * What the AI is told about the album of a piece, beside the piece's own words: the album in
      * a few lines and the other titles. Empty for a piece of an unnamed album or of none.
      */
