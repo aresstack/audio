@@ -267,6 +267,16 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
         private void fail(String trackId, Exception failed) {
             String reason = failed.getMessage() == null || failed.getMessage().isBlank()
                     ? failed.getClass().getSimpleName() : failed.getMessage();
+            // The protocol says every failure with its whole cause, not only the table.
+            for (AlbumTrack each : album.tracks()) {
+                if (each.id().equals(trackId)) {
+                    try {
+                        listener.progress(each, "Fehler: " + causes(failed));
+                    } catch (RuntimeException unheard) {
+                        // telling it must not keep the title from being marked as failed
+                    }
+                }
+            }
             synchronized (lock) {
                 try {
                     set(trackId, Status.FAILED, reason, 0);
@@ -275,6 +285,24 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
                     listener.changed(album, state);
                 }
             }
+        }
+
+        /** A failure and every cause behind it, with where the first one happened in the code. */
+        private String causes(Throwable failed) {
+            StringBuilder said = new StringBuilder();
+            Throwable deepest = failed;
+            for (Throwable at = failed; at != null && said.length() < 4000; at = at.getCause()) {
+                said.append(said.length() == 0 ? "" : " · Ursache: ").append(at);
+                deepest = at;
+                if (at.getCause() == at) {
+                    break;
+                }
+            }
+            StackTraceElement[] where = deepest.getStackTrace();
+            if (where.length > 0) {
+                said.append(" (bei ").append(where[0]).append(")");
+            }
+            return said.toString();
         }
 
         /** Under the lock: notes where a title stands, writes it, and tells the listener. */
