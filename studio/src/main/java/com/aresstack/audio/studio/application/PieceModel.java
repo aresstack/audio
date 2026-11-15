@@ -9,7 +9,7 @@ import java.util.function.Consumer;
 /**
  * Keeps the model of the piece that is open in the studio in step with what the studio still
  * writes the old way. The window calls it when a piece is opened, after composing and after a
- * track was renamed; it never stops the studio: whatever goes wrong is said as a warning, and
+ * track was renamed, from the window's thread or from the one that composes; it never stops the studio: whatever goes wrong is said as a warning, and
  * the piece goes on working from its old files as before.
  *
  * <p>Opening a piece that has a model never changes that model: old files that differ from it
@@ -30,7 +30,7 @@ public final class PieceModel {
      * The piece in this folder is the open one now. A piece from before the model is taken into
      * it here; a folder without a piece is no piece yet, and nothing is written into it.
      */
-    public void open(Path opened) {
+    public synchronized void open(Path opened) {
         load(opened);
     }
 
@@ -72,10 +72,12 @@ public final class PieceModel {
 
     /**
      * Takes into the model what was just written the old way: a composed arrangement or a renamed
-     * track. A piece that was composed for the first time gets its model here. A model that
-     * says more than {@code arrangement.tsv} can is not replaced; that is a warning.
+     * track. Only these two call it. Rendering, playing, mixing and proposals of the AI never do:
+     * they must not change the saved piece, and a file changed behind the model's back stays out.
+     * A piece that was composed for the first time gets its model here. A model that says more
+     * than {@code arrangement.tsv} can is not replaced; that is a warning.
      */
-    public void synchronize() {
+    public synchronized void synchronize() {
         if (session == null) {
             // Nothing in memory: the piece is new, or the last attempt failed. A piece without a
             // model is imported from the files as they are now, which already is the new state.
@@ -94,7 +96,7 @@ public final class PieceModel {
     }
 
     /** The model of the open piece, if it has one. */
-    public Optional<ProjectSession> session() {
+    public synchronized Optional<ProjectSession> session() {
         return Optional.ofNullable(session);
     }
 
