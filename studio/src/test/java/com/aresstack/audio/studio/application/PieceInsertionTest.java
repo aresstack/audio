@@ -26,6 +26,7 @@ import com.aresstack.audio.studio.ai.ComposedContinuation;
 import com.aresstack.audio.studio.ai.ContinuationComposer;
 import com.aresstack.audio.studio.ai.ContinuationPreset;
 import com.aresstack.audio.studio.ai.ContinuationRequest;
+import com.aresstack.audio.studio.ai.ContinuationTask;
 import com.aresstack.audio.studio.ai.FakeChatModel;
 import com.aresstack.audio.studio.ai.IntensityCurve;
 import com.aresstack.audio.studio.progress.Progress;
@@ -184,6 +185,108 @@ public final class PieceInsertionTest {
         assertTrue(session.revisions().stream().anyMatch(r -> r.composition().equals(before)));
         session.undo();
         assertEquals(before, session.composition());
+    }
+
+    @Test
+    public void aNoteSoundingAcrossTheInsertionPointKeepsSounding() throws Exception {
+        long point = 4 * BAR;
+        long room = 8 * BAR;
+        // make one note of the old piece sound from bar 4 into bar 5, across the coming insertion point
+        PlacedNote held = session.composition().parts().stream()
+                .flatMap(part -> session.composition().notesOf(part.id()).stream())
+                .filter(n -> n.tick() < point && n.clip().startTick() < point && n.clip().endTick() > point + BAR)
+                .max(java.util.Comparator.comparingLong(PlacedNote::tick))
+                .orElseThrow(() -> new AssertionError("the fixture needs a clip across bar 5"));
+        long length = point + BAR - held.tick();
+        Note longer = new Note(held.note().id(), held.note().tick(), length, held.note().pitch(),
+                held.note().velocity(), held.note().voiceId());
+        session.apply(new Patch("longer note", List.of(new EditOp.ChangeNote(held.clip().id(), longer))),
+                EditScope.everything());
+        String partId = session.composition().parts().stream().map(Part::id)
+                .filter(id -> session.composition().notesOf(id).stream()
+                        .anyMatch(n -> n.note().id().equals(held.note().id())))
+                .findFirst().orElseThrow();
+        Composition before = session.composition();
+
+        PieceExtension insertion = PieceExtension.start(session, ContinuationComposer.with(model()),
+                ContinuationRequest.insert(5, 8, ContinuationPreset.STANDALONE, ""), Ids.seeded(21), QUIET);
+        Proposal proposal = insertion.proposal();
+        Composition after = proposal.result();
+
+        assertEquals(List.of(), CompositionValidator.validate(after));
+        // the note keeps its full length instead of ending at the insertion point, and its clip grew with it
+        PlacedNote kept = after.notesOf(partId).stream().filter(n -> n.note().id().equals(held.note().id()))
+                .findFirst().orElseThrow();
+        assertEquals(held.tick(), kept.tick());
+        assertEquals(length, kept.note().length());
+        assertEquals(held.clip().id(), kept.clip().id());
+        assertTrue(kept.clip().endTick() >= point + BAR);
+        assertTrue(kept.clip().endTick() <= point + room);
+        assertTrue(proposal.patch().operations().stream().anyMatch(op -> op instanceof EditOp.ResizeClip));
+        assertEquals(List.of(), insertion.continuation().shortened());
+        // the transition zone reaches back to the start of the held note; everything else stays proven
+        assertTrue(proposal.scope().fromTick() - proposal.scope().transitionTicks() <= held.tick());
+        assertEquals(InsertPassage.hashFrom(before, point), InsertPassage.hashFrom(after, point + room));
+        assertEquals(List.of(), InsertPassage.originalKept(before, after, insertion.continuation().task(),
+                insertion.continuation().task().tailStart(), ids(before.parts()), Set.of()));
+        // without the insertion's hold the shift alone would cut the note at the point
+        PlacedNote cut = TimeShift.shift(before, point, room).notesOf(partId).stream()
+                .filter(n -> n.note().id().equals(held.note().id())).findFirst().orElseThrow();
+        assertEquals(point - held.tick(), cut.note().length());
+
+        insertion.accept();
+        assertEquals(after, session.composition());
+    }
+
+    @Test
+    public void aNoteSoundingBeyondTheInsertedBarsIsShortenedOnlyOpenly() throws Exception {
+        long point = 4 * BAR;
+        long room = 2 * BAR;
+        // one note of the old piece sounds from bar 4 to the end of its clip, longer than the two inserted bars
+        PlacedNote held = session.composition().parts().stream()
+                .flatMap(part -> session.composition().notesOf(part.id()).stream())
+                .filter(n -> n.tick() < point && n.clip().startTick() < point
+                        && n.clip().endTick() > point + room + BAR)
+                .max(java.util.Comparator.comparingLong(PlacedNote::tick))
+                .orElseThrow(() -> new AssertionError("the fixture needs a clip across bars 5-7"));
+        long length = held.clip().endTick() - held.tick();
+        Note longer = new Note(held.note().id(), held.note().tick(), length, held.note().pitch(),
+                held.note().velocity(), held.note().voiceId());
+        session.apply(new Patch("longer note", List.of(new EditOp.ChangeNote(held.clip().id(), longer))),
+                EditScope.everything());
+        String partId = session.composition().parts().stream().map(Part::id)
+                .filter(id -> session.composition().notesOf(id).stream()
+                        .anyMatch(n -> n.note().id().equals(held.note().id())))
+                .findFirst().orElseThrow();
+        Composition before = session.composition();
+
+        PieceExtension insertion = PieceExtension.start(session, ContinuationComposer.with(model()),
+                ContinuationRequest.insert(5, 2, ContinuationPreset.STANDALONE, ""), Ids.seeded(21), QUIET);
+        Proposal proposal = insertion.proposal();
+        Composition after = proposal.result();
+        ComposedContinuation composed = insertion.continuation();
+
+        assertEquals(List.of(), CompositionValidator.validate(after));
+        // the note sounds on to the end of the room, where the moved original begins, and not further
+        PlacedNote kept = after.notesOf(partId).stream().filter(n -> n.note().id().equals(held.note().id()))
+                .findFirst().orElseThrow();
+        assertEquals(held.tick(), kept.tick());
+        assertEquals(point + room, kept.endTick());
+        assertTrue(kept.note().length() < length);
+        // the shortening is not silent: listed, among the corrections and in the description of the proposal
+        assertEquals(1, composed.shortened().size());
+        assertEquals(held.note().id(), composed.shortened().get(0).noteId());
+        assertEquals(length, composed.shortened().get(0).length());
+        assertEquals(point + room - held.tick(), composed.keptLength(composed.shortened().get(0)));
+        assertTrue(composed.corrections().stream().anyMatch(line -> line.contains(held.note().id())
+                && line.contains("Originaldauer nicht erhaltbar")));
+        assertTrue(proposal.patch().description().contains("1 über den Einfügepunkt klingende Note(n) gekürzt"));
+        // the check of the original accepts exactly this listed shortening, nothing silent
+        ContinuationTask task = composed.task();
+        assertEquals(List.of(), InsertPassage.originalKept(before, after, task, task.tailStart(),
+                ids(before.parts()), Set.of(), InsertPassage.shortened(composed)));
+        assertFalse(InsertPassage.originalKept(before, after, task, task.tailStart(), ids(before.parts()),
+                Set.of()).isEmpty());
     }
 
     @Test
