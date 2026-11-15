@@ -72,11 +72,19 @@ final class ModelChoicePanel extends JPanel {
         load = new DeckWidgets.RefreshKey(
                 "Modelle neu laden: die Modelle des eingestellten Dienstes in die Auswahl holen");
         load.addActionListener(event -> this.loadModels.run());
-        JPanel head = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        JPanel title = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        title.setOpaque(false);
+        title.add(DeckWidgets.lettering("KI-Modelle"));
+        title.add(javax.swing.Box.createHorizontalStrut(8));
+        title.add(load);
+        // At the right end of the heading: the key to the table that gives every task its own model.
+        extended = new DeckWidgets.HeadKey("Erweitert");
+        extended.setToolTipText("Erweiterte Modellzuordnung: jeder KI-Aufgabe ein eigenes Modell geben");
+        extended.addActionListener(event -> showExtended());
+        JPanel head = new JPanel(new java.awt.BorderLayout(8, 0));
         head.setOpaque(false);
-        head.add(DeckWidgets.lettering("KI-Modelle"));
-        head.add(javax.swing.Box.createHorizontalStrut(8));
-        head.add(load);
+        head.add(title, java.awt.BorderLayout.WEST);
+        head.add(extended, java.awt.BorderLayout.EAST);
         add(head, at);
         for (ModelRole role : this.roles) {
             JComboBox<String> box = box(role);
@@ -102,17 +110,6 @@ final class ModelChoicePanel extends JPanel {
             add(purpose, at);
             at.gridx = 0;
         }
-        extended = new JButton("Erweiterte Modellzuordnung …");
-        extended.setToolTipText("Jeder KI-Aufgabe ein eigenes Modell geben");
-        extended.addActionListener(event -> showExtended());
-        JPanel buttons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        buttons.setOpaque(false);
-        buttons.add(extended);
-        at.gridy++;
-        at.gridx = 0;
-        at.gridwidth = 2;
-        at.insets = new Insets(10, 0, 0, 0);
-        add(buttons, at);
         refresh();
     }
 
