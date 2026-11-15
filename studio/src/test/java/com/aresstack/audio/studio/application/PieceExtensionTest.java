@@ -464,6 +464,27 @@ public final class PieceExtensionTest {
     }
 
     @Test
+    public void aTransitionWithoutNewBarsIsNoContinuation() throws Exception {
+        FakeChatModel model = model((instruction, prompt) -> {
+            String section = FakeChatModel.quoted(prompt, "section");
+            if (instruction.equals(ChatContinuationPlanner.INSTRUCTION) || SectionGenerator.TRANSITION.equals(section)) {
+                return null;
+            }
+            return "{\"part\":\"" + FakeChatModel.quoted(prompt, "part") + "\",\"section\":\"" + section
+                    + "\",\"notes\":[]}";
+        });
+        ContinuationRequest request = ContinuationRequest.of(8, ContinuationPreset.STANDALONE, ContinuationEnding.OPEN)
+                .revisingTail(2);
+        try {
+            PieceExtension.start(session, composerWith(model), request, Ids.seeded(12), QUIET);
+            fail("only the rewritten transition and silent new bars are refused");
+        } catch (java.io.IOException expected) {
+            assertTrue(expected.getMessage().contains("Keine spielbaren Noten"));
+        }
+        assertTrue(session.pending().isEmpty());
+    }
+
+    @Test
     public void theAiNeverAddressesExistingObjects() throws Exception {
         FakeChatModel model = composer();
         Composition before = session.composition();

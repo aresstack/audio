@@ -39,10 +39,12 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 
 /**
  * Makes a model of a piece from before the model (architecture review 5.2): the arrangement
@@ -59,10 +61,16 @@ import java.util.Properties;
  */
 public final class LegacyImport {
     /** What the import made of the old files. */
-    public record Result(Composition composition, MixScene mix, List<StemManifest.Entry> stems, List<String> warnings) {
+    public record Result(Composition composition, MixScene mix, List<StemManifest.Entry> stems, List<String> warnings,
+                         Set<String> namedSoundBanks) {
+        /**
+         * @param namedSoundBanks the parts whose sound bank {@code tracks.json} names itself, even
+         *                        "builtin"; the others play the built-in sound only for want of one
+         */
         public Result {
             warnings = List.copyOf(warnings);
             stems = List.copyOf(stems);
+            namedSoundBanks = Set.copyOf(namedSoundBanks);
         }
     }
 
@@ -74,6 +82,7 @@ public final class LegacyImport {
     private final Composition previous;
     private final MixScene previousMix;
     private final List<String> warnings = new ArrayList<>();
+    private final Set<String> namedSoundBanks = new LinkedHashSet<>();
     private Ids ids;
 
     private LegacyImport(Path source, Path folder, Composition previous, MixScene previousMix) {
@@ -187,7 +196,7 @@ public final class LegacyImport {
             warn("Modell: " + violation);
         }
         MixScene mix = mix(stageRoles, time);
-        return new Result(composition, mix, stems(composition), warnings);
+        return new Result(composition, mix, stems(composition), warnings, namedSoundBanks);
     }
 
     private Part part(ArrangementFile.Track line, List<ArrangementFile.Note> notes, JsonObject listed) {
@@ -202,6 +211,9 @@ public final class LegacyImport {
         }
         String instrument = text(listed, "instrument");
         String library = text(listed, "libraryId");
+        if (library != null) {
+            namedSoundBanks.add(line.id());
+        }
         String listedRole = text(listed, "role");
         if (listedRole != null && !listedRole.equals(role) && !(role == null && listedRole.equals(line.id()))) {
             warn("Spur " + line.id() + ": tracks.json nennt die Rolle " + listedRole + ", das Arrangement "

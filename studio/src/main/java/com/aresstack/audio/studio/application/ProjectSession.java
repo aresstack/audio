@@ -223,7 +223,7 @@ public final class ProjectSession {
             return false;
         }
         LegacyImport.Result result = current.get();
-        Composition merged = piece ? keepingModel(result.composition(), composition) : composition;
+        Composition merged = piece ? keepingModel(result.composition(), composition, result.namedSoundBanks()) : composition;
         MixScene mixed = keepingMix(result.mix(), mix, merged, stage);
         boolean changed = !merged.equals(composition) || !Objects.equals(mixed, mix);
         if (changed) {
@@ -536,7 +536,7 @@ public final class ProjectSession {
      * value; the sections (the form of the piece) stay, and only music beyond their end gets a
      * section of its own; the time map stays where the file names the same tempo.
      */
-    private static Composition keepingModel(Composition imported, Composition model) {
+    private static Composition keepingModel(Composition imported, Composition model, Set<String> namedSoundBanks) {
         List<Part> parts = new ArrayList<>();
         List<Track> tracks = new ArrayList<>();
         for (Part part : imported.parts()) {
@@ -545,10 +545,12 @@ public final class ProjectSession {
             boolean same = old != null && own != null
                     && TsvExport.linesOf(imported, part.id()).equals(TsvExport.linesOf(model, part.id()));
             // tracks.json is still where the old studio keeps instrument and sound bank: they come
-            // from there even for a part whose notes stayed the same.
-            parts.add(!same ? part : part.instrument() == null ? old
-                    : new Part(old.id(), old.name(), old.role(), part.instrument(), old.program(), part.libraryId(),
-                            old.staffLayout(), old.voices(), old.legacyChannel()));
+            // from there even for a part whose notes stayed the same, each one that it names, the
+            // built-in sound too. What it does not name stays as the model has it.
+            String library = namedSoundBanks.contains(part.id()) ? part.libraryId() : same ? old.libraryId() : null;
+            parts.add(!same ? part
+                    : new Part(old.id(), old.name(), old.role(), or(part.instrument(), old.instrument()),
+                            old.program(), library, old.staffLayout(), old.voices(), old.legacyChannel()));
             tracks.add(same ? own : imported.track(part.id()));
         }
         Meta a = imported.meta();

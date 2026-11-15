@@ -66,6 +66,43 @@ public record VoiceFrame(String sectionId, String name, String function, long st
         return frames;
     }
 
+    /**
+     * The frames of a stretch of the piece ({@code REPLACE_REGION}, {@code VARIATE_REGION}): every
+     * section that overlaps it, cut to the stretch, so that one call still writes no more than one
+     * section; the whole stretch as one frame if the piece has no sections. The chords of a cut
+     * section are cut alike.
+     */
+    public static List<VoiceFrame> within(Composition piece, long fromTick, long toTick) {
+        if (fromTick < 0 || toTick <= fromTick) {
+            throw new IllegalArgumentException("Ein Bereich umfasst mindestens einen Tick: " + fromTick + ".." + toTick);
+        }
+        TimeMap time = piece.timeMap();
+        List<VoiceFrame> frames = new ArrayList<>();
+        for (Section section : piece.sections()) {
+            long start = Math.max(fromTick, section.startTick());
+            long end = Math.min(toTick, section.endTick());
+            if (start >= end) {
+                continue;
+            }
+            int first = time.barOf(start);
+            int bars = Math.max(1, time.barsCovering(end) - first);
+            int skip = first - time.barOf(section.startTick());
+            List<String> harmony = section.harmony().size() > skip
+                    ? section.harmony().subList(skip, Math.min(section.harmony().size(), skip + bars)) : List.of();
+            frames.add(new VoiceFrame(section.id(), section.name(), section.function(), start, end, first, bars, harmony,
+                    section.intensity(), section.instruction()));
+        }
+        long covered = frames.stream().mapToLong(VoiceFrame::lengthTicks).sum();
+        if (frames.isEmpty() || covered < toTick - fromTick) {
+            // no sections, or sections that leave part of the stretch uncovered (past the last one)
+            frames.clear();
+            int first = time.barOf(fromTick);
+            frames.add(new VoiceFrame(WHOLE, "Auswahl", null, fromTick, toTick, first,
+                    Math.max(1, time.barsCovering(toTick) - first), List.of(), null, null));
+        }
+        return frames;
+    }
+
     public long lengthTicks() {
         return endTick - startTick;
     }

@@ -78,14 +78,14 @@ public final class ChatOrchestrationPlanner implements OrchestrationPlanner {
     public OrchestrationPlan plan(OrchestrationTask task, Composition piece, Path cacheDirectory) throws IOException {
         String prompt = prompt(task);
         Path cache = cacheDirectory.resolve("plan-" + ContextBuilder.sha256(prompt).substring(0, 12) + ".json");
-        return read(model.generate(INSTRUCTION, prompt, maxTokens, cache), task);
+        return read(model.generate(INSTRUCTION, prompt, maxTokens, cache), task, piece);
     }
 
     /** Reads and completes a planning answer; see the class comment. */
-    public static OrchestrationPlan read(JsonObject answer, OrchestrationTask task) {
+    public static OrchestrationPlan read(JsonObject answer, OrchestrationTask task, Composition piece) {
         List<String> repairs = new ArrayList<>();
         Map<String, String> renamed = new HashMap<>();
-        List<ContinuationPlan.NewPart> newParts = ChatContinuationPlanner.newParts(answer, repairs, renamed);
+        List<ContinuationPlan.NewPart> newParts = ChatContinuationPlanner.newParts(answer, piece, repairs, renamed);
         List<OrchestrationPlan.FramePlan> frames = new ArrayList<>();
         for (JsonObject given : ChatContinuationPlanner.objects(answer, "frames")) {
             String id = ChatContinuationPlanner.text(given, "frame");

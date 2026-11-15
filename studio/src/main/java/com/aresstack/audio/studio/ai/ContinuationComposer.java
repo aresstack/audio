@@ -117,12 +117,12 @@ public final class ContinuationComposer {
 
         Map<String, Written> written = write(room, task, plan, frames, voices, cacheDirectory, progress);
         ComposedContinuation result = assemble(room, task, plan, frames, voices, written, new Fresh(room, ids));
-        if (result.noteCount() == 0) {
+        if (result.clips().stream().allMatch(c -> c.clip().notes().isEmpty())) {
             throw new IOException("Keine spielbaren Noten für die Fortsetzung; die Antworten bleiben im Cache zur "
                     + "Diagnose.");
         }
-        progress.update((task.inserts() ? "Einfügung: " : "Fortsetzung: ") + result.noteCount() + " Noten in " + result.sections().size()
-                + " Abschnitt(en), " + result.newParts().size() + " neue Instrumente, " + result.corrections().size()
+        progress.update((task.inserts() ? "Einfügung: " : "Fortsetzung: ") + result.noteCount() + " Noten in "
+                + result.sections().size() + " Abschnitt(en), " + result.newParts().size() + " neue Instrumente, " + result.corrections().size()
                 + " Korrekturen.");
         return result;
     }

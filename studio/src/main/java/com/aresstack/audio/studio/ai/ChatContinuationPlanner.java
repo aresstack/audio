@@ -119,7 +119,7 @@ public final class ChatContinuationPlanner implements ContinuationPlanner {
     public static ContinuationPlan read(JsonObject answer, ContinuationTask task, Composition piece) {
         List<String> repairs = new ArrayList<>();
         Map<String, String> renamed = new HashMap<>();
-        List<ContinuationPlan.NewPart> newParts = newParts(answer, repairs, renamed);
+        List<ContinuationPlan.NewPart> newParts = newParts(answer, piece, repairs, renamed);
         List<ContinuationPlan.PlannedSection> sections = new ArrayList<>();
         int index = 0;
         for (JsonObject given : objects(answer, "sections")) {
@@ -155,13 +155,15 @@ public final class ChatContinuationPlanner implements ContinuationPlanner {
     }
 
     /**
-     * The new instruments of a planning answer, renamed to new1, new2, ... in their order; an
-     * instrument without name or valid program is dropped, an unknown role becomes texture. How
-     * the keys of the answer were renamed goes into {@code renamed}.
+     * The new instruments of a planning answer, renamed to new1, new2, ... in their order, skipping
+     * keys that are ids of existing parts; an instrument without name or valid program is dropped,
+     * an unknown role becomes texture. How the keys of the answer were renamed goes into
+     * {@code renamed}; a key that is the id of an existing part keeps meaning that part.
      */
-    static List<ContinuationPlan.NewPart> newParts(JsonObject answer, List<String> repairs,
+    static List<ContinuationPlan.NewPart> newParts(JsonObject answer, Composition piece, List<String> repairs,
                                                    Map<String, String> renamed) {
         List<ContinuationPlan.NewPart> newParts = new ArrayList<>();
+        int skipped = 0;
         for (JsonObject given : objects(answer, "newParts")) {
             String name = text(given, "name");
             String key = text(given, "key");
@@ -169,24 +171,38 @@ public final class ChatContinuationPlanner implements ContinuationPlanner {
             if (name == null || name.isBlank() || program == null || program < 0 || program > 127) {
                 repairs.add("Neues Instrument " + (name == null ? key : name) + " ohne Namen oder gültiges Programm "
                         + "verworfen.");
-                if (key != null) {
+                if (key != null && !taken(piece, key)) {
                     renamed.put(key, "verworfen:" + key); // its mentions must not name a later new part
                 }
                 continue;
             }
             String role = text(given, "role");
-            if (!Role.ALL.contains(role)) {
+            if (role == null || !Role.ALL.contains(role)) {
                 repairs.add("Neues Instrument " + name + ": unbekannte Rolle " + role + ", als texture übernommen.");
                 role = Role.TEXTURE;
             }
-            String fixed = "new" + (newParts.size() + 1);
-            if (key != null) {
-                renamed.put(key, fixed);
+            String fixed = freeKey(newParts.size() + 1 + skipped);
+            while (taken(piece, fixed)) {
+                skipped++;
+                fixed = freeKey(newParts.size() + 1 + skipped);
+            }
+            if (key != null && !taken(piece, key)) {
+                renamed.put(key, fixed); // a key that is the id of an existing part keeps meaning that part
             }
             newParts.add(new ContinuationPlan.NewPart(fixed, name, text(given, "instrument"), program, role,
                     text(given, "idea")));
         }
         return newParts;
+    }
+
+    /** The key of the n-th new part: "new" and its number. */
+    private static String freeKey(int number) {
+        return "new" + number;
+    }
+
+    /** Whether a key is the id of an existing part of the piece: then no new part may have it. */
+    private static boolean taken(Composition piece, String key) {
+        return piece.part(key) != null;
     }
 
     static List<JsonObject> objects(JsonObject object, String name) {
