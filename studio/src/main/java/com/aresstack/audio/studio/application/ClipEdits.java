@@ -57,9 +57,12 @@ public final class ClipEdits {
 
     /** A clip of the piece with its lane. */
     public record Placed(Track track, Clip clip) {
-        public long endTick() {
-            return clip instanceof MidiClip midi ? midi.endTick() : clip.startTick() + 1;
-        }
+    }
+
+    /** Where a clip ends in ticks; an audio clip keeps its length in time, measured on the piece's time map. */
+    public static long endOf(Composition piece, Clip clip) {
+        return clip instanceof com.aresstack.audio.composition.AudioClip audio ? audio.endTick(piece.timeMap())
+                : lengthOf(clip) + clip.startTick();
     }
 
     /** Finds a clip by its id. */
@@ -90,14 +93,18 @@ public final class ClipEdits {
             return ClipEdit.refused("Diese Spur gibt es nicht.");
         }
         if (target.kind() != at.clip().kind()) {
-            return ClipEdit.refused("Ein " + kindName(at.clip()) + " gehört auf eine " + kindName(at.clip()) + "-Spur.");
+            return ClipEdit.refused("Ein " + kindName(at.clip()) + " gehört auf eine "
+                    + (at.clip().kind() == Track.Kind.MIDI ? "MIDI" : "Audio") + "-Spur.");
         }
         long start = Math.max(0, startTick);
         if (start == at.clip().startTick() && target.id().equals(at.track().id())) {
             return new ClipEdit(new Patch("", List.of()), null, clipId, null);
         }
-        long length = lengthOf(at.clip());
-        Optional<String> busy = overlapping(target, start, start + length, clipId);
+        long end = at.clip() instanceof com.aresstack.audio.composition.AudioClip audio
+                ? new com.aresstack.audio.composition.AudioClip(audio.id(), start, audio.lengthSamples(),
+                audio.assetId(), audio.gainDb(), audio.fadeInSamples(), audio.fadeOutSamples()).endTick(piece.timeMap())
+                : start + lengthOf(at.clip());
+        Optional<String> busy = AudioEdits.overlapping(piece, target, start, end, clipId);
         if (busy.isPresent()) {
             return ClipEdit.refused("Dort liegt schon Clip " + busy.get() + "; Clips einer Spur überlappen nicht.");
         }
@@ -308,7 +315,7 @@ public final class ClipEdits {
         return -1;
     }
 
-    /** How long a clip lasts in ticks; an audio clip as long as a tick until B3 measures it on the time map. */
+    /** How long a MIDI clip lasts in ticks; for an audio clip see {@link #endOf}. */
     static long lengthOf(Clip clip) {
         return clip instanceof MidiClip midi ? midi.lengthTicks() : 1;
     }
