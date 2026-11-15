@@ -120,6 +120,18 @@ public record Album(String id, String title, AlbumConcept concept, List<AlbumTra
         return text.toString();
     }
 
+    /**
+     * A description without what a piece was told about its album: earlier versions kept the whole
+     * {@link #brief} in the description of the piece, which made it long and hard to read.
+     */
+    public static String withoutBrief(String description) {
+        if (description == null) {
+            return null;
+        }
+        int at = description.indexOf("This piece is track ");
+        return at < 0 ? description : description.substring(0, at).strip();
+    }
+
     private static void append(StringBuilder text, String label, String value) {
         if (!value.isEmpty()) {
             text.append(label).append(value);

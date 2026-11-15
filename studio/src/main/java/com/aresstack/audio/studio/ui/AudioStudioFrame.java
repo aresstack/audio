@@ -209,13 +209,15 @@ public final class AudioStudioFrame extends JFrame {
             com.aresstack.audio.studio.application.SongLibrary.standard();
     /** Every piece belongs to an album; a piece without one lands in the unnamed album. */
     private final AlbumMembership albumMembers = new AlbumMembership(new AlbumFiles(songs.root()), songs);
-    /** The choice of the album, the project the studio works in; under it the choice of its piece. */
-    private final JComboBox<Album> albumChoice = new JComboBox<Album>();
-    /** The id of the album chosen above, or {@code null} before the first look at the library. */
+    /** The id of the album worked in: the one clicked in the tree, or the album of the open piece. */
     private String currentAlbum;
-    /** The pieces of the chosen album as the list of pieces shows them; another piece is marked. */
-    private final java.util.Set<Path> piecesOfAlbum = new java.util.HashSet<Path>();
     private AlbumsPanel albumsPanel;
+    /** The albums of the project and their titles, at the left of the desk. */
+    private AlbumTree albumTree;
+    /** One page key lit at a time; none while the page of an album is shown, which the tree opens. */
+    private final javax.swing.ButtonGroup pageGroup = new javax.swing.ButtonGroup();
+    /** Under the name of the studio: the project, that is the library with all its albums. */
+    private final JLabel projectName = new JLabel();
     /** The model of the open piece; it follows what the studio still writes the old way. */
     private final com.aresstack.audio.studio.application.PieceModel pieceModel =
             new com.aresstack.audio.studio.application.PieceModel(this::append);
@@ -227,9 +229,6 @@ public final class AudioStudioFrame extends JFrame {
             new com.aresstack.audio.studio.application.StageFollowsMix();
     private final com.aresstack.audio.studio.application.PieceEditing pieceEditing =
             new com.aresstack.audio.studio.application.PieceEditing(this::pieceToEdit);
-    private final JComboBox<com.aresstack.audio.studio.application.SongLibrary.Song> songChoice =
-            new JComboBox<com.aresstack.audio.studio.application.SongLibrary.Song>();
-    private boolean fillingSongs;
     /** What the plan says about the piece: tempo, key, bars, mood. */
     private final JLabel songFacts = new JLabel(" ");
     private final javax.swing.JRadioButton aiChooses = new javax.swing.JRadioButton("die KI wählt sie");
@@ -312,7 +311,12 @@ public final class AudioStudioFrame extends JFrame {
         pageHolder.add(libraryPage(), "library");
         pageHolder.add(settingsPanel(), "settings");
         pageHolder.add(consolePage(), "console");
-        desk.add(pageHolder, BorderLayout.CENTER);
+        // At the left the albums of the project as a tree, beside it the page of what was clicked there.
+        JPanel work = new JPanel(new BorderLayout(14, 0));
+        work.setOpaque(false);
+        work.add(new DeckWidgets.Module("Alben", albumTree()), BorderLayout.WEST);
+        work.add(pageHolder, BorderLayout.CENTER);
+        desk.add(work, BorderLayout.CENTER);
         statusLine.setFont(statusLine.getFont().deriveFont(12f));
         statusLine.setForeground(AudioStudioTheme.TEXT_DIM);
         statusLine.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8));
@@ -351,14 +355,12 @@ public final class AudioStudioFrame extends JFrame {
         JLabel title = new JLabel("Audio Studio");
         title.setFont(new java.awt.Font(java.awt.Font.SERIF, java.awt.Font.BOLD | java.awt.Font.ITALIC, 27));
         title.setForeground(AudioStudioTheme.TEXT);
-        // Under the name: the choice of the album, the project; under it the choice of its piece,
-        // and beside that a small menu for new, open and the like.
-        albumChoice.setToolTipText("Das Album wählen, an dem gearbeitet wird; jede Komposition gehört zu einem");
-        albumChoice.setPreferredSize(new Dimension(232, 28));
-        albumChoice.setAlignmentX(0f);
-        albumChoice.setMaximumSize(new Dimension(232, 28));
-        songChoice.setToolTipText("Die Komposition des Albums wählen, an der gearbeitet wird");
-        songChoice.setPreferredSize(new Dimension(196, 28));
+        // Under the name: the project, and beside it a small menu for new, open and the like.
+        // Albums and pieces are chosen in the tree at the left.
+        projectName.setText(projectTitle());
+        projectName.setFont(projectName.getFont().deriveFont(java.awt.Font.BOLD, 14f));
+        projectName.setForeground(AudioStudioTheme.TEXT);
+        projectName.setToolTipText("Das Projekt: " + songs.root());
         songMenuKey.setToolTipText("Rückgängig, Versionen, Stück verlängern, Takte einfügen, Stimme hinzukomponieren,"
                 + " neue Komposition, öffnen, Ordner zeigen, Plan ansehen, Demo laden");
         songMenuKey.setMargin(new Insets(2, 4, 2, 4));
@@ -366,7 +368,7 @@ public final class AudioStudioFrame extends JFrame {
         songMenuKey.setPreferredSize(new Dimension(30, 28));
         JPanel line = new JPanel(new BorderLayout(4, 0));
         line.setOpaque(false);
-        line.add(songChoice, BorderLayout.CENTER);
+        line.add(projectName, BorderLayout.CENTER);
         line.add(songMenuKey, BorderLayout.EAST);
         line.setAlignmentX(0f);
         line.setMaximumSize(new Dimension(232, 28));
@@ -376,8 +378,6 @@ public final class AudioStudioFrame extends JFrame {
         name.add(brand);
         name.add(title);
         name.add(javax.swing.Box.createVerticalStrut(6));
-        name.add(albumChoice);
-        name.add(javax.swing.Box.createVerticalStrut(4));
         name.add(line);
         name.add(javax.swing.Box.createVerticalGlue());
         name.setPreferredSize(new Dimension(236, 96));
@@ -443,21 +443,16 @@ public final class AudioStudioFrame extends JFrame {
         display.add(lcd, BorderLayout.CENTER);
         // Under the display, as on a player: one key per page of the work on the piece. The
         // settings and the sound banks are not among them; they sit behind two round keys in the corner.
-        JPanel keysOfPages = new JPanel(new java.awt.GridLayout(1, 5, 6, 0));
+        JPanel keysOfPages = new JPanel(new java.awt.GridLayout(1, 4, 6, 0));
         keysOfPages.setOpaque(false);
-        javax.swing.ButtonGroup onePage = new javax.swing.ButtonGroup();
-        // The album is the frame of its pieces, so it comes first; the studio still opens on the piece.
-        String[][] entries = {{"albums", "Alben"}, {"song", "Komposition"}, {"deck", "Arrangement"},
+        javax.swing.ButtonGroup onePage = pageGroup;
+        // The albums are in the tree at the left: a click on an album shows its page, a click on a title its piece.
+        String[][] entries = {{"song", "Komposition"}, {"deck", "Arrangement"},
                 {"stage", "Bühne"},
                 {"console", "Protokoll"}};
         for (final String[] entry : entries) {
             DeckWidgets.PageKey key = new DeckWidgets.PageKey(entry[1]);
-            key.addActionListener(event -> {
-                if ("albums".equals(entry[0]) && albumsPanel != null) {
-                    albumsPanel.follow(currentAlbum); // the page shows the album chosen above, as it is now
-                }
-                pages.show(pageHolder, entry[0]);
-            });
+            key.addActionListener(event -> pages.show(pageHolder, entry[0]));
             onePage.add(key);
             pageKeys.put(entry[0], key);
             keysOfPages.add(key);
@@ -730,46 +725,6 @@ public final class AudioStudioFrame extends JFrame {
         demo.addActionListener(event -> loadDemo());
         moreMenu.add(demo);
         songMenuKey.addActionListener(event -> moreMenu.show(songMenuKey, 0, songMenuKey.getHeight()));
-        songChoice.setRenderer(new javax.swing.DefaultListCellRenderer() {
-            private final java.text.SimpleDateFormat day = new java.text.SimpleDateFormat("dd.MM.yyyy HH:mm");
-
-            @Override
-            public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list, Object value, int index,
-                                                                   boolean selected, boolean focused) {
-                String text = "";
-                if (value instanceof com.aresstack.audio.studio.application.SongLibrary.Song) {
-                    com.aresstack.audio.studio.application.SongLibrary.Song song =
-                            (com.aresstack.audio.studio.application.SongLibrary.Song) value;
-                    text = song.name() + (index >= 0 && song.changed() > 0
-                            ? "   ·   " + day.format(new java.util.Date(song.changed())) : "")
-                            + (piecesOfAlbum.contains(song.folder()) ? "" : "   ·   nicht in diesem Album");
-                }
-                return super.getListCellRendererComponent(list, text, index, selected, focused);
-            }
-        });
-        albumChoice.setRenderer(new javax.swing.DefaultListCellRenderer() {
-            @Override
-            public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list, Object value, int index,
-                                                                   boolean selected, boolean focused) {
-                String text = "";
-                if (value instanceof Album) {
-                    Album album = (Album) value;
-                    text = album.title() + (index >= 0 ? "   ·   " + album.tracks().size() + " Titel" : "");
-                }
-                return super.getListCellRendererComponent(list, text, index, selected, focused);
-            }
-        });
-        albumChoice.addActionListener(event -> {
-            if (!fillingSongs && albumChoice.getSelectedItem() != null) {
-                chooseAlbum(((Album) albumChoice.getSelectedItem()).id(), true);
-            }
-        });
-        songChoice.addActionListener(event -> {
-            if (!fillingSongs && songChoice.getSelectedItem() != null) {
-                openSong(((com.aresstack.audio.studio.application.SongLibrary.Song) songChoice.getSelectedItem()).folder());
-            }
-        });
-
         // Composing: one key, and the choice of who decides on the instruments.
         javax.swing.ButtonGroup who = new javax.swing.ButtonGroup();
         who.add(aiChooses);
@@ -1332,7 +1287,7 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         final Path output = Paths.get(directory.getText().trim());
-        final String prompt = description.getText().trim();
+        final String prompt = wishForAi();
         final int tokens = (Integer) tokenLimit.getValue();
         final com.aresstack.audio.studio.stage.SpatialScene current = scene;
         // Movements are a request of their own, only when the user switched them on (off by default).
@@ -1441,7 +1396,16 @@ public final class AudioStudioFrame extends JFrame {
         AlbumsPanel albums = new AlbumsPanel(new AlbumsPanel.Host() {
             @Override
             public void albumChosen(String id) {
-                chooseAlbum(id, false);
+                currentAlbum = id;
+                refreshSongs();
+                if (albumTree != null) {
+                    albumTree.selectAlbum(id);
+                }
+            }
+
+            @Override
+            public void albumChanged() {
+                refreshSongs(); // a title, a new title or a plan: the tree shows it
             }
 
             @Override
@@ -1504,6 +1468,7 @@ public final class AudioStudioFrame extends JFrame {
             }
         }, songs, registry);
         albumsPanel = albums;
+        albums.listInTree(); // the albums are chosen in the tree at the left
         albums.setBesideConcept(albumModelChoices);
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
@@ -1888,7 +1853,7 @@ public final class AudioStudioFrame extends JFrame {
      */
     private boolean planStillFits() {
         Path folder = Paths.get(directory.getText().trim());
-        String now = description.getText().trim();
+        String now = wishForAi();
         String planned = songs.plannedFrom(folder);
         if (!Files.isRegularFile(folder.resolve("composition-plan.json")) || planned == null
                 || planned.trim().equals(now)) {
@@ -1926,7 +1891,7 @@ public final class AudioStudioFrame extends JFrame {
             message(invalid.getMessage());
             return;
         }
-        final String prompt = description.getText().trim();
+        final String prompt = wishForAi();
         final Path output = Paths.get(directory.getText().trim());
         final com.aresstack.audio.studio.application.CompositionSpec spec;
         try {
@@ -1989,7 +1954,7 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         final Path output = Paths.get(directory.getText().trim());
-        final String prompt = description.getText().trim();
+        final String prompt = wishForAi();
         final com.aresstack.audio.studio.application.CompositionSpec spec;
         try {
             spec = specFields.spec();
@@ -2457,7 +2422,7 @@ public final class AudioStudioFrame extends JFrame {
             message(invalid.getMessage());
             return;
         }
-        final String prompt = description.getText().trim();
+        final String prompt = wishForAi();
         final int tokens = (Integer) tokenLimit.getValue();
         final int parallel = (Integer) parallelRequests.getValue();
         if (!saveSettings(false)) {
@@ -3096,7 +3061,7 @@ public final class AudioStudioFrame extends JFrame {
         }
         album.setSelectedItem(chosen == null ? "" : chosen.title());
         int answer = JOptionPane.showConfirmDialog(this, new Object[]{"Wie soll das neue Stück heißen?", name,
-                        "In welches Album? Ein neuer Titel legt ein neues Album an; leer: das unbenannte Album.", album},
+                        "In welches Album? Ein neuer Titel legt ein neues Album an; leer: ein neues unbenanntes Album.", album},
                 "Neues Stück", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
         if (answer != JOptionPane.OK_OPTION) {
             return;
@@ -3142,7 +3107,10 @@ public final class AudioStudioFrame extends JFrame {
                 }
             }
             if (target == null) {
-                target = albumMembers.untitled();
+                // No album named: an unnamed album of its own when the user left the album empty,
+                // the first unnamed one when nothing was chosen at all.
+                target = title != null ? albumMembers.albums().create(AlbumMembership.UNTITLED,
+                        new com.aresstack.audio.studio.album.AlbumConcept("", "", 12, 300)) : albumMembers.untitled();
             }
             Album now = albumMembers.add(target.id(), piece);
             currentAlbum = now.id();
@@ -3156,44 +3124,97 @@ public final class AudioStudioFrame extends JFrame {
         }
     }
 
-    /**
-     * The user chose an album, above or on the page of the albums. Its piece changed last is
-     * opened, unless the open piece belongs to it; an album without a piece keeps the open piece,
-     * and the next new composition goes into it.
-     */
-    private void chooseAlbum(String id, boolean fromAbove) {
-        if (id == null || id.equals(currentAlbum)) {
-            return;
-        }
-        Album album = albumMembers.albums().album(id).orElse(null);
-        if (album == null) {
+    /** Shows the page of an album: its settings, its titles and its production. */
+    private void showAlbum(String id) {
+        if (id == null || !albumMembers.albums().album(id).isPresent()) {
             refreshSongs();
             return;
         }
         currentAlbum = id;
-        if (fromAbove && albumsPanel != null) {
+        if (albumsPanel != null) {
             albumsPanel.follow(id);
         }
-        Path current = Paths.get(directory.getText().trim()).toAbsolutePath().normalize();
-        com.aresstack.audio.studio.application.SongLibrary.Song latest = null;
-        for (com.aresstack.audio.studio.application.SongLibrary.Song piece : albumMembers.pieces(album)) {
-            if (piece.folder().toAbsolutePath().normalize().equals(current)) {
+        showPage("albums");
+    }
+
+    /** The tree at the left: the albums of the project with their titles. */
+    private AlbumTree albumTree() {
+        albumTree = new AlbumTree(new AlbumTree.Host() {
+            @Override
+            public void albumClicked(String albumId) {
+                showAlbum(albumId);
+            }
+
+            @Override
+            public void pieceClicked(String albumId, Path folder) {
+                currentAlbum = albumId;
+                openSong(folder);
+                if (Paths.get(directory.getText().trim()).equals(folder)) {
+                    showPage("song");
+                }
+            }
+
+            @Override
+            public void moveTitle(String fromAlbum, String trackId, String toAlbum, int index) {
+                if (albumsPanel != null && albumsPanel.producing()) {
+                    message("Während ein Album produziert wird, werden keine Titel verschoben.");
+                    return;
+                }
+                try {
+                    if (albumMembers.move(fromAlbum, trackId, toAlbum, index)) {
+                        if (albumsPanel != null) {
+                            albumsPanel.follow(currentAlbum == null ? toAlbum : currentAlbum);
+                        }
+                    }
+                } catch (IOException | RuntimeException failed) {
+                    message("Der Titel ließ sich nicht verschieben: " + failed.getMessage());
+                }
                 refreshSongs();
-                return;
             }
-            if (latest == null || piece.changed() > latest.changed()) {
-                latest = piece;
+
+            @Override
+            public void newAlbum() {
+                if (albumsPanel != null) {
+                    String before = currentAlbum;
+                    albumsPanel.createAlbum(); // a new album becomes the current one
+                    if (currentAlbum != null && !currentAlbum.equals(before)) {
+                        showAlbum(currentAlbum);
+                    }
+                }
             }
-        }
-        if (latest != null && fromAbove) {
-            openSong(latest.folder());
-            return;
-        }
-        refreshSongs();
-        if (latest == null && fromAbove) {
-            append("Das Album „" + album.title() + "“ hat noch kein Stück. Auf der Seite Alben lässt es sich planen"
-                    + " und produzieren; eine neue Komposition kommt hinein.");
-        }
+
+            @Override
+            public void newComposition() {
+                createNewComposition();
+                showPage("song");
+            }
+
+            @Override
+            public void deleteAlbum(String albumId) {
+                if (albumsPanel != null) {
+                    albumsPanel.follow(albumId);
+                    albumsPanel.deleteAlbum();
+                    refreshSongs();
+                }
+            }
+        });
+        return albumTree;
+    }
+
+    /** What the project is called: the folder of its library, the standard one simply "Mein Projekt". */
+    private String projectTitle() {
+        return songs.root().equals(com.aresstack.audio.studio.application.SongLibrary.standard().root())
+                ? "Mein Projekt" : String.valueOf(songs.root().getFileName());
+    }
+
+    /**
+     * The words the AI composes from: the description of the piece, and for a piece of a named
+     * album what it is told about that album. The description itself shows only the piece's own words.
+     */
+    private String wishForAi() {
+        String own = description.getText().trim();
+        String context = albumMembers.albumContext(Paths.get(directory.getText().trim()));
+        return context.isEmpty() ? own : own + "\n" + context;
     }
 
     /** Switches to another piece: its tracks, its description, its arrangement and what was rendered. */
@@ -3211,7 +3232,7 @@ public final class AudioStudioFrame extends JFrame {
         directory.setText(folder.toString());
         Path song = folder.resolve("arrangement.tsv");
         arrangementFile.setText(Files.isRegularFile(song) ? song.toString() : "");
-        String kept = songs.description(folder);
+        String kept = Album.withoutBrief(songs.description(folder)); // the album is told to the AI beside it
         if (kept != null) {
             description.setText(kept);
             description.setCaretPosition(0);
@@ -3225,8 +3246,11 @@ public final class AudioStudioFrame extends JFrame {
     /** The album chosen above follows a piece that is opened, if the piece is not in it. */
     private void followPiece(Path folder) {
         Album own = albumMembers.albumOf(folder).orElse(null);
-        if (own != null && !own.id().equals(currentAlbum)
-                && (currentAlbum == null || !piecesOfAlbum.contains(folder))) {
+        if (own == null || own.id().equals(currentAlbum)) {
+            return;
+        }
+        Album chosen = currentAlbum == null ? null : albumMembers.albums().album(currentAlbum).orElse(null);
+        if (chosen == null || albumMembers.pieces(chosen).stream().noneMatch(song -> song.folder().equals(folder))) {
             currentAlbum = own.id();
         }
     }
@@ -3244,68 +3268,32 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     /**
-     * Fills the list of albums and the list of the pieces of the chosen album, and shows the piece
-     * in use, also when it lies in another album or outside the library. Before that, every piece
-     * that no album names is put into the unnamed album, so that each piece belongs to one.
+     * Shows the albums of the project with their titles in the tree, and the piece in use. Before
+     * that, every piece that no album names is put into the unnamed album, so that each piece
+     * belongs to one, and a new piece takes its title from its plan.
      */
     private void refreshSongs() {
-        fillingSongs = true;
+        Path current = Paths.get(directory.getText().trim());
         try {
-            Path current = Paths.get(directory.getText().trim());
-            try {
-                int adopted = albumMembers.adoptLoosePieces();
-                if (adopted > 0) {
-                    append(adopted == 1 ? "Ein Stück ohne Album liegt jetzt im Album „" + AlbumMembership.UNTITLED + "“."
-                            : adopted + " Stücke ohne Album liegen jetzt im Album „" + AlbumMembership.UNTITLED + "“.");
-                }
-                albumMembers.refresh(current); // the plan may have given the piece its title, tempo and key
-            } catch (IOException failed) {
-                append("Die Stücke ohne Album ließen sich nicht ins unbenannte Album legen: " + failed.getMessage());
+            int adopted = albumMembers.adoptLoosePieces();
+            if (adopted > 0) {
+                append(adopted == 1 ? "Ein Stück ohne Album liegt jetzt im Album „" + AlbumMembership.UNTITLED + "“."
+                        : adopted + " Stücke ohne Album liegen jetzt im Album „" + AlbumMembership.UNTITLED + "“.");
             }
-            java.util.List<Album> all = albumMembers.albums().albums();
-            Album chosen = null;
-            for (Album each : all) {
-                if (each.id().equals(currentAlbum)) {
-                    chosen = each;
-                }
-            }
-            if (chosen == null) {
-                chosen = albumMembers.albumOf(current).orElse(all.isEmpty() ? null : all.get(0));
-            }
-            if (chosen == null) {
-                try {
-                    chosen = albumMembers.untitled(); // an empty library still has an album to work in
-                    all = albumMembers.albums().albums();
-                } catch (IOException failed) {
-                    append("Das unbenannte Album ließ sich nicht anlegen: " + failed.getMessage());
-                }
-            }
-            currentAlbum = chosen == null ? null : chosen.id();
-            albumChoice.removeAllItems();
-            for (Album each : all) {
-                albumChoice.addItem(each);
-            }
-            albumChoice.setSelectedItem(chosen);
-            songChoice.removeAllItems();
-            piecesOfAlbum.clear();
-            boolean listed = false;
-            java.util.List<com.aresstack.audio.studio.application.SongLibrary.Song> pieces = chosen == null
-                    ? songs.songs() : albumMembers.pieces(chosen);
-            for (com.aresstack.audio.studio.application.SongLibrary.Song song : pieces) {
-                songChoice.addItem(song);
-                piecesOfAlbum.add(song.folder());
-                listed |= song.folder().equals(current);
-            }
-            com.aresstack.audio.studio.application.SongLibrary.Song shown = songs.song(current);
-            if (!listed) {
-                songChoice.insertItemAt(shown, 0);
-            }
-            songChoice.setSelectedItem(shown);
-            setTitle("AresStack Audio Studio — " + (chosen == null ? "" : chosen.title() + " — ") + shown.name());
-            songFacts.setText(songFacts(current));
-        } finally {
-            fillingSongs = false;
+            albumMembers.refresh(current); // the plan may have given the piece its title, tempo and key
+        } catch (IOException failed) {
+            append("Die Stücke ohne Album ließen sich nicht ins unbenannte Album legen: " + failed.getMessage());
         }
+        java.util.List<Album> all = albumMembers.albums().albums();
+        if (currentAlbum == null || all.stream().noneMatch(album -> album.id().equals(currentAlbum))) {
+            currentAlbum = albumMembers.albumOf(current).map(Album::id).orElse(null);
+        }
+        if (albumTree != null) {
+            albumTree.show(all, songs, currentAlbum, current);
+        }
+        Album chosen = currentAlbum == null ? null : albumMembers.albums().album(currentAlbum).orElse(null);
+        setTitle("AresStack Audio Studio — " + (chosen == null ? "" : chosen.title() + " — ") + songs.name(current));
+        songFacts.setText(songFacts(current));
     }
 
     /** One line about the piece from its plan: tempo, key, metre, length and mood; a hint when there is no plan. */
@@ -3382,7 +3370,7 @@ public final class AudioStudioFrame extends JFrame {
             sfizz.setText(saved.getProperty("sfizz", sfizz.getText()));
             description.setText(saved.getProperty("description", description.getText()));
             parallelRequests.setValue(parseParallel(saved.getProperty("parallel", "32")));
-            String keptDescription = songs.description(Paths.get(directory.getText().trim()));
+            String keptDescription = Album.withoutBrief(songs.description(Paths.get(directory.getText().trim())));
             if (keptDescription != null) {
                 description.setText(keptDescription);
             }
@@ -4121,6 +4109,8 @@ public final class AudioStudioFrame extends JFrame {
         javax.swing.JToggleButton key = pageKeys.get(page);
         if (key != null) {
             key.setSelected(true);
+        } else {
+            pageGroup.clearSelection();
         }
     }
 

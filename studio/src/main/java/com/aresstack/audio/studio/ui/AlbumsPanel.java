@@ -105,12 +105,18 @@ final class AlbumsPanel extends JPanel {
         /** The user chose this album in the list of the page; the window's choice of the album follows. */
         default void albumChosen(String id) {
         }
+
+        /** An album was written: its title, its concept or its list of titles changed. */
+        default void albumChanged() {
+        }
     }
 
     /** How many pieces of an album are made at the same time. */
     static final int PIECES_AT_ONCE = 2;
 
     private final Host host;
+    /** The list of the albums at the left of the page; hidden when the window has a tree of them. */
+    private final JPanel left = new JPanel(new BorderLayout(0, 8));
     private final SongLibrary songs;
     private final InstrumentRegistry registry;
     private final AlbumFiles files;
@@ -224,7 +230,6 @@ final class AlbumsPanel extends JPanel {
         listKeys.setOpaque(false);
         listKeys.add(create);
         listKeys.add(delete);
-        JPanel left = new JPanel(new BorderLayout(0, 8));
         left.setOpaque(false);
         left.setPreferredSize(new Dimension(250, 200));
         left.add(DeckWidgets.lettering("Alben"), BorderLayout.NORTH);
@@ -692,15 +697,29 @@ final class AlbumsPanel extends JPanel {
             albums.set(at, changed);
             showing = false;
         }
+        host.albumChanged();
+    }
+
+    /** The window chooses the albums in a tree of its own: the list of the page is not shown. */
+    void listInTree() {
+        remove(left);
+        revalidate();
+    }
+
+    /** Whether an album is being produced. */
+    boolean producing() {
+        return production != null && production.running();
     }
 
     void createAlbum() {
-        String name = host.ask("Wie soll das Album heißen?", "Neues Album");
-        if (name == null || name.isBlank()) {
+        String name = host.ask("Wie soll das Album heißen? Ohne Titel heißt es „" + AlbumMembership.UNTITLED + "“.",
+                "Neues Album");
+        if (name == null) {
             return;
         }
         try {
-            Album made = files.create(name.trim(), new AlbumConcept("", "", 12, 300));
+            Album made = files.create(name.isBlank() ? AlbumMembership.UNTITLED : name.trim(),
+                    new AlbumConcept("", "", 12, 300));
             reload(made.id());
             host.albumChosen(made.id()); // the album chosen above follows the new one
             description.requestFocusInWindow();
@@ -709,7 +728,7 @@ final class AlbumsPanel extends JPanel {
         }
     }
 
-    private void deleteAlbum() {
+    void deleteAlbum() {
         if (album == null || !host.confirm("Das Album „" + album.title() + "“ löschen?\n\n"
                 + "Seine Stücke bleiben erhalten und kommen ins unbenannte Album.")) {
             return;

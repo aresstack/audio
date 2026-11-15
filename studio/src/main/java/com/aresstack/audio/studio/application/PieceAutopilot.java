@@ -54,6 +54,15 @@ public final class PieceAutopilot {
     public record Result(Path arrangement, Path rendered, TrackArrangement tracks, SpatialScene scene) {
     }
 
+    /**
+     * A long piece is not composed in one go: it begins with this many bars, and the continuation
+     * (C3) adds the rest step by step, each step planned with the piece so far in view. One plan
+     * for minutes of music would need an answer of the model longer than any limit of tokens.
+     */
+    public static final int FIRST_BARS = 16;
+    /** How many bars one step of the continuation adds at most. */
+    public static final int STEP_BARS = 16;
+
     private final InstrumentRegistry registry;
     private final ModelLineup models;
     private final int maxTokens;
@@ -99,10 +108,20 @@ public final class PieceAutopilot {
         }
         new TrackArrangementStore().save(folder, tracks);
         GemmaMusicComposer composer = new GemmaMusicComposer(models, maxTokens, maxParallel);
+        CompositionSpec first = spec == null || spec.bars() <= FIRST_BARS ? spec
+                : new CompositionSpec(FIRST_BARS, spec.bpm(), spec.key(), spec.numerator(), spec.denominator(),
+                spec.snapToHarmony());
+        // The beginning of a long piece is told that it goes on: it must not end yet.
+        String opening = first == spec ? description : description + "\nCompose only the opening " + FIRST_BARS
+                + " bars of a piece of " + spec.bars() + " bars: introduce the themes and do not end;"
+                + " the piece is continued afterwards.";
         Path arrangement = ComposingIntoPiece.run(
-                () -> spec == null ? composer.compose(description, folder, tracks, progress)
-                        : composer.compose(description, folder, tracks, spec, progress),
+                () -> first == null ? composer.compose(opening, folder, tracks, progress)
+                        : composer.compose(opening, folder, tracks, first, progress),
                 folder, description, songs, model);
+        if (first != spec) {
+            arrangement = grow(folder, model, description, spec.bars(), progress);
+        }
         return new Result(arrangement, render(arrangement, folder, model, assignments, programs, progress), tracks,
                 scene);
     }
@@ -128,6 +147,49 @@ public final class PieceAutopilot {
         progress.update("Dieses Stück wird aus seiner Datei gerendert (kein Werkmodell).");
         return new StudioMusicRenderer(registry).render(arrangement, folder, assignments, programs,
                 rendering.sf2Engine(), rendering.fluidSynth(), rendering.sfizz(), progress);
+    }
+
+    /**
+     * Lets the piece grow to its length with the continuation, step by step; every step is taken
+     * into the piece at once, so an interrupted production goes on from the bars it has.
+     */
+    private Path grow(Path folder, PieceModel model, String description, int target, Progress progress)
+            throws Exception {
+        ProjectSession session = (model == null ? java.util.Optional.<ProjectSession>empty() : model.of(folder))
+                .orElseThrow(() -> new java.io.IOException("Das Stück hat kein Werkmodell; es lässt sich nicht"
+                        + " schrittweise verlängern."));
+        String words = description == null ? "" : description.strip();
+        if (words.length() > 600) {
+            words = words.substring(0, 600);
+        }
+        int have = bars(session);
+        while (have < target) {
+            int step = Math.min(STEP_BARS, target - have);
+            boolean last = have + step >= target;
+            progress.update("Verlängere das Stück von " + have + " auf " + (have + step) + " von " + target
+                    + " Takten ...");
+            com.aresstack.audio.studio.ai.ContinuationRequest request =
+                    com.aresstack.audio.studio.ai.ContinuationRequest.of(step,
+                            com.aresstack.audio.studio.ai.ContinuationPreset.STANDALONE,
+                            last ? com.aresstack.audio.studio.ai.ContinuationEnding.CLOSED
+                                    : com.aresstack.audio.studio.ai.ContinuationEnding.OPEN, words);
+            ExtensionOffer offer = ExtensionOffer.start(session,
+                    com.aresstack.audio.studio.ai.ContinuationComposer.with(models), request, progress);
+            offer.confirm(); // nothing of the original is shortened when appending; no one to ask here
+            offer.accept();
+            int now = bars(session);
+            if (now <= have) {
+                throw new java.io.IOException("Die Verlängerung hat dem Stück keine Takte gegeben (bei Takt "
+                        + have + ").");
+            }
+            have = now;
+        }
+        return folder.resolve("arrangement.tsv");
+    }
+
+    private static int bars(ProjectSession session) {
+        com.aresstack.audio.composition.Composition piece = session.composition();
+        return piece.timeMap().barsCovering(piece.endTick());
     }
 
     /** Stops the requests to the models that are running. */
