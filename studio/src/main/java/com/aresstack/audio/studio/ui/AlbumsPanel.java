@@ -497,7 +497,7 @@ final class AlbumsPanel extends JPanel {
         final AlbumSuggester proposer;
         try {
             proposer = suggester != null ? suggester
-                    : new ChatAlbumSuggester(ModelLineup.of(host.model()).model(AlbumRoles.ALBUM), host.tokens());
+                    : new ChatAlbumSuggester(host.models().model(AlbumRoles.ALBUM), host.tokens());
         } catch (RuntimeException noModel) {
             // Without a model there are no proposals; the fields work as before.
             return;
