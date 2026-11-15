@@ -230,9 +230,11 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
             }
             AlbumTrack told = track;
             try {
-                PieceProduction.ProducedPiece produced = pieces.produce(new PieceProduction.PieceOrder(piece,
-                        track.title(), description(album, track), track.spec()),
+                // Everything the AI streams for the piece can be shown where the piece is open.
+                com.aresstack.audio.studio.progress.Progress progress = listener.watching(told, piece,
                         message -> listener.progress(told, message));
+                PieceProduction.ProducedPiece produced = pieces.produce(new PieceProduction.PieceOrder(piece,
+                        track.title(), description(album, track), track.spec()), progress);
                 if (produced == null || produced.mix() == null || !Files.isRegularFile(produced.mix())) {
                     throw new IOException("Das Stück hat keine gemischte Datei.");
                 }

@@ -24,6 +24,16 @@ public interface AlbumProductionCoordinator {
         /** What the piece of a title is doing right now. */
         default void progress(AlbumTrack track, String message) {
         }
+
+        /**
+         * The progress the piece of a title is made with: {@code plain} tells {@link #progress};
+         * a listener that wants to see the piece while it is written (its notes, its instruments,
+         * its form) gives one that shows that as well.
+         */
+        default com.aresstack.audio.studio.progress.Progress watching(AlbumTrack track, java.nio.file.Path piece,
+                                                                     com.aresstack.audio.studio.progress.Progress plain) {
+            return plain;
+        }
     }
 
     /** A production that runs. */
