@@ -230,9 +230,9 @@ public final class LiveStageTest {
                 live = drain(stage.graph(), SpatialStemMixer.BLOCK);
             }
             // Live asks the motion on the grid of the file (every 64 frames), so both take the same
-            // course; what is left comes from the first echoes (see the broadband test below).
-            Assert.assertArrayEquals("left, convolution " + sound.convolution(), file.left, live[0], 3e-3f);
-            Assert.assertArrayEquals("right, convolution " + sound.convolution(), file.right, live[1], 3e-3f);
+            // course (see the broadband test below for what is left).
+            Assert.assertArrayEquals("left, convolution " + sound.convolution(), file.left, live[0], 1e-3f);
+            Assert.assertArrayEquals("right, convolution " + sound.convolution(), file.right, live[1], 1e-3f);
         }
 
         // It does cross the head: noise alone in a dry room is nearer the left ear at the start
@@ -271,14 +271,10 @@ public final class LiveStageTest {
                 live = drain(stage.graph(), SpatialStemMixer.BLOCK);
             }
             String how = "headphones " + sound.headphones() + ", convolution " + sound.convolution();
-            int onset = RATE / 4;
             int end = 4 * RATE;
-            // While the first echoes of the noise arrive, the file leaves out the sample that lies
-            // partly before the start of the source and live reads it against silence: single
-            // samples differ by about 2e-3 there, 38 dB below the signal.
-            Assert.assertEquals(how + ", onset", 0, worst(file, live, 0, onset), 3e-3);
-            // The moving source itself: measured 5e-4 at a signal of 0.16 (rms), 50 dB below it.
-            Assert.assertEquals(how + ", moving", 0, worst(file, live, onset, end), 1e-3);
+            // The moving source, from its first echoes on: measured 5e-4 at a signal of 0.16 (rms),
+            // 50 dB below it. Where the rest comes from was not followed up further.
+            Assert.assertEquals(how + ", moving", 0, worst(file, live, 0, end), 1e-3);
             // After the source has ended: its echoes, the room and the filters of the head ring out.
             Assert.assertEquals(how + ", tail", 0, worst(file, live, end, file.left.length), 2e-4);
             Assert.assertTrue(how + ": the tail is heard", rms(file.left, end, end + RATE / 2) > 1e-3);
