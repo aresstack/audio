@@ -1125,9 +1125,10 @@ public final class AudioStudioFrame extends JFrame {
             com.aresstack.audio.studio.stage.SpatialScene proposed,
             com.aresstack.audio.studio.application.StageMovements movements, Path output, Progress progress)
             throws IOException {
+        com.aresstack.audio.studio.application.MovementDirector.Piece piece =
+                com.aresstack.audio.studio.application.MovementDirector.of(arrangement);
         java.util.Set<String> movable = com.aresstack.audio.studio.application.MovementDirector.movable(
-                current, movements,
-                com.aresstack.audio.studio.application.StageMixService.tracks(arrangement));
+                current, movements, piece);
         if (movable.isEmpty()) {
             append("Bewegungen: keine Spur kann sich bewegen (alle geschützt, oder das Stück hat noch kein Werkmodell).");
             return com.aresstack.audio.studio.application.MovementDirector.Proposal.NONE;
@@ -1136,7 +1137,7 @@ public final class AudioStudioFrame extends JFrame {
             com.aresstack.audio.studio.application.MovementDirector.Proposal moves =
                     new com.aresstack.audio.studio.application.MovementDirector(
                             com.aresstack.audio.studio.ai.ChatModel.of(client), tokens)
-                            .propose(prompt, arrangement, current.taking(proposed), movable, output, progress);
+                            .propose(prompt, piece, current.taking(proposed), movable, output, progress);
             append(moves.empty() ? "Bewegungen: die KI lässt alle Spuren stehen."
                     : "Bewegungen vorgeschlagen für " + String.join(", ", moves.curves().keySet()) + ".");
             return moves;

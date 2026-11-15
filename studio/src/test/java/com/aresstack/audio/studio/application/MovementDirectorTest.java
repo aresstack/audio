@@ -89,7 +89,7 @@ public final class MovementDirectorTest {
         assertTrue("the melody of this piece is protected", stage.placement("melody").locked());
         PieceModel model = new PieceModel(line -> { });
         model.open(piece);
-        Set<String> movable = MovementDirector.movable(stage, model.movements(), StageMixService.tracks(arrangement));
+        Set<String> movable = MovementDirector.movable(stage, model.movements(), MovementDirector.of(arrangement));
         assertFalse(movable.contains("melody"));
         assertTrue(movable.contains("harmony"));
         int bars = MovementDirector.bars(arrangement);
@@ -118,7 +118,7 @@ public final class MovementDirectorTest {
                 + "\"nonsense\"]}");
 
         MovementDirector.Proposal proposal = new MovementDirector(ai, 8192)
-                .propose("A quiet morning", arrangement, stage, movable, piece, message -> { });
+                .propose("A quiet morning", MovementDirector.of(arrangement), stage, movable, piece, message -> { });
 
         assertEquals(1, ai.prompts.size());
         String prompt = ai.prompts.get(0);
@@ -150,16 +150,16 @@ public final class MovementDirectorTest {
         Path arrangement = piece.resolve("arrangement.tsv");
         Answering ai = new Answering("{\"stage\":[]}");
         MovementDirector director = new MovementDirector(ai, 4096);
-        assertTrue(director.propose("x", arrangement, null, Set.of(), piece, message -> { }).empty());
+        assertTrue(director.propose("x", MovementDirector.of(arrangement), null, Set.of(), piece, message -> { }).empty());
         assertTrue("no request when nothing may move", ai.prompts.isEmpty());
         try {
-            director.propose("x", arrangement, null, Set.of("harmony"), piece, message -> { });
+            director.propose("x", MovementDirector.of(arrangement), null, Set.of("harmony"), piece, message -> { });
             fail("an answer without movements is not a proposal");
         } catch (IOException expected) {
             assertTrue(expected.getMessage().contains("invalid movement proposal"));
         }
         assertTrue("an empty list is a fine answer", new MovementDirector(new Answering("{\"movements\":[]}"), 4096)
-                .propose("x", arrangement, null, Set.of("harmony"), piece, message -> { }).empty());
+                .propose("x", MovementDirector.of(arrangement), null, Set.of("harmony"), piece, message -> { }).empty());
     }
 
     @Test
@@ -201,6 +201,16 @@ public final class MovementDirectorTest {
         assertEquals(List.of(), MixValidator.validate(mix));
         assertEquals(List.of(), log.stream().filter(line -> line.startsWith("WARN: Der Verlauf")).toList());
         assertEquals(0, model.takeMovements(MovementDirector.Proposal.NONE, stage));
+
+        // Taken with one click, gone with one undo: all curves of the proposal are one step.
+        ProjectSession session = model.session().orElseThrow();
+        assertEquals("Bewegungen der KI übernommen", session.undoDescription());
+        session.undo();
+        MixScene before = MixJson.load(piece);
+        assertNull(before.lane(harmony, "x"));
+        assertEquals(List.of(new AutomationLane.Point(0, 0.3)), before.lane(bass, "x").points());
+        assertEquals(List.of(new AutomationLane.Point(BAR, 0.2)), before.lane(harmony, "depth").points());
+        assertTrue(model.movements().of("harmony", AutomationLane.X).isEmpty());
     }
 
     @Test

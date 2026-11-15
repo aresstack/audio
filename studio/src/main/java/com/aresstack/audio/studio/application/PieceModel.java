@@ -136,31 +136,48 @@ public final class PieceModel {
     /**
      * The user took the movements the AI proposed: each proposed curve is kept in the mix document
      * as if drawn by hand, replacing the curve of that parameter; curves the AI did not propose stay.
-     * A track the user protected in the meantime is left as it is. Only {@code mix.json} is written.
+     * A track the user protected in the meantime is left as it is. All curves together are ONE
+     * undoable step. Only {@code mix.json} is written.
      *
      * @param stage the stage as it stands after the mix proposal was taken
-     * @return how many curves were kept; a curve that could not be kept was said as a warning
+     * @return how many curves were kept; if none could be, the reason was said as a warning
      */
-    public synchronized int takeMovements(MovementDirector.Proposal proposal, com.aresstack.audio.studio.stage.SpatialScene stage) {
+    public synchronized int takeMovements(MovementDirector.Proposal proposal,
+                                          com.aresstack.audio.studio.stage.SpatialScene stage) {
         if (proposal == null || proposal.empty()) {
             return 0;
         }
+        if (session == null) {
+            log.accept("WARN: Die Bewegungen lassen sich nicht speichern: das Stück hat noch kein Werkmodell.");
+            return 0;
+        }
         StageMovements movements = movements();
-        int kept = 0;
+        List<ProjectSession.Curve> curves = new java.util.ArrayList<>();
         for (Map.Entry<String, Map<String, List<StageMovements.Point>>> track : proposal.curves().entrySet()) {
             com.aresstack.audio.studio.stage.SoundSourcePlacement placement =
                     stage == null ? null : stage.placement(track.getKey());
-            if (placement != null && placement.locked()) {
+            if ((placement != null && placement.locked()) || !movements.editable(track.getKey())) {
                 continue;
             }
             for (Map.Entry<String, List<StageMovements.Point>> curve : track.getValue().entrySet()) {
-                movements = movements.with(track.getKey(), curve.getKey(), curve.getValue());
-                if (movements.editable(track.getKey()) && move(movements, track.getKey(), curve.getKey())) {
-                    kept++;
+                if (!StageMovements.PARAMETERS.contains(curve.getKey())) {
+                    continue;
                 }
+                movements = movements.with(track.getKey(), curve.getKey(), curve.getValue());
+                curves.add(new ProjectSession.Curve(track.getKey(), curve.getKey(),
+                        movements.ticks(track.getKey(), curve.getKey())));
             }
         }
-        return kept;
+        if (curves.isEmpty()) {
+            return 0;
+        }
+        try {
+            session.automateAll(curves, "Bewegungen der KI übernommen");
+            return curves.size();
+        } catch (IOException | RuntimeException failed) {
+            log.accept("WARN: Die Bewegungen lassen sich nicht speichern: " + said(failed));
+            return 0;
+        }
     }
 
     /**

@@ -314,11 +314,55 @@ public final class ProjectSession {
         if (mix == null) {
             throw new IOException("Das Stück hat noch keine Abmischung im Werkmodell: " + folder);
         }
+        List<AutomationLane.Point> wanted = points == null ? List.of() : points;
+        return keepMix(automated(mix, ownerId, parameter, wanted), wanted.isEmpty()
+                ? "Verlauf entfernt (" + parameter + ")" : "Verlauf geändert (" + parameter + ")");
+    }
+
+    /** One curve of a channel to be set: the owner of the channel, the parameter, the points in ticks. */
+    public record Curve(String ownerId, String parameter, List<AutomationLane.Point> points) {
+    }
+
+    /**
+     * Sets several curves at once, as {@link #automate} does each, but as ONE undoable step: the
+     * movements the AI proposed and the user took with one click go back with one undo.
+     *
+     * @param description what the step is called in the history
+     * @return whether the mix changed
+     * @throws IOException if the piece has no mix or no channel of an owner (then nothing changed),
+     *                     or the file cannot be written
+     */
+    public boolean automateAll(List<Curve> curves, String description) throws IOException {
+        if (mix == null) {
+            throw new IOException("Das Stück hat noch keine Abmischung im Werkmodell: " + folder);
+        }
+        MixScene changed = mix;
+        for (Curve curve : curves) {
+            changed = automated(changed, curve.ownerId(), curve.parameter(),
+                    curve.points() == null ? List.of() : curve.points());
+        }
+        return keepMix(changed, description);
+    }
+
+    /** Keeps a changed mix: first the file, then the session, then a step in the history. */
+    private boolean keepMix(MixScene changed, String description) throws IOException {
+        if (changed.equals(mix)) {
+            return false;
+        }
+        MixJson.save(folder, changed); // first the file, then the session
+        mix = changed;
+        history.push(new State(composition, mix), description);
+        return true;
+    }
+
+    /** A mix with the lane of one parameter of a channel replaced; without points the lane goes. */
+    private MixScene automated(MixScene base, String ownerId, String parameter, List<AutomationLane.Point> points)
+            throws IOException {
         if (!AutomationLane.PARAMETERS.contains(parameter)) {
             throw new IllegalArgumentException("Unknown automation parameter: " + parameter);
         }
         MixChannel channel = null;
-        for (MixChannel candidate : mix.channels()) {
+        for (MixChannel candidate : base.channels()) {
             if (candidate.owner().id().equals(ownerId)) {
                 channel = candidate;
                 break;
@@ -327,10 +371,10 @@ public final class ProjectSession {
         if (channel == null) {
             throw new IOException("Die Abmischung kennt keinen Kanal für „" + ownerId + "“.");
         }
-        List<AutomationLane.Point> wanted = points == null ? List.of() : points;
+        List<AutomationLane.Point> wanted = points;
         List<AutomationLane> lanes = new ArrayList<>();
         boolean placed = false;
-        for (AutomationLane lane : mix.automation()) {
+        for (AutomationLane lane : base.automation()) {
             if (channel.id().equals(lane.channelId()) && lane.parameter().equals(parameter)) {
                 // the lane keeps its id and its place in the file; a second lane of the same kind goes
                 if (!placed && !wanted.isEmpty()) {
@@ -343,7 +387,7 @@ public final class ProjectSession {
         }
         if (!placed && !wanted.isEmpty()) {
             Set<String> taken = new java.util.HashSet<>();
-            for (AutomationLane lane : mix.automation()) {
+            for (AutomationLane lane : base.automation()) {
                 taken.add(lane.id());
             }
             String id = ids.next();
@@ -352,15 +396,7 @@ public final class ProjectSession {
             }
             lanes.add(new AutomationLane(id, channel.id(), parameter, wanted));
         }
-        MixScene changed = new MixScene(mix.room(), mix.masterDb(), mix.levelMode(), mix.channels(), lanes);
-        if (changed.equals(mix)) {
-            return false;
-        }
-        MixJson.save(folder, changed); // first the file, then the session
-        mix = changed;
-        history.push(new State(composition, mix), wanted.isEmpty() ? "Verlauf entfernt (" + parameter + ")"
-                : "Verlauf geändert (" + parameter + ")");
-        return true;
+        return new MixScene(base.room(), base.masterDb(), base.levelMode(), base.channels(), lanes);
     }
 
     /**

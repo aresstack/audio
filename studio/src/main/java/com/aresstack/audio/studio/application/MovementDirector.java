@@ -101,49 +101,76 @@ public final class MovementDirector {
     }
 
     /**
-     * Asks for the movements of the written arrangement.
+     * What the AI is told of the piece: tempo, meter and key, length, and for each track its role
+     * and how many notes it plays in each bar. Made from the written arrangement ({@link #of(Path)});
+     * the model of the piece can make it as well, so that the request does not depend on the file.
+     *
+     * @param meterAndKey as {@code "4/4"} or {@code "3/4, D minor"}
+     */
+    public record Piece(int tempo, String meterAndKey, int bars, List<Track> tracks) {
+        public Piece {
+            bars = Math.max(1, bars);
+            tracks = List.copyOf(tracks);
+        }
+    }
+
+    /**
+     * A track as the AI is told of it.
+     *
+     * @param perBar the notes in each bar, as {@code "[1, 0, 2]"}, or {@code null} if it plays none
+     */
+    public record Track(String id, String role, String perBar) {
+    }
+
+    /** The piece as its written arrangement says. */
+    public static Piece of(Path arrangement) throws IOException {
+        Map<String, MixDirector.Summary> played = MixDirector.summaries(arrangement);
+        List<Track> tracks = new ArrayList<>();
+        for (MusicTrack track : StageMixService.tracks(arrangement)) {
+            MixDirector.Summary summary = played.get(track.id());
+            tracks.add(new Track(track.id(), track.role(),
+                    summary == null || summary.notes == 0 ? null : summary.perBar()));
+        }
+        return new Piece(StageMixService.tempo(arrangement), MixDirector.meterAndKey(arrangement),
+                bars(arrangement), tracks);
+    }
+
+    /**
+     * Asks for the movements of a piece.
      *
      * @param stage   where the tracks stand when nothing moves (the mix as proposed, protected tracks
      *                as the user set them); the curves start from there
      * @param movable the tracks that may move: not protected, with a channel in the mix document
      * @return the checked proposal, perhaps empty: the AI may well let everything stand
      */
-    public Proposal propose(String description, Path arrangement, SpatialScene stage, Set<String> movable,
+    public Proposal propose(String description, Piece piece, SpatialScene stage, Set<String> movable,
                             Path directory, Progress progress) throws IOException {
         if (movable.isEmpty()) {
             return Proposal.NONE;
         }
         progress.update("KI schlägt Bewegungen auf der Bühne vor ...");
-        List<MusicTrack> tracks = StageMixService.tracks(arrangement);
-        int bars = bars(arrangement);
         Files.deleteIfExists(directory.resolve(FILE_NAME)); // asked anew each time; the answer is kept to be read
         JsonObject response = client.generate("Return valid JSON only, no Markdown.",
-                prompt(description, tracks, arrangement, stage, movable, bars), Math.min(maxTokens, 4096),
+                prompt(description, piece, stage, movable), Math.min(maxTokens, 4096),
                 directory.resolve(FILE_NAME));
         try {
-            return read(response, movable, bars);
+            return read(response, movable, piece.bars());
         } catch (RuntimeException invalid) {
             throw new IOException("The AI returned an invalid movement proposal; original JSON preserved.", invalid);
         }
     }
 
-    static String prompt(String description, List<MusicTrack> tracks, Path arrangement, SpatialScene stage,
-                         Set<String> movable, int bars) throws IOException {
-        Map<String, MixDirector.Summary> played = MixDirector.summaries(arrangement);
+    static String prompt(String description, Piece piece, SpatialScene stage, Set<String> movable) {
+        int bars = piece.bars();
         StringBuilder text = new StringBuilder("You are the mixing engineer of this instrumental piece: ")
-                .append(description).append("\nTempo ").append(StageMixService.tempo(arrangement))
-                .append(" BPM, ").append(MixDirector.meterAndKey(arrangement)).append(", ").append(bars)
+                .append(description).append("\nTempo ").append(piece.tempo())
+                .append(" BPM, ").append(piece.meterAndKey()).append(", ").append(bars)
                 .append(" bars (counted from 0 to ").append(bars).append("). ")
                 .append("The mix is set; now say how instruments move on the stage over the bars. ")
                 .append("The tracks, what they play and where they stand when nothing moves:\n");
-        for (MusicTrack track : tracks) {
-            MixDirector.Summary summary = played.get(track.id());
+        for (Track track : piece.tracks()) {
             text.append("- ").append(track.id()).append(" (").append(track.role()).append("): ");
-            if (summary == null || summary.notes == 0) {
-                text.append("no notes");
-            } else {
-                text.append("notes per bar ").append(summary.perBar());
-            }
+            text.append(track.perBar() == null ? "no notes" : "notes per bar " + track.perBar());
             SoundSourcePlacement placement = stage == null ? null : stage.placement(track.id());
             if (placement != null) {
                 text.append("; x=").append(number(placement.x())).append(", depth=")
@@ -268,9 +295,9 @@ public final class MovementDirector {
      * The tracks of a stage that may move: not protected by the user, and with a channel in the mix
      * document of the piece, so that their curves can be kept.
      */
-    public static Set<String> movable(SpatialScene current, StageMovements movements, List<MusicTrack> tracks) {
+    public static Set<String> movable(SpatialScene current, StageMovements movements, Piece piece) {
         Set<String> movable = new java.util.LinkedHashSet<>();
-        for (MusicTrack track : tracks) {
+        for (Track track : piece.tracks()) {
             SoundSourcePlacement placement = current == null ? null : current.placement(track.id());
             if ((placement == null || !placement.locked()) && movements.editable(track.id())) {
                 movable.add(track.id());
