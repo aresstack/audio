@@ -38,8 +38,35 @@ public final class ChatAlbumSuggester implements AlbumSuggester {
     @Override
     public List<String> suggest(Field field, String title, String description, String style, List<String> known)
             throws IOException {
+        return suggest(field, title, description, style, known, null);
+    }
+
+    @Override
+    public List<String> suggest(Field field, String title, String description, String style, List<String> known,
+                                java.util.function.Consumer<List<String>> seen) throws IOException {
+        java.util.function.Consumer<String> heard = null;
+        if (seen != null) {
+            List<List<String>> shown = new ArrayList<List<String>>(List.of(List.of()));
+            heard = text -> {
+                List<String> now;
+                try {
+                    now = clean(com.aresstack.audio.studio.ai.PartialJson.read(text), known);
+                } catch (RuntimeException unreadable) {
+                    return; // a look at the answer on its way
+                }
+                if (!now.equals(shown.get(0))) {
+                    shown.set(0, now);
+                    seen.accept(now);
+                }
+            };
+        }
         JsonObject said = model.generate(INSTRUCTION, prompt(field, title, description, style, known), maxTokens,
-                null);
+                null, heard);
+        return clean(said, known);
+    }
+
+    /** The proposals of an answer, whole or still being written: cleaned, shortened, none twice. */
+    static List<String> clean(JsonObject said, List<String> known) {
         List<String> proposals = new ArrayList<String>();
         if (said == null || !said.has("suggestions") || !said.get("suggestions").isJsonArray()) {
             return proposals;

@@ -27,6 +27,18 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
     private final ChatModel model;
     private final int maxTokens;
 
+    /** Is given the titles planned so far while the answer is still being written; may stay {@code null}. */
+    private java.util.function.Consumer<List<AlbumTrack>> watcher;
+
+    /**
+     * Lets the planned titles be seen while the model writes them: the kept titles and the new ones
+     * as far as they have arrived, a few times a second at most, on the thread that plans.
+     */
+    public ChatAlbumPlanner watching(java.util.function.Consumer<List<AlbumTrack>> seen) {
+        this.watcher = seen;
+        return this;
+    }
+
     public ChatAlbumPlanner(ChatModel model, int maxTokens) {
         this.model = model;
         this.maxTokens = maxTokens;
@@ -51,7 +63,22 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
             // A plan is asked for anew each time: the answer kept from before would only come again.
             Files.deleteIfExists(answer);
         }
-        JsonObject said = model.generate(INSTRUCTION, prompt(album, kept, wanted), maxTokens, answer);
+        java.util.function.Consumer<String> heard = null;
+        if (watcher != null) {
+            String[] shown = {""};
+            heard = text -> {
+                List<AlbumTrack> seen = seenTracks(text, kept, wanted, concept);
+                StringBuilder key = new StringBuilder();
+                for (AlbumTrack track : seen) {
+                    key.append(track).append('\n');
+                }
+                if (!key.toString().equals(shown[0])) {
+                    shown[0] = key.toString();
+                    watcher.accept(seen);
+                }
+            };
+        }
+        JsonObject said = model.generate(INSTRUCTION, prompt(album, kept, wanted), maxTokens, answer, heard);
         JsonArray planned = said != null && said.has("tracks") && said.get("tracks").isJsonArray()
                 ? said.getAsJsonArray("tracks") : new JsonArray();
 
@@ -88,6 +115,36 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         }
         progress.update("Trackliste bereit: " + tracks.size() + " Titel.");
         return album.withTracks(tracks);
+    }
+
+    /**
+     * The titles of a plan that is still being written: the kept ones, then every new one whose
+     * title has arrived, with what has arrived of the rest.
+     */
+    static List<AlbumTrack> seenTracks(String text, List<AlbumTrack> kept, int wanted, AlbumConcept concept) {
+        List<AlbumTrack> seen = new ArrayList<AlbumTrack>(kept);
+        try {
+            JsonObject partial = com.aresstack.audio.studio.ai.PartialJson.read(text);
+            if (partial == null || !partial.has("tracks") || !partial.get("tracks").isJsonArray()) {
+                return seen;
+            }
+            List<String> ids = new ArrayList<String>();
+            for (AlbumTrack track : kept) {
+                ids.add(track.id());
+            }
+            JsonArray tracks = partial.getAsJsonArray("tracks");
+            for (int i = 0; i < Math.min(wanted, tracks.size()); i++) {
+                if (!tracks.get(i).isJsonObject() || AlbumFiles.text(tracks.get(i).getAsJsonObject(), "title").isBlank()) {
+                    continue;
+                }
+                String id = freshId(ids);
+                ids.add(id);
+                seen.add(track(id, tracks.get(i).getAsJsonObject(), kept.size() + i + 1, concept));
+            }
+        } catch (RuntimeException unreadable) {
+            // a look at the plan on its way
+        }
+        return seen;
     }
 
     static String prompt(Album album, List<AlbumTrack> kept, int wanted) {
