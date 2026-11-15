@@ -101,6 +101,7 @@ public final class AudioStudioFrame extends JFrame {
     private final JTextField model = new JTextField("google/gemma-4-31B-it", 23);
     private final JSpinner tokenLimit = new JSpinner(
             new SpinnerNumberModel(16384, 256, Integer.MAX_VALUE, 256));
+    private final JSpinner sectionBars = new JSpinner(new SpinnerNumberModel(8, 2, 64, 1));
     private final JTextField proxyHost = new JTextField(16);
     private final JTextField proxyPort = new JTextField("", 5);
     private final JComboBox<String> proxyMode = new JComboBox<String>(new String[]{
@@ -1424,6 +1425,11 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
+            public int sectionBars() {
+                return (Integer) sectionBars.getValue();
+            }
+
+            @Override
             public PieceAutopilot.Rendering rendering() {
                 return new PieceAutopilot.Rendering(
                         sf2Engine.getSelectedIndex() == 1 ? Sf2Engine.FLUIDSYNTH : Sf2Engine.GERVILL,
@@ -1557,6 +1563,10 @@ public final class AudioStudioFrame extends JFrame {
         parallelRequests.setPreferredSize(new Dimension(110, 30));
         addRow(ai, row++, "Antwortlänge",
                 line(tokenLimit, note("Tokens je Antwort; der Kompositionsplan nutzt höchstens 2.048.")));
+        sectionBars.setPreferredSize(new Dimension(110, 30));
+        sectionBars.setToolTipText("So viele Takte schreibt die KI je Anfrage und Spur, 2 bis 64");
+        addRow(ai, row++, "Takte je Abschnitt",
+                line(sectionBars, note("Takte je Anfrage und Spur; Stücke bis zur doppelten Länge entstehen in einem Zug.")));
         addRow(ai, row++, "Parallel",
                 line(parallelRequests, note("Anfragen gleichzeitig; höchstens so viele wie Spuren.")));
         addRow(ai, row, "", note("Der API-Key wird lokal im Klartext gespeichert (studio.properties im Benutzerordner)."));
@@ -1902,6 +1912,7 @@ public final class AudioStudioFrame extends JFrame {
         }
         final int tokens = (Integer) tokenLimit.getValue();
         final int parallel = (Integer) parallelRequests.getValue();
+        final int sections = (Integer) sectionBars.getValue();
         final RenderSettings settings;
         try {
             settings = captureRenderSettings(chosen);
@@ -1919,7 +1930,7 @@ public final class AudioStudioFrame extends JFrame {
             public Path execute(Progress progress) throws Exception {
                 try {
                     recordModels(output, "Komposition", models);
-                    Path arrangement = composeIntoPiece(new GemmaMusicComposer(models, tokens, parallel),
+                    Path arrangement = composeIntoPiece(new GemmaMusicComposer(models, tokens, parallel).sectionBars(sections),
                             prompt, output, chosen, spec, progress);
                     return renderArrangement(arrangement, output, settings, progress);
                 } finally {
@@ -1964,6 +1975,7 @@ public final class AudioStudioFrame extends JFrame {
         }
         final int tokens = (Integer) tokenLimit.getValue();
         final int parallel = (Integer) parallelRequests.getValue();
+        final int sections = (Integer) sectionBars.getValue();
         if (!saveSettings(false)) {
             return;
         }
@@ -1989,7 +2001,7 @@ public final class AudioStudioFrame extends JFrame {
                     recordModels(output, autopilot ? "Autopilot" : "Instrumentenvorschlag", models);
                     if (autopilot) {
                         // The AI decides everything: the same steps the production of an album runs.
-                        PieceAutopilot pilot = new PieceAutopilot(registry, models, tokens, parallel, rendering);
+                        PieceAutopilot pilot = new PieceAutopilot(registry, models, tokens, parallel, rendering).sectionBars(sections);
                         return composeIntoPiece(pilot, prompt, output, stageBefore, progress);
                     }
                     final InstrumentProposalService.Staged staged = new InstrumentProposalService(
@@ -2425,6 +2437,7 @@ public final class AudioStudioFrame extends JFrame {
         final String prompt = wishForAi();
         final int tokens = (Integer) tokenLimit.getValue();
         final int parallel = (Integer) parallelRequests.getValue();
+        final int sections = (Integer) sectionBars.getValue();
         if (!saveSettings(false)) {
             return;
         }
@@ -2438,7 +2451,7 @@ public final class AudioStudioFrame extends JFrame {
                 com.aresstack.audio.studio.application.RecompositionOffer offer = null;
                 try {
                     offer = com.aresstack.audio.studio.application.RecompositionOffer.stage(piece, trackId, runId);
-                    composeAside(new GemmaMusicComposer(models, tokens, parallel), prompt, offer.staging(), chosen,
+                    composeAside(new GemmaMusicComposer(models, tokens, parallel).sectionBars(sections), prompt, offer.staging(), chosen,
                             progress);
                     Path preview = offer.propose(runId);
                     progress.update("Der Vorschlag wird zum Anhören gerendert ...");
@@ -3360,6 +3373,7 @@ public final class AudioStudioFrame extends JFrame {
             modelChoices.setAssignment(com.aresstack.audio.studio.settings.ModelSettings.read(saved));
             albumModelChoices.setAssignment(modelChoices.assignment());
             tokenLimit.setValue(AiDefaults.maxTokens(saved));
+            sectionBars.setValue(AiDefaults.sectionBars(saved));
             proxyHost.setText(saved.getProperty("proxyHost", ""));
             proxyPort.setText(saved.getProperty("proxyPort", ""));
             proxyPacUrl.setText(saved.getProperty("proxyPacUrl", ""));
@@ -3415,6 +3429,7 @@ public final class AudioStudioFrame extends JFrame {
             }
             com.aresstack.audio.studio.settings.ModelSettings.write(saved, currentAssignment());
             saved.setProperty("maxTokens", tokenLimit.getValue().toString());
+            saved.setProperty("sectionBars", sectionBars.getValue().toString());
             saved.setProperty("proxyHost", proxyHost.getText().trim());
             saved.setProperty("proxyPort", proxyPort.getText().trim());
             String selectedProxyMode = proxyMode.getSelectedIndex() == 0 ? ""
@@ -3482,6 +3497,16 @@ public final class AudioStudioFrame extends JFrame {
                     @Override
                     public void sketch(final List<String> arrangement) {
                         SwingUtilities.invokeLater(() -> showSketch(arrangement));
+                    }
+
+                    @Override
+                    public void preparing(final String what, final long characters) {
+                        SwingUtilities.invokeLater(() -> showPreparing(what, characters));
+                    }
+
+                    @Override
+                    public void planned(final List<String> chords) {
+                        SwingUtilities.invokeLater(() -> showPlanned(chords));
                     }
 
                     @Override
@@ -3922,6 +3947,78 @@ public final class AudioStudioFrame extends JFrame {
         showTrackWork();
     }
 
+    /** What the AI does before the first note, or {@code null}; shown with the seconds it takes. */
+    private String preparing;
+    private long preparingSince;
+    private long preparingArrived;
+    private final javax.swing.Timer preparingClock = new javax.swing.Timer(1000, event -> sayPreparing());
+
+    /**
+     * The steps before the first note (instruments, plan) take a while and were silent: the
+     * empty paper and the status line now say which step runs, for how long, and how much of its
+     * answer is there.
+     */
+    private void showPreparing(String what, long characters) {
+        if (worker == null || worker.isDone()) {
+            return;
+        }
+        if (!what.equals(preparing)) {
+            preparing = what;
+            preparingSince = System.currentTimeMillis();
+        }
+        preparingArrived = characters;
+        if (!preparingClock.isRunning()) {
+            preparingClock.start();
+        }
+        sayPreparing();
+    }
+
+    private void sayPreparing() {
+        if (preparing == null || worker == null || worker.isDone()) {
+            preparing = null;
+            preparingClock.stop();
+            return;
+        }
+        long seconds = (System.currentTimeMillis() - preparingSince) / 1000;
+        String line = preparing + " · " + seconds + " s · " + (preparingArrived == 0
+                ? "noch kein Text angekommen (das Modell überlegt oder wartet)"
+                : preparingArrived + " Zeichen angekommen");
+        setStatus(line);
+        sayOnPaper(line);
+    }
+
+    /** The plan is there: the chords are said until the first notes arrive. */
+    private void showPlanned(List<String> chords) {
+        if (worker == null || worker.isDone()) {
+            return;
+        }
+        preparing = null;
+        preparingClock.stop();
+        StringBuilder said = new StringBuilder("Plan steht · Akkorde: ");
+        for (int i = 0; i < chords.size() && i < 16; i++) {
+            said.append(i == 0 ? "" : " | ").append(chords.get(i));
+        }
+        if (chords.size() > 16) {
+            said.append(" … (").append(chords.size()).append(" Takte)");
+        }
+        append(said.toString());
+        setStatus(said.toString());
+        sayOnPaper(said + " · gleich kommen die Noten");
+    }
+
+    /** A line on the paper of the score while it has no notes yet. */
+    private void sayOnPaper(String line) {
+        try {
+            List<String> ids = new ArrayList<String>();
+            for (MusicTrack track : trackTable.tracks()) {
+                ids.add(track.id());
+            }
+            scoreView.setScore(null, ids, line);
+        } catch (RuntimeException undrawn) {
+            // the status line says it as well
+        }
+    }
+
     /**
      * The piece while the AI writes it: the score on the page of the composition grows with every
      * note that arrives. Only shown; the saved piece is shown again when the work is over.
@@ -3930,6 +4027,8 @@ public final class AudioStudioFrame extends JFrame {
         if (worker == null || worker.isDone()) {
             return; // a late picture after the work ended: the score shows the piece itself again
         }
+        preparing = null;
+        preparingClock.stop();
         try {
             List<String> ids = new ArrayList<String>();
             for (MusicTrack track : trackTable.tracks()) {
@@ -3965,6 +4064,8 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     /** One line for many tracks: how many are being worked on at the same time, and how many are done. */
+    private String saidWaiting;
+
     private void showTrackWork() {
         int working = 0;
         int waiting = 0;
@@ -3982,6 +4083,15 @@ public final class AudioStudioFrame extends JFrame {
             return; // the next line of the log takes the display again
         }
         long seconds = (System.currentTimeMillis() - trackStageBegan) / 1000;
+        if (trackStage == TrackProgress.Stage.COMPOSE && sketchNotes == 0 && arrived == 0 && done == 0) {
+            // Between the plan and the first note: the requests are out, the service has sent nothing yet.
+            String waitingFor = "Noten angefragt: " + working + " Spuren gleichzeitig · " + seconds
+                    + " s · der Dienst hat noch keinen Text geschickt";
+            if (!waitingFor.equals(saidWaiting)) {
+                saidWaiting = waitingFor;
+                sayOnPaper(waitingFor);
+            }
+        }
         setStatus((trackStage == TrackProgress.Stage.COMPOSE ? "KI komponiert" : "Rendern") + ": "
                 + working + " gleichzeitig · " + done + " von " + trackStates.size() + " fertig"
                 + (waiting > 0 ? " · " + waiting + " warten" : "") + (failed > 0 ? " · " + failed + " Fehler" : "")

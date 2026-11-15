@@ -38,7 +38,7 @@ import java.util.concurrent.Future;
  * Plan a song once, then compose any validated arrangement of voices concurrently.
  *
  * <p>The piece follows a {@link CompositionSpec}: bars, tempo, key and meter. A piece of more
- * than {@link CompositionSpec#MAX_SECTION_BARS} bars is composed in sections (architecture
+ * than twice the chosen section length ({@link #sectionBars(int)}, 8 bars unless the user says otherwise) is composed in sections (architecture
  * review E4): the tracks run side by side, the sections of a track one after another, and each
  * request after the first is told how the previous section of its track ended. Beats in a
  * request count from the start of its section; the application turns them into ticks.
@@ -59,6 +59,20 @@ public final class GemmaMusicComposer {
     private final ChatModel client;
     private final int maxTokens;
     private final int maxParallel;
+    private int sectionBars = CompositionSpec.SECTION_BARS;
+
+    /**
+     * How many bars one request for notes covers; a piece of up to twice as many bars is asked
+     * for in one. The studio's setting "Takte je Abschnitt".
+     */
+    public GemmaMusicComposer sectionBars(int bars) {
+        if (bars < CompositionSpec.MIN_CHOSEN_SECTION_BARS || bars > CompositionSpec.MAX_CHOSEN_SECTION_BARS) {
+            throw new IllegalArgumentException("Ein Abschnitt hat " + CompositionSpec.MIN_CHOSEN_SECTION_BARS
+                    + " bis " + CompositionSpec.MAX_CHOSEN_SECTION_BARS + " Takte: " + bars);
+        }
+        this.sectionBars = bars;
+        return this;
+    }
 
     public GemmaMusicComposer(ChatModel client) {
         this(client, 16384, 32);
@@ -180,9 +194,18 @@ public final class GemmaMusicComposer {
                     + "instruments share the work, section by section)."
                     + "\nKeep tempoBpm, key, timeSignature and bars exactly as given. No notes yet. Return only JSON.";
         }
+        final SketchProgress watched = progress instanceof SketchProgress ? (SketchProgress) progress : null;
+        final String step = "Die KI plant Struktur und Harmonien";
+        if (watched != null) {
+            watched.preparing(step, 0);
+        }
         JsonObject plan = planner.generate("Return valid JSON only, no Markdown.", prompt,
-                Math.min(spec.isLegacy() ? 2048 : 4096, maxTokens), directory.resolve("composition-plan.json"));
+                Math.min(spec.isLegacy() ? 2048 : 4096, maxTokens), directory.resolve("composition-plan.json"),
+                watched == null ? null : text -> watched.preparing(step, text.length()));
         validatePlan(plan, spec, progress);
+        if (watched != null) {
+            watched.planned(chords(plan, spec));
+        }
         return plan;
     }
 
@@ -206,10 +229,10 @@ public final class GemmaMusicComposer {
                                                           CompositionSpec spec, Path directory,
                                                           Progress progress) throws IOException {
         int threads = Math.min(maxParallel, tracks.tracks().size());
-        List<int[]> sections = spec.sections();
+        List<int[]> sections = spec.sections(sectionBars);
         List<String> chords = chords(plan, spec);
         final Sketch sketch = progress instanceof SketchProgress
-                ? new Sketch(tracks, spec, chords, (SketchProgress) progress) : null;
+                ? new Sketch(tracks, spec, sections, chords, (SketchProgress) progress) : null;
         final Arriving arriving = new Arriving(progress);
         ExecutorService executor = Executors.newFixedThreadPool(threads);
         CompletionService<TrackResponse> completion =
@@ -481,11 +504,11 @@ public final class GemmaMusicComposer {
         }
     }
 
-    private static Path assemble(TrackArrangement tracks, Map<String, List<JsonObject>> responses,
+    private Path assemble(TrackArrangement tracks, Map<String, List<JsonObject>> responses,
                                  CompositionSpec spec, List<String> chords, Path directory,
                                  Progress progress) throws IOException {
         CompositionNoteNormalizer normalizer = new CompositionNoteNormalizer(progress, spec, chords);
-        List<String> arrangement = lines(tracks, responses, spec, normalizer, progress, false);
+        List<String> arrangement = lines(tracks, responses, spec, spec.sections(sectionBars), normalizer, progress, false);
         Path output = directory.resolve("arrangement.tsv");
         Files.write(output, arrangement, StandardCharsets.UTF_8);
         Files.write(directory.resolve("note-corrections.tsv"),
@@ -503,10 +526,10 @@ public final class GemmaMusicComposer {
      *                   without a playable note is then left out instead of being an error
      */
     private static List<String> lines(TrackArrangement tracks, Map<String, List<JsonObject>> responses,
-                                      CompositionSpec spec, CompositionNoteNormalizer normalizer,
+                                      CompositionSpec spec, List<int[]> sections,
+                                      CompositionNoteNormalizer normalizer,
                                       Progress progress, boolean unfinished) throws IOException {
         List<String> body = new ArrayList<String>();
-        List<int[]> sections = spec.sections();
         long end = 0;
         for (MusicTrack track : tracks.tracks()) {
             List<JsonObject> parts = responses.get(track.id());
@@ -664,14 +687,17 @@ public final class GemmaMusicComposer {
         private static final long EVERY = 250;
         private final TrackArrangement tracks;
         private final CompositionSpec spec;
+        private final List<int[]> sections;
         private final List<String> chords;
         private final SketchProgress shown;
         private final Map<String, List<JsonObject>> soFar = new HashMap<String, List<JsonObject>>();
         private long last;
 
-        private Sketch(TrackArrangement tracks, CompositionSpec spec, List<String> chords, SketchProgress shown) {
+        private Sketch(TrackArrangement tracks, CompositionSpec spec, List<int[]> sections, List<String> chords,
+                       SketchProgress shown) {
             this.tracks = tracks;
             this.spec = spec;
+            this.sections = sections;
             this.chords = chords;
             this.shown = shown;
         }
@@ -705,7 +731,7 @@ public final class GemmaMusicComposer {
             last = time;
             try {
                 Progress silent = message -> { };
-                shown.sketch(lines(tracks, soFar, spec, new CompositionNoteNormalizer(silent, spec, chords),
+                shown.sketch(lines(tracks, soFar, spec, sections, new CompositionNoteNormalizer(silent, spec, chords),
                         silent, true));
             } catch (IOException | RuntimeException unshown) {
                 // a picture of the piece on its way; the piece itself does not depend on it

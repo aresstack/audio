@@ -349,4 +349,26 @@ public final class ParametricCompositionTest {
             assertTrue(wav.getFileName() + " sounds at the end: rms " + rms, rms > 0.01);
         }
     }
+
+    @Test
+    public void theLengthOfASectionIsWhatTheUserChose() {
+        CompositionSpec piece = CompositionSpec.of(40, 100, Key.C_MAJOR, 4, 4);
+        assertEquals("unchanged without a choice", piece.sections().size(), piece.sections(8).size());
+        assertEquals(5, piece.sections(8).size());
+        List<int[]> four = piece.sections(4);
+        assertEquals(10, four.size());
+        assertEquals(4, four.get(3)[1]);
+        assertEquals(12, four.get(3)[0]);
+        assertEquals("up to twice the length in one request", 1, piece.sections(20).size());
+        assertEquals(3, piece.sections(16).size());
+        List<int[]> sixteen = CompositionSpec.of(38, 100, Key.C_MAJOR, 4, 4).sections(16);
+        assertEquals(2, sixteen.size());
+        assertEquals("a rest of less than half a section joins the last one", 22, sixteen.get(1)[1]);
+        try {
+            piece.sections(1);
+            org.junit.Assert.fail("one bar is no section");
+        } catch (IllegalArgumentException expected) {
+            // said
+        }
+    }
 }

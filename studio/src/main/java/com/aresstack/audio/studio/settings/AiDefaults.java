@@ -38,6 +38,15 @@ public final class AiDefaults {
         }
     }
 
+    /** The bars of one request for notes: 2 to 64, 8 when the setting is missing or malformed. */
+    public static int sectionBars(Properties settings) {
+        try {
+            return Math.max(2, Math.min(64, Integer.parseInt(settings.getProperty("sectionBars", "8").trim())));
+        } catch (NumberFormatException invalid) {
+            return 8;
+        }
+    }
+
     /** The chat completions address for a base address, or {@code null} if it is no HTTP(S) address. */
     public static String completionsEndpoint(String base) {
         String normalized = base.trim().replaceAll("/+$", "");
