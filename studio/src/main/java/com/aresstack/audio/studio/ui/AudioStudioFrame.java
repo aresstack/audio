@@ -2086,7 +2086,9 @@ public final class AudioStudioFrame extends JFrame {
         final AudioProxyRoutes routes = configureNetworkRoutes();
         append("KI-Modelle: " + fixed);
         return new com.aresstack.audio.studio.ai.ModelLineup(fixed,
-                name -> new KipitzChatClient(url, key, name, routes).legacyModel(fixed.base()));
+                name -> new KipitzChatClient(url, key, name, routes).legacyModel(fixed.base())
+                        // A connection that breaks off or is tried again is said at once, in the protocol and below.
+                        .troubles(line -> SwingUtilities.invokeLater(() -> append(line))));
     }
 
     /** The assignment as chosen now: the roles as set, the base model from the settings page. */

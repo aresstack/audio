@@ -207,4 +207,48 @@ public final class KipitzStreamingTest {
             server.stop(0);
         }
     }
+
+    @Test
+    public void aConnectionThatFallsSilentIsEndedSaidAndTheRequestSentAgain() throws Exception {
+        final List<String> asked = Collections.synchronizedList(new ArrayList<String>());
+        final List<String> troubles = Collections.synchronizedList(new ArrayList<String>());
+        final java.util.concurrent.CountDownLatch over = new java.util.concurrent.CountDownLatch(1);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
+        server.createContext("/", exchange -> {
+            asked.add(read(exchange.getRequestBody()));
+            if (asked.size() == 1) {
+                // The answer begins and then nothing more comes, as on a Wi-Fi connection that died.
+                exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+                exchange.sendResponseHeaders(200, 0);
+                OutputStream output = exchange.getResponseBody();
+                output.write(FIRST.getBytes("UTF-8"));
+                output.flush();
+                try {
+                    over.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (InterruptedException stopped) {
+                    Thread.currentThread().interrupt();
+                }
+                exchange.close();
+            } else {
+                send(exchange, 200, "text/event-stream", FIRST, SECOND, END);
+            }
+        });
+        server.start();
+        long silence = KipitzChatClient.silenceMillis;
+        KipitzChatClient.silenceMillis = 500;
+        try {
+            JsonObject answer = client(server).troubles(troubles::add).generate("Return JSON", "Compose", 2048,
+                    folder.getRoot().toPath().resolve("melody.json"));
+            Assert.assertEquals("melody", answer.get("part").getAsString());
+            Assert.assertEquals("asked again after the silence", 2, asked.size());
+            Assert.assertEquals(troubles.toString(), 1, troubles.size());
+            Assert.assertTrue(troubles.get(0), troubles.get(0).contains("kein Text mehr")
+                    && troubles.get(0).contains("Versuch 2 von"));
+        } finally {
+            KipitzChatClient.silenceMillis = silence;
+            over.countDown();
+            server.stop(0);
+        }
+    }
 }
