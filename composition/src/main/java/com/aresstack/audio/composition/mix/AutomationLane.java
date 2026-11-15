@@ -17,6 +17,9 @@ import java.util.List;
  * While a channel has such a lane, the lane says where it stands and the value in the channel is
  * where it stands when nothing moves; a lane on both makes the channel a moving source.</li>
  * <li>{@link #REVERB}: the share of the channel sent to the room, as in {@link MixChannel}.</li>
+ * <li>{@link #HEIGHT} (work package D4): how high the channel stands above the ears of the
+ * listener, 0 (ear height) to 1 (as high as the stage reaches). A channel without this lane stands
+ * at the height of its placement.</li>
  * </ul>
  * Other names are kept as they come, so that a newer file loses nothing, but are not heard; the
  * {@link MixValidator} names them.
@@ -33,8 +36,10 @@ public record AutomationLane(String id, String channelId, String parameter, List
     public static final String DEPTH = "depth";
     /** Share sent to the room, 0 to 1, as {@link MixChannel#reverb()}. */
     public static final String REVERB = "reverb";
+    /** Between 0 (ear height) and 1 (top of the stage); work package D4. */
+    public static final String HEIGHT = "height";
     /** The parameters the studio knows, in this order. */
-    public static final List<String> PARAMETERS = List.of(LEVEL, X, DEPTH, REVERB);
+    public static final List<String> PARAMETERS = List.of(LEVEL, X, DEPTH, REVERB, HEIGHT);
 
     public record Point(long tick, double value) {
         public Point {
@@ -100,7 +105,7 @@ public record AutomationLane(String id, String channelId, String parameter, List
     public static double least(String parameter) {
         return switch (parameter) {
             case X -> -1;
-            case DEPTH, REVERB -> 0;
+            case DEPTH, REVERB, HEIGHT -> 0;
             default -> Double.NEGATIVE_INFINITY;
         };
     }
@@ -108,7 +113,7 @@ public record AutomationLane(String id, String channelId, String parameter, List
     /** The largest value a parameter may take. */
     public static double most(String parameter) {
         return switch (parameter) {
-            case X, DEPTH, REVERB -> 1;
+            case X, DEPTH, REVERB, HEIGHT -> 1;
             default -> Double.POSITIVE_INFINITY;
         };
     }

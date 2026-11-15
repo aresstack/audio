@@ -126,4 +126,19 @@ public final class SpatialSceneTest {
         Assert.assertEquals("a word where a number belongs: the usual value", 0, read.placement("bass").x(), 0);
         Assert.assertFalse(read.placement("bass").muted());
     }
+
+    @Test
+    public void heightIsKeptAndOnlyWrittenWhenAStageHasIt() {
+        SoundSourcePlacement low = new SoundSourcePlacement("a", 0.2, 0.4);
+        SoundSourcePlacement high = low.named("b").atHeight(0.75);
+        SpatialScene scene = new SpatialScene(AcousticRoom.HALL, java.util.List.of(low, high));
+        com.google.gson.JsonObject json = SpatialSceneStore.write(scene);
+        SpatialScene read = SpatialSceneStore.read(json);
+        Assert.assertEquals(0, read.placement("a").height(), 0);
+        Assert.assertEquals(0.75, read.placement("b").height(), 1e-9);
+        Assert.assertEquals(0.75, read.placement("b").at(0.1, 0.1).height(), 1e-9);
+        // Only the high source writes a height.
+        Assert.assertEquals(1, json.toString().split("\"height\"", -1).length - 1);
+        Assert.assertEquals(1, high.atHeight(3).height(), 0);
+    }
 }

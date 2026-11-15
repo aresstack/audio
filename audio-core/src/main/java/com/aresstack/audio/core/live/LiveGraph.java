@@ -2,7 +2,7 @@ package com.aresstack.audio.core.live;
 
 import com.aresstack.audio.core.AudioBlock;
 import com.aresstack.audio.core.AudioSource;
-import com.aresstack.audio.core.dsp.RoomReverb;
+import com.aresstack.audio.core.dsp.RoomBus;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -26,7 +26,7 @@ public final class LiveGraph implements AudioSource {
     public static final double DEFAULT_GLIDE_MS = 20;
 
     private final LiveChannel[] channels;
-    private final RoomReverb room;
+    private final RoomBus room;
     private final long frames;
     private final double glideMs;
     private final Ramp roomGain;
@@ -47,11 +47,11 @@ public final class LiveGraph implements AudioSource {
      * @param roomGain how loud the ring of the room is
      * @param frames   how long the mix is, including the ring at the end
      */
-    public LiveGraph(List<LiveChannel> channels, RoomReverb room, float roomGain, long frames) {
+    public LiveGraph(List<LiveChannel> channels, RoomBus room, float roomGain, long frames) {
         this(channels, room, roomGain, frames, DEFAULT_GLIDE_MS);
     }
 
-    public LiveGraph(List<LiveChannel> channels, RoomReverb room, float roomGain, long frames, double glideMs) {
+    public LiveGraph(List<LiveChannel> channels, RoomBus room, float roomGain, long frames, double glideMs) {
         if (!(glideMs >= 0) || Double.isInfinite(glideMs)) {
             throw new IllegalArgumentException("A glide takes a finite time of at least 0 ms.");
         }

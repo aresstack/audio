@@ -38,18 +38,24 @@ public final class StageAutomation {
      * @param reverb the share sent to the room, 0 to 1
      * @param trimDb dB added to the fixed level of the placement: what a mix document says beyond
      *               the range a {@link SoundSourcePlacement} can hold, otherwise 0
+     * @param height the height above the ears, 0 to 1 (work package D4)
      */
     public record Lanes(AutomationCurve level, AutomationCurve x, AutomationCurve depth, AutomationCurve reverb,
-                        double trimDb) {
-        static final Lanes STILL = new Lanes(null, null, null, null, 0);
+                        double trimDb, AutomationCurve height) {
+        static final Lanes STILL = new Lanes(null, null, null, null, 0, null);
 
         public Lanes(AutomationCurve level, AutomationCurve x, AutomationCurve depth, AutomationCurve reverb) {
-            this(level, x, depth, reverb, 0);
+            this(level, x, depth, reverb, 0, null);
+        }
+
+        public Lanes(AutomationCurve level, AutomationCurve x, AutomationCurve depth, AutomationCurve reverb,
+                     double trimDb) {
+            this(level, x, depth, reverb, trimDb, null);
         }
 
         /** Whether the track changes its place or its share of the room over time. */
         public boolean moves() {
-            return x != null || depth != null || reverb != null;
+            return x != null || depth != null || reverb != null || height != null;
         }
     }
 
@@ -81,7 +87,7 @@ public final class StageAutomation {
         joined.replaceAll((track, none) -> {
             Lanes moving = movements.of(track);
             Lanes own = of(track);
-            return new Lanes(own.level(), moving.x(), moving.depth(), moving.reverb(), own.trimDb());
+            return new Lanes(own.level(), moving.x(), moving.depth(), moving.reverb(), own.trimDb(), moving.height());
         });
         return new StageAutomation(joined);
     }
@@ -154,10 +160,11 @@ public final class StageAutomation {
             AutomationCurve x = curve(mix.lane(channel.id(), AutomationLane.X), time);
             AutomationCurve depth = curve(mix.lane(channel.id(), AutomationLane.DEPTH), time);
             AutomationCurve reverb = curve(mix.lane(channel.id(), AutomationLane.REVERB), time);
+            AutomationCurve height = curve(mix.lane(channel.id(), AutomationLane.HEIGHT), time);
             double trim = channel.levelDb() - Math.max(SoundSourcePlacement.MIN_LEVEL,
                     Math.min(SoundSourcePlacement.MAX_LEVEL, channel.levelDb()));
-            if (level != null || x != null || depth != null || reverb != null || trim != 0) {
-                tracks.putIfAbsent(trackId(channel.owner()), new Lanes(level, x, depth, reverb, trim));
+            if (level != null || x != null || depth != null || reverb != null || height != null || trim != 0) {
+                tracks.putIfAbsent(trackId(channel.owner()), new Lanes(level, x, depth, reverb, trim, height));
             }
         }
         return new StageAutomation(tracks);

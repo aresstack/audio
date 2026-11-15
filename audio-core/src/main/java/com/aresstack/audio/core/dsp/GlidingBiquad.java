@@ -113,13 +113,19 @@ public final class GlidingBiquad implements AudioProcessor {
 
     /** Filters the first {@code count} frames of the block in place. */
     public void process(AudioBlock block, int count) {
+        process(block, 0, count);
+    }
+
+    /** Filters {@code count} frames of the block from {@code from} on, in place. */
+    public void process(AudioBlock block, int from, int count) {
+        count += from;
         float[] left = block.left;
         float[] right = block.right;
         double sl1 = l1;
         double sl2 = l2;
         double sr1 = r1;
         double sr2 = r2;
-        int i = 0;
+        int i = from;
         // While gliding, the coefficients move by one step per frame.
         while (remaining > 0 && i < count) {
             if (--remaining == 0) {
