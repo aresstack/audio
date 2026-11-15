@@ -2662,7 +2662,7 @@ public final class AudioStudioFrame extends JFrame {
                 + (request.bars() == 1 ? " Takt" : " Takte") + " verlängert ("
                 + request.preset().label() + ").",
                 (session, model, progress) -> com.aresstack.audio.studio.application.ExtensionOffer.start(session,
-                        com.aresstack.audio.studio.ai.ContinuationComposer.with(model), request, progress));
+                        com.aresstack.audio.studio.ai.ContinuationComposer.with(model, partsAtOnce()), request, progress));
     }
 
     /** Asks which bars the AI shall put into the piece and where, and has them written as a proposal (C4). */
@@ -2684,7 +2684,7 @@ public final class AudioStudioFrame extends JFrame {
         offerFromAi(piece.get(), "Vor Takt " + request.insertBeforeBar() + " werden " + request.bars()
                 + (request.bars() == 1 ? " Takt" : " Takte") + " eingefügt.",
                 (session, model, progress) -> com.aresstack.audio.studio.application.ExtensionOffer.start(session,
-                        com.aresstack.audio.studio.ai.ContinuationComposer.with(model), request, progress));
+                        com.aresstack.audio.studio.ai.ContinuationComposer.with(model, partsAtOnce()), request, progress));
     }
 
     /** Asks how the AI shall orchestrate the marked bars anew, and has it done as a proposal (C4). */
@@ -2706,7 +2706,7 @@ public final class AudioStudioFrame extends JFrame {
                 : "Takt " + request.firstBar() + " bis " + request.lastBar()) + " wird umorchestriert ("
                 + request.preset().label() + ").",
                 (session, model, progress) -> com.aresstack.audio.studio.application.ReorchestrationOffer.start(
-                        session, com.aresstack.audio.studio.ai.OrchestrationComposer.with(model), request, progress));
+                        session, com.aresstack.audio.studio.ai.OrchestrationComposer.with(model, partsAtOnce()), request, progress));
     }
 
     /**
@@ -2879,6 +2879,12 @@ public final class AudioStudioFrame extends JFrame {
         undoKey.setToolTipText(piece.isPresent() && piece.get().canUndo()
                 ? "Rückgängig: " + piece.get().undoDescription() + " (Strg+Z)"
                 : "Nimmt die letzte Änderung am Stück zurück (Strg+Z)");
+    }
+
+    /** How many parts the AI writes at the same time when it works on a piece: the setting "Parallel". */
+    private int partsAtOnce() {
+        Object allowed = parallelRequests.getValue();
+        return allowed instanceof Integer ? Math.max(1, (Integer) allowed) : 4;
     }
 
     /** Has the AI make a proposal for the saved piece; what was asked for decides how. */
