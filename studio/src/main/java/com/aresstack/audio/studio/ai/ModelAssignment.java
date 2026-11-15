@@ -34,6 +34,11 @@ public final class ModelAssignment {
         return base;
     }
 
+    /** The same roles, with another base model. */
+    public ModelAssignment withBase(String model) {
+        return new ModelAssignment(model, own);
+    }
+
     /** The same, with a model of its own for a role; {@code null} or blank lets the role follow again. */
     public ModelAssignment with(ModelRole role, String model) {
         Map<String, String> changed = new LinkedHashMap<>(own);

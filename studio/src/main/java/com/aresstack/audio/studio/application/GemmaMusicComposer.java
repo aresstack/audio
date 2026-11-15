@@ -238,10 +238,9 @@ public final class GemmaMusicComposer {
                                         : promptFor(target, plan, spec, chords, section,
                                         s == 0 ? null : context(answers.get(s - 1), sections.get(s - 1), spec));
                                 Path cached = cachedResponse(directory, target, prompt, spec);
-                                allKnown &= Files.isRegularFile(cached);
-                                JsonObject answer = client.generate(
-                                        "Compose original instrumental music. Return valid JSON only.",
-                                        prompt, maxTokens, cached);
+                                String instruction = "Compose original instrumental music. Return valid JSON only.";
+                                allKnown &= client.hasAnswer(instruction, prompt, maxTokens, cached);
+                                JsonObject answer = client.generate(instruction, prompt, maxTokens, cached);
                                 validateResponse(target, answer);
                                 answers.add(answer);
                                 notes += answer.getAsJsonArray("notes").size();
