@@ -178,6 +178,8 @@ final class AlbumsPanel extends JPanel {
     static final int TYPING_PAUSE_MILLIS = 900;
     /** The proposals made for the fields of the album shown; kept with the album. */
     private AlbumSuggestions suggestions = AlbumSuggestions.EMPTY;
+    /** The titles the AI has planned so far while it still writes the list; {@code null} otherwise. */
+    private List<AlbumTrack> preview;
     /** Who proposes; {@code null} asks the model of the settings. Set by a test. */
     private AlbumSuggester suggester;
     /** One request after the other, so that typing never floods the model. */
@@ -640,7 +642,24 @@ final class AlbumsPanel extends JPanel {
             List<String> fresh;
             String problem = null;
             try {
-                fresh = proposer.suggest(field, named, about, sounds, known);
+                // Each proposal shows in the list as soon as the AI has written it.
+                fresh = proposer.suggest(field, named, about, sounds, known, seen -> SwingUtilities.invokeLater(() -> {
+                    if (album == null || !album.id().equals(asked.id()) || !with.equals(askedWith.get(field))) {
+                        return;
+                    }
+                    List<String> shown = new ArrayList<String>(seen);
+                    for (String old : known) {
+                        if (shown.stream().noneMatch(one -> one.equalsIgnoreCase(old))) {
+                            shown.add(old);
+                        }
+                    }
+                    boolean open = box(field).isPopupVisible();
+                    box(field).proposals(shown);
+                    box(field).setToolTipText("Die KI schreibt Vorschläge … " + seen.size() + " bisher");
+                    if (open) {
+                        box(field).showPopup();
+                    }
+                }));
             } catch (IOException | RuntimeException failed) {
                 fresh = List.of();
                 problem = String.valueOf(failed.getMessage());
@@ -818,7 +837,13 @@ final class AlbumsPanel extends JPanel {
             Album planned = null;
             String problem = null;
             try {
-                planned = new ChatAlbumPlanner(model, tokens).plan(asked, files.folder(asked.id()), host::log);
+                // Every title shows in the list as soon as the AI has written it.
+                planned = new ChatAlbumPlanner(model, tokens).watching(seen -> SwingUtilities.invokeLater(() -> {
+                    if (busy && album != null && album.id().equals(asked.id())) {
+                        preview = seen;
+                        tracks.fireTableDataChanged();
+                    }
+                })).plan(asked, files.folder(asked.id()), host::log);
                 files.save(planned);
                 host.albumChanged(); // the tree shows the planned titles at once
             } catch (IOException | RuntimeException failed) {
@@ -828,6 +853,8 @@ final class AlbumsPanel extends JPanel {
             final String said = problem;
             SwingUtilities.invokeLater(() -> {
                 busy = false;
+                preview = null;
+                tracks.fireTableDataChanged();
                 planning.turn(false);
                 if (result != null) {
                     reload(result.id());
@@ -1093,7 +1120,12 @@ final class AlbumsPanel extends JPanel {
 
         @Override
         public int getRowCount() {
-            return album == null ? 0 : album.tracks().size();
+            return album == null ? 0 : rows().size();
+        }
+
+        /** The titles shown: those the AI is planning right now, else those of the album. */
+        private List<AlbumTrack> rows() {
+            return preview != null ? preview : album.tracks();
         }
 
         @Override
@@ -1108,7 +1140,8 @@ final class AlbumsPanel extends JPanel {
 
         @Override
         public boolean isCellEditable(int row, int column) {
-            if (column == 0 || column == STATE || busy || (production != null && production.running())) {
+            if (column == 0 || column == STATE || busy || preview != null
+                    || (production != null && production.running())) {
                 return false;
             }
             Status at = state.status(album.tracks().get(row).id());
@@ -1118,7 +1151,10 @@ final class AlbumsPanel extends JPanel {
 
         @Override
         public Object getValueAt(int row, int column) {
-            AlbumTrack track = album.tracks().get(row);
+            AlbumTrack track = rows().get(row);
+            if (preview != null && column == STATE && !track.hasPiece()) {
+                return "kommt von der KI …";
+            }
             AlbumProductionState.Entry entry = state.of(track.id());
             switch (column) {
                 case 0:

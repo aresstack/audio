@@ -36,4 +36,13 @@ public interface AlbumSuggester {
      */
     List<String> suggest(Field field, String title, String description, String style, List<String> known)
             throws IOException;
+
+    /**
+     * The same, and the proposals can be seen while they arrive: {@code seen} is given the ones
+     * written so far (the last one perhaps not yet whole), a few times a second at most.
+     */
+    default List<String> suggest(Field field, String title, String description, String style, List<String> known,
+                                 java.util.function.Consumer<List<String>> seen) throws IOException {
+        return suggest(field, title, description, style, known);
+    }
 }
