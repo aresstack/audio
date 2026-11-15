@@ -44,6 +44,13 @@ public final class PackageDependencyTest {
                 "studio.project", "javax.swing"));
     }
 
+    /** The visualizer draws pictures of the sound; it knows no window, no AI, no use case and no project files. */
+    @Test
+    public void theVisualizerKnowsNoWindowAndNothingAboveIt() throws IOException {
+        assertEquals(List.of(), referencesFrom("visual", "studio.ui", "studio.ai", "studio.application",
+                "studio.project", "studio.settings", "javax.swing"));
+    }
+
     private static List<String> referencesFrom(String pkg, String... forbidden) throws IOException {
         List<String> found = new ArrayList<>();
         try (Stream<Path> files = Files.walk(ROOT.resolve(pkg))) {

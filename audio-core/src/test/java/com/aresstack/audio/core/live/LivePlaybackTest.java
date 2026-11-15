@@ -103,6 +103,33 @@ public final class LivePlaybackTest {
     }
 
     @Test
+    public void theTapHoldsWhatWentToTheSinkAndEachChannelItsPeaks() throws Exception {
+        int frames = RATE / 2;
+        LiveChannel channel = tone(frames, 0);
+        LiveGraph graph = new LiveGraph(List.of(channel), null, 0, frames);
+        Recorder sink = new Recorder(3 * frames, false);
+        MasterBus master = new MasterBus(MasterBus.Settings.fixed(0));
+        try (LivePlayback playback = new LivePlayback(graph, master, sink, RATE, BLOCK).start()) {
+            playback.play();
+            waitFor(() -> playback.state() == LivePlayback.State.ENDED, 10);
+            Assert.assertEquals(sink.written, playback.tap().written());
+            Assert.assertEquals("the recorder holds nothing back", sink.written, playback.tapHeard());
+            int count = 1024;
+            float[] left = new float[count];
+            float[] right = new float[count];
+            Assert.assertTrue(playback.tap().read(sink.written, left, right, count));
+            for (int i = 0; i < count; i++) {
+                Assert.assertEquals(sink.left[sink.written - count + i], left[i], 0f);
+                Assert.assertEquals(sink.right[sink.written - count + i], right[i], 0f);
+            }
+            // The tone peaks at 0.3; a block in the middle of the piece says so, after the end there is none.
+            float middle = channel.peakAt(frames / 2);
+            Assert.assertEquals(0.3f, middle, 0.02f);
+            Assert.assertEquals(0f, channel.peakAt(-1), 0f);
+        }
+    }
+
+    @Test
     public void pauseStopsWhereTheListenerIsAndPlayGoesOnThere() throws Exception {
         int frames = 4 * RATE;
         LiveGraph graph = new LiveGraph(List.of(tone(frames, 0)), null, 0, frames);

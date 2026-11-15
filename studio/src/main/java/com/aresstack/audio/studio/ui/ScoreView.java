@@ -140,6 +140,23 @@ final class ScoreView extends JComponent implements Scrollable {
     void setSections(List<SectionMark> shown) {
         sections = new ArrayList<SectionMark>(shown == null ? List.<SectionMark>of() : shown);
         repaint();
+        for (ScoreView follower : followers) {
+            follower.setSections(shown);
+        }
+    }
+
+    /** Other views that show what this one shows (the score of the visualizer): told of every change. */
+    private final List<ScoreView> followers = new ArrayList<ScoreView>();
+
+    /** Lets another view show the same score, sections and play line as this one from now on. */
+    void follow(ScoreView follower) {
+        if (follower == null || follower == this || followers.contains(follower)) {
+            return;
+        }
+        followers.add(follower);
+        follower.setScore(score, order, hint);
+        follower.setSections(sections);
+        follower.setSecond(second);
     }
 
     void setScore(Score shown, List<String> trackIds, String emptyHint) {
@@ -148,6 +165,9 @@ final class ScoreView extends JComponent implements Scrollable {
         hint = emptyHint == null ? "" : emptyHint;
         revalidate();
         repaint();
+        for (ScoreView follower : followers) {
+            follower.setScore(shown, trackIds, emptyHint);
+        }
     }
 
     /**
@@ -215,6 +235,9 @@ final class ScoreView extends JComponent implements Scrollable {
 
     /** Where the playback is, in seconds; negative when nothing plays. */
     void setSecond(double played) {
+        for (ScoreView follower : followers) {
+            follower.setSecond(played);
+        }
         if (Math.abs(played - second) < 0.01) {
             return;
         }
