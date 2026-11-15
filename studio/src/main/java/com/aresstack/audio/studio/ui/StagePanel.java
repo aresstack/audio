@@ -40,6 +40,12 @@ final class StagePanel extends JPanel {
          */
         void sceneChanged(SpatialScene scene, boolean settled);
 
+        /**
+         * The user wants to switch the piece from the old way of setting its level (mixed to its
+         * peak) to the fixed level with the limiter. Returns whether they confirm it.
+         */
+        boolean confirmFixedLevel();
+
         /** The AI shall propose a mix. */
         void askDirector();
     }
@@ -116,6 +122,7 @@ final class StagePanel extends JPanel {
     private final JLabel course = new JLabel(" ");
     private final LevelCourse curve = new LevelCourse();
     private Row master;
+    private final JToggleButton fixed = new JToggleButton("Fester Pegel mit Limiter");
     private final JButton flat = new JButton("Verlauf löschen");
     private final JButton director = new JButton("KI mischt ab");
     private final JButton usual = new JButton("Standardaufstellung");
@@ -346,7 +353,11 @@ final class StagePanel extends JPanel {
                 change(scene.withMaster(shown), settled);
             }
         };
-        JPanel mixing = column(masterForm, Box.createVerticalStrut(8), director, Box.createVerticalStrut(8), verdict,
+        fixed.setToolTipText("<html>Aus: die Mischung wird wie bisher voll ausgesteuert (auf ihre Spitze gebracht).<br>"
+                + "An: der Master-Pegel gilt fest, ein Limiter hält die Spitzen bei −1 dBFS;<br>"
+                + "beim Speichern als WAV lässt sich dann auf Spitze oder Lautheit normalisieren.</html>");
+        fixed.addActionListener(event -> switchLevel(fixed.isSelected()));
+        JPanel mixing = column(masterForm, Box.createVerticalStrut(6), fixed, Box.createVerticalStrut(8), director, Box.createVerticalStrut(8), verdict,
                 Box.createVerticalStrut(8), usual, Box.createVerticalStrut(10), status);
 
         JPanel modules = new JPanel();
@@ -644,6 +655,21 @@ final class StagePanel extends JPanel {
         change(scene.with(placement), settled);
     }
 
+    /**
+     * Switching a piece to the fixed level changes how loud it sounds, so it is asked for once;
+     * going back to the way it was needs no question.
+     */
+    private void switchLevel(boolean toFixed) {
+        if (filling || toFixed == scene.fixedLevel()) {
+            return;
+        }
+        if (toFixed && !host.confirmFixedLevel()) {
+            showRoom();
+            return;
+        }
+        change(scene.withFixedLevel(toFixed), true);
+    }
+
     private void change(SpatialScene changed, boolean settled) {
         scene = changed;
         view.setScene(changed, order);
@@ -660,6 +686,7 @@ final class StagePanel extends JPanel {
             if (master != null) {
                 master.show((int) Math.round(scene.masterDb()));
             }
+            fixed.setSelected(scene.fixedLevel());
             amount.show((int) Math.round(scene.room().amount() * 100));
         } finally {
             filling = false;

@@ -43,6 +43,9 @@ public final class SpatialSceneStore {
         }
     }
 
+    /** The value of "level" for a piece with the fixed level structure; without it the piece is mixed to its peak. */
+    private static final String LEVEL_FIXED = "fixed";
+
     public static JsonObject write(SpatialScene scene) {
         JsonObject root = new JsonObject();
         root.addProperty("version", VERSION);
@@ -52,6 +55,10 @@ public final class SpatialSceneStore {
         room.addProperty("amount", round(scene.room().amount()));
         root.add("room", room);
         root.addProperty("master", round(scene.masterDb()));
+        if (scene.fixedLevel()) {
+            // Only a piece that was switched says so: the file of every other piece stays as it was.
+            root.addProperty("level", LEVEL_FIXED);
+        }
         JsonArray sources = new JsonArray();
         for (SoundSourcePlacement placement : scene.placements()) {
             JsonObject source = new JsonObject();
@@ -121,7 +128,8 @@ public final class SpatialSceneStore {
                         flag(source, "muted"), flag(source, "locked"), points));
             }
         }
-        return new SpatialScene(room, placements, number(root, "master", 0));
+        return new SpatialScene(room, placements, number(root, "master", 0),
+                LEVEL_FIXED.equals(text(root, "level", "")));
     }
 
     private static double round(double value) {

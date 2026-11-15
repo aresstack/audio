@@ -580,6 +580,19 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
+            public boolean confirmFixedLevel() {
+                return JOptionPane.showConfirmDialog(AudioStudioFrame.this,
+                        "Dieses Stück auf festen Pegel umstellen?\n\n"
+                                + "Bisher wird die Mischung am Ende voll ausgesteuert. Mit festem Pegel gilt der\n"
+                                + "Master-Pegel so, wie er eingestellt ist, und ein Limiter hält die Spitzen bei −1 dBFS.\n"
+                                + "Das Stück klingt danach anders laut als bisher. Beim Speichern als WAV lässt sich\n"
+                                + "dann auf Spitze oder Lautheit normalisieren.\n\n"
+                                + "Die Umstellung gilt nur für dieses Stück und lässt sich hier wieder zurücknehmen.",
+                        "Fester Pegel", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE)
+                        == JOptionPane.OK_OPTION;
+            }
+
+            @Override
             public void askDirector() {
                 AudioStudioFrame.this.askDirector();
             }
@@ -650,19 +663,22 @@ public final class AudioStudioFrame extends JFrame {
             }
             final long began = System.nanoTime();
             String problem = null;
+            com.aresstack.audio.studio.application.StageMixService mixing =
+                    new com.aresstack.audio.studio.application.StageMixService();
             try {
-                new com.aresstack.audio.studio.application.StageMixService().mix(arrangement, folder, mixed,
-                        message -> { });
+                mixing.mix(arrangement, folder, mixed, message -> { });
             } catch (Exception failed) {
                 problem = String.valueOf(failed.getMessage());
             }
             final String said = problem;
+            final String limiter = com.aresstack.audio.studio.application.MixReport.limiterShort(mixing.outcome());
             final double seconds = (System.nanoTime() - began) / 1e9;
-            SwingUtilities.invokeLater(() -> mixedAgain(folder, ticket, said, seconds));
+            SwingUtilities.invokeLater(() -> mixedAgain(folder, ticket, said, seconds, limiter));
         });
     }
 
-    private void mixedAgain(Path folder, int ticket, String problem, double seconds) {
+    /** @param limiter what the limiter did in this mix, or {@code null} for a piece that is mixed to its peak */
+    private void mixedAgain(Path folder, int ticket, String problem, double seconds, String limiter) {
         if (!folder.equals(Paths.get(directory.getText().trim()))) {
             return; // another piece is open by now
         }
@@ -671,8 +687,9 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         if (ticket == mixWanted && stagePanel.proposal() == null) {
-            stagePanel.setStatus(String.format(java.util.Locale.GERMANY,
-                    "Neu gemischt in %.1f s · ohne KI, ohne Synthese", seconds));
+            // With the fixed level the line shows what the limiter did: how far it turned the loudest place down.
+            stagePanel.setStatus(String.format(java.util.Locale.GERMANY, "Neu gemischt in %.1f s · ", seconds)
+                    + (limiter == null ? "ohne KI, ohne Synthese" : limiter));
         }
         String selected = (String) playbackSelection.getSelectedItem();
         if (selected == null || "Java reference mix".equals(selected)) {
@@ -693,7 +710,13 @@ public final class AudioStudioFrame extends JFrame {
         lcd.setSource(playbackName(selected), true);
     }
 
-    /** Writes the mix on the stage to a WAV file of the user's choice, with 24 bits. */
+    /** What the last export was normalized to; offered again for the next one. */
+    private com.aresstack.audio.core.mix.ExportNormalization exportNormalization;
+
+    /**
+     * Writes the mix on the stage to a WAV file of the user's choice, with 24 bits. A piece with
+     * the fixed level may be normalized to a peak or a loudness; that is chosen beside the file.
+     */
     private void exportMix() {
         final Path arrangement = writtenArrangement();
         if (arrangement == null) {
@@ -702,6 +725,8 @@ public final class AudioStudioFrame extends JFrame {
         }
         javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
         chooser.setDialogTitle("Mischung als WAV speichern (24 Bit)");
+        ExportLevelChoice levelChoice = new ExportLevelChoice(scene.fixedLevel(), exportNormalization);
+        chooser.setAccessory(levelChoice);
         chooser.setSelectedFile(new java.io.File(songs.name(Paths.get(directory.getText().trim()))
                 .replaceAll("[^\\p{L}\\p{N} _-]", "").trim() + ".wav"));
         if (chooser.showSaveDialog(this) != javax.swing.JFileChooser.APPROVE_OPTION) {
@@ -710,10 +735,23 @@ public final class AudioStudioFrame extends JFrame {
         Path chosen = chooser.getSelectedFile().toPath();
         final Path target = chosen.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".wav")
                 ? chosen : chosen.resolveSibling(chosen.getFileName() + ".wav");
+        final com.aresstack.audio.core.mix.ExportNormalization wanted = levelChoice.chosen();
+        if (scene.fixedLevel()) {
+            exportNormalization = wanted;
+        }
         try {
-            new com.aresstack.audio.studio.application.StageMixService().export(arrangement,
-                    Paths.get(directory.getText().trim()), scene, target, 24);
+            com.aresstack.audio.studio.application.StageMixService mixing =
+                    new com.aresstack.audio.studio.application.StageMixService();
+            mixing.export(arrangement, Paths.get(directory.getText().trim()), scene, target, 24,
+                    com.aresstack.audio.studio.application.StageMixService.level(scene, wanted));
             append("Mischung gespeichert (24 Bit, 44,1 kHz): " + target);
+            for (String found : new String[]{
+                    com.aresstack.audio.studio.application.MixReport.limiter(mixing.outcome()),
+                    com.aresstack.audio.studio.application.MixReport.normalization(mixing.outcome(), wanted)}) {
+                if (found != null) {
+                    append("  " + found);
+                }
+            }
         } catch (Exception failed) {
             message("Die Mischung ließ sich nicht speichern: " + failed.getMessage());
         }
