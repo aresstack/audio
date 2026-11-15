@@ -118,9 +118,14 @@ public final class AudioStudioFrame extends JFrame {
     private final JTextField proxyNonProxyHosts = new JTextField(24);
     private final JCheckBox proxyBasic = new JCheckBox("Proxy-BASIC via KeePass");
     /** Whether the arrangement is fitted into the window; off, every bar has its width and the lanes scroll. */
-    private final JCheckBox fitArrangement = new JCheckBox("Ganzes Stück in die Fensterbreite einpassen", true);
+    private final JCheckBox fitArrangement = new JCheckBox("Ganzes Stück in die Fensterbreite einpassen", false);
+    /** How wide a bar of the arrangement is when the piece is not fitted into the window, in pixels. */
+    private final JSpinner arrangementBarWidth = new JSpinner(new SpinnerNumberModel(ArrangementView.BAR_WIDTH,
+            ArrangementView.MIN_BAR_WIDTH, ArrangementView.MAX_BAR_WIDTH, 8));
     private final JComboBox<AppIcon> appIconChoice = new JComboBox<>(AppIcon.values());
     private boolean showingSavedIcon;
+    /** True while the saved bar width is put into its field, so that showing it does not save again. */
+    private boolean showingSavedBarWidth;
     private final JTextField proxyCredentialRef = new JTextField(22);
     private final JComboBox<KeePassEntry> keePassEntries = new JComboBox<KeePassEntry>();
     private final JTextField directory = new JTextField(Paths.get(System.getProperty("user.home"),
@@ -1811,6 +1816,14 @@ public final class AudioStudioFrame extends JFrame {
         });
         addRow(looks, 0, "Arrangement", fitArrangement);
         addRow(looks, 1, "", note("Aus: lange Stücke bleiben lesbar; unten ein Rollbalken, Umschalt + Mausrad rollt seitwärts."));
+        arrangementBarWidth.setToolTipText("Breite eines Takts im Arrangement in Pixeln, wenn nicht eingepasst wird");
+        arrangementBarWidth.addChangeListener(event -> {
+            trackTable.setBarWidth((Integer) arrangementBarWidth.getValue());
+            if (!showingSavedBarWidth) {
+                saveSettings(false);
+            }
+        });
+        addRow(looks, 3, "Taktbreite (px)", line(arrangementBarWidth));
         appIconChoice.setRenderer(new javax.swing.DefaultListCellRenderer() {
             @Override
             public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list, Object value,
@@ -4012,11 +4025,25 @@ public final class AudioStudioFrame extends JFrame {
         }
         Album chosen = currentAlbum == null ? null : albumMembers.albums().album(currentAlbum).orElse(null);
         setTitle("AresStack Audio Studio — " + (chosen == null ? "" : chosen.title() + " — ") + songs.name(current));
-        songFacts.setText(songFacts(current));
+        songFacts.setText(songFacts(current, modelBars(current)));
     }
 
     /** One line about the piece from its plan: tempo, key, metre, length and mood; a hint when there is no plan. */
-    private static String songFacts(Path folder) {
+    /**
+     * The bars of the piece as its model has them, or 0 without a model: after "Verlängern" or a
+     * production in portions the plan still names the length it was first planned with.
+     */
+    private int modelBars(Path folder) {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> model = pieceModel.of(folder);
+        if (!model.isPresent()) {
+            return 0;
+        }
+        com.aresstack.audio.composition.Composition piece = model.get().composition();
+        long end = piece.endTick();
+        return end <= 0 ? 0 : piece.timeMap().barOf(end - 1) + 1;
+    }
+
+    private static String songFacts(Path folder, int modelBars) {
         Path plan = folder.resolve("composition-plan.json");
         if (!Files.isRegularFile(plan)) {
             return Files.isRegularFile(folder.resolve("arrangement.tsv")) ? "Arrangement ohne Plan der KI"
@@ -4028,7 +4055,9 @@ public final class AudioStudioFrame extends JFrame {
             StringBuilder facts = new StringBuilder();
             String[][] parts = {{"tempoBpm", " BPM"}, {"key", ""}, {"timeSignature", ""}, {"bars", " Takte"}};
             for (String[] part : parts) {
-                if (json.has(part[0]) && json.get(part[0]).isJsonPrimitive()) {
+                if ("bars".equals(part[0]) && modelBars > 0) {
+                    facts.append(facts.length() > 0 ? "  ·  " : "").append(modelBars).append(part[1]);
+                } else if (json.has(part[0]) && json.get(part[0]).isJsonPrimitive()) {
                     facts.append(facts.length() > 0 ? "  ·  " : "").append(json.get(part[0]).getAsString()).append(part[1]);
                 }
             }
@@ -4101,8 +4130,24 @@ public final class AudioStudioFrame extends JFrame {
             proxyNonProxyHosts.setText(saved.getProperty("proxyNonProxyHosts", ""));
             proxyBasic.setSelected("BASIC".equalsIgnoreCase(saved.getProperty("proxyAuthMode", "")));
             proxyCredentialRef.setText(saved.getProperty("proxyCredentialRef", ""));
-            fitArrangement.setSelected(!"false".equalsIgnoreCase(saved.getProperty("arrangementFit", "true")));
+            // A new key: the old "arrangementFit" was saved as true by every studio, and squeezed long pieces.
+            fitArrangement.setSelected("true".equalsIgnoreCase(saved.getProperty("arrangementFitWindow", "false")));
             trackTable.setFit(fitArrangement.isSelected());
+            int barWidth = ArrangementView.BAR_WIDTH;
+            try {
+                barWidth = Integer.parseInt(saved.getProperty("arrangementBarWidth",
+                        Integer.toString(ArrangementView.BAR_WIDTH)).trim());
+            } catch (NumberFormatException unreadable) {
+                // the usual width
+            }
+            barWidth = Math.max(ArrangementView.MIN_BAR_WIDTH, Math.min(ArrangementView.MAX_BAR_WIDTH, barWidth));
+            showingSavedBarWidth = true;
+            try {
+                arrangementBarWidth.setValue(barWidth);
+            } finally {
+                showingSavedBarWidth = false;
+            }
+            trackTable.setBarWidth(barWidth);
             AppIcon savedIcon = AppIcon.fromKey(saved.getProperty(AppIcon.SETTING));
             showingSavedIcon = true;
             try {
@@ -4186,7 +4231,8 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("proxyNonProxyHosts", proxyNonProxyHosts.getText().trim());
             saved.setProperty("proxyAuthMode", proxyBasic.isSelected() ? "BASIC" : "");
             saved.setProperty("proxyCredentialRef", proxyCredentialRef.getText().trim());
-            saved.setProperty("arrangementFit", String.valueOf(fitArrangement.isSelected()));
+            saved.setProperty("arrangementFitWindow", String.valueOf(fitArrangement.isSelected()));
+            saved.setProperty("arrangementBarWidth", String.valueOf(arrangementBarWidth.getValue()));
             saved.setProperty(AppIcon.SETTING, ((AppIcon) appIconChoice.getSelectedItem()).key());
             saved.setProperty("outputDirectory", directory.getText().trim());
             try {
