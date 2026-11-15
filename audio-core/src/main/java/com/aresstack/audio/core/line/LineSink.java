@@ -12,18 +12,28 @@ import javax.sound.sampled.SourceDataLine;
  * rounded as {@link com.aresstack.audio.core.wav.WavFileSink} does) and go to a
  * {@code SourceDataLine}. The bytes of one block are allocated once, when the sink is opened.
  *
- * <p>The buffer of the line decides how late a change is heard: with the default of 2048 frames
- * (46 ms at 44.1 kHz) a moved instrument is heard after at most that plus one block. This package
+ * <p>The buffer of the line decides how late a change is heard: with the default of 4096 frames
+ * (93 ms at 44.1 kHz) a moved instrument is heard after at most that plus one block. The sink
+ * counts how often the line ran empty ({@link #underruns()}), which the render time of the audio
+ * thread cannot show. This package
  * is the only one in the core besides {@code wav} that touches {@code javax.sound}; a game attaches
  * its own {@code LiveSink} instead.
  */
 public final class LineSink implements LiveSink {
-    /** The default buffer of the line, in frames. */
-    public static final int DEFAULT_BUFFER_FRAMES = 2048;
+    /**
+     * The default buffer of the line, in frames: 4096 (93 ms at 44.1 kHz). 2048 frames dropped out
+     * now and then on a Windows sound card although every block was rendered in time.
+     */
+    public static final int DEFAULT_BUFFER_FRAMES = 4096;
 
     private final SourceDataLine line;
     private final byte[] bytes;
     private final int frameSize;
+    // written and read only by the audio thread, published for other threads
+    private boolean started;
+    private int writesSinceStart;
+    private volatile long underruns;
+    private volatile int lowestBuffered = -1;
 
     /**
      * Opens the default output of the system for 16-bit stereo at this rate.
@@ -81,17 +91,42 @@ public final class LineSink implements LiveSink {
             bytes[at++] = (byte) r;
             bytes[at++] = (byte) (r >> 8);
         }
+        if (started) {
+            int waiting = bufferedFrames();
+            // the first writes after a start fill the line; after them an empty line is a drop-out
+            if (++writesSinceStart > 2) {
+                if (waiting == 0) {
+                    underruns = underruns + 1;
+                }
+                if (lowestBuffered < 0 || waiting < lowestBuffered) {
+                    lowestBuffered = waiting;
+                }
+            }
+        }
         line.write(bytes, 0, at);
+    }
+
+    @Override
+    public long underruns() {
+        return underruns;
+    }
+
+    @Override
+    public int lowestBufferedFrames() {
+        return lowestBuffered;
     }
 
     @Override
     public void start() {
         line.start();
+        started = true;
+        writesSinceStart = 0;
     }
 
     @Override
     public void pause() {
         line.stop();
+        started = false;
     }
 
     @Override

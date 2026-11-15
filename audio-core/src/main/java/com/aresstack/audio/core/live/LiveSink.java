@@ -34,6 +34,20 @@ public interface LiveSink extends AudioSink {
         return 0;
     }
 
+    /**
+     * How often the output ran empty while it was started: a drop-out the listener hears even
+     * though every block was rendered in time (scheduling, a buffer too small for the system's
+     * audio driver). 0 for sinks that cannot tell.
+     */
+    default long underruns() {
+        return 0;
+    }
+
+    /** The fewest frames that waited in the output just before a write since it was started; -1 if unknown. */
+    default int lowestBufferedFrames() {
+        return -1;
+    }
+
     @Override
     default void close() {
     }
