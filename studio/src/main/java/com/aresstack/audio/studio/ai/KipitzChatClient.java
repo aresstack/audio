@@ -146,7 +146,8 @@ public final class KipitzChatClient implements ChatModel {
         try {
             if (!"stop".equals(answer.finishReason)) {
                 throw new IOException("The model output was not complete (finish_reason=" + answer.finishReason
-                        + ("length".equals(answer.finishReason) ? ", also with " + budget + " tokens" : "") + ").");
+                        + ("length".equals(answer.finishReason) ? ", also with " + budget + " tokens" : "")
+                        + ", model " + model + ").");
             }
             String content = answer.text.trim();
             JsonObject parsed = jsonObjectIn(content);
@@ -267,7 +268,7 @@ public final class KipitzChatClient implements ChatModel {
     }
 
     /** How often an answer that was cut off at its limit is asked for again, each time with twice the room. */
-    static final int LONGER_ANSWERS = 2;
+    static final int LONGER_ANSWERS = 3;
 
     /** The sampling of every request; part of the identity of a kept answer. */
     static final double TEMPERATURE = 0.55;
