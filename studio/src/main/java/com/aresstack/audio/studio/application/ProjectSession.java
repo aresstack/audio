@@ -609,9 +609,9 @@ public final class ProjectSession {
      * The mix after a new import: the channels of parts that stayed keep what the mix says of
      * them, a new part gets the seat the import gives it, a part that went loses its channel and
      * its automation. Only a changed {@code spatial-scene.json} sets places, levels, room and
-     * level curves anew, and with them how the level is set ({@code levelMode}), which the stage
-     * file says since a piece can be switched to the fixed level; otherwise that stays as the mix
-     * has it.
+     * level curves anew (lanes of place and room share, which the old file cannot hold, stay), and
+     * with them how the level is set ({@code levelMode}), which the stage file says since a piece
+     * can be switched to the fixed level; otherwise that stays as the mix has it.
      */
     private static MixScene keepingMix(MixScene imported, MixScene model, Composition composition, boolean stage) {
         if (model == null) {
@@ -639,9 +639,11 @@ public final class ProjectSession {
                     automation.add(lane);
                 }
             }
+            // The stage file knows level curves only: a lane of the place or the share of the room
+            // (D3) stays as the model has it, also for a channel the stage file sets anew.
             for (AutomationLane lane : model.automation()) {
                 boolean stays = channels.stream().anyMatch(c -> c.id().equals(lane.channelId()))
-                        && !fromStage.contains(lane.channelId());
+                        && (!fromStage.contains(lane.channelId()) || !AutomationLane.LEVEL.equals(lane.parameter()));
                 if (lane.channelId() == null || stays) {
                     automation.add(lane);
                 }

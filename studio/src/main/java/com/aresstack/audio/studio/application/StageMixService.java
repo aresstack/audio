@@ -1,8 +1,14 @@
 package com.aresstack.audio.studio.application;
 
+import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.TimeMap;
+import com.aresstack.audio.composition.mix.MixScene;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.mix.MixLevel;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
+import com.aresstack.audio.studio.mix.StageAutomation;
+import com.aresstack.audio.studio.project.CompositionJson;
+import com.aresstack.audio.studio.project.MixJson;
 import com.aresstack.audio.studio.progress.Progress;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
@@ -20,6 +26,11 @@ import java.util.Map;
  * Mixes the tracks that were already rendered, as they stand on the stage of the
  * piece. It needs neither the AI nor a synthesizer: after moving an instrument or a
  * fader, only this runs again.
+ *
+ * <p>The level curves come from the stage as the window keeps it ({@code spatial-scene.json});
+ * a movement of the place or of the room share, which only the mix document can hold, comes from
+ * {@code mix.json} of the piece, read through its time map (work package D3). A piece without
+ * such a lane mixes exactly as before.
  */
 public final class StageMixService {
     public static final String MIX_FILE = "arrangement-instruments.wav";
@@ -112,15 +123,52 @@ public final class StageMixService {
         }
         progress.update("Mische " + tracks.size() + " Spuren auf der Bühne · " + fitting.room().name()
                 + (heard ? "" : " · alle Spuren sind stumm") + " ...");
+        int tempo = tempo(arrangement);
+        double secondsPerBar = secondsPerBar(arrangement);
+        StageAutomation automation = StageAutomation.of(placements, secondsPerBar)
+                .movingAs(movements(directory, tempo, progress));
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
             MixLevel chosen = level != null ? level : level(fitting, null);
-            outcome = mixer.mix(files, placements, fitting.room(), secondsPerBar(arrangement), chosen, fresh, bits);
+            outcome = mixer.withAutomation(automation).mix(files, placements, fitting.room(), secondsPerBar, chosen,
+                    fresh, bits);
             Files.move(fresh, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(fresh);
         }
         return target;
+    }
+
+    /**
+     * How the tracks move according to the mix document of the piece: place and room share over
+     * time, for the tracks named as the owners of their channels. The time map of the model is
+     * taken while it has the tempo of the arrangement the stems were rendered from; otherwise one
+     * tempo. A piece without {@code mix.json}, or with one that cannot be read, does not move.
+     */
+    static StageAutomation movements(Path directory, int tempo, Progress progress) {
+        MixScene document;
+        try {
+            document = MixJson.load(directory);
+        } catch (IOException | RuntimeException unreadable) {
+            progress.update("mix.json ist nicht lesbar; die Bühne wird ohne ihre Bewegungen gemischt.");
+            return StageAutomation.NONE;
+        }
+        if (document == null || document.automation().isEmpty()) {
+            return StageAutomation.NONE;
+        }
+        // Seconds depend on the tempo alone, so one tempo is enough when the model does not fit.
+        TimeMap time = TimeMap.of(tempo);
+        if (Files.isRegularFile(directory.resolve(CompositionJson.FILE_NAME))) {
+            try {
+                Composition model = CompositionJson.load(directory);
+                if (model.timeMap().tempoAt(0) == tempo) {
+                    time = model.timeMap();
+                }
+            } catch (IOException | RuntimeException unreadable) {
+                // then the tempo of the arrangement, as the stems were rendered
+            }
+        }
+        return StageAutomation.of(document, time);
     }
 
     /** Notes which file holds the sound of each track, for the mixes that follow without rendering. */
