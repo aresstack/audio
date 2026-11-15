@@ -4,6 +4,7 @@ Small, modular Java audio experiments for [3d4j](https://github.com/aresstack/3d
 
 ## Modules
 
+- **`audio-core`** — The audio core shared by Audio Studio, AskAI and 3d4j: stereo float blocks pulled through a graph of sources and processors (level strip, filters, panner, wall echoes, room reverb, meter), streaming WAV in and out, the offline mix. JDK only, no preview features, no application code; only `com.aresstack.audio.core.wav` uses `javax.sound`. Rules for processors in its package documentation.
 - **`music`** — Original multitrack composition renderer, recovered from the Gemma/Cubase-style experiment. Accepts an eight-bar, variable-track TSV arrangement (any number of tracks; beyond 15 melodic ones, channels are reused on further MIDI ports), exports editable Standard MIDI Format type 1 and mono PCM WAV previews (one per instrument plus mix). Uses the Java Sound API only.
 - **`instruments`** — Registry of researched libraries (GeneralUser GS, MuseScore General, VSCO 2 CE, VPO, Salamander, Spanish Classical Guitar, FSBS Clean, FreePats, SFZ Instruments), local path storage and license/source links.
 - **`studio`** — Swing test application with KIPITZ/Gemma chat client, resumable multitrack composition, per-track sampled instruments and WAV mixing.
@@ -150,7 +151,7 @@ To continue an interrupted song, reopen Audio Studio. It automatically recognize
 
 The **Bühne** page shows the stage from above: the back wall at the top, the listener in front at the bottom, each track a disc in the colour of its channel. A disc is dragged to its place; the mouse wheel over it changes its level. Beside the stage are the sliders of the chosen instrument (side, depth, level, width, share of the room, **Stumm**, **Vor KI schützen**) and the room (dry studio, chamber hall, concert hall, cathedral; reverberation time and amount).
 
-What the stage does to the sound (`studio/mix/SpatialStemMixer`, float throughout, 44.1 kHz, only the finished mix is written as 16-bit PCM, or 24 bit on export; tracks are read one at a time, pieces up to ten minutes):
+What the stage does to the sound (`studio/mix/SpatialStemMixer` on the block graph of the `audio-core` module, float throughout, 44.1 kHz, only the finished mix is written as 16-bit PCM, or 24 bit on export; all tracks stream block by block, so a piece may be of any length):
 
 - level per track, optionally moving over the bars (**Verlauf**: points of bar and dB, interpolated without clicks);
 - width (mid/side) and equal-power panning from the angle at which the listener sees the track;

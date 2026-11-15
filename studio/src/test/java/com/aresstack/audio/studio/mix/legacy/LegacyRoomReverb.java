@@ -1,4 +1,4 @@
-package com.aresstack.audio.studio.mix;
+package com.aresstack.audio.studio.mix.legacy;
 
 /**
  * The ring of the room: all sources send into it together, the way one room answers
@@ -7,7 +7,7 @@ package com.aresstack.audio.studio.mix;
  * set so that the ring falls by 60 dB in the wanted time, and a low-pass in each
  * loop makes the high notes die away sooner, as walls do.
  */
-final class RoomReverb {
+final class LegacyRoomReverb {
     private static final int[] COMBS = {1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617};
     private static final int[] ALL_PASSES = {556, 441, 341, 225};
     private static final int SPREAD = 23;
@@ -16,7 +16,7 @@ final class RoomReverb {
     private final Channel right;
     private final int preDelay;
 
-    RoomReverb(int sampleRate, double seconds, double damping, double preDelaySeconds) {
+    LegacyRoomReverb(int sampleRate, double seconds, double damping, double preDelaySeconds) {
         left = new Channel(sampleRate, seconds, damping, 0);
         right = new Channel(sampleRate, seconds, damping, SPREAD);
         preDelay = (int) Math.round(preDelaySeconds * sampleRate);

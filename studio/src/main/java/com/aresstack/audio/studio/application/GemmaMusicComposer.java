@@ -1,6 +1,8 @@
 package com.aresstack.audio.studio.application;
 
 import com.aresstack.audio.studio.ai.KipitzChatClient;
+import com.aresstack.audio.studio.progress.Progress;
+import com.aresstack.audio.studio.progress.TrackProgress;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -25,32 +27,6 @@ import java.util.concurrent.TimeUnit;
 
 /** Plan a song once, then compose any validated arrangement of voices concurrently. */
 public final class GemmaMusicComposer {
-    public interface Progress {
-        void update(String message);
-    }
-
-    /** What is being done to a track. */
-    public enum Stage { COMPOSE, RENDER }
-
-    /** How far that is. */
-    public enum State { WAITING, WORKING, DONE, FAILED }
-
-    /**
-     * A listener that also wants to know how each single track is getting on, e.g. to show it on
-     * the track's channel strip while several tracks are worked on at the same time. Called from
-     * the worker threads.
-     */
-    public interface TrackProgress extends Progress {
-        void track(String trackId, Stage stage, State state, String detail);
-    }
-
-    /** Tells a listener about a track, if it wants to know. */
-    public static void tell(Progress progress, String trackId, Stage stage, State state, String detail) {
-        if (progress instanceof TrackProgress) {
-            ((TrackProgress) progress).track(trackId, stage, state, detail);
-        }
-    }
-
     private static final String[] CHORDS = {"C", "G", "Am", "F", "C", "G", "F", "G"};
     private final KipitzChatClient client;
     private final int maxTokens;
@@ -116,7 +92,7 @@ public final class GemmaMusicComposer {
         progress.update("Composing " + tracks.tracks().size() + " tracks, " + threads + " at the same time ...");
         try {
             for (MusicTrack track : tracks.tracks()) {
-                tell(progress, track.id(), Stage.COMPOSE, State.WAITING, "");
+                TrackProgress.tell(progress, track.id(), TrackProgress.Stage.COMPOSE, TrackProgress.State.WAITING, "");
             }
             for (MusicTrack track : tracks.tracks()) {
                 final MusicTrack target = track;
@@ -128,7 +104,7 @@ public final class GemmaMusicComposer {
                         }
                         progress.update("Composing " + target.id() + " ("
                                 + target.instrument() + ") ...");
-                        tell(progress, target.id(), Stage.COMPOSE, State.WORKING, "");
+                        TrackProgress.tell(progress, target.id(), TrackProgress.Stage.COMPOSE, TrackProgress.State.WORKING, "");
                         try {
                             String prompt = promptFor(target, plan);
                             Path cached = cachedResponse(directory, target, prompt);
@@ -137,14 +113,14 @@ public final class GemmaMusicComposer {
                                     "Compose original instrumental music. Return valid JSON only.",
                                     prompt, maxTokens, cached);
                             validateResponse(target, answer);
-                            tell(progress, target.id(), Stage.COMPOSE, State.DONE,
+                            TrackProgress.tell(progress, target.id(), TrackProgress.Stage.COMPOSE, TrackProgress.State.DONE,
                                     answer.getAsJsonArray("notes").size() + (known ? " notes, cached" : " notes"));
                             return new TrackResponse(target.id(), answer);
                         } catch (IOException failed) {
-                            tell(progress, target.id(), Stage.COMPOSE, State.FAILED, String.valueOf(failed.getMessage()));
+                            TrackProgress.tell(progress, target.id(), TrackProgress.Stage.COMPOSE, TrackProgress.State.FAILED, String.valueOf(failed.getMessage()));
                             throw failed;
                         } catch (RuntimeException failed) {
-                            tell(progress, target.id(), Stage.COMPOSE, State.FAILED, String.valueOf(failed));
+                            TrackProgress.tell(progress, target.id(), TrackProgress.Stage.COMPOSE, TrackProgress.State.FAILED, String.valueOf(failed));
                             throw failed;
                         }
                     }

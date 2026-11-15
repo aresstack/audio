@@ -4,18 +4,20 @@ import com.aresstack.audio.instruments.InstrumentCatalog;
 import com.aresstack.audio.instruments.InstrumentLibrary;
 import com.aresstack.audio.instruments.InstrumentRegistry;
 import com.aresstack.audio.instruments.network.AudioProxyRoutes;
-import com.aresstack.audio.studio.keepass.AudioKeePassService;
-import com.aresstack.audio.studio.keepass.KeePassEntry;
 import com.aresstack.audio.studio.ai.KipitzChatClient;
 import com.aresstack.audio.studio.application.GemmaMusicComposer;
-import com.aresstack.audio.studio.application.StudioMusicRenderer;
+import com.aresstack.audio.studio.application.InstrumentProposalService;
 import com.aresstack.audio.studio.application.MusicTrack;
+import com.aresstack.audio.studio.application.StudioMusicRenderer;
 import com.aresstack.audio.studio.application.TrackArrangement;
 import com.aresstack.audio.studio.application.TrackArrangementStore;
-import com.aresstack.audio.studio.application.InstrumentProposalService;
+import com.aresstack.audio.studio.keepass.AudioKeePassService;
+import com.aresstack.audio.studio.keepass.KeePassEntry;
+import com.aresstack.audio.studio.progress.Progress;
+import com.aresstack.audio.studio.progress.TrackProgress;
 import com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine;
-import com.aresstack.audio.studio.settings.StudioSettingsStore;
 import com.aresstack.audio.studio.settings.AiDefaults;
+import com.aresstack.audio.studio.settings.StudioSettingsStore;
 
 import java.awt.BorderLayout;
 import java.awt.event.WindowAdapter;
@@ -794,7 +796,7 @@ public final class AudioStudioFrame extends JFrame {
         stagePanel.setStatus("Die KI schlägt eine Abmischung vor …");
         start(new Operation() {
             @Override
-            public Path execute(GemmaMusicComposer.Progress progress) throws Exception {
+            public Path execute(Progress progress) throws Exception {
                 try {
                     final com.aresstack.audio.studio.stage.SpatialScene proposed =
                             new com.aresstack.audio.studio.application.MixDirector(client, tokens)
@@ -1143,7 +1145,7 @@ public final class AudioStudioFrame extends JFrame {
         activeClient = client;
         start(new Operation() {
             @Override
-            public Path execute(GemmaMusicComposer.Progress progress) throws Exception {
+            public Path execute(Progress progress) throws Exception {
                 try {
                     boolean planned = Files.isRegularFile(output.resolve("composition-plan.json"));
                     Path arrangement = new GemmaMusicComposer(client, tokens, parallel)
@@ -1187,7 +1189,7 @@ public final class AudioStudioFrame extends JFrame {
         activeClient = client;
         start(new Operation() {
             @Override
-            public Path execute(GemmaMusicComposer.Progress progress) throws Exception {
+            public Path execute(Progress progress) throws Exception {
                 try {
                     final InstrumentProposalService.Staged staged = new InstrumentProposalService(client, tokens)
                             .proposeStaged(prompt, output, progress);
@@ -1272,7 +1274,7 @@ public final class AudioStudioFrame extends JFrame {
         }
         start(new Operation() {
             @Override
-            public Path execute(GemmaMusicComposer.Progress progress) throws Exception {
+            public Path execute(Progress progress) throws Exception {
                 return renderArrangement(arrangement, output, settings, progress);
             }
         });
@@ -1521,7 +1523,7 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     private Path renderArrangement(Path source, Path destination, RenderSettings settings,
-                                   GemmaMusicComposer.Progress progress) throws Exception {
+                                   Progress progress) throws Exception {
         return new StudioMusicRenderer(registry).render(source, destination, settings.assignments,
                 settings.programs, settings.sf2Engine,
                 settings.fluidSynthExecutable, settings.sfizzExecutable, progress);
@@ -1760,15 +1762,15 @@ public final class AudioStudioFrame extends JFrame {
         worker = new SwingWorker<Path, String>() {
             @Override
             protected Path doInBackground() throws Exception {
-                return action.execute(new GemmaMusicComposer.TrackProgress() {
+                return action.execute(new TrackProgress() {
                     @Override
                     public void update(String update) {
                         publish(update);
                     }
 
                     @Override
-                    public void track(final String trackId, final GemmaMusicComposer.Stage stage,
-                                      final GemmaMusicComposer.State state, final String detail) {
+                    public void track(final String trackId, final TrackProgress.Stage stage,
+                                      final TrackProgress.State state, final String detail) {
                         SwingUtilities.invokeLater(() -> trackWork(trackId, stage, state, detail));
                     }
                 });
@@ -2051,13 +2053,13 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     /** How each track is getting on in the stage that is running, by track id. */
-    private final Map<String, GemmaMusicComposer.State> trackStates =
-            new java.util.LinkedHashMap<String, GemmaMusicComposer.State>();
-    private GemmaMusicComposer.Stage trackStage;
+    private final Map<String, TrackProgress.State> trackStates =
+            new java.util.LinkedHashMap<String, TrackProgress.State>();
+    private TrackProgress.Stage trackStage;
     private long trackStageBegan;
 
     /** A track reports from the workers: its strip shows it, and the display counts all of them. */
-    private void trackWork(String trackId, GemmaMusicComposer.Stage stage, GemmaMusicComposer.State state,
+    private void trackWork(String trackId, TrackProgress.Stage stage, TrackProgress.State state,
                            String detail) {
         if (worker == null || worker.isDone()) {
             return; // a late word after the work was cancelled
@@ -2069,16 +2071,16 @@ public final class AudioStudioFrame extends JFrame {
             trackStageBegan = System.currentTimeMillis();
         }
         trackStates.put(trackId, state);
-        TrackLanes.Work work = state == GemmaMusicComposer.State.WAITING ? TrackLanes.Work.WAITING
-                : state == GemmaMusicComposer.State.WORKING ? TrackLanes.Work.WORKING
-                : state == GemmaMusicComposer.State.DONE ? TrackLanes.Work.DONE : TrackLanes.Work.FAILED;
-        trackTable.setWork(trackId, work, stage == GemmaMusicComposer.Stage.COMPOSE ? "KI" : "Rendern", detail);
+        TrackLanes.Work work = state == TrackProgress.State.WAITING ? TrackLanes.Work.WAITING
+                : state == TrackProgress.State.WORKING ? TrackLanes.Work.WORKING
+                : state == TrackProgress.State.DONE ? TrackLanes.Work.DONE : TrackLanes.Work.FAILED;
+        trackTable.setWork(trackId, work, stage == TrackProgress.Stage.COMPOSE ? "KI" : "Rendern", detail);
         showTrackWork();
     }
 
     private boolean tracksAtWork() {
-        for (GemmaMusicComposer.State state : trackStates.values()) {
-            if (state == GemmaMusicComposer.State.WAITING || state == GemmaMusicComposer.State.WORKING) {
+        for (TrackProgress.State state : trackStates.values()) {
+            if (state == TrackProgress.State.WAITING || state == TrackProgress.State.WORKING) {
                 return true;
             }
         }
@@ -2091,7 +2093,7 @@ public final class AudioStudioFrame extends JFrame {
         int waiting = 0;
         int done = 0;
         int failed = 0;
-        for (GemmaMusicComposer.State state : trackStates.values()) {
+        for (TrackProgress.State state : trackStates.values()) {
             switch (state) {
                 case WORKING: working++; break;
                 case WAITING: waiting++; break;
@@ -2103,7 +2105,7 @@ public final class AudioStudioFrame extends JFrame {
             return; // the next line of the log takes the display again
         }
         long seconds = (System.currentTimeMillis() - trackStageBegan) / 1000;
-        setStatus((trackStage == GemmaMusicComposer.Stage.COMPOSE ? "KI komponiert" : "Rendern") + ": "
+        setStatus((trackStage == TrackProgress.Stage.COMPOSE ? "KI komponiert" : "Rendern") + ": "
                 + working + " gleichzeitig · " + done + " von " + trackStates.size() + " fertig"
                 + (waiting > 0 ? " · " + waiting + " warten" : "") + (failed > 0 ? " · " + failed + " Fehler" : "")
                 + " · " + seconds + " s");
@@ -2321,7 +2323,7 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     private interface Operation {
-        Path execute(GemmaMusicComposer.Progress progress) throws Exception;
+        Path execute(Progress progress) throws Exception;
     }
 
     private static final class RenderSettings {

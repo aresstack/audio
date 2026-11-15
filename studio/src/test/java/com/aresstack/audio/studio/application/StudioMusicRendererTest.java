@@ -3,6 +3,7 @@ package com.aresstack.audio.studio.application;
 import com.aresstack.audio.instruments.InstrumentCatalog;
 import com.aresstack.audio.instruments.InstrumentLibrary;
 import com.aresstack.audio.instruments.InstrumentRegistry;
+import com.aresstack.audio.studio.progress.Progress;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -44,7 +45,7 @@ public final class StudioMusicRendererTest {
                 com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine.FLUIDSYNTH,
                 "intentionally-missing-fluidsynth-audio-studio-test-executable",
                 "intentionally-missing-sfizz-test-executable",
-                new GemmaMusicComposer.Progress() {
+                new Progress() {
                     @Override
                     public void update(String message) {
                         messages.add(message);

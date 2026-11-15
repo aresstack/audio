@@ -4,9 +4,10 @@ import com.aresstack.audio.instruments.InstrumentCatalog;
 import com.aresstack.audio.instruments.InstrumentLibrary;
 import com.aresstack.audio.instruments.InstrumentRegistry;
 import com.aresstack.audio.instruments.network.AudioProxyRoutes;
-import com.aresstack.audio.studio.keepass.AudioKeePassService;
 import com.aresstack.audio.studio.application.GemmaMusicComposer;
 import com.aresstack.audio.studio.application.StudioMusicRenderer;
+import com.aresstack.audio.studio.keepass.AudioKeePassService;
+import com.aresstack.audio.studio.progress.Progress;
 import java.awt.EventQueue;
 import java.awt.GraphicsEnvironment;
 import java.io.InputStream;
@@ -82,7 +83,7 @@ public final class AudioStudioMain {
             }
             Path mixed = new StudioMusicRenderer(registry).render(
                     tsv, sandbox.resolve("render"), assignments, "fluidsynth", "sfizz_render",
-                    new GemmaMusicComposer.Progress() {
+                    new Progress() {
                         @Override
                         public void update(String message) {
                             System.out.println(message);

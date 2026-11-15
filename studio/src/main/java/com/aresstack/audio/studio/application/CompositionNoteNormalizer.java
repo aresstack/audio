@@ -1,5 +1,6 @@
 package com.aresstack.audio.studio.application;
 
+import com.aresstack.audio.studio.progress.Progress;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -14,10 +15,10 @@ public final class CompositionNoteNormalizer {
     private static final double STEP = 0.25;
     private static final String[] CHORDS = {"C", "G", "Am", "F", "C", "G", "F", "G"};
 
-    private final GemmaMusicComposer.Progress progress;
+    private final Progress progress;
     private final List<String> corrections = new ArrayList<String>();
 
-    public CompositionNoteNormalizer(GemmaMusicComposer.Progress progress) {
+    public CompositionNoteNormalizer(Progress progress) {
         this.progress = progress;
         corrections.add("part\tnote\tfield\toriginal\tcorrected\treason");
     }

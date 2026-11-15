@@ -1,6 +1,7 @@
 package com.aresstack.audio.studio.application;
 
 import com.aresstack.audio.studio.ai.KipitzChatClient;
+import com.aresstack.audio.studio.progress.Progress;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -49,7 +50,7 @@ public final class GemmaMusicComposerTest {
         KipitzChatClient offline = new KipitzChatClient(
                 "http://127.0.0.1:1/v1/chat/completions", "", "google/gemma-4-31B-it", "", 8080);
         Path arrangement = new GemmaMusicComposer(offline).compose(
-                "Offline fixture", output, new GemmaMusicComposer.Progress() {
+                "Offline fixture", output, new Progress() {
                     @Override
                     public void update(String message) {
                     }
@@ -85,7 +86,7 @@ public final class GemmaMusicComposerTest {
         KipitzChatClient offline = new KipitzChatClient(
                 "http://127.0.0.1:1/v1/chat/completions", "", "google/gemma-4-31B-it", "", 8080);
         new GemmaMusicComposer(offline).compose("No network", output,
-                new GemmaMusicComposer.Progress() {
+                new Progress() {
                     @Override
                     public void update(String message) {
                     }
