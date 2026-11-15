@@ -54,6 +54,7 @@ public record ChangeSet(SortedSet<String> added, SortedSet<String> removed, Sort
         }
         boolean tempo = !before.timeMap().tempos().equals(after.timeMap().tempos());
         boolean form = !before.sections().equals(after.sections()) || !before.meta().equals(after.meta())
+                || !before.dynamics().equals(after.dynamics())
                 || !before.timeMap().meters().equals(after.timeMap().meters())
                 || !before.timeMap().keys().equals(after.timeMap().keys());
         return new ChangeSet(added, removed, changed, tempo, form, all);
@@ -81,8 +82,9 @@ public record ChangeSet(SortedSet<String> added, SortedSet<String> removed, Sort
     private static String sound(Composition piece, Part part) {
         List<String> notes = new ArrayList<>();
         for (Composition.PlacedNote placed : piece.notesOf(part.id())) {
-            notes.add(placed.tick() + ":" + placed.note().length() + ":" + placed.note().pitch() + ":"
-                    + placed.note().velocity());
+            // As the note sounds: a dynamic mark or an articulation changes the stem as a new velocity does.
+            notes.add(placed.tick() + ":" + piece.playedLength(placed) + ":" + placed.note().pitch() + ":"
+                    + piece.playedVelocity(placed));
         }
         Collections.sort(notes);
         return Objects.toString(part.role()) + "|" + part.instrument() + "|" + part.program() + "|" + part.libraryId()

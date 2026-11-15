@@ -122,7 +122,7 @@ public final class NoteEdits {
             for (Found note : found) {
                 Note n = note.note();
                 operations.add(new EditOp.ChangeNote(note.clip().id(),
-                        new Note(n.id(), n.tick() + by, n.length(), n.pitch() + up, n.velocity(), n.voiceId())));
+                        new Note(n.id(), n.tick() + by, n.length(), n.pitch() + up, n.velocity(), n.voiceId(), n.articulation())));
             }
         }
         return edit(describe(found.size(), "verschoben"), operations, found, refs(found));
@@ -141,7 +141,7 @@ public final class NoteEdits {
             long length = clamp(n.length() + ticks, Math.min(least, n.length()), note.clip().lengthTicks() - n.tick());
             if (length != n.length()) {
                 operations.add(new EditOp.ChangeNote(note.clip().id(),
-                        new Note(n.id(), n.tick(), length, n.pitch(), n.velocity(), n.voiceId())));
+                        new Note(n.id(), n.tick(), length, n.pitch(), n.velocity(), n.voiceId(), n.articulation())));
             }
         }
         return edit(describe(found.size(), ticks < 0 ? "verkürzt" : "verlängert"), operations, found, refs(found));
@@ -212,7 +212,7 @@ public final class NoteEdits {
                 long length = Math.min(n.length(), note.clip().lengthTicks() - snapped);
                 if (snapped != n.tick() || length != n.length()) {
                     operations.add(new EditOp.ChangeNote(note.clip().id(),
-                            new Note(n.id(), snapped, length, n.pitch(), n.velocity(), n.voiceId())));
+                            new Note(n.id(), snapped, length, n.pitch(), n.velocity(), n.voiceId(), n.articulation())));
                 }
             }
         }

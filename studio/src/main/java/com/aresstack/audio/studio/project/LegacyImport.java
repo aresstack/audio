@@ -1,5 +1,6 @@
 package com.aresstack.audio.studio.project;
 
+import com.aresstack.audio.composition.Articulation;
 import com.aresstack.audio.composition.Composition;
 import com.aresstack.audio.composition.CompositionValidator;
 import com.aresstack.audio.composition.Ids;
@@ -191,11 +192,18 @@ public final class LegacyImport {
         parts = withLegacyChannels(parts, lines);
 
         Section whole = new Section(previousSectionId(), "A", null, 0, length, null, chords(plan), null);
-        Composition composition = new Composition(meta(plan, song), time, List.of(whole), parts, tracks, List.of());
+        // Since the dynamics work package the plan may name how tempo and loudness run through the piece.
+        Set<String> partIds = new LinkedHashSet<>();
+        for (Part part : parts) {
+            partIds.add(part.id());
+        }
+        PlanShape.Shape shape = PlanShape.read(plan, time, partIds, PlanShape.MIN_BPM, PlanShape.MAX_BPM, length, this::warn);
+        Composition composition = new Composition(meta(plan, song), shape.timeMap(), List.of(whole), parts, tracks,
+                List.of(), shape.dynamics());
         for (CompositionValidator.Violation violation : CompositionValidator.validate(composition)) {
             warn("Modell: " + violation);
         }
-        MixScene mix = mix(stageRoles, time);
+        MixScene mix = mix(stageRoles, composition.timeMap());
         return new Result(composition, mix, stems(composition), warnings, namedSoundBanks);
     }
 
@@ -294,8 +302,13 @@ public final class LegacyImport {
             ArrangementFile.Note line = written.get(i);
             Deque<String> reuse = oldNotes.get(key(line.tick(), line.length(), line.pitch(), line.velocity()));
             String noteId = reuse != null && !reuse.isEmpty() ? reuse.poll() : fresh();
+            Articulation articulation = Articulation.parse(line.articulation());
+            if (articulation == null && line.articulation() != null) {
+                warn("arrangement.tsv, Zeile " + line.line() + ": unbekannte Artikulation " + line.articulation()
+                        + " übergangen.");
+            }
             notes.add(new Note(noteId, line.tick(), line.length(), line.pitch(), line.velocity(),
-                    part.voices().get(voiceOf[i]).id()));
+                    part.voices().get(voiceOf[i]).id(), articulation));
         }
         String clipId = oldClip != null ? oldClip.id() : fresh();
         return new Track(id, before == null ? id : before.name(), Track.Kind.MIDI, part.id(),

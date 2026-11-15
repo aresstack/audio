@@ -3,6 +3,7 @@ package com.aresstack.audio.composition.edit;
 import com.aresstack.audio.composition.Asset;
 import com.aresstack.audio.composition.AudioClip;
 import com.aresstack.audio.composition.Clip;
+import com.aresstack.audio.composition.Dynamics;
 import com.aresstack.audio.composition.Meta;
 import com.aresstack.audio.composition.Note;
 import com.aresstack.audio.composition.Part;
@@ -21,7 +22,7 @@ public sealed interface EditOp {
     enum Kind {
         ADD_PART, SET_PART, ADD_TRACK, ADD_CLIP, REMOVE_CLIP, MOVE_CLIP, RESIZE_CLIP, SPLIT_CLIP, SET_CLIP_PART,
         ADD_NOTES, REMOVE_NOTES, CHANGE_NOTE, SET_SECTIONS, SET_TIME_MAP, SET_META, SHIFT_TIME, ADD_ASSET,
-        SET_AUDIO_CLIP
+        SET_AUDIO_CLIP, SET_DYNAMICS
     }
 
     Kind kind();
@@ -244,6 +245,18 @@ public sealed interface EditOp {
         @Override
         public Kind kind() {
             return Kind.SET_TIME_MAP;
+        }
+    }
+
+    /** Replaces the dynamic marks, hairpins and the dynamic scale of the piece. */
+    record SetDynamics(Dynamics dynamics) implements EditOp {
+        public SetDynamics {
+            require(dynamics, "dynamics");
+        }
+
+        @Override
+        public Kind kind() {
+            return Kind.SET_DYNAMICS;
         }
     }
 

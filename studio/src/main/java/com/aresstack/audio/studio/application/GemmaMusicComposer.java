@@ -1,6 +1,10 @@
 package com.aresstack.audio.studio.application;
 
+import com.aresstack.audio.composition.Articulation;
+import com.aresstack.audio.composition.Dynamics;
 import com.aresstack.audio.composition.Key;
+import com.aresstack.audio.composition.TimeMap;
+import com.aresstack.audio.studio.project.PlanShape;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.ai.ChatModel;
@@ -60,6 +64,23 @@ public final class GemmaMusicComposer {
     private final int maxTokens;
     private final int maxParallel;
     private int sectionBars = CompositionSpec.SECTION_BARS;
+    /** Whether the plan names tempo changes, dynamics and hairpins, and the notes articulations. */
+    private boolean shapePerformance = true;
+
+    /** The velocity a plain note is written with when the player applies the dynamics: that of the reference level. */
+    static final int ACCENT_REFERENCE = Dynamics.Scale.STANDARD.velocity(Dynamics.Scale.STANDARD.reference());
+    /** The articulations a note may name, as the AI is to write them. */
+    static final String ARTICULATIONS = articulationWords();
+
+    /**
+     * Whether the planning model plans the course of tempo (accelerando, ritardando, sudden
+     * changes) and of loudness (dynamic marks, crescendo, decrescendo), and the notes may name
+     * articulations. On by default; a piece of the legacy spec is always asked for as before.
+     */
+    public GemmaMusicComposer shapePerformance(boolean shape) {
+        this.shapePerformance = shape;
+        return this;
+    }
 
     /**
      * How many bars one request for notes covers; a piece of up to twice as many bars is asked
@@ -192,6 +213,7 @@ public final class GemmaMusicComposer {
                     + spec.key().name() + ", for example \"" + exampleChords(spec.key()) + "\"; give the piece a "
                     + "form with contrasting sections and a cadence at the end), arrangementNotes (how the "
                     + "instruments share the work, section by section)."
+                    + (shapePerformance ? performancePlan(tracks, spec) : "")
                     + "\nKeep tempoBpm, key, timeSignature and bars exactly as given. No notes yet. Return only JSON.";
         }
         final SketchProgress watched = progress instanceof SketchProgress ? (SketchProgress) progress : null;
@@ -207,6 +229,107 @@ public final class GemmaMusicComposer {
             watched.planned(chords(plan, spec));
         }
         return plan;
+    }
+
+    /** What the plan is to say about tempo and loudness, in the words of {@link PlanShape}. */
+    static String performancePlan(TrackArrangement tracks, CompositionSpec spec) {
+        StringBuilder ids = new StringBuilder();
+        for (MusicTrack track : tracks.tracks()) {
+            ids.append(ids.length() == 0 ? "" : ", ").append(track.id());
+        }
+        StringBuilder levels = new StringBuilder();
+        for (Dynamics.Level level : Dynamics.Level.values()) {
+            levels.append(levels.length() == 0 ? "" : " ").append(level.symbol());
+        }
+        return "\nPlan the performance as a score marks it, as the music asks for it:"
+                + " tempoChanges (an array, may be empty, of points {bar, bpm, glide}: bar counts from 1; from that"
+                + " bar the tempo is bpm; glide=true makes the tempo change evenly from this point to the next"
+                + " point, an accelerando or ritardando, glide=false makes it jump; bar 1 keeps tempoBpm; keep"
+                + " bpm between " + PlanShape.MIN_BPM + " and " + PlanShape.MAX_BPM + "),"
+                + " dynamics (an array of marks {bar, beat, level, part}: beat is optional, quarter notes from 1;"
+                + " level is one of " + levels + "; part is optional, one of " + ids + ", omitted for all"
+                + " instruments; begin with a mark in bar 1),"
+                + " hairpins (an array, may be empty, of crescendos and decrescendos {fromBar, toBar, to, part}:"
+                + " the level changes evenly from the start of fromBar to the start of toBar and ends on level to;"
+                + " part as for dynamics; hairpins of the same part do not overlap).";
+    }
+
+    /**
+     * The course of tempo and loudness in the bars of one request, for one track, in words; or
+     * {@code null} if the plan names none.
+     */
+    static String performance(JsonObject plan, CompositionSpec spec, String trackId, int[] section) {
+        if (plan == null || !(plan.has("tempoChanges") || plan.has("dynamics") || plan.has("hairpins"))) {
+            return null;
+        }
+        TimeMap time = spec.timeMap();
+        PlanShape.Shape shape = PlanShape.read(plan, time, java.util.Set.of(trackId), PlanShape.MIN_BPM,
+                PlanShape.MAX_BPM, spec.ticks(), warning -> { });
+        long from = time.tickOfBar(section[0]);
+        long to = time.tickOfBar(section[0] + section[1]);
+        List<String> said = new ArrayList<String>();
+        Dynamics dynamics = shape.dynamics();
+        Dynamics.Level opening = null;
+        for (Dynamics.Mark mark : dynamics.marks()) {
+            if (mark.holdsFor(trackId) && mark.tick() <= from) {
+                opening = mark.level();
+            }
+        }
+        if (opening != null) {
+            said.add("starts " + opening.symbol());
+        }
+        for (Dynamics.Mark mark : dynamics.marks()) {
+            if (mark.holdsFor(trackId) && mark.tick() > from && mark.tick() < to) {
+                said.add(at(time, mark.tick()) + " " + mark.level().symbol());
+            }
+        }
+        for (Dynamics.Hairpin pin : dynamics.hairpins()) {
+            if (pin.holdsFor(trackId) && pin.startTick() < to && pin.endTick() > from) {
+                said.add(at(time, pin.startTick()) + " to " + at(time, pin.endTick()) + " "
+                        + (dynamics.swells(pin) ? "crescendo" : "decrescendo") + " to " + pin.target().symbol());
+            }
+        }
+        List<TimeMap.Tempo> tempos = shape.timeMap().tempos();
+        for (int i = 0; i < tempos.size(); i++) {
+            TimeMap.Tempo tempo = tempos.get(i);
+            boolean inside = tempo.tick() >= from && tempo.tick() < to && tempo.tick() > 0;
+            if (tempo.glide() && tempo.tick() < to && tempos.get(i + 1).tick() > from) {
+                TimeMap.Tempo next = tempos.get(i + 1);
+                said.add(at(time, tempo.tick()) + " to " + at(time, next.tick()) + " "
+                        + (next.bpm() > tempo.bpm() ? "accelerando" : "ritardando") + " to " + number(next.bpm()) + " BPM");
+            } else if (inside) {
+                said.add(at(time, tempo.tick()) + " " + number(tempo.bpm()) + " BPM");
+            }
+        }
+        return said.isEmpty() ? null : String.join(", ", said);
+    }
+
+    private static String at(TimeMap time, long tick) {
+        int bar = time.barOf(tick);
+        long into = tick - time.tickOfBar(bar);
+        return "bar " + (bar + 1) + (into == 0 ? "" : " beat " + beats(1 + into / (double) TimeMap.PPQ));
+    }
+
+    private static String number(double value) {
+        return value == Math.rint(value) ? String.valueOf((long) value) : String.valueOf(value);
+    }
+
+    /** The articulation a note of an answer names, or {@code null}. */
+    private static Articulation articulationOf(JsonObject note) {
+        try {
+            return note.has("articulation") && !note.get("articulation").isJsonNull()
+                    ? Articulation.parse(note.get("articulation").getAsString()) : null;
+        } catch (RuntimeException odd) {
+            return null;
+        }
+    }
+
+    private static String articulationWords() {
+        StringBuilder words = new StringBuilder();
+        for (Articulation articulation : Articulation.values()) {
+            words.append(words.length() == 0 ? "" : ", ").append(articulation.token());
+        }
+        return words.toString();
     }
 
     /** Chord symbols on the first, fourth, fifth and sixth degree of a key, to show the format. */
@@ -383,6 +506,13 @@ public final class GemmaMusicComposer {
             text.append("A bar has ").append(beats(spec.quartersPerBar())).append(" quarter-note beats. ");
         }
         text.append("Arrangement: ").append(plan.has("arrangementNotes") ? plan.get("arrangementNotes").getAsString() : "");
+        String performance = performance(plan, spec, track.id(), section);
+        if (performance != null) {
+            text.append("\nPerformance in these bars (the player applies it): ").append(performance)
+                    .append(". Write velocity as the accent of a note within the marked level: about ")
+                    .append(ACCENT_REFERENCE).append(" for a plain note, more for a stressed one; do not fade or swell "
+                            + "by velocity yourself.");
+        }
         if (context != null) {
             text.append("\nThe previous bars of this track ended like this (beat counted from the start of "
                     + "these bars, so negative): ").append(context).append(". Continue from there.");
@@ -399,6 +529,8 @@ public final class GemmaMusicComposer {
                 .append(whole ? "Use absolute song beats" : "Count beats from the start of these bars")
                 .append(" and explicitly list the notes. Compose this track as part of the shared arrangement; "
                         + "no Markdown.")
+                .append(performance != null ? " A note may also have articulation, one of " + ARTICULATIONS
+                        + ", where the music asks for it (short notes, stresses, bound lines)." : "")
                 .append(voiceRule(track, false));
         return text.toString();
     }
@@ -551,6 +683,7 @@ public final class GemmaMusicComposer {
             List<String> lines = new ArrayList<String>();
             List<long[]> written = new ArrayList<long[]>();
             List<String> named = new ArrayList<String>();
+            List<Articulation> articulations = new ArrayList<Articulation>();
             int playable = 0;
             int index = 0;
             for (int s = 0; s < parts.size() && s < sections.size(); s++) {
@@ -573,6 +706,7 @@ public final class GemmaMusicComposer {
                     lines.add("note\t" + track.id() + "\t" + note.startTick()
                             + "\t" + note.durationTicks() + "\t" + note.pitch()
                             + "\t" + note.velocity());
+                    articulations.add(articulationOf(element.getAsJsonObject()));
                     written.add(new long[]{note.startTick(), note.durationTicks(), note.pitch()});
                     named.add(voiceOf(element.getAsJsonObject()));
                     end = Math.max(end, note.startTick() + note.durationTicks());
@@ -588,10 +722,17 @@ public final class GemmaMusicComposer {
             }
             String[] answered = named.toArray(new String[0]);
             boolean struck = MusicTrack.DRUMS.equals(track.role());
-            if (!struck && Voicing.named(answered, grand)) {
+            boolean voiced = !struck && Voicing.named(answered, grand);
+            if (voiced) {
                 String[] voices = Voicing.assign(written, answered, false, grand);
                 for (int i = 0; i < lines.size(); i++) {
                     lines.set(i, lines.get(i) + "\t" + voices[i]);
+                }
+            }
+            // The articulation in the eighth column, after a blank voice column where none is named.
+            for (int i = 0; i < lines.size(); i++) {
+                if (articulations.get(i) != null) {
+                    lines.set(i, lines.get(i) + (voiced ? "" : "\t") + "\t" + articulations.get(i).token());
                 }
             }
             body.addAll(head);

@@ -32,6 +32,7 @@ public final class CompositionValidator {
         unique(found, "track", composition.tracks().stream().map(Track::id).toList());
         unique(found, "asset", composition.assets().stream().map(Asset::id).toList());
         sections(found, composition.sections());
+        dynamics(found, composition);
         Set<String> voices = new HashSet<>();
         for (Part part : composition.parts()) {
             Set<String> own = new HashSet<>();
@@ -120,6 +121,29 @@ public final class CompositionValidator {
                         : "leaves a gap after the section before"));
             }
             expected = section.endTick();
+        }
+    }
+
+    /** Every mark and hairpin of a part names a part of the piece; a part's hairpins do not overlap. */
+    private static void dynamics(List<Violation> found, Composition composition) {
+        Dynamics dynamics = composition.dynamics();
+        for (Dynamics.Mark mark : dynamics.marks()) {
+            if (mark.partId() != null && composition.part(mark.partId()) == null) {
+                found.add(new Violation(mark.partId(), "a dynamic mark at tick " + mark.tick() + " names an unknown part"));
+            }
+        }
+        for (int i = 0; i < dynamics.hairpins().size(); i++) {
+            Dynamics.Hairpin pin = dynamics.hairpins().get(i);
+            if (pin.partId() != null && composition.part(pin.partId()) == null) {
+                found.add(new Violation(pin.partId(), "a hairpin at tick " + pin.startTick() + " names an unknown part"));
+            }
+            for (int j = i + 1; j < dynamics.hairpins().size(); j++) {
+                Dynamics.Hairpin other = dynamics.hairpins().get(j);
+                if (java.util.Objects.equals(pin.partId(), other.partId()) && other.startTick() < pin.endTick()) {
+                    found.add(new Violation(pin.partId() == null ? "dynamics" : pin.partId(),
+                            "hairpins overlap at tick " + other.startTick()));
+                }
+            }
         }
     }
 

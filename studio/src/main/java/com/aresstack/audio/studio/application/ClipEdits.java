@@ -140,7 +140,8 @@ public final class ClipEdits {
         String newId = fresh(ids, used);
         List<Note> notes = new ArrayList<>();
         for (Note note : midi.notes()) {
-            notes.add(new Note(fresh(ids, used), note.tick(), note.length(), note.pitch(), note.velocity(), note.voiceId()));
+            notes.add(new Note(fresh(ids, used), note.tick(), note.length(), note.pitch(), note.velocity(), note.voiceId(),
+                    note.articulation()));
         }
         // The copy is played by the part that plays the original, also on a lane whose default part is another.
         String part = found.get().track().partOf(midi);
@@ -262,7 +263,7 @@ public final class ClipEdits {
         for (Note note : midi.notes()) {
             int index = old == null ? 0 : Math.max(0, indexOfVoice(old, note.voiceId()));
             operations.add(new EditOp.ChangeNote(clipId, new Note(note.id(), note.tick(), note.length(), note.pitch(),
-                    note.velocity(), voices.get(Math.min(index, voices.size() - 1)).id())));
+                    note.velocity(), voices.get(Math.min(index, voices.size() - 1)).id(), note.articulation())));
         }
         return edit("Clip spielt jetzt " + instrument.name(), operations, Set.of(track.id()), clipId);
     }
@@ -301,7 +302,7 @@ public final class ClipEdits {
                 continue;
             }
             operations.add(new EditOp.ChangeNote(clip.id(), new Note(note.id(), note.tick(), note.length(), note.pitch(),
-                    note.velocity(), to.firstVoice().id())));
+                    note.velocity(), to.firstVoice().id(), note.articulation())));
         }
         return operations;
     }

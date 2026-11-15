@@ -136,11 +136,16 @@ public final class ContextBuilder {
         line(text, "brief", meta.brief());
         line(text, "remarks", meta.remarks());
         text.append("tempo: ");
-        join(text, time.tempos(), t -> "bar " + (time.barOf(t.tick()) + 1) + " " + number(t.bpm()) + " BPM");
+        join(text, time.tempos(), t -> "bar " + (time.barOf(t.tick()) + 1) + " " + number(t.bpm()) + " BPM"
+                + (t.glide() ? " gliding to the next tempo" : ""));
         text.append("\nmeter: ");
         join(text, time.meters(), m -> "bar " + (time.barOf(m.tick()) + 1) + " " + m.numerator() + "/" + m.denominator());
         text.append("\nkey: ");
         join(text, time.keys(), k -> "bar " + (time.barOf(k.tick()) + 1) + " " + key(k.key()));
+        // Only a piece with dynamics says them, so that the context of every other piece stays as it was.
+        if (!piece.dynamics().isEmpty()) {
+            text.append("\ndynamics: ").append(dynamicsLine(piece));
+        }
         text.append("\nlength: ").append(bars).append(" bars\n");
         text.append("time: bar counts from 1 at the start of the piece; beat is the offset within the bar in "
                 + "quarter notes, from 0; dur is in quarter notes; pitch is the MIDI number with its name "
@@ -260,9 +265,39 @@ public final class ContextBuilder {
                 text.append(n.tick() < from ? "  held " : heldIn ? "  held-into-region " : "  ").append(bar + 1).append(' ')
                         .append(quarters(n.tick() - barStart)).append(' ').append(quarters(n.note().length())).append(' ')
                         .append(part.drums() ? drum(n.note().pitch()) : pitch(n.note().pitch())).append('/')
-                        .append(n.note().pitch()).append(' ').append(n.note().velocity()).append('\n');
+                        .append(n.note().pitch()).append(' ').append(n.note().velocity())
+                        .append(n.note().articulation() == null ? "" : " " + n.note().articulation().token()).append('\n');
             }
         }
+    }
+
+    /**
+     * The dynamic marks and hairpins of a piece in words, for example
+     * {@code "bar 1 p; bars 5-8 crescendo to f (bass); bar 9 ff"}.
+     */
+    public static String dynamicsLine(Composition piece) {
+        TimeMap time = piece.timeMap();
+        com.aresstack.audio.composition.Dynamics dynamics = piece.dynamics();
+        java.util.TreeMap<Long, java.util.List<String>> said = new java.util.TreeMap<>();
+        for (com.aresstack.audio.composition.Dynamics.Mark mark : dynamics.marks()) {
+            said.computeIfAbsent(mark.tick(), k -> new java.util.ArrayList<>()).add(at(time, mark.tick()) + " "
+                    + mark.level().symbol() + (mark.partId() == null ? "" : " (" + mark.partId() + ")"));
+        }
+        for (com.aresstack.audio.composition.Dynamics.Hairpin pin : dynamics.hairpins()) {
+            said.computeIfAbsent(pin.startTick(), k -> new java.util.ArrayList<>()).add(at(time, pin.startTick())
+                    + " to " + at(time, pin.endTick()) + " " + (dynamics.swells(pin) ? "crescendo" : "decrescendo")
+                    + " to " + pin.target().symbol() + (pin.partId() == null ? "" : " (" + pin.partId() + ")"));
+        }
+        java.util.List<String> all = new java.util.ArrayList<>();
+        said.values().forEach(all::addAll);
+        return String.join("; ", all);
+    }
+
+    /** {@code "bar 5"} at the start of a bar, else {@code "bar 5 beat 2.5"} (beats from 0 as in the notes). */
+    private static String at(TimeMap time, long tick) {
+        int bar = time.barOf(tick);
+        long into = tick - time.tickOfBar(bar);
+        return "bar " + (bar + 1) + (into == 0 ? "" : " beat " + quarters(into));
     }
 
     /** A MIDI pitch by name, 60 = C4, sharps only. */

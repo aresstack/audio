@@ -38,7 +38,7 @@ public final class MidiExport {
             TimeMap time = composition.timeMap();
             Sequence sequence = new Sequence(Sequence.PPQ, TimeMap.PPQ);
             Track first = sequence.createTrack();
-            for (TimeMap.Tempo tempo : time.tempos()) {
+            for (TimeMap.Tempo tempo : time.playedTempos()) {
                 int microseconds = (int) (60000000 / tempo.bpm());
                 meta(first, 0x51, new byte[]{(byte) (microseconds >>> 16), (byte) (microseconds >>> 8),
                         (byte) microseconds}, tempo.tick());
@@ -68,9 +68,10 @@ public final class MidiExport {
                     midi(track, ShortMessage.PROGRAM_CHANGE, channel, part.program(), 0, 0);
                 }
                 for (Composition.PlacedNote placed : composition.notesOf(part.id())) {
-                    midi(track, ShortMessage.NOTE_ON, channel, placed.note().pitch(), placed.note().velocity(),
+                    midi(track, ShortMessage.NOTE_ON, channel, placed.note().pitch(), composition.playedVelocity(placed),
                             placed.tick());
-                    midi(track, ShortMessage.NOTE_OFF, channel, placed.note().pitch(), 0, placed.endTick());
+                    midi(track, ShortMessage.NOTE_OFF, channel, placed.note().pitch(), 0,
+                        composition.playedEnd(placed));
                 }
             }
             ByteArrayOutputStream out = new ByteArrayOutputStream();

@@ -174,6 +174,10 @@ public final class ProjectSession {
      * the model, and only then may a new version of it be taken over without losing anything.
      */
     public boolean withinTsv() {
+        return withinTsv(composition);
+    }
+
+    private static boolean withinTsv(Composition composition) {
         try {
             TsvExport.lines(composition);
         } catch (TsvExport.NotExpressible beyond) {
@@ -191,6 +195,18 @@ public final class ProjectSession {
             }
         }
         return composition.assets().isEmpty() && composition.parts().size() == composition.tracks().size();
+    }
+
+    /**
+     * Whether a new version of the old files may be taken over without losing anything: the
+     * model says only what {@code arrangement.tsv} can, apart from the changes of tempo and the
+     * dynamics, which {@link #keepingModel} keeps (or takes from a new plan).
+     */
+    private static boolean takesOldFiles(Composition composition) {
+        TimeMap time = composition.timeMap();
+        TimeMap steady = new TimeMap(List.of(new TimeMap.Tempo(0, time.tempos().get(0).bpm())), time.meters(),
+                time.keys());
+        return withinTsv(composition.withTimeMap(steady).withDynamics(com.aresstack.audio.composition.Dynamics.NONE));
     }
 
     /**
@@ -213,7 +229,7 @@ public final class ProjectSession {
         if (!piece && !stage) {
             return false;
         }
-        if (piece && !withinTsv()) {
+        if (piece && !takesOldFiles(composition)) {
             throw new IOException("Das Werk enthält mehr, als arrangement.tsv ausdrücken kann (Tempo- oder"
                     + " Taktwechsel, mehrere Clips oder Instrumente je Bahn); die geänderte Datei wird nicht"
                     + " übernommen, damit nichts verloren geht: " + folder);
@@ -223,7 +239,9 @@ public final class ProjectSession {
             return false;
         }
         LegacyImport.Result result = current.get();
-        Composition merged = piece ? keepingModel(result.composition(), composition, result.namedSoundBanks()) : composition;
+        boolean replanned = changed(before, now, List.of(ProjectFolder.PLAN));
+        Composition merged = piece ? keepingModel(result.composition(), composition, result.namedSoundBanks(), replanned)
+                : composition;
         MixScene mixed = keepingMix(result.mix(), mix, merged, stage);
         boolean changed = !merged.equals(composition) || !Objects.equals(mixed, mix);
         if (changed) {
@@ -737,7 +755,8 @@ public final class ProjectSession {
      * value; the sections (the form of the piece) stay, and only music beyond their end gets a
      * section of its own; the time map stays where the file names the same tempo.
      */
-    private static Composition keepingModel(Composition imported, Composition model, Set<String> namedSoundBanks) {
+    private static Composition keepingModel(Composition imported, Composition model, Set<String> namedSoundBanks,
+                                            boolean replanned) {
         List<Part> parts = new ArrayList<>();
         List<Track> tracks = new ArrayList<>();
         for (Part part : imported.parts()) {
@@ -759,11 +778,22 @@ public final class ProjectSession {
         Meta meta = new Meta(or(a.title(), b.title()), or(a.genre(), b.genre()), or(a.mood(), b.mood()),
                 or(a.brief(), b.brief()), or(a.plannedFrom(), b.plannedFrom()), or(a.remarks(), b.remarks()));
         List<Section> sections = keepingSections(imported, model);
-        // The model's own time map stays unless the file says another tempo, meter or key.
-        TimeMap time = imported.timeMap().tempoAt(0) == model.timeMap().tempoAt(0)
+        // The model's own time map stays unless the file says another tempo, meter or key, or a
+        // new plan names its own changes of tempo.
+        boolean planTempos = replanned && imported.timeMap().tempos().size() > 1;
+        TimeMap time = !planTempos && imported.timeMap().tempos().get(0).bpm() == model.timeMap().tempos().get(0).bpm()
                 && imported.timeMap().meterAt(0).equals(model.timeMap().meterAt(0))
                 && imported.timeMap().keyAt(0).equals(model.timeMap().keyAt(0)) ? model.timeMap() : imported.timeMap();
-        return new Composition(meta, time, sections, parts, tracks, model.assets());
+        // The same for dynamics: the model's stay, unless a new plan names its own. Marks of a part
+        // that is gone go with it.
+        com.aresstack.audio.composition.Dynamics dynamics = replanned && !imported.dynamics().isEmpty()
+                ? imported.dynamics() : model.dynamics();
+        for (Part gone : model.parts()) {
+            if (imported.part(gone.id()) == null) {
+                dynamics = dynamics.withoutPart(gone.id());
+            }
+        }
+        return new Composition(meta, time, sections, parts, tracks, model.assets(), dynamics);
     }
 
     /**

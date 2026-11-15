@@ -2,8 +2,10 @@ package com.aresstack.audio.studio.project;
 
 import com.aresstack.audio.composition.AudioClip;
 import com.aresstack.audio.composition.Asset;
+import com.aresstack.audio.composition.Articulation;
 import com.aresstack.audio.composition.Clip;
 import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.Dynamics;
 import com.aresstack.audio.composition.Key;
 import com.aresstack.audio.composition.Meta;
 import com.aresstack.audio.composition.MidiClip;
@@ -32,7 +34,15 @@ import java.util.function.Function;
 public final class CompositionJson {
     public static final String FILE_NAME = "composition.json";
     public static final String FORMAT = "aresstack-composition";
-    public static final int VERSION = 1;
+    /** The newest version this studio reads and writes. */
+    public static final int VERSION = 2;
+    /**
+     * The version of a file that says nothing beyond the first model: it is still written so,
+     * so that an older studio keeps reading such pieces. Version 2 adds gliding tempos, dynamic
+     * marks and hairpins, and articulations of notes; only a piece that has one of them is
+     * written as version 2, which an older studio refuses instead of losing them silently.
+     */
+    public static final int FIRST_VERSION = 1;
 
     private CompositionJson() {
     }
@@ -49,7 +59,7 @@ public final class CompositionJson {
     public static JsonObject write(Composition composition) {
         JsonObject root = new JsonObject();
         root.addProperty("format", FORMAT);
-        root.addProperty("version", VERSION);
+        root.addProperty("version", beyondFirst(composition) ? VERSION : FIRST_VERSION);
         Meta meta = composition.meta();
         JsonObject m = new JsonObject();
         put(m, "title", meta.title());
@@ -70,7 +80,105 @@ public final class CompositionJson {
             a.addProperty("path", asset.path());
             return a;
         }));
+        if (!composition.dynamics().equals(Dynamics.NONE)) {
+            root.add("dynamics", dynamics(composition.dynamics()));
+        }
         return root;
+    }
+
+    /** Whether the piece says something only version 2 can. */
+    static boolean beyondFirst(Composition composition) {
+        if (!composition.dynamics().equals(Dynamics.NONE)) {
+            return true;
+        }
+        for (TimeMap.Tempo tempo : composition.timeMap().tempos()) {
+            if (tempo.glide()) {
+                return true;
+            }
+        }
+        for (Track track : composition.tracks()) {
+            for (Clip clip : track.clips()) {
+                if (clip instanceof MidiClip midi) {
+                    for (Note note : midi.notes()) {
+                        if (note.articulation() != null) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static JsonObject dynamics(Dynamics dynamics) {
+        JsonObject d = new JsonObject();
+        d.add("marks", array(dynamics.marks(), mark -> {
+            JsonObject e = new JsonObject();
+            e.addProperty("tick", mark.tick());
+            e.addProperty("level", mark.level().symbol());
+            put(e, "part", mark.partId());
+            return e;
+        }));
+        d.add("hairpins", array(dynamics.hairpins(), pin -> {
+            JsonObject e = new JsonObject();
+            e.addProperty("start", pin.startTick());
+            e.addProperty("end", pin.endTick());
+            e.addProperty("target", pin.target().symbol());
+            put(e, "part", pin.partId());
+            return e;
+        }));
+        JsonObject scale = new JsonObject();
+        for (Dynamics.Level level : Dynamics.Level.values()) {
+            scale.addProperty(level.symbol(), dynamics.scale().velocity(level));
+        }
+        d.add("scale", scale);
+        d.addProperty("reference", dynamics.scale().reference().symbol());
+        JsonObject articulations = new JsonObject();
+        for (Articulation articulation : Articulation.values()) {
+            JsonObject a = new JsonObject();
+            a.addProperty("length", dynamics.articulations().length(articulation));
+            a.addProperty("velocity", dynamics.articulations().velocity(articulation));
+            articulations.add(articulation.token(), a);
+        }
+        d.add("articulations", articulations);
+        return d;
+    }
+
+    private static Dynamics dynamics(JsonObject d) {
+        if (d == null) {
+            return Dynamics.NONE;
+        }
+        List<Dynamics.Mark> marks = list(d, "marks", e -> new Dynamics.Mark(e.get("tick").getAsLong(),
+                Dynamics.Level.parse(text(e, "level")), text(e, "part")));
+        List<Dynamics.Hairpin> hairpins = list(d, "hairpins", e -> new Dynamics.Hairpin(e.get("start").getAsLong(),
+                e.get("end").getAsLong(), Dynamics.Level.parse(text(e, "target")), text(e, "part")));
+        Dynamics.Scale scale = Dynamics.Scale.STANDARD;
+        if (d.has("scale")) {
+            java.util.EnumMap<Dynamics.Level, Integer> velocities = new java.util.EnumMap<>(Dynamics.Level.class);
+            JsonObject s = d.getAsJsonObject("scale");
+            for (Dynamics.Level level : Dynamics.Level.values()) {
+                velocities.put(level, s.has(level.symbol()) ? s.get(level.symbol()).getAsInt()
+                        : Dynamics.Scale.STANDARD.velocity(level));
+            }
+            scale = new Dynamics.Scale(velocities, d.has("reference") ? Dynamics.Level.parse(text(d, "reference"))
+                    : Dynamics.Scale.STANDARD.reference());
+        }
+        Dynamics.Articulations articulations = Dynamics.Articulations.STANDARD;
+        if (d.has("articulations")) {
+            JsonObject a = d.getAsJsonObject("articulations");
+            for (Articulation articulation : Articulation.values()) {
+                if (a.has(articulation.token())) {
+                    JsonObject factors = a.getAsJsonObject(articulation.token());
+                    if (factors.has("length")) {
+                        articulations = articulations.withLength(articulation, factors.get("length").getAsDouble());
+                    }
+                    if (factors.has("velocity")) {
+                        articulations = articulations.withVelocity(articulation, factors.get("velocity").getAsDouble());
+                    }
+                }
+            }
+        }
+        return new Dynamics(marks, hairpins, scale, articulations);
     }
 
     public static Composition read(JsonObject root) throws IOException {
@@ -91,7 +199,8 @@ public final class CompositionJson {
             List<Track> tracks = list(root, "tracks", CompositionJson::track);
             List<Asset> assets = list(root, "assets",
                     a -> new Asset(text(a, "id"), text(a, "name"), text(a, "path")));
-            return new Composition(meta, time(root.getAsJsonObject("timeMap")), sections, parts, tracks, assets);
+            return new Composition(meta, time(root.getAsJsonObject("timeMap")), sections, parts, tracks, assets,
+                    dynamics(root.getAsJsonObject("dynamics")));
         } catch (RuntimeException invalid) {
             throw new IOException("The composition cannot be read: " + invalid.getMessage(), invalid);
         }
@@ -104,6 +213,9 @@ public final class CompositionJson {
             JsonObject e = new JsonObject();
             e.addProperty("tick", tempo.tick());
             e.addProperty("bpm", tempo.bpm());
+            if (tempo.glide()) {
+                e.addProperty("glide", true);
+            }
             return e;
         }));
         t.add("meters", array(time.meters(), meter -> {
@@ -134,7 +246,8 @@ public final class CompositionJson {
             throw new IOException("Only " + TimeMap.PPQ + " ticks per quarter are supported, not " + t.get("ppq"));
         }
         return new TimeMap(
-                list(t, "tempos", e -> new TimeMap.Tempo(e.get("tick").getAsLong(), e.get("bpm").getAsDouble())),
+                list(t, "tempos", e -> new TimeMap.Tempo(e.get("tick").getAsLong(), e.get("bpm").getAsDouble(),
+                        e.has("glide") && e.get("glide").getAsBoolean())),
                 list(t, "meters", e -> new TimeMap.Meter(e.get("tick").getAsLong(), e.get("numerator").getAsInt(),
                         e.get("denominator").getAsInt())),
                 list(t, "keys", e -> new TimeMap.KeyChange(e.get("tick").getAsLong(), key(e))));
@@ -232,6 +345,9 @@ public final class CompositionJson {
                 n.addProperty("pitch", note.pitch());
                 n.addProperty("velocity", note.velocity());
                 n.addProperty("voice", note.voiceId());
+                if (note.articulation() != null) {
+                    n.addProperty("articulation", note.articulation().token());
+                }
                 return n;
             }));
         } else {
@@ -253,7 +369,8 @@ public final class CompositionJson {
         if ("midi".equals(type)) {
             return new MidiClip(text(c, "id"), c.get("start").getAsLong(), c.get("length").getAsLong(), text(c, "part"),
                     list(c, "notes", n -> new Note(text(n, "id"), n.get("tick").getAsLong(), n.get("length").getAsLong(),
-                            n.get("pitch").getAsInt(), n.get("velocity").getAsInt(), text(n, "voice"))));
+                            n.get("pitch").getAsInt(), n.get("velocity").getAsInt(), text(n, "voice"),
+                            articulation(text(n, "articulation")))));
         }
         if ("audio".equals(type)) {
             return new AudioClip(text(c, "id"), c.get("start").getAsLong(), c.get("lengthSamples").getAsLong(),
@@ -261,6 +378,18 @@ public final class CompositionJson {
                     c.get("fadeOutSamples").getAsLong());
         }
         throw new IllegalArgumentException("Unknown kind of clip: " + type);
+    }
+
+    /** The articulation a file names; a word this studio does not know is refused, not dropped. */
+    private static Articulation articulation(String token) {
+        if (token == null) {
+            return null;
+        }
+        Articulation articulation = Articulation.parse(token);
+        if (articulation == null) {
+            throw new IllegalArgumentException("Unknown articulation: " + token);
+        }
+        return articulation;
     }
 
     static <T> JsonArray array(List<T> items, Function<T, JsonObject> write) {

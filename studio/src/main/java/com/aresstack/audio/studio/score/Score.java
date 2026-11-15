@@ -1,6 +1,8 @@
 package com.aresstack.audio.studio.score;
 
+import com.aresstack.audio.composition.Articulation;
 import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.Dynamics;
 import com.aresstack.audio.composition.Key;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.TimeMap;
@@ -11,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -119,6 +122,9 @@ public final class Score {
         private final Placement system;
         private final List<String> names;
         private final List<Voice.Stem> stems;
+        private List<DynamicMark> dynamics = List.of();
+        private List<HairpinMark> hairpins = List.of();
+        private Map<Integer, Articulation> articulations = Map.of();
 
         Staff(String trackId, Clef clef, List<List<List<Event>>> voices) {
             this(trackId, clef, voices, Placement.SINGLE, voices.size() == 1 ? List.of("1") : List.of("1", "2"),
@@ -137,6 +143,24 @@ public final class Score {
 
         public String trackId() { return trackId; }
         public Clef clef() { return clef; }
+
+        /** The dynamic marks written under this staff, in the order of the piece. */
+        public List<DynamicMark> dynamics() { return dynamics; }
+
+        /** The hairpins written under this staff. */
+        public List<HairpinMark> hairpins() { return hairpins; }
+
+        /**
+         * The articulation of the notes that begin at a sixteenth of the piece (counted from 0 over
+         * all bars) on this staff, or {@code null}.
+         */
+        public Articulation articulationAt(int position) { return articulations.get(position); }
+
+        void perform(List<DynamicMark> marks, List<HairpinMark> pins, Map<Integer, Articulation> articulated) {
+            dynamics = List.copyOf(marks);
+            hairpins = List.copyOf(pins);
+            articulations = Map.copyOf(articulated);
+        }
         /** The events of a bar, in the order they sound; a bar without notes holds one whole rest. */
         public List<Event> bar(int index) { return bar(0, index); }
 
@@ -177,9 +201,27 @@ public final class Score {
         }
     }
 
+    /** A dynamic mark under a staff, at a sixteenth of the piece counted from 0 over all bars. */
+    public record DynamicMark(int position, Dynamics.Level level) {
+    }
+
+    /** A hairpin under a staff, from one sixteenth of the piece to another. */
+    public record HairpinMark(int from, int to, boolean crescendo) {
+    }
+
+    /**
+     * A tempo mark over the score: {@code "♩ = 96"} where the tempo jumps or a glide ends,
+     * {@code "accel."} or {@code "rit."} where a glide begins, then a dashed line up to {@code until}
+     * (the sixteenth where the glide ends; -1 for a plain mark).
+     */
+    public record TempoMark(int position, String text, int until) {
+    }
+
     private final int tempo;
     private final int bars;
     private final List<Staff> staves;
+    private List<TempoMark> tempoMarks = List.of();
+    private TimeMap time;
     private final Key key;
     private final int numerator;
     private final int denominator;
@@ -197,6 +239,21 @@ public final class Score {
     public int bars() { return bars; }
     public List<Staff> staves() { return staves; }
     public double secondsPerBar() { return numerator * 4.0 / denominator * 60.0 / tempo; }
+
+    /** The changes of tempo after the first bar's tempo, as the score marks them. */
+    public List<TempoMark> tempoMarks() { return tempoMarks; }
+
+    /**
+     * The bar (with its fraction) that sounds at a time in seconds: along the tempo of the piece,
+     * changes and glides included, where the score was made from the model; else at its one tempo.
+     */
+    public double barAt(double seconds) {
+        if (time == null) {
+            return seconds / secondsPerBar();
+        }
+        long tick = time.tickAt(seconds);
+        return tick / (double) (barLength() * TICKS_PER_SIXTEENTH);
+    }
 
     /** The key of the piece: C major for pieces from before F2. */
     public Key key() { return key; }
@@ -399,7 +456,104 @@ public final class Score {
             staves.addAll(staves(part.id(), notes, voices, stems,
                     part.staffLayout() == Part.StaffLayout.GRAND, bars, bar, beat(numerator, denominator), key));
         }
-        return new Score(tempo, bars, staves, key, numerator, denominator);
+        perform(composition, staves);
+        Score score = new Score(tempo, bars, staves, key, numerator, denominator);
+        score.time = time;
+        score.tempoMarks = tempoMarks(time);
+        return score;
+    }
+
+    /**
+     * Writes dynamics and articulations onto the staves: the marks and hairpins of a part (and
+     * those for all parts) under each of its staves, the lower system of a grand staff excepted,
+     * whose marks stand between the two; the articulation of a note on the staff its voice is on.
+     */
+    private static void perform(Composition composition, List<Staff> staves) {
+        Dynamics dynamics = composition.dynamics();
+        for (Staff staff : staves) {
+            if (staff.system() == Placement.LOWER) {
+                continue;
+            }
+            List<DynamicMark> marks = new ArrayList<DynamicMark>();
+            for (Dynamics.Mark mark : dynamics.marks()) {
+                if (mark.holdsFor(staff.trackId())) {
+                    marks.add(new DynamicMark(position(mark.tick()), mark.level()));
+                }
+            }
+            List<HairpinMark> pins = new ArrayList<HairpinMark>();
+            for (Dynamics.Hairpin pin : dynamics.hairpins()) {
+                if (pin.holdsFor(staff.trackId())) {
+                    pins.add(new HairpinMark(position(pin.startTick()), position(pin.endTick()),
+                            dynamics.levelVelocity(staff.trackId(), pin.endTick())
+                                    >= dynamics.levelVelocity(staff.trackId(), pin.startTick())));
+                }
+            }
+            Map<Integer, Articulation> articulated = new HashMap<Integer, Articulation>();
+            Part part = composition.part(staff.trackId());
+            if (part != null) {
+                Map<String, String> tokens = Voicing.tokens(part);
+                for (Composition.PlacedNote placed : composition.notesOf(part.id())) {
+                    Articulation articulation = placed.note().articulation();
+                    if (articulation == null) {
+                        continue;
+                    }
+                    String token = tokens.get(placed.note().voiceId());
+                    Voice.Staff on = token == null || Voicing.struck(part) ? null : Voicing.staffOf(token);
+                    boolean here = staff.system() == Placement.SINGLE || (on == Voice.Staff.UPPER)
+                            == (staff.system() == Placement.UPPER);
+                    if (here) {
+                        articulated.putIfAbsent(position(placed.tick()), articulation);
+                    }
+                }
+            }
+            staff.perform(marks, pins, articulated);
+        }
+        // The lower system of a grand staff: only the articulations of its own notes.
+        for (Staff staff : staves) {
+            if (staff.system() != Placement.LOWER) {
+                continue;
+            }
+            Map<Integer, Articulation> articulated = new HashMap<Integer, Articulation>();
+            Part part = composition.part(staff.trackId());
+            Map<String, String> tokens = Voicing.tokens(part);
+            for (Composition.PlacedNote placed : composition.notesOf(part.id())) {
+                String token = tokens.get(placed.note().voiceId());
+                if (placed.note().articulation() != null && token != null
+                        && Voicing.staffOf(token) == Voice.Staff.LOWER) {
+                    articulated.putIfAbsent(position(placed.tick()), placed.note().articulation());
+                }
+            }
+            staff.perform(List.of(), List.of(), articulated);
+        }
+    }
+
+    /** The tempo marks of a time map: every change after tick 0, and every glide. */
+    private static List<TempoMark> tempoMarks(TimeMap time) {
+        List<TempoMark> marks = new ArrayList<TempoMark>();
+        List<TimeMap.Tempo> tempos = time.tempos();
+        for (int i = 0; i < tempos.size(); i++) {
+            TimeMap.Tempo tempo = tempos.get(i);
+            boolean reached = i > 0 && tempos.get(i - 1).glide();
+            if (tempo.tick() > 0 || tempo.glide()) {
+                if (tempo.tick() > 0 && (reached || !tempo.glide())) {
+                    marks.add(new TempoMark(position(tempo.tick()), "♩ = " + Math.round(tempo.bpm()), -1));
+                }
+                if (tempo.glide()) {
+                    TimeMap.Tempo next = tempos.get(i + 1);
+                    int from = position(tempo.tick());
+                    int to = position(next.tick());
+                    String word = next.bpm() > tempo.bpm() ? "accel." : "rit.";
+                    marks.add(new TempoMark(from, tempo.tick() > 0 && !reached
+                            ? word + " (♩ = " + Math.round(tempo.bpm()) + ")" : word, to));
+                }
+            }
+        }
+        return marks;
+    }
+
+    /** The sixteenth of the piece a tick lies on, counted from 0 over all bars. */
+    private static int position(long tick) {
+        return (int) Math.round(tick / (double) TICKS_PER_SIXTEENTH);
     }
 
     /** Start and stop of a note in sixteenths, as the score writes it: at least one sixteenth long. */

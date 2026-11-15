@@ -102,7 +102,8 @@ public final class TrackRecomposition {
         List<Note> voiced = new ArrayList<>();
         for (Note n : notes) {
             voiced.add(part.voice(n.voiceId()) != null ? n
-                    : new Note(n.id(), n.tick(), n.length(), n.pitch(), n.velocity(), part.firstVoice().id()));
+                    : new Note(n.id(), n.tick(), n.length(), n.pitch(), n.velocity(), part.firstVoice().id(),
+                            n.articulation()));
         }
         return voiced;
     }
