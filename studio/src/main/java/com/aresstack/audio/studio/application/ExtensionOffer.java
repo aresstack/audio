@@ -27,6 +27,8 @@ public final class ExtensionOffer implements AiOffer {
     private final ProjectSession session;
     private final PieceExtension extension;
     private Path preview;
+    /** Whether the user agreed to the notes of the original that this attempt shortens. */
+    private boolean confirmed;
 
     private ExtensionOffer(ProjectSession session, PieceExtension extension) {
         this.session = session;
@@ -59,7 +61,10 @@ public final class ExtensionOffer implements AiOffer {
         return did + " (" + sections + (sections == 1 ? " Abschnitt, " : " Abschnitte, ") + notes
                 + (notes == 1 ? " Note" : " Noten")
                 + (added > 0 ? ", " + added + (added == 1 ? " neues Instrument" : " neue Instrumente") : "")
-                + (extension.attempt() > 1 ? ", " + extension.attempt() + ". Versuch" : "") + ").";
+                + (extension.attempt() > 1 ? ", " + extension.attempt() + ". Versuch" : "") + ")"
+                + (written.shortened().isEmpty() ? "." : "; " + written.shortened().size()
+                + (written.shortened().size() == 1 ? " Note des Originals wird gekürzt."
+                : " Noten des Originals werden gekürzt."));
     }
 
     /** The plan of the AI section by section, its new instruments, and what had to be repaired. */
@@ -102,6 +107,10 @@ public final class ExtensionOffer implements AiOffer {
             notes.add(request.inserts() ? "Die Takte davor und danach bleiben Note für Note, wie sie sind;"
                     + " alles ab der Einfügestelle rückt nach hinten."
                     : "Das bisherige Stück bleibt Note für Note unverändert.");
+        } else if (request.tailBars() == 0) {
+            // Nothing was written anew before the point; only notes that sound across it had to end earlier.
+            notes.add("Bis auf die unten aufgezählten gekürzten Noten bleiben die Takte davor und danach,"
+                    + " wie sie sind; alles ab der Einfügestelle rückt nach hinten.");
         } else {
             notes.add((request.tailBars() == 1 ? "Der letzte Takt" : "Die letzten " + request.tailBars() + " Takte")
                     + (request.inserts() ? " vor der Einfügestelle" : " des bisherigen Stücks")
@@ -164,14 +173,72 @@ public final class ExtensionOffer implements AiOffer {
         return time.seconds(time.tickOfBar(bar));
     }
 
+    /**
+     * The notes of the original that an insertion cannot keep in full (they sound across the
+     * insertion point and beyond the end of the new bars): each with its voice, where it begins,
+     * its length in the original and the length it keeps.
+     */
+    @Override
+    public List<String> toConfirm() {
+        ComposedContinuation written = extension.continuation();
+        Composition piece = session.composition();
+        TimeMap time = piece.timeMap();
+        List<String> lines = new ArrayList<String>();
+        for (ComposedContinuation.Hold hold : written.shortened()) {
+            Part part = piece.part(hold.partId());
+            String voice = part == null || part.name() == null || part.name().isBlank() ? hold.partId() : part.name();
+            int bar = time.barOf(hold.tick());
+            lines.add(voice + ": " + pitchOf(piece, hold) + "ab Takt " + (bar + 1) + ", "
+                    + beat(hold.tick() - time.tickOfBar(bar)) + " · im Original " + quarters(hold.length())
+                    + " lang, bleibt " + quarters(written.keptLength(hold)));
+        }
+        return lines;
+    }
+
+    private static String pitchOf(Composition piece, ComposedContinuation.Hold hold) {
+        for (Composition.PlacedNote placed : piece.notesOf(hold.partId())) {
+            if (placed.note().id().equals(hold.noteId())) {
+                int pitch = placed.note().pitch();
+                String[] names = {"C", "Cis", "D", "Es", "E", "F", "Fis", "G", "As", "A", "B", "H"};
+                return "Note " + names[pitch % 12] + (pitch / 12 - 1) + " ";
+            }
+        }
+        return "Note ";
+    }
+
+    private static String beat(long ticksIntoBar) {
+        return "Schlag " + number(1 + ticksIntoBar / (double) TimeMap.PPQ);
+    }
+
+    /** A length in quarter notes, the unit a reader counts in: "6 Viertel", "1,5 Viertel". */
+    private static String quarters(long ticks) {
+        return number(ticks / (double) TimeMap.PPQ) + " Viertel";
+    }
+
+    private static String number(double value) {
+        double rounded = Math.round(value * 100) / 100.0;
+        return rounded == Math.rint(rounded) ? Long.toString((long) rounded)
+                : Double.toString(rounded).replace('.', ',');
+    }
+
+    @Override
+    public void confirm() {
+        confirmed = true;
+    }
+
     @Override
     public void again(Progress progress) throws Exception {
         preview = null;
+        confirmed = false; // another attempt may shorten other notes
         extension.regenerate(progress);
     }
 
     @Override
     public ChangeSet accept() throws IOException {
+        if (!confirmed && !extension.continuation().shortened().isEmpty()) {
+            throw new IllegalStateException("Der Vorschlag kürzt Noten des Originals; er wird erst übernommen,"
+                    + " wenn die gekürzten Noten gesehen und bestätigt sind.");
+        }
         if (preview != null) {
             PreviewStems.carry(preview, session.folder()); // what was heard need not be rendered again
         }

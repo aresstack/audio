@@ -19,7 +19,7 @@ import com.aresstack.audio.composition.mix.MixChannel;
 import com.aresstack.audio.composition.mix.MixScene;
 import com.aresstack.audio.composition.mix.Room;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
-import com.aresstack.audio.studio.score.Score;
+import com.aresstack.audio.studio.score.Voicing;
 import com.aresstack.audio.studio.stage.Performer;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
@@ -178,7 +178,7 @@ public final class LegacyImport {
         Map<String, String> stageRoles = new LinkedHashMap<>();
         for (ArrangementFile.Track line : lines.values()) {
             JsonObject entry = listed.get(line.id());
-            Part part = part(line, notes.get(line.id()), entry);
+            Part part = part(line, notes.get(line.id()), entry, file.grandStaff(line.id()));
             parts.add(part);
             tracks.add(track(line.id(), part, notes.get(line.id()), length));
             stageRoles.put(line.id(), stageRole(line));
@@ -199,7 +199,7 @@ public final class LegacyImport {
         return new Result(composition, mix, stems(composition), warnings, namedSoundBanks);
     }
 
-    private Part part(ArrangementFile.Track line, List<ArrangementFile.Note> notes, JsonObject listed) {
+    private Part part(ArrangementFile.Track line, List<ArrangementFile.Note> notes, JsonObject listed, boolean grand) {
         String role = line.role() == null || line.role().trim().isEmpty() ? null : line.role().trim();
         if (role != null && !Role.ALL.contains(role)) {
             warn("Spur " + line.id() + ": unbekannte Rolle \"" + role + "\" übernommen, wie sie geschrieben ist.");
@@ -219,26 +219,60 @@ public final class LegacyImport {
             warn("Spur " + line.id() + ": tracks.json nennt die Rolle " + listedRole + ", das Arrangement "
                     + (role == null ? "keine" : role) + "; es gilt das Arrangement.");
         }
-        // The voices: the heuristic of the score decides once, and the model keeps its answer.
+        // The voices: as the notes name them (since S1); where none does, the heuristic of the
+        // score decides once, and the model keeps its answer.
         List<long[]> written = new ArrayList<>();
-        for (ArrangementFile.Note note : notes) {
+        String[] named = new String[notes.size()];
+        boolean misnamed = false;
+        for (int i = 0; i < notes.size(); i++) {
+            ArrangementFile.Note note = notes.get(i);
             written.add(new long[]{note.tick(), note.length(), note.pitch()});
+            named[i] = note.voice();
+            misnamed |= note.voice() != null && Voicing.normalize(note.voice(), grand) == null;
         }
         boolean struck = line.onDrumChannel() || Role.DRUMS.equals(role);
-        int[] voiceOf = Score.voicesOf(written, struck);
-        boolean two = false;
-        for (int voice : voiceOf) {
-            two |= voice == 1;
+        if (struck && grand) {
+            warn("Spur " + line.id() + ": Schlagzeug steht in einem eigenen System, nicht in einem Doppelsystem.");
+            grand = false;
         }
+        if (misnamed && !struck) {
+            warn("Spur " + line.id() + ": Stimmen, die " + (grand ? "kein Doppelsystem (rh, lh, ...)"
+                    : "kein einzelnes System (1, 2, ...)") + " kennt, werden der ersten passenden Stimme zugeordnet.");
+        }
+        String[] voiceOf = Voicing.assign(written, struck ? null : named, struck, grand);
+        List<String> tokens = new ArrayList<>();
+        for (String token : voiceOf) {
+            if (!tokens.contains(token)) {
+                tokens.add(token);
+            }
+        }
+        if (tokens.isEmpty()) {
+            tokens.add(grand ? "rh" : "1");
+        }
+        tokens.sort(Voicing.ORDER);
         Part before = previous == null ? null : previous.part(line.id());
-        List<Voice> voices = new ArrayList<>();
-        voices.add(new Voice(voiceId(before, 0), "Stimme 1", null, two ? Voice.Stem.UP : Voice.Stem.AUTO));
-        if (two) {
-            voices.add(new Voice(voiceId(before, 1), "Stimme 2", null, Voice.Stem.DOWN));
+        Map<String, String> beforeIds = new HashMap<>();
+        if (before != null) {
+            Voicing.tokens(before).forEach((id, token) -> beforeIds.putIfAbsent(token, id));
         }
-        pendingVoices.put(line.id(), voiceOf);
+        List<Voice> voices = new ArrayList<>();
+        for (String token : tokens) {
+            List<String> sameStaff = new ArrayList<>();
+            for (String other : tokens) {
+                if (Voicing.staffOf(other) == Voicing.staffOf(token)) {
+                    sameStaff.add(other);
+                }
+            }
+            String id = beforeIds.containsKey(token) ? beforeIds.get(token) : fresh();
+            voices.add(new Voice(id, Voicing.name(token), Voicing.staffOf(token), Voicing.stem(token, sameStaff)));
+        }
+        int[] index = new int[voiceOf.length];
+        for (int i = 0; i < voiceOf.length; i++) {
+            index[i] = tokens.indexOf(voiceOf[i]);
+        }
+        pendingVoices.put(line.id(), index);
         return new Part(line.id(), before == null ? line.id() : before.name(), role, instrument, program, library,
-                Part.StaffLayout.SINGLE, voices, null);
+                grand ? Part.StaffLayout.GRAND : Part.StaffLayout.SINGLE, voices, null);
     }
 
     private final Map<String, int[]> pendingVoices = new HashMap<>();
@@ -498,10 +532,6 @@ public final class LegacyImport {
             }
         }
         return properties;
-    }
-
-    private String voiceId(Part before, int index) {
-        return before != null && before.voices().size() > index ? before.voices().get(index).id() : fresh();
     }
 
     private String previousSectionId() {
