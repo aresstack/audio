@@ -40,6 +40,33 @@ public final class MixDirectorTest {
     }
 
     @Test
+    public void theMixIsSeenOnTheStageWhileItArrives() throws Exception {
+        Path song = folder.newFolder().toPath();
+        Path arrangement = song.resolve("arrangement.tsv");
+        Files.write(arrangement, Arrays.asList("tempo\t96",
+                "track\tflute\t73\t0\tmelody", "note\tflute\t0\t480\t72\t90",
+                "track\tbass\t32\t1\tbass", "note\tbass\t0\t1920\t36\t100"), StandardCharsets.UTF_8);
+        java.util.List<MusicTrack> tracks = StageMixService.tracks(arrangement);
+        SpatialScene scene = SpatialScene.standard(tracks);
+        String answer = "{\"room\":\"cathedral\",\"stage\":[{\"track\":\"flute\",\"x\":-0.5,\"depth\":0.2,\"level\":0,"
+                + "\"width\":0.3,\"reverb\":0.4},{\"track\":\"bass\",\"x\":0.75,\"depth\":0.6,\"level\":-4,\"width\":0.2,"
+                + "\"reverb\":0.1}]}";
+
+        Assert.assertNull(MixDirector.seenMix("", scene, tracks));
+        String firstOnly = answer.substring(0, answer.indexOf("\"depth\":0.6"));
+        SpatialScene seen = MixDirector.seenMix(firstOnly, scene, tracks);
+        Assert.assertEquals("the flute has its place", -0.5, seen.placement("flute").x(), 1e-9);
+        Assert.assertEquals("the bass, still being written, stands where it stood",
+                scene.placement("bass").x(), seen.placement("bass").x(), 1e-9);
+        Assert.assertEquals("Kathedrale", seen.room().name());
+        SpatialScene whole = MixDirector.seenMix(answer, scene, tracks);
+        Assert.assertEquals(0.75, whole.placement("bass").x(), 1e-9);
+        for (int cut = 0; cut <= answer.length(); cut++) {
+            MixDirector.seenMix(answer.substring(0, cut), scene, tracks); // never throws
+        }
+    }
+
+    @Test
     public void anInstrumentProposalBringsItsStageAndOneWithoutGetsTheUsualSeating() throws Exception {
         KipitzChatClient offline = new KipitzChatClient(
                 "http://127.0.0.1:1/v1/chat/completions", "", "local", "", 8080)

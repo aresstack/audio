@@ -41,4 +41,11 @@ public interface SketchProgress extends TrackProgress {
      */
     default void form(List<FormSection> sections) {
     }
+
+    /**
+     * The instruments the AI has chosen so far, while its answer arrives: each as
+     * {@code {id, role, instrument, program}}, in the order it names them.
+     */
+    default void instruments(List<String[]> chosen) {
+    }
 }

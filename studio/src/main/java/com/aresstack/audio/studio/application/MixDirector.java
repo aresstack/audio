@@ -28,10 +28,54 @@ public final class MixDirector {
     public static final String FILE_NAME = "mix-proposal.json";
     private final ChatModel client;
     private final int maxTokens;
+    private java.util.function.Consumer<SpatialScene> watching;
 
     public MixDirector(ChatModel client, int maxTokens) {
         this.client = client;
         this.maxTokens = maxTokens;
+    }
+
+    /**
+     * Who sees the mix while the answer arrives: the stage as it stands with every placement the
+     * AI has written so far. Only for looking; the proposal is the one {@code direct} returns.
+     */
+    public MixDirector watching(java.util.function.Consumer<SpatialScene> seen) {
+        this.watching = seen;
+        return this;
+    }
+
+    /**
+     * The stage as far as a mix proposal has arrived: {@code current} with the placements that are
+     * whole already (the last one may still be written and is left out), the room and the master
+     * once they are named; {@code null} if nothing new can be read yet.
+     */
+    static SpatialScene seenMix(String text, SpatialScene current, List<MusicTrack> tracks) {
+        try {
+            JsonObject seen = com.aresstack.audio.studio.ai.PartialJson.read(text);
+            if (seen == null) {
+                return null;
+            }
+            boolean whole = text.trim().endsWith("}") && seen.equals(com.google.gson.JsonParser.parseString(
+                    text.substring(text.indexOf('{'))));
+            SpatialScene read = SpatialSceneStore.read(seen);
+            SpatialScene stage = current.fitting(tracks);
+            List<SoundSourcePlacement> placed = read.placements();
+            int count = whole ? placed.size() : placed.size() - 1;
+            for (int i = 0; i < count; i++) {
+                if (stage.placement(placed.get(i).trackId()) != null) {
+                    stage = stage.with(placed.get(i));
+                }
+            }
+            if (seen.has("room") && (count > 0 || whole)) {
+                stage = stage.inRoom(read.room());
+            }
+            if (seen.has("master")) {
+                stage = stage.withMaster(read.masterDb());
+            }
+            return stage;
+        } catch (RuntimeException unreadable) {
+            return null;
+        }
     }
 
     /**
@@ -43,7 +87,7 @@ public final class MixDirector {
     public SpatialScene direct(String description, Path arrangement, SpatialScene current, Path directory,
                                Progress progress) throws IOException {
         List<MusicTrack> tracks = StageMixService.tracks(arrangement);
-        return direct(tracks, prompt(description, tracks, arrangement, current), directory, progress);
+        return direct(tracks, prompt(description, tracks, arrangement, current), current, directory, progress);
     }
 
     /**
@@ -53,15 +97,32 @@ public final class MixDirector {
     public SpatialScene direct(String description, Composition model, SpatialScene current, Path directory,
                                Progress progress) throws IOException {
         List<MusicTrack> tracks = StageMixService.Piece.of(model).tracks();
-        return direct(tracks, prompt(description, tracks, model, current), directory, progress);
+        return direct(tracks, prompt(description, tracks, model, current), current, directory, progress);
     }
 
-    private SpatialScene direct(List<MusicTrack> tracks, String prompt, Path directory, Progress progress)
-            throws IOException {
+    private SpatialScene direct(final List<MusicTrack> tracks, String prompt, final SpatialScene current,
+                                Path directory, Progress progress) throws IOException {
+        final java.util.function.Consumer<SpatialScene> watcher = watching;
         progress.update("KI hört sich die Spuren an und schlägt eine Abmischung vor ...");
         Files.deleteIfExists(directory.resolve(FILE_NAME)); // asked anew each time; the answer is kept to be read
         JsonObject response = client.generate("Return valid JSON only, no Markdown.", prompt,
-                Math.min(maxTokens, 4096), directory.resolve(FILE_NAME));
+                Math.min(maxTokens, 4096), directory.resolve(FILE_NAME),
+                watcher == null || current == null ? null : new java.util.function.Consumer<String>() {
+                    private long told;
+
+                    @Override
+                    public void accept(String text) {
+                        long now = System.currentTimeMillis();
+                        if (now - told < 200) {
+                            return; // a few pictures a second are enough
+                        }
+                        SpatialScene stage = seenMix(text, current, tracks);
+                        if (stage != null) {
+                            told = now;
+                            watcher.accept(stage);
+                        }
+                    }
+                });
         try {
             return SpatialSceneStore.read(response).fitting(tracks);
         } catch (RuntimeException invalid) {
