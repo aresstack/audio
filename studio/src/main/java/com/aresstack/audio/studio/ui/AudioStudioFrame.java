@@ -5134,6 +5134,9 @@ public final class AudioStudioFrame extends JFrame {
     private void albumPieceProduced(Path piece) {
         try {
             com.aresstack.audio.studio.application.HeardTitles.producedAgain(piece); // a new mix is new again
+            if (!com.aresstack.audio.studio.application.HeardTitles.heard(piece)) {
+                hearing.reset(); // the new mix is counted from its start
+            }
         } catch (IOException kept) {
             append("WARN: Ob „" + piece.getFileName() + "“ neu ist, ließ sich nicht vermerken: " + kept.getMessage());
         }
@@ -5751,8 +5754,20 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         Path next = nextForAlbum();
+        Path fading = heardPiece();
         if (next == null || !player.fadeOut(left)) {
             return; // nothing follows: this title plays to its end as it is
+        }
+        // The tail that fades out is heard beside the next title: it counts for this one now.
+        if (fading != null && hearing.heard(fading, left, length, albumHeardPercent)
+                && !com.aresstack.audio.studio.application.HeardTitles.heard(fading)) {
+            try {
+                com.aresstack.audio.studio.application.HeardTitles.markHeard(fading);
+            } catch (IOException failed) {
+                append("WARN: Dass „" + fading.getFileName() + "“ gehört ist, ließ sich nicht vermerken: "
+                        + failed.getMessage());
+            }
+            heardChanged();
         }
         albumPlay = false;
         goToAlbumTitle(next, left);

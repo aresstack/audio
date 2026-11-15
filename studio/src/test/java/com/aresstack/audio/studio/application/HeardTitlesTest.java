@@ -59,4 +59,13 @@ public final class HeardTitlesTest {
         Path piece = folder.getRoot().toPath().resolve("a");
         Assert.assertTrue(counter.heard(piece, 99.5, 100, 100));
     }
+
+    @Test
+    public void afterAResetThePieceCanBeHeardAgain() {
+        HeardTitles.Counter counter = new HeardTitles.Counter();
+        Path piece = folder.getRoot().toPath().resolve("a");
+        Assert.assertTrue(counter.heard(piece, 90, 100, 80));
+        counter.reset();
+        Assert.assertTrue("produced anew: counted again", counter.heard(piece, 90, 100, 80));
+    }
 }
