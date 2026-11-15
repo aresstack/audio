@@ -32,6 +32,11 @@ public interface AiOffer {
     /** The part to hear on its own beside the whole piece, or {@code null} if there is none. */
     String soloPartId();
 
+    /** What the key that plays {@link #soloPartId()} alone is called. */
+    default String soloName() {
+        return "Nur das Neue anhören";
+    }
+
     /** The General MIDI programs of parts the proposal adds, by part: the studio's table does not know them yet. */
     Map<String, Integer> newPrograms();
 
