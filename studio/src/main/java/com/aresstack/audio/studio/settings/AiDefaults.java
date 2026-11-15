@@ -48,7 +48,7 @@ public final class AiDefaults {
     }
 
     /** The bars of a piece and of each step that makes it longer, unless the user says otherwise. */
-    public static final int PIECE_BARS = 240;
+    public static final int PIECE_BARS = 280;
 
     /**
      * The bars a new piece has, an extension adds and a long piece grows by per step: 4 to 512,
