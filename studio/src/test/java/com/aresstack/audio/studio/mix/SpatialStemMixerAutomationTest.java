@@ -144,6 +144,12 @@ public final class SpatialStemMixerAutomationTest {
                 DRY);
         double[] sides = power(leftOnly, 0, RATE / 2);
         assertTrue("the part stands left, the audio track right: " + Arrays.toString(sides), sides[0] > 4 * sides[1]);
+        // And the other way round: the audio track gets its own lane, never the part's.
+        SpatialStemMixer.Mix rightOnly = mix(document, TimeMap.of(120),
+                List.of(new SpatialStemMixer.Signal(new float[RATE / 2], new float[RATE / 2], RATE), noise(RATE / 2, 4)),
+                DRY);
+        double[] other = power(rightOnly, 0, RATE / 2);
+        assertTrue("the audio track stands right: " + Arrays.toString(other), other[1] > 4 * other[0]);
     }
 
     private static double[] power(SpatialStemMixer.Mix mix, int from, int to) {
