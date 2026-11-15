@@ -65,7 +65,8 @@ public final class ChatSectionGenerator implements SectionGenerator {
                     .append(frame.firstBar() + 1).append('-').append(frame.firstBar() + frame.bars()).append(" of the "
                             + "piece), so that it leads naturally into the continuation. Its original notes there are "
                             + "listed above; keep their character and their connection to what comes before. Every "
-                            + "other part and every earlier bar stays exactly as given.\n");
+                            + "other part and every earlier bar stays exactly as given. A note in the last bar may ring up "
+                    + "to one bar into the continuation.\n");
         } else {
             prompt.append("Write the notes of ONE part for one section of the ")
                     .append(task.inserts() ? "inserted bars" : "continuation").append(". The other parts are "
