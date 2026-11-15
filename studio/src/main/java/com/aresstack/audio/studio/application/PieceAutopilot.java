@@ -115,7 +115,12 @@ public final class PieceAutopilot {
         String opening = first == spec ? description : description + "\nCompose only the opening " + FIRST_BARS
                 + " bars of a piece of " + spec.bars() + " bars: introduce the themes and do not end;"
                 + " the piece is continued afterwards.";
-        Path arrangement = ComposingIntoPiece.run(
+        // A long piece that was interrupted after it had begun to grow goes on from the bars it has:
+        // composing its opening again would write the short arrangement over the grown piece.
+        java.util.Optional<ProjectSession> saved = first == spec || model == null ? java.util.Optional.empty()
+                : model.of(folder);
+        boolean grown = saved.isPresent() && bars(saved.get()) > FIRST_BARS;
+        Path arrangement = grown ? folder.resolve("arrangement.tsv") : ComposingIntoPiece.run(
                 () -> first == null ? composer.compose(opening, folder, tracks, progress)
                         : composer.compose(opening, folder, tracks, first, progress),
                 folder, description, songs, model);

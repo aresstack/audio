@@ -172,7 +172,17 @@ public final class AlbumMembershipTest {
         assertEquals(List.of(two.getFileName().toString(), one.getFileName().toString()),
                 pieces(files.album(winter.id()).get()));
 
+        AlbumProductionState.load(files.folder(winter.id())).with("t1", AlbumProductionState.Status.FAILED, "abgebrochen", 0)
+                .save(files.folder(winter.id()));
         assertTrue(members.move(winter.id(), "t1", summer.id(), -1));
+        String arrived = files.album(summer.id()).get().tracks().get(0).id();
+        assertEquals("an unfinished piece stays unfinished in its new album", AlbumProductionState.Status.FAILED,
+                AlbumProductionState.load(files.folder(summer.id())).status(arrived));
+        assertEquals(AlbumProductionState.Status.PLANNED,
+                AlbumProductionState.load(files.folder(winter.id())).status("t1"));
+        assertEquals(List.of("Winter", "Unbenanntes Album", "Unbenanntes Album 2"), new ArrayList<String>(
+                AlbumMembership.labels(List.of(winter, members.untitled(), files.create(AlbumMembership.UNTITLED,
+                        new AlbumConcept("", "", 12, 300)))).values()));
         assertEquals(List.of(two.getFileName().toString()), pieces(files.album(winter.id()).get()));
         assertEquals(List.of(one.getFileName().toString()), pieces(files.album(summer.id()).get()));
         assertEquals(summer.id(), members.albumOf(one).get().id());

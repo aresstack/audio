@@ -200,12 +200,9 @@ final class AlbumTree extends JPanel {
             root.removeAllChildren();
             Path wanted = current == null ? null : current.toAbsolutePath().normalize();
             DefaultMutableTreeNode select = null;
-            int untitled = 0;
+            java.util.Map<String, String> labels = AlbumMembership.labels(albums);
             for (Album album : albums) {
-                String label = album.title();
-                if (AlbumMembership.isUntitled(album) && ++untitled > 1) {
-                    label = album.title() + " " + untitled;
-                }
+                String label = labels.get(album.id());
                 DefaultMutableTreeNode albumNode = new DefaultMutableTreeNode(new AlbumNode(album,
                         label + "   ·   " + album.tracks().size()));
                 root.add(albumNode);

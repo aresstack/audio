@@ -706,6 +706,11 @@ final class AlbumsPanel extends JPanel {
         revalidate();
     }
 
+    /** Whether the page waits for the AI: a plan or a proposal. */
+    boolean busy() {
+        return busy;
+    }
+
     /** Whether an album is being produced. */
     boolean producing() {
         return production != null && production.running();
@@ -774,6 +779,7 @@ final class AlbumsPanel extends JPanel {
             try {
                 planned = new ChatAlbumPlanner(model, tokens).plan(asked, files.folder(asked.id()), host::log);
                 files.save(planned);
+                host.albumChanged(); // the tree shows the planned titles at once
             } catch (IOException | RuntimeException failed) {
                 problem = failed.getMessage() == null ? failed.toString() : failed.getMessage();
             }

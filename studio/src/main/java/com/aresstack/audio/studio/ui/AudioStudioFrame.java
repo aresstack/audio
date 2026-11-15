@@ -3052,14 +3052,12 @@ public final class AudioStudioFrame extends JFrame {
         javax.swing.JTextField name = new javax.swing.JTextField("Neues Stück", 24);
         JComboBox<String> album = new JComboBox<String>();
         album.setEditable(true);
-        Album chosen = null;
-        for (Album each : albumMembers.albums().albums()) {
-            album.addItem(each.title());
-            if (each.id().equals(currentAlbum)) {
-                chosen = each;
-            }
+        // Two unnamed albums are told apart by a number, as in the tree.
+        java.util.Map<String, String> labels = AlbumMembership.labels(albumMembers.albums().albums());
+        for (String label : labels.values()) {
+            album.addItem(label);
         }
-        album.setSelectedItem(chosen == null ? "" : chosen.title());
+        album.setSelectedItem(currentAlbum == null || !labels.containsKey(currentAlbum) ? "" : labels.get(currentAlbum));
         int answer = JOptionPane.showConfirmDialog(this, new Object[]{"Wie soll das neue Stück heißen?", name,
                         "In welches Album? Ein neuer Titel legt ein neues Album an; leer: ein neues unbenanntes Album.", album},
                 "Neues Stück", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
@@ -3092,10 +3090,17 @@ public final class AudioStudioFrame extends JFrame {
     private String intoAlbum(Path piece, String title) {
         try {
             Album target = null;
+            java.util.List<Album> all = albumMembers.albums().albums();
             if (title == null) {
                 target = currentAlbum == null ? null : albumMembers.albums().album(currentAlbum).orElse(null);
             } else if (!title.isEmpty()) {
-                for (Album each : albumMembers.albums().albums()) {
+                // A name as the list shows it ("Unbenanntes Album 2") names exactly that album.
+                for (java.util.Map.Entry<String, String> label : AlbumMembership.labels(all).entrySet()) {
+                    if (label.getValue().equals(title)) {
+                        target = albumMembers.albums().album(label.getKey()).orElse(null);
+                    }
+                }
+                for (Album each : target != null ? java.util.List.<Album>of() : all) {
                     if (each.title().equalsIgnoreCase(title)) {
                         target = each;
                         break;
@@ -3191,11 +3196,19 @@ public final class AudioStudioFrame extends JFrame {
 
             @Override
             public void deleteAlbum(String albumId) {
-                if (albumsPanel != null) {
-                    albumsPanel.follow(albumId);
-                    albumsPanel.deleteAlbum();
-                    refreshSongs();
+                if (albumsPanel == null) {
+                    return;
                 }
+                if (albumsPanel.producing() || albumsPanel.busy()) {
+                    message("Während ein Album geplant oder produziert wird, wird keines gelöscht.");
+                    return;
+                }
+                albumsPanel.follow(albumId);
+                // Only the album asked for, never another one the page happens to show.
+                if (albumsPanel.album() != null && albumsPanel.album().id().equals(albumId)) {
+                    albumsPanel.deleteAlbum();
+                }
+                refreshSongs();
             }
         });
         return albumTree;

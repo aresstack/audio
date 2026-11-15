@@ -41,6 +41,20 @@ public final class AlbumMembership {
         return albums;
     }
 
+    /**
+     * What each album is called where the user chooses among them, by id, in their order: its
+     * title, and for the second and every further unnamed album a number, so that two unnamed
+     * albums can be told apart.
+     */
+    public static java.util.Map<String, String> labels(List<Album> all) {
+        java.util.Map<String, String> labels = new java.util.LinkedHashMap<String, String>();
+        int untitled = 0;
+        for (Album album : all) {
+            labels.put(album.id(), isUntitled(album) && ++untitled > 1 ? album.title() + " " + untitled : album.title());
+        }
+        return labels;
+    }
+
     /** Whether this is the unnamed album, the one the pieces without an album land in. */
     public static boolean isUntitled(Album album) {
         return album != null && UNTITLED.equals(album.title());
@@ -248,6 +262,14 @@ public final class AlbumMembership {
         // First the album that takes it, so that the piece is never in no album.
         albums.save(to.withTracks(into));
         albums.save(from.withTracks(left));
+        // How far its production got goes with it, so that the other album takes up an unfinished piece.
+        AlbumProductionState fromState = AlbumProductionState.load(albums.folder(fromId));
+        AlbumProductionState.Entry entry = fromState.of(trackId);
+        if (entry.status() != AlbumProductionState.Status.PLANNED) {
+            AlbumProductionState.load(albums.folder(toId))
+                    .with(arriving.id(), entry.status(), entry.reason(), entry.seconds()).save(albums.folder(toId));
+            fromState.with(trackId, AlbumProductionState.Status.PLANNED).save(albums.folder(fromId));
+        }
         return true;
     }
 
