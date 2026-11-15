@@ -78,7 +78,52 @@ public record ContextTiers(Tier tier, boolean compact, List<Window> windows) {
         return new ContextTiers(longPiece ? Tier.LONG : Tier.WINDOWED, longPiece, windows);
     }
 
-    /** The last window: the end of the original. */
+    /**
+     * The tiers for inserting new bars into a piece: {@code room} is the piece with the room
+     * already made, the new bars run from {@code newStart} to {@code newEnd}. The music before and
+     * after the room is what the insertion has to join, so both are given in full: for a short
+     * piece all of it, for a longer one the beginning (main theme), the bars before the room
+     * (reaching two bars further back than the bars that may be rewritten) and the bars after it.
+     */
+    public static ContextTiers forInsertion(Composition room, long newStart, long newEnd, int tailBars) {
+        TimeMap time = room.timeMap();
+        int beforeBars = time.barOf(newStart);
+        int firstAfter = time.barOf(newEnd);
+        int lastBar = Math.max(firstAfter, time.barsCovering(room.endTick()));
+        int afterBars = lastBar - firstAfter;
+        int original = beforeBars + afterBars;
+        String beforeLabel = "before the inserted bars";
+        String afterLabel = "after the inserted bars: the music the insertion leads into";
+        List<Window> windows = new ArrayList<>();
+        if (original <= FULL_BARS) {
+            if (beforeBars > 0) {
+                windows.add(new Window(beforeLabel, 0, newStart));
+            }
+            if (afterBars > 0) {
+                windows.add(new Window(afterLabel, newEnd, time.tickOfBar(lastBar)));
+            }
+            return new ContextTiers(Tier.FULL, false, windows.isEmpty()
+                    ? List.of(new Window(null, newStart, newEnd)) : windows);
+        }
+        boolean longPiece = original > WINDOWED_BARS;
+        int around = longPiece ? LONG_WINDOW_BARS : WINDOW_BARS;
+        int nearBefore = Math.min(beforeBars, Math.max(around, tailBars + 2));
+        int nearFrom = beforeBars - nearBefore;
+        int themeBars = Math.min(around, nearFrom);
+        if (themeBars > 0) {
+            windows.add(new Window("beginning of the piece: main theme", 0, time.tickOfBar(themeBars)));
+        }
+        if (nearBefore > 0) {
+            windows.add(new Window(beforeLabel, time.tickOfBar(nearFrom), newStart));
+        }
+        int nearAfter = Math.min(afterBars, around);
+        if (nearAfter > 0) {
+            windows.add(new Window(afterLabel, newEnd, time.tickOfBar(firstAfter + nearAfter)));
+        }
+        return new ContextTiers(longPiece ? Tier.LONG : Tier.WINDOWED, longPiece, windows);
+    }
+
+    /** The last window: the end of the original (for an insertion, the music after the room). */
     public Window end() {
         return windows.get(windows.size() - 1);
     }

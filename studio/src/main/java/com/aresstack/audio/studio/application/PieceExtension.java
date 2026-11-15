@@ -18,18 +18,23 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 /**
- * The use case "continue the piece" in the folder of a piece (work package C3, report 5): the AI
+ * The use cases "continue the piece" (work package C3, report 5) and "insert new bars" (work
+ * package C4, {@code INSERT}: a request with {@link ContinuationRequest#inserts()}) in the folder of a
+ * piece. They share planner, generators and preview; an insertion only adds the deterministic
+ * shift of the music after the insertion point ({@link InsertPassage}). The AI
  * plans and writes the continuation, it becomes a proposal of the piece's {@link ProjectSession},
  * which can be listened to ({@link #preview}), composed again ({@link #regenerate}), accepted or
  * discarded. The piece changes only on acceptance; the state before stays as a revision, so the
  * original is never lost, not even after a revised transition.
  *
- * <p>The answers of the model are kept in {@value #CACHE} within the piece, as the record of where
- * the continuation came from; every attempt has its own answers.
+ * <p>The answers of the model are kept in {@value #CACHE} (insertions in {@value #INSERT_CACHE})
+ * within the piece, as the record of where the new bars came from; every attempt has its own answers.
  */
 public final class PieceExtension {
     /** Where the answers of the model are kept, relative to the folder of the piece. */
     public static final String CACHE = "ai-cache/extend";
+    /** Where the answers of the model for insertions are kept. */
+    public static final String INSERT_CACHE = "ai-cache/insert";
 
     private final ProjectSession session;
     private final ContinuationComposer composer;
@@ -124,19 +129,24 @@ public final class PieceExtension {
     private Proposal generate(Progress progress) throws IOException, EditRefusedException {
         Composition base = session.composition();
         int next = attempt + 1;
-        ComposedContinuation composed = composer.compose(base, request, ids, next, session.folder().resolve(CACHE),
-                progress);
-        Proposal made = session.propose(AppendContinuation.patch(base, composed), AppendContinuation.scope(composed),
+        ComposedContinuation composed = composer.compose(base, request, ids, next,
+                session.folder().resolve(request.inserts() ? INSERT_CACHE : CACHE), progress);
+        Proposal made = request.inserts()
+                ? session.propose(InsertPassage.patch(composed), InsertPassage.scope(composed), Revision.Author.AI,
+                composed.runId())
+                : session.propose(AppendContinuation.patch(base, composed), AppendContinuation.scope(composed),
                 Revision.Author.AI, composed.runId());
         Set<String> goOn = new HashSet<>();
         composed.task().parts().forEach(part -> goOn.add(part.id()));
         Set<String> created = new HashSet<>();
         composed.newParts().stream().map(Part::id).forEach(created::add);
-        List<String> differences = AppendContinuation.originalKept(base, made.result(), composed.fromTick(), goOn,
-                created);
+        List<String> differences = request.inserts()
+                ? InsertPassage.originalKept(base, made.result(), composed.task(), composed.fromTick(), goOn, created)
+                : AppendContinuation.originalKept(base, made.result(), composed.fromTick(), goOn, created);
         if (!differences.isEmpty()) {
             session.discard(made);
-            throw new IllegalStateException("Die Fortsetzung hätte das Original verändert: " + differences);
+            throw new IllegalStateException((request.inserts() ? "Die Einfügung" : "Die Fortsetzung")
+                    + " hätte das Original verändert: " + differences);
         }
         attempt = next;
         continuation = composed;

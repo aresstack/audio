@@ -116,6 +116,25 @@ public final class KeyTest {
             assertEquals(key, Key.parse(key.name()));
             assertEquals(key, Key.parse(key.germanName()));
         }
+        // Six flats or six sharps: as written.
+        Key gFlat = Key.parse("Gb major");
+        assertEquals(-6, gFlat.fifths());
+        assertEquals("Gb major", gFlat.name());
+        assertEquals("Ges-Dur", gFlat.germanName());
+        assertEquals(gFlat, Key.parse("Ges-Dur"));
+        assertEquals(gFlat, Key.parse(gFlat.name()));
+        assertEquals(6, Key.parse("F# major").fifths());
+        Key dSharp = Key.parse("D# minor");
+        assertEquals(6, dSharp.fifths());
+        assertEquals("D# minor", dSharp.name());
+        assertEquals("dis-Moll", dSharp.germanName());
+        assertEquals(dSharp, Key.parse("dis-Moll"));
+        assertEquals(-6, Key.parse("Eb minor").fifths());
+        assertEquals(-6, Key.parse("es-Moll").fifths());
+        // Elsewhere the spelling follows from the tonic: C# major stays D flat major.
+        assertEquals(Key.parse("Db major"), Key.parse("C# major"));
+        assertEquals(new Key(6, Key.Mode.MAJOR), new Key(6, Key.Mode.MAJOR, false));
+        assertEquals(new Key(1, Key.Mode.MAJOR), new Key(1, Key.Mode.MAJOR, false));
     }
 
     @Test(expected = IllegalArgumentException.class)
