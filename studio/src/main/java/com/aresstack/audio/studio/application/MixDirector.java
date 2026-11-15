@@ -1,7 +1,7 @@
 package com.aresstack.audio.studio.application;
 
 import com.aresstack.audio.music.arrangement.ArrangementFile;
-import com.aresstack.audio.studio.ai.KipitzChatClient;
+import com.aresstack.audio.studio.ai.ChatModel;
 import com.aresstack.audio.studio.progress.Progress;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
@@ -24,10 +24,10 @@ import java.util.TreeMap;
  */
 public final class MixDirector {
     public static final String FILE_NAME = "mix-proposal.json";
-    private final KipitzChatClient client;
+    private final ChatModel client;
     private final int maxTokens;
 
-    public MixDirector(KipitzChatClient client, int maxTokens) {
+    public MixDirector(ChatModel client, int maxTokens) {
         this.client = client;
         this.maxTokens = maxTokens;
     }
