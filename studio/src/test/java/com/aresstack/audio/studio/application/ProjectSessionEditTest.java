@@ -261,7 +261,9 @@ public final class ProjectSessionEditTest {
         ProjectSession session = ProjectSession.open(piece).orElseThrow();
         com.aresstack.audio.composition.TimeMap waltz = new com.aresstack.audio.composition.TimeMap(
                 session.composition().timeMap().tempos(),
-                List.of(new com.aresstack.audio.composition.TimeMap.Meter(0, 3, 4)),
+                // Since F2 one meter of its own fits arrangement.tsv; a change of meter does not.
+                List.of(new com.aresstack.audio.composition.TimeMap.Meter(0, 4, 4),
+                        new com.aresstack.audio.composition.TimeMap.Meter(1920, 3, 4)),
                 session.composition().timeMap().keys());
         session.apply(Patch.of("Walzer", new EditOp.SetTimeMap(waltz)), EditScope.everything());
         assertArrayEquals(com.aresstack.audio.studio.project.MidiExport.bytes(session.composition()),

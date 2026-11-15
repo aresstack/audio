@@ -83,7 +83,7 @@ public final class StageMixService {
                 + (heard ? "" : " · alle Spuren sind stumm") + " ...");
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
-            mixer.mix(files, placements, fitting.room(), 4 * 60.0 / tempo(arrangement), fitting.masterDb(), fresh, bits);
+            mixer.mix(files, placements, fitting.room(), secondsPerBar(arrangement), fitting.masterDb(), fresh, bits);
             Files.move(fresh, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(fresh);
@@ -197,6 +197,12 @@ public final class StageMixService {
             throw new IllegalArgumentException("Arrangement must contain at least one track.");
         }
         return tracks;
+    }
+
+    /** How long one bar of a written arrangement lasts: its meter at its tempo (4/4 for pieces from before F2). */
+    public static double secondsPerBar(Path arrangement) throws IOException {
+        ArrangementFile file = ArrangementFile.read(arrangement);
+        return file.quartersPerBar() * 60.0 / file.tempoOrDefault();
     }
 
     /** The tempo of a written arrangement, kept within 20..400; 108 if it names none that can be read. */

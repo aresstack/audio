@@ -9,6 +9,7 @@ import com.aresstack.audio.composition.Note;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.Role;
 import com.aresstack.audio.composition.Section;
+import com.aresstack.audio.composition.Key;
 import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.composition.Track;
 import com.aresstack.audio.composition.Voice;
@@ -18,7 +19,7 @@ import com.aresstack.audio.composition.mix.MixChannel;
 import com.aresstack.audio.composition.mix.MixScene;
 import com.aresstack.audio.composition.mix.Room;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
-import com.aresstack.audio.studio.score.Score;
+import com.aresstack.audio.studio.score.Voicing;
 import com.aresstack.audio.studio.stage.Performer;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
@@ -111,7 +112,7 @@ public final class LegacyImport {
         for (ArrangementFile.Problem problem : file.problems()) {
             warn("arrangement.tsv, Zeile " + problem.line() + " übergangen (" + problem.reason() + "): " + problem.text());
         }
-        TimeMap time = TimeMap.of(tempo(file));
+        TimeMap time = timeMap(file);
         Map<String, JsonObject> listed = tracksJson();
         JsonObject plan = json(ProjectFolder.PLAN);
         Properties song = properties();
@@ -144,9 +145,19 @@ public final class LegacyImport {
         }
 
         int bars = Math.max(MIN_BARS, time.barsCovering(end));
-        int planned = planBars(plan);
-        if (planned > bars) {
-            bars = planned;
+        if (file.bars().isPresent()) {
+            // Since F2 the file may say how long the piece is.
+            if (file.bars().getAsInt() < bars) {
+                warn("arrangement.tsv nennt " + file.bars().getAsInt() + " Takte, die Noten reichen bis Takt "
+                        + bars + "; es gilt " + bars + ".");
+            }
+            bars = Math.max(bars, file.bars().getAsInt());
+            planBars(plan, time); // only for its warning
+        } else {
+            int planned = planBars(plan, time);
+            if (planned > bars) {
+                bars = planned;
+            }
         }
         long length = time.tickOfBar(bars);
 
@@ -155,7 +166,7 @@ public final class LegacyImport {
         Map<String, String> stageRoles = new LinkedHashMap<>();
         for (ArrangementFile.Track line : lines.values()) {
             JsonObject entry = listed.get(line.id());
-            Part part = part(line, notes.get(line.id()), entry);
+            Part part = part(line, notes.get(line.id()), entry, file.grandStaff(line.id()));
             parts.add(part);
             tracks.add(track(line.id(), part, notes.get(line.id()), length));
             stageRoles.put(line.id(), stageRole(line));
@@ -176,7 +187,7 @@ public final class LegacyImport {
         return new Result(composition, mix, stems(composition), warnings);
     }
 
-    private Part part(ArrangementFile.Track line, List<ArrangementFile.Note> notes, JsonObject listed) {
+    private Part part(ArrangementFile.Track line, List<ArrangementFile.Note> notes, JsonObject listed, boolean grand) {
         String role = line.role() == null || line.role().trim().isEmpty() ? null : line.role().trim();
         if (role != null && !Role.ALL.contains(role)) {
             warn("Spur " + line.id() + ": unbekannte Rolle \"" + role + "\" übernommen, wie sie geschrieben ist.");
@@ -193,26 +204,60 @@ public final class LegacyImport {
             warn("Spur " + line.id() + ": tracks.json nennt die Rolle " + listedRole + ", das Arrangement "
                     + (role == null ? "keine" : role) + "; es gilt das Arrangement.");
         }
-        // The voices: the heuristic of the score decides once, and the model keeps its answer.
+        // The voices: as the notes name them (since S1); where none does, the heuristic of the
+        // score decides once, and the model keeps its answer.
         List<long[]> written = new ArrayList<>();
-        for (ArrangementFile.Note note : notes) {
+        String[] named = new String[notes.size()];
+        boolean misnamed = false;
+        for (int i = 0; i < notes.size(); i++) {
+            ArrangementFile.Note note = notes.get(i);
             written.add(new long[]{note.tick(), note.length(), note.pitch()});
+            named[i] = note.voice();
+            misnamed |= note.voice() != null && Voicing.normalize(note.voice(), grand) == null;
         }
         boolean struck = line.onDrumChannel() || Role.DRUMS.equals(role);
-        int[] voiceOf = Score.voicesOf(written, struck);
-        boolean two = false;
-        for (int voice : voiceOf) {
-            two |= voice == 1;
+        if (struck && grand) {
+            warn("Spur " + line.id() + ": Schlagzeug steht in einem eigenen System, nicht in einem Doppelsystem.");
+            grand = false;
         }
+        if (misnamed && !struck) {
+            warn("Spur " + line.id() + ": Stimmen, die " + (grand ? "kein Doppelsystem (rh, lh, ...)"
+                    : "kein einzelnes System (1, 2, ...)") + " kennt, werden der ersten passenden Stimme zugeordnet.");
+        }
+        String[] voiceOf = Voicing.assign(written, struck ? null : named, struck, grand);
+        List<String> tokens = new ArrayList<>();
+        for (String token : voiceOf) {
+            if (!tokens.contains(token)) {
+                tokens.add(token);
+            }
+        }
+        if (tokens.isEmpty()) {
+            tokens.add(grand ? "rh" : "1");
+        }
+        tokens.sort(Voicing.ORDER);
         Part before = previous == null ? null : previous.part(line.id());
-        List<Voice> voices = new ArrayList<>();
-        voices.add(new Voice(voiceId(before, 0), "Stimme 1", null, two ? Voice.Stem.UP : Voice.Stem.AUTO));
-        if (two) {
-            voices.add(new Voice(voiceId(before, 1), "Stimme 2", null, Voice.Stem.DOWN));
+        Map<String, String> beforeIds = new HashMap<>();
+        if (before != null) {
+            Voicing.tokens(before).forEach((id, token) -> beforeIds.putIfAbsent(token, id));
         }
-        pendingVoices.put(line.id(), voiceOf);
+        List<Voice> voices = new ArrayList<>();
+        for (String token : tokens) {
+            List<String> sameStaff = new ArrayList<>();
+            for (String other : tokens) {
+                if (Voicing.staffOf(other) == Voicing.staffOf(token)) {
+                    sameStaff.add(other);
+                }
+            }
+            String id = beforeIds.containsKey(token) ? beforeIds.get(token) : fresh();
+            voices.add(new Voice(id, Voicing.name(token), Voicing.staffOf(token), Voicing.stem(token, sameStaff)));
+        }
+        int[] index = new int[voiceOf.length];
+        for (int i = 0; i < voiceOf.length; i++) {
+            index[i] = tokens.indexOf(voiceOf[i]);
+        }
+        pendingVoices.put(line.id(), index);
         return new Part(line.id(), before == null ? line.id() : before.name(), role, instrument, program, library,
-                Part.StaffLayout.SINGLE, voices, null);
+                grand ? Part.StaffLayout.GRAND : Part.StaffLayout.SINGLE, voices, null);
     }
 
     private final Map<String, int[]> pendingVoices = new HashMap<>();
@@ -369,14 +414,52 @@ public final class LegacyImport {
         return ArrangementFile.DEFAULT_TEMPO;
     }
 
-    private int planBars(JsonObject plan) {
+    /**
+     * The time map the file says: its tempo and, since F2, its meter and key; four quarters and
+     * C major where it names none, as every piece from before.
+     */
+    private TimeMap timeMap(ArrangementFile file) {
+        double tempo = tempo(file);
+        int numerator = 4;
+        int denominator = 4;
+        if (file.meter().isPresent()) {
+            ArrangementFile.Meter meter = file.meter().get();
+            if (meter.numerator() <= 64 && meter.denominator() <= 64) {
+                numerator = meter.numerator();
+                denominator = meter.denominator();
+            } else {
+                warn("arrangement.tsv, Zeile " + meter.line() + ": Taktart " + meter.text() + " übergangen; es gilt 4/4.");
+            }
+        }
+        Key key = Key.C_MAJOR;
+        if (file.key().isPresent()) {
+            try {
+                key = Key.parse(file.key().get().name());
+            } catch (IllegalArgumentException odd) {
+                warn("arrangement.tsv, Zeile " + file.key().get().line() + ": Tonart übergangen; es gilt C-Dur.");
+            }
+        }
+        return new TimeMap(List.of(new TimeMap.Tempo(0, tempo)), List.of(new TimeMap.Meter(0, numerator, denominator)),
+                List.of(new TimeMap.KeyChange(0, key)));
+    }
+
+    private int planBars(JsonObject plan, TimeMap time) {
         if (plan == null) {
             return 0;
         }
         String key = text(plan, "key");
         String meter = text(plan, "timeSignature");
-        if ((key != null && !"C major".equals(key)) || (meter != null && !"4/4".equals(meter))) {
-            warn("composition-plan.json nennt " + key + " " + meter + "; der Altbestand kennt nur C-Dur im 4/4-Takt.");
+        TimeMap.Meter written = time.meters().get(0);
+        Key keyOfFile = time.keys().get(0).key();
+        boolean sameKey;
+        try {
+            sameKey = key == null || Key.parse(key).equals(keyOfFile);
+        } catch (IllegalArgumentException odd) {
+            sameKey = false;
+        }
+        if (!sameKey || (meter != null && !(written.numerator() + "/" + written.denominator()).equals(meter.trim()))) {
+            warn("composition-plan.json nennt " + key + " " + meter + "; arrangement.tsv sagt "
+                    + keyOfFile.name() + " " + written.numerator() + "/" + written.denominator() + "; es gilt arrangement.tsv.");
         }
         try {
             return plan.has("bars") ? Math.max(0, Math.min(4096, plan.get("bars").getAsInt())) : 0;
@@ -434,10 +517,6 @@ public final class LegacyImport {
             }
         }
         return properties;
-    }
-
-    private String voiceId(Part before, int index) {
-        return before != null && before.voices().size() > index ? before.voices().get(index).id() : fresh();
     }
 
     private String previousSectionId() {
