@@ -235,7 +235,22 @@ public final class AudioStudioFrame extends JFrame {
     private final JLabel projectName = new JLabel();
     /** The model of the open piece; it follows what the studio still writes the old way. */
     private final com.aresstack.audio.studio.application.PieceModel pieceModel =
-            new com.aresstack.audio.studio.application.PieceModel(this::append);
+            new com.aresstack.audio.studio.application.PieceModel(this::modelSays);
+
+    /**
+     * What the model of the open piece says. While the album production makes pieces, it writes
+     * their files itself, and the open one may be among them: that its files changed is then no
+     * news worth a warning, since the production takes them into its model when the step ends.
+     */
+    private void modelSays(String line) {
+        if (line.startsWith("WARN: Die Dateien des Stücks") && albumsPanel != null && albumsPanel.producing()) {
+            return;
+        }
+        append(line);
+    }
+
+    /** The models last named in the protocol; a production asks for them often, they are named once. */
+    private String modelsSaid;
     /** The note editor's way into the open piece: every change a patch through the edit core (B1). */
     /** The piece as the kept answers of the AI last followed it; the note editor's undo is compared with it. */
     private com.aresstack.audio.composition.Composition answersState;
@@ -2272,7 +2287,10 @@ public final class AudioStudioFrame extends JFrame {
         final String key = new String(secret);
         Arrays.fill(secret, (char) 0);
         final AudioProxyRoutes routes = configureNetworkRoutes();
-        append("KI-Modelle: " + fixed);
+        if (!String.valueOf(fixed).equals(modelsSaid)) {
+            modelsSaid = String.valueOf(fixed);
+            append("KI-Modelle: " + fixed);
+        }
         return new com.aresstack.audio.studio.ai.ModelLineup(fixed,
                 name -> new KipitzChatClient(url, key, name, routes).legacyModel(fixed.base())
                         // A connection that breaks off or is tried again is said at once, in the protocol and below.
