@@ -94,6 +94,12 @@ final class TrackLanes extends JPanel {
     private final JPanel column = new JPanel();
     private final JLabel count = DeckWidgets.lettering("");
     private final JButton add = new JButton("+ Spur");
+    /** Appends an audio lane to the piece (work package B3); {@code null} while the piece has no model. */
+    private final JButton addAudio = new JButton("+ Audio");
+    private Runnable audioAdder;
+    /** The audio lanes of the piece, below the tracks: id and name. They are no players, so no instrument. */
+    private List<String[]> audioLanes = new ArrayList<String[]>();
+    private final List<JPanel> audioHeads = new ArrayList<JPanel>();
     private final JLabel mixName = DeckWidgets.lettering("Mix");
     private final JScrollPane scroll;
     private boolean changing;
@@ -116,6 +122,14 @@ final class TrackLanes extends JPanel {
         add.setToolTipText("Eine weitere Spur unten anfügen");
         add.setMargin(new Insets(3, 10, 3, 10));
         add.addActionListener(event -> addTrack());
+        addAudio.setToolTipText("Eine Audiospur für Klänge und Soundeffekte unten anfügen");
+        addAudio.setMargin(new Insets(3, 10, 3, 10));
+        addAudio.setVisible(false);
+        addAudio.addActionListener(event -> {
+            if (audioAdder != null) {
+                audioAdder.run();
+            }
+        });
         mixName.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         mixName.setToolTipText("Die ganze Mischung zur Wiedergabe wählen");
         mixName.addMouseListener(new MouseAdapter() {
@@ -139,6 +153,31 @@ final class TrackLanes extends JPanel {
         });
         add(scroll, BorderLayout.CENTER);
         fill(MusicTrack.defaults());
+    }
+
+    /**
+     * The audio lanes of the piece (work package B3), shown below the tracks with a head that names
+     * them; the arrangement draws their clips in the same rows.
+     *
+     * @param adder what "+ Audio" does; {@code null} hides the key (a piece without a model)
+     */
+    void setAudioLanes(List<String[]> lanes, Runnable adder) {
+        audioAdder = adder;
+        addAudio.setVisible(adder != null);
+        boolean same = lanes.size() == audioLanes.size();
+        for (int i = 0; same && i < lanes.size(); i++) {
+            same = java.util.Arrays.equals(lanes.get(i), audioLanes.get(i));
+        }
+        if (same) {
+            return;
+        }
+        audioLanes = new ArrayList<String[]>(lanes);
+        changing = true;
+        try {
+            fill(tracks());
+        } finally {
+            changing = false;
+        }
     }
 
     /** The sound banks may have changed; the menus are built when they open, so nothing is to be done. */
@@ -255,13 +294,37 @@ final class TrackLanes extends JPanel {
             heads.add(head);
             column.add(head);
         }
+        audioHeads.clear();
+        for (String[] lane : audioLanes) {
+            JPanel head = new JPanel(new BorderLayout());
+            head.setBackground(new Color(0x181A21));
+            head.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(255, 255, 255, 14)),
+                    BorderFactory.createEmptyBorder(6, 14, 6, 10)));
+            JLabel name = new JLabel(lane[1]);
+            name.setForeground(AudioStudioTheme.TEXT);
+            name.setFont(AudioStudioTheme.display(12f));
+            JLabel kind = DeckWidgets.lettering("Audio · Klänge und Effekte");
+            JPanel words = new JPanel(new BorderLayout());
+            words.setOpaque(false);
+            words.add(name, BorderLayout.NORTH);
+            words.add(kind, BorderLayout.SOUTH);
+            head.add(words, BorderLayout.NORTH);
+            head.setToolTipText("Rechtsklick in die Spur: Soundeffekt oder Audiodatei einfügen");
+            audioHeads.add(head);
+            column.add(head);
+        }
         JPanel foot = new JPanel(new BorderLayout());
         foot.setOpaque(false);
         foot.setBorder(BorderFactory.createEmptyBorder(8, 14, 8, 10));
         JPanel footRow = new JPanel(new BorderLayout());
         footRow.setOpaque(false);
         footRow.add(mixName, BorderLayout.WEST);
-        footRow.add(add, BorderLayout.EAST);
+        JPanel keys = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 0));
+        keys.setOpaque(false);
+        keys.add(addAudio);
+        keys.add(add);
+        footRow.add(keys, BorderLayout.EAST);
         foot.add(footRow, BorderLayout.NORTH);
         foot.setMinimumSize(new Dimension(HEAD_WIDTH, ArrangementView.MIX));
         foot.setPreferredSize(new Dimension(HEAD_WIDTH, ArrangementView.MIX));
@@ -269,7 +332,8 @@ final class TrackLanes extends JPanel {
         foot.setAlignmentX(0f);
         column.add(foot);
         add.setEnabled(editable);
-        count.setText(heads.isEmpty() ? "Keine Spur" : heads.size() + (heads.size() == 1 ? " Spur" : " Spuren"));
+        count.setText(heads.isEmpty() ? "Keine Spur" : heads.size() + (heads.size() == 1 ? " Spur" : " Spuren")
+                + (audioHeads.isEmpty() ? "" : " · " + audioHeads.size() + " Audio"));
         fitHeights();
         column.revalidate();
         column.repaint();
@@ -286,8 +350,12 @@ final class TrackLanes extends JPanel {
     /** The lanes share the height there is: few tracks get high lanes, many get low ones and the list scrolls. */
     private void fitHeights() {
         int free = scroll.getHeight() - ArrangementView.RULER - ArrangementView.MIX - 4;
-        int height = heads.isEmpty() ? 60 : Math.max(54, Math.min(150, free / heads.size()));
+        int rows = heads.size() + audioHeads.size();
+        int height = rows == 0 ? 60 : Math.max(54, Math.min(150, free / rows));
         for (Head head : heads) {
+            fix(head, height);
+        }
+        for (JPanel head : audioHeads) {
             fix(head, height);
         }
         view.setLaneHeight(height);
