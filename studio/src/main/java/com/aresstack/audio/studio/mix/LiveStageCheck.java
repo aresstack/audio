@@ -18,10 +18,11 @@ import java.util.stream.Stream;
  * thread needed and whether a block came late.
  *
  * <pre>
- * java -cp audio-studio.jar com.aresstack.audio.studio.mix.LiveStageCheck &lt;folder or WAV files&gt; [seconds] [room]
+ * java -cp audio-studio.jar com.aresstack.audio.studio.mix.LiveStageCheck &lt;folder or WAV files&gt; [seconds] [room] [loop]
  * </pre>
  *
- * The room is one of {@code studio}, {@code chamber} (default), {@code hall}, {@code cathedral}.
+ * The room is one of {@code studio}, {@code chamber} (default), {@code hall}, {@code cathedral};
+ * {@code loop} (or {@code schleife}) starts the piece again whenever it ends, for short stems.
  */
 public final class LiveStageCheck {
     private LiveStageCheck() {
@@ -29,12 +30,13 @@ public final class LiveStageCheck {
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
-            System.err.println("Aufruf: LiveStageCheck <Ordner mit WAV-Stems oder WAV-Dateien> [Sekunden] [studio|chamber|hall|cathedral]");
+            System.err.println("Aufruf: LiveStageCheck <Ordner mit WAV-Stems oder WAV-Dateien> [Sekunden] [studio|chamber|hall|cathedral] [schleife]");
             System.exit(2);
         }
         List<Path> files = new ArrayList<Path>();
         double seconds = 20;
         AcousticRoom room = AcousticRoom.CHAMBER;
+        boolean loop = false;
         for (String arg : args) {
             Path path = Paths.get(arg);
             if (Files.isDirectory(path)) {
@@ -44,6 +46,8 @@ public final class LiveStageCheck {
                 }
             } else if (Files.isRegularFile(path)) {
                 files.add(path);
+            } else if (arg.equalsIgnoreCase("loop") || arg.equalsIgnoreCase("schleife")) {
+                loop = true;
             } else if (AcousticRoom.known(arg)) {
                 room = AcousticRoom.of(arg);
             } else {
@@ -67,12 +71,24 @@ public final class LiveStageCheck {
             double[][] corners = {{-1, 0}, {1, 0}, {1, 1}, {-1, 1}};
             long until = System.nanoTime() + (long) (seconds * 1e9);
             int step = 0;
-            while (System.nanoTime() < until && playback.state() == LivePlayback.State.PLAYING) {
+            while (System.nanoTime() < until) {
+                LivePlayback.State state = playback.state();
+                if (state == LivePlayback.State.ENDED && loop) {
+                    playback.play();
+                } else if (state != LivePlayback.State.PLAYING) {
+                    break;
+                }
                 double[] corner = corners[step++ % corners.length];
                 stage.move(0, placements.get(0).at(corner[0], corner[1]));
                 System.out.printf(Locale.GERMANY, "%6.2f s  erste Spur bei x=%+.0f, Tiefe=%.0f%n", playback.heardSeconds(),
                         corner[0], corner[1]);
-                Thread.sleep(2000);
+                // in steps of 50 ms, so that a loop starts again without a long gap
+                for (int wait = 0; wait < 40 && System.nanoTime() < until; wait++) {
+                    Thread.sleep(50);
+                    if (loop && playback.state() == LivePlayback.State.ENDED) {
+                        playback.play();
+                    }
+                }
             }
             playback.pause();
             System.out.printf(Locale.GERMANY, "Blöcke: %d, mittlere Last: %.1f %%, längster Block: %.2f ms von %.2f ms, zu spät: %d%n",

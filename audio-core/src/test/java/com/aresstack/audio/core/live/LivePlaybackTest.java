@@ -212,4 +212,21 @@ public final class LivePlaybackTest {
             Assert.assertEquals(0.5f, sink.left[frames - 1 + master.latencyFrames()], 1e-6f);
         }
     }
+
+    @Test
+    public void playingRightAfterPlayEvenBeforeTheAudioThreadWakesUp() throws Exception {
+        int frames = 4 * RATE;
+        LiveGraph graph = new LiveGraph(List.of(tone(frames, 0)), null, 0, frames);
+        Recorder sink = new Recorder(2 * frames, true);
+        try (LivePlayback playback = new LivePlayback(graph, new MasterBus(MasterBus.Settings.fixed(0)), sink, RATE,
+                BLOCK).start()) {
+            Assert.assertEquals(LivePlayback.State.PAUSED, playback.state());
+            playback.play();
+            // a loop "while playing" right after play() must not end at once (LiveStageCheck did)
+            Assert.assertEquals(LivePlayback.State.PLAYING, playback.state());
+            Assert.assertTrue(playback.playing());
+            waitFor(() -> sink.written > BLOCK, 10);
+            Assert.assertTrue(playback.playing());
+        }
+    }
 }
