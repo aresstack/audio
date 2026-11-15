@@ -138,6 +138,23 @@ public final class StageMovementsTest {
     }
 
     @Test
+    public void theLevelCurveHasOneSourceAndIsNotWrittenFromHere() throws Exception {
+        // The level curve comes from the stage (dynamics in spatial-scene.json) into the level lane of
+        // the model. Written here as well, the next change of the stage would overwrite it.
+        List<String> log = new ArrayList<>();
+        PieceModel model = new PieceModel(log::add);
+        model.open(piece);
+        byte[] before = Files.readAllBytes(piece.resolve(MixJson.FILE_NAME));
+        assertFalse(StageMovements.PARAMETERS.contains(AutomationLane.LEVEL));
+        StageMovements drawn = model.movements().with("melody", AutomationLane.LEVEL,
+                List.of(new StageMovements.Point(1, -6)));
+        assertEquals(List.of(), drawn.of("melody", AutomationLane.LEVEL));
+        assertFalse(model.move(drawn, "melody", AutomationLane.LEVEL));
+        assertArrayEquals(before, Files.readAllBytes(piece.resolve(MixJson.FILE_NAME)));
+        assertEquals(1, log.stream().filter(line -> line.startsWith("WARN: Der Verlauf")).count());
+    }
+
+    @Test
     public void barsFollowTheMetersOfThePiece() {
         // Two bars of 4/4, then 3/4: bar 2.5 lies in the middle of the first bar of three quarters.
         TimeMap time = new TimeMap(List.of(new TimeMap.Tempo(0, 120)),
