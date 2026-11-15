@@ -189,8 +189,8 @@ public final class AudioStudioFrame extends JFrame {
     private boolean fillingSongs;
     /** What the plan says about the piece: tempo, key, bars, mood. */
     private final JLabel songFacts = new JLabel(" ");
-    private final javax.swing.JToggleButton aiChooses = new javax.swing.JToggleButton("KI wählt Instrumente");
-    private final javax.swing.JToggleButton ownTracks = new javax.swing.JToggleButton("Meine Spuren");
+    private final javax.swing.JRadioButton aiChooses = new javax.swing.JRadioButton("die KI wählt sie");
+    private final javax.swing.JRadioButton ownTracks = new javax.swing.JRadioButton("meine Spuren aus dem Arrangement");
     private final JButton composeButton = new JButton("Komponieren");
     private final DeckDisplays.Meter masterLeft = new DeckDisplays.Meter(false);
     private final DeckDisplays.Meter masterRight = new DeckDisplays.Meter(false);
@@ -744,12 +744,19 @@ public final class AudioStudioFrame extends JFrame {
         written.add(wish, BorderLayout.NORTH);
         written.add(notes, BorderLayout.CENTER);
 
-        JPanel whoRow = new JPanel(new java.awt.GridLayout(1, 2, 8, 0));
+        // One choice of two, shown as what it is: radio buttons behind the question they answer.
+        JPanel whoRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         whoRow.setOpaque(false);
+        JLabel whoAsks = new JLabel("Instrumente:");
+        whoAsks.setForeground(AudioStudioTheme.TEXT_DIM);
+        whoRow.add(whoAsks);
+        aiChooses.setOpaque(false);
+        ownTracks.setOpaque(false);
+        aiChooses.addActionListener(event -> updateComposeKey());
+        ownTracks.addActionListener(event -> updateComposeKey());
         whoRow.add(aiChooses);
         whoRow.add(ownTracks);
-        whoRow.setPreferredSize(new Dimension(380, 40));
-        composeButton.setPreferredSize(new Dimension(260, 44));
+        composeButton.setPreferredSize(new Dimension(310, 44));
         JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
         bottom.setOpaque(false);
         bottom.add(whoRow);
@@ -1598,6 +1605,27 @@ public final class AudioStudioFrame extends JFrame {
         panel.add(component, field);
     }
 
+    /**
+     * Names the compose key after what it does with the piece that is open: a piece that is not
+     * composed yet is composed; one that is composed is either begun anew (the AI chooses the
+     * instruments: a new piece beside it, or this one replaced, as the studio then asks) or gets
+     * the tracks composed that have no notes yet.
+     */
+    private void updateComposeKey() {
+        if (!specFields.locked()) {
+            composeButton.setText("Komponieren");
+            composeButton.setToolTipText("Komponieren und gleich rendern");
+        } else if (aiChooses.isSelected()) {
+            composeButton.setText("Neu komponieren …");
+            composeButton.setToolTipText("Dieses Stück ist schon komponiert. Hier entsteht ein neues Stück daneben,"
+                    + " oder dieses wird ersetzt; das wird gleich gefragt.");
+        } else {
+            composeButton.setText("Fehlende Spuren komponieren");
+            composeButton.setToolTipText("Komponiert für die Spuren im Arrangement, die noch keine Noten haben;"
+                    + " was schon komponiert ist, bleibt.");
+        }
+    }
+
     /** The one key: the AI chooses the instruments first, or the tracks of the mixer are composed as they are. */
     private void compose() {
         if (aiChooses.isSelected()) {
@@ -1654,6 +1682,7 @@ public final class AudioStudioFrame extends JFrame {
                 refreshSongs();
                 append("Neues Stück angelegt; seinen Namen bekommt es vom Plan der KI: " + fresh.getFileName());
                 specFields.show(null);
+                updateComposeKey();
                 specFields.choose(chosenSpec);
                 return true;
             }
@@ -1661,6 +1690,7 @@ public final class AudioStudioFrame extends JFrame {
                 int put = putAnswersAside(folder, null);
                 append("Das Stück wird neu komponiert; " + put + " bisherige Antworten liegen im Ordner „earlier“.");
                 specFields.show(null);
+                updateComposeKey();
                 specFields.choose(chosenSpec);
                 return true;
             }
@@ -3084,6 +3114,7 @@ public final class AudioStudioFrame extends JFrame {
                 description.setText(keptDescription);
             }
             ownTracks.setSelected("own".equals(saved.getProperty("instrumentMode")));
+            updateComposeKey();
             listening = com.aresstack.audio.studio.application.StageListening.from(saved);
             if (stagePanel != null) {
                 stagePanel.setMovementsWanted(com.aresstack.audio.studio.application.MovementDirector.wanted(saved));
@@ -3421,6 +3452,7 @@ public final class AudioStudioFrame extends JFrame {
         Path folder = Paths.get(directory.getText().trim());
         // A planned piece shows what it was planned with; only a new one can still be given its length, tempo and key.
         specFields.show(GemmaMusicComposer.specOf(folder));
+        updateComposeKey();
         arrangementView.setArrangement(shownArrangement(folder), withAudioLanes(ids),
                 there ? "" : "Noch nichts gerendert · Komponieren oder Demo laden");
         arrangementView.setMix(player.envelope(), soloTrack() == null ? "Mix" : "Solo", soloTrack(), player.length());
