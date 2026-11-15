@@ -167,8 +167,8 @@ public final class ProjectSession {
     }
 
     /**
-     * Whether the model says only what {@code arrangement.tsv} can say: one tempo in four
-     * quarters, one clip per track over its default part. Only then is the file a full view of
+     * Whether the model says only what {@code arrangement.tsv} can say: one tempo, one meter
+     * and one key, one clip per track over its default part. Only then is the file a full view of
      * the model, and only then may a new version of it be taken over without losing anything.
      */
     public boolean withinTsv() {
@@ -253,7 +253,7 @@ public final class ProjectSession {
 
     /**
      * Writes the model and {@code arrangement.tsv} from it, without a revision. A piece that says
-     * more than the TSV can (tempo or meter changes, another meter than 4/4) gets
+     * more than the TSV can (changes of tempo, meter or key) gets
      * {@code arrangement.mid}, written from the model, as its exchange file. A TSV lying there is
      * left as it is (work package F1): {@link #synchronize()} never takes it over such a model.
      */
