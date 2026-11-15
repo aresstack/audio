@@ -10,6 +10,7 @@ import com.aresstack.audio.core.dsp.StereoPanner;
 import com.aresstack.audio.core.dsp.StereoStrip;
 import com.aresstack.audio.core.mix.ChannelMotion;
 import com.aresstack.audio.core.mix.LegacyPeakNormalization;
+import com.aresstack.audio.core.mix.LevelMode;
 import com.aresstack.audio.core.mix.MixGraph;
 import com.aresstack.audio.core.mix.OfflineMix;
 import com.aresstack.audio.core.mix.StemChannel;
@@ -152,8 +153,26 @@ public final class SpatialStemMixer {
         mix(files, placements, room, secondsPerBar, 0, output, bits);
     }
 
+    /**
+     * Mixes the files of the tracks in the compatibility mode ({@link MixLevel#legacy}): the
+     * finished mix normalized to its peak as before, then the master level.
+     */
     public void mix(List<Path> files, List<SoundSourcePlacement> placements, AcousticRoom room,
                     double secondsPerBar, double masterDb, Path output, int bits) throws Exception {
+        mix(files, placements, room, secondsPerBar, MixLevel.legacy(masterDb), output, bits);
+    }
+
+    /**
+     * Mixes the files of the tracks with this level strategy and writes the mix as a WAV of 16
+     * or 24 bits.
+     *
+     * @return what the mix found out about its level, for the preview of the same piece
+     */
+    public MixOutcome mix(List<Path> files, List<SoundSourcePlacement> placements, AcousticRoom room,
+                          double secondsPerBar, MixLevel level, Path output, int bits) throws Exception {
+        if (level == null) {
+            throw new IllegalArgumentException("A mix needs its level strategy.");
+        }
         if (files.isEmpty() || files.size() != placements.size()) {
             throw new IllegalArgumentException("Every audio stem needs its placement.");
         }
@@ -184,18 +203,28 @@ public final class SpatialStemMixer {
         }
         long heard = length;
         long total = length + tail(length, room);
+        OfflineMix.GraphFactory graph = () -> graph(files.size(), placements, room, secondsPerBar, heard, total,
+                index -> {
+                    WavFileSource source = new WavFileSource(files.get(index));
+                    return LinearResampler.at(source, source.sampleRate(), RATE);
+                });
         // The mix goes to a file of its own first and replaces the output only when it is finished: the
-        // stems are read while the mix is written, and the output may be one of them.
+        // stems are read while the mix is written (twice, if the level needs a first pass), and the output
+        // may be one of them.
         Path fresh = output.toAbsolutePath().resolveSibling(output.getFileName() + "." + System.nanoTime() + ".part");
         try {
+            MixOutcome outcome;
             try (WavFileSink sink = new WavFileSink(fresh, RATE, bits, blockFrames)) {
-                OfflineMix.renderNormalized(() -> graph(files.size(), placements, room, secondsPerBar, heard, total,
-                        index -> {
-                            WavFileSource source = new WavFileSource(files.get(index));
-                            return LinearResampler.at(source, source.sampleRate(), RATE);
-                        }), RATE, blockFrames, masterDb, sink);
+                if (level.mode() == LevelMode.FIXED) {
+                    outcome = MixOutcome.fixed(OfflineMix.renderFixed(graph, RATE, blockFrames, level.master(),
+                            level.normalization(), sink));
+                } else {
+                    outcome = MixOutcome.legacy(OfflineMix.renderNormalized(graph, RATE, blockFrames,
+                            level.masterDb(), sink));
+                }
             }
             Files.move(fresh, output, StandardCopyOption.REPLACE_EXISTING);
+            return outcome;
         } finally {
             Files.deleteIfExists(fresh);
         }

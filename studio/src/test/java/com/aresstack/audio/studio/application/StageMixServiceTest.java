@@ -133,6 +133,33 @@ public final class StageMixServiceTest {
         }
     }
 
+    @Test
+    public void theExportIsBitIdenticalToBefore() throws Exception {
+        // Decision of the product owner, "export old, live new": files and exports keep the old
+        // peak normalization, byte for byte as the mixer from before the level strategy wrote them.
+        Path song = piece("tempo\t120", "track\tmelody\t73\t0\tmelody", "track\tbass\t32\t1\tbass");
+        Path arrangement = song.resolve("arrangement.tsv");
+        StageMixService service = new StageMixService();
+        Assert.assertTrue("no factor before the first mix", Float.isNaN(service.legacyFactor()));
+        for (com.aresstack.audio.studio.stage.AcousticRoom room : new com.aresstack.audio.studio.stage.AcousticRoom[]{
+                com.aresstack.audio.studio.stage.AcousticRoom.STUDIO, com.aresstack.audio.studio.stage.AcousticRoom.HALL}) {
+            for (double masterDb : new double[]{0, -6}) {
+                SpatialScene scene = new SpatialScene(room, service.scene(arrangement, song).placements(), masterDb);
+                scene = scene.with(scene.placement("bass").at(0.7, 0));
+                Path exported = service.export(arrangement, song, scene, song.resolve("export.wav"), 16);
+                SpatialScene fitting = scene.fitting(StageMixService.tracks(arrangement));
+                Path old = song.resolve("old.wav");
+                new com.aresstack.audio.studio.mix.legacy.LegacySpatialStemMixer().mix(
+                        Arrays.asList(song.resolve("melody.wav"), song.resolve("bass.wav")),
+                        Arrays.asList(fitting.placement("melody"), fitting.placement("bass")), fitting.room(),
+                        StageMixService.secondsPerBar(arrangement), fitting.masterDb(), old, 16);
+                Assert.assertArrayEquals(room.name() + ", " + masterDb + " dB", Files.readAllBytes(old),
+                        Files.readAllBytes(exported));
+                Assert.assertTrue("live playback gets the factor of the file", service.legacyFactor() > 0);
+            }
+        }
+    }
+
     /** A piece of one second: its arrangement and a tone as the sound of the melody and of the bass. */
     private Path piece(String... lines) throws Exception {
         Path song = folder.newFolder().toPath();
