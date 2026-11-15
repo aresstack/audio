@@ -105,15 +105,20 @@ public final class LivePlayback implements AutoCloseable {
         return blockFrames;
     }
 
-    /** Plays from where playback stands; from the start if it had played to the end. */
+    /**
+     * Plays from where playback stands; from the start if it had played to the end. The state is
+     * {@link State#PLAYING} when this returns.
+     */
     public void play() {
         if (state == State.CLOSED || state == State.FAILED) {
             return;
         }
-        if (graph.position() >= graph.frames()) {
+        if (!graph.seekPending() && graph.position() >= graph.frames()) {
             graph.seek(0);
         }
         wantPlaying = true;
+        // Playing from the caller's point of view at once, not only once the audio thread has woken up.
+        state = State.PLAYING;
         LockSupport.unpark(thread);
     }
 
@@ -273,9 +278,8 @@ public final class LivePlayback implements AutoCloseable {
 
     /** The piece has ended: the limiter's look-ahead is pushed out with silence, the sink played out. */
     private void finish() {
-        int rest = Math.min(blockFrames, master.latencyFrames());
-        if (rest > 0) {
-            block.setFrames(rest);
+        for (int rest = master.latencyFrames(); rest > 0; rest -= blockFrames) {
+            block.setFrames(Math.min(blockFrames, rest));
             block.clear();
             master.process(block);
             meter.process(block);

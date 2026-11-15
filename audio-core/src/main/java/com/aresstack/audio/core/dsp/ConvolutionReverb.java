@@ -52,6 +52,13 @@ public final class ConvolutionReverb implements RoomBus {
     }
 
     @Override
+    public void reset() {
+        if (convolver != null) {
+            convolver.reset();
+        }
+    }
+
+    @Override
     public void process(AudioBlock send, int frames, AudioBlock bus, float gain) {
         float[] sendLeft = send.left;
         float[] sendRight = send.right;

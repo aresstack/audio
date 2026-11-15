@@ -16,6 +16,9 @@ public interface RoomBus {
      */
     void process(AudioBlock send, int frames, AudioBlock bus, float gain);
 
+    /** Forgets the ring (after a seek), keeping what was prepared. Never allocates, locks or throws. */
+    void reset();
+
     /** By how many frames the ring lags behind what was sent, beyond its own pre-delay. */
     default int latencyFrames() {
         return 0;

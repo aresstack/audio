@@ -239,4 +239,125 @@ public final class LiveGraphTest {
         Assert.assertEquals(0, TestSignals.rms(block.left, 400, 512), 1e-6);
         Assert.assertTrue(channel.settled());
     }
+
+    @Test
+    public void echoDelaysThatChangeFasterThanAFadeNeverJump() throws Exception {
+        // Dragging sends a new place every block, faster than the 20 ms fade of a changed echo delay.
+        int frames = RATE;
+        float[] tone = TestSignals.sine(frames, 110, RATE, 0.5);
+        ChannelParameters base = ChannelParameters.builder().pan(0, 0)
+                .echoes(new int[]{100}, new float[]{1f}, new float[]{1f}).build();
+        LiveChannel channel = new LiveChannel(new ArraySource(tone, tone.clone(), RATE), frames, base, 4000, WALLS);
+        LiveGraph graph = new LiveGraph(List.of(channel), null, 0, frames);
+        int[] delays = {300, 301, 900, 120, 2000, 2001, 50};
+        float[] out = new float[frames];
+        AudioBlock block = new AudioBlock(512);
+        graph.prepare(RATE, 512);
+        int at = 0;
+        int got;
+        int turn = 0;
+        do {
+            if (at > RATE / 4 && turn < delays.length) {
+                channel.set(base.toBuilder().echoes(new int[]{delays[turn++]}, new float[]{1f}, new float[]{1f}).build());
+            }
+            block.setFrames(512);
+            got = graph.read(block);
+            System.arraycopy(block.left, 0, out, at, got);
+            at += got;
+        } while (got == 512);
+        float most = largestStep(new float[][]{out}, 4096);
+        // the echo is the low-passed sine: it moves by at most about 0.008 per sample
+        Assert.assertTrue("largest step " + most, most < 0.012f);
+    }
+
+    @Test
+    public void aSeekSilencesTheRoomOfThePassageLeftBehind() throws Exception {
+        int frames = 2 * RATE;
+        float[] left = new float[frames];
+        left[100] = 1;
+        ChannelParameters loud = ChannelParameters.builder().pan(0, 0).send(1, 1).build();
+        LiveGraph graph = new LiveGraph(List.of(new LiveChannel(new ArraySource(left, left.clone(), RATE), frames,
+                loud, 0, null)), new RoomReverb(ROOM), 1f, frames);
+        AudioBlock block = new AudioBlock(512);
+        graph.prepare(RATE, 512);
+        float before = 0;
+        for (int b = 0; b < 20; b++) {
+            block.setFrames(512);
+            graph.read(block);
+            for (int i = 0; i < 512; i++) {
+                before = Math.max(before, Math.abs(block.left[i]));
+            }
+        }
+        Assert.assertTrue("the room rings " + before, before > 1e-3);
+        graph.seek(RATE);
+        block.setFrames(512);
+        graph.read(block);
+        for (int i = 0; i < 512; i++) {
+            Assert.assertEquals(0f, block.left[i], 0f);
+            Assert.assertEquals(0f, block.right[i], 0f);
+        }
+    }
+
+    @Test
+    public void aLoopStartsAgainWithoutAGap() throws Exception {
+        int frames = 1000;
+        float[] ramp = new float[frames];
+        for (int i = 0; i < frames; i++) {
+            ramp[i] = 0.1f + i * 0.0005f;
+        }
+        LiveGraph graph = new LiveGraph(List.of(new LiveChannel(new ArraySource(ramp, ramp.clone(), RATE), frames,
+                ChannelParameters.builder().build(), 0, null)), null, 0, frames + 500);
+        graph.setLoop(frames);
+        AudioBlock block = new AudioBlock(300);
+        graph.prepare(RATE, 300);
+        float[] out = new float[3600];
+        for (int at = 0; at < out.length; at += 300) {
+            block.setFrames(300);
+            Assert.assertEquals("a loop never ends", 300, graph.read(block));
+            System.arraycopy(block.left, 0, out, at, 300);
+        }
+        for (int i = 0; i < out.length; i++) {
+            Assert.assertEquals("frame " + i, ramp[i % frames], out[i], 1e-6f);
+        }
+        graph.setLoop(0);
+        int got;
+        long total = graph.position();
+        do {
+            block.setFrames(300);
+            got = graph.read(block);
+            total += got;
+        } while (got == 300);
+        Assert.assertEquals("without the loop it ends with the ring", frames + 500, total);
+    }
+
+    @Test
+    public void smallEchoDelayChangesGlideAndDoNotCancelATone() throws Exception {
+        // A tone and one strong echo; the echo's delay creeps by 2 frames every 10 ms, as when dragging.
+        // Gliding the delay moves the comb of tone and echo smoothly; it never mixes the echo with a
+        // shifted copy of itself, so the level only follows the slowly moving interference.
+        int frames = 2 * RATE;
+        float[] tone = TestSignals.sine(frames, 330, RATE, 0.3);
+        ChannelParameters base = ChannelParameters.builder().pan(0, 0)
+                .echoes(new int[]{500}, new float[]{0.5f}, new float[]{0.5f}).build();
+        LiveChannel channel = new LiveChannel(new ArraySource(tone, tone.clone(), RATE), frames, base, 4000, WALLS);
+        LiveGraph graph = new LiveGraph(List.of(channel), null, 0, frames);
+        AudioBlock block = new AudioBlock(441);
+        graph.prepare(RATE, 441);
+        float[] out = new float[frames];
+        for (int at = 0, step = 0; at + 441 <= frames; at += 441, step++) {
+            channel.set(base.toBuilder().echoes(new int[]{500 + 2 * step}, new float[]{0.5f}, new float[]{0.5f}).build());
+            block.setFrames(441);
+            graph.read(block);
+            System.arraycopy(block.left, 0, out, at, 441);
+        }
+        // level per 5 ms against its neighbours: no short holes
+        double[] level = new double[frames / 220];
+        for (int w = 0; w < level.length; w++) {
+            level[w] = 10 * Math.log10(TestSignals.rms(out, w * 220, (w + 1) * 220) + 1e-9) * 2;
+        }
+        for (int w = 20; w < level.length - 2; w++) {
+            double around = (level[w - 2] + level[w + 2]) / 2;
+            Assert.assertTrue("hole of " + (level[w] - around) + " dB at window " + w, level[w] > around - 1);
+        }
+    }
 }

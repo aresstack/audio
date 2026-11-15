@@ -51,6 +51,21 @@ public final class RoomReverb implements RoomBus {
         position = 0;
     }
 
+    /**
+     * Forgets everything that rings, as after {@link #prepare} but without allocating: for a jump in
+     * live playback, so that the room does not go on ringing with a passage that is no longer played.
+     */
+    @Override
+    public void reset() {
+        java.util.Arrays.fill(delayedLeft, 0f);
+        java.util.Arrays.fill(delayedRight, 0f);
+        if (left != null) {
+            left.reset();
+            right.reset();
+        }
+        position = 0;
+    }
+
     /** Adds the ring of the first {@code frames} frames that were sent to the bus, scaled by {@code gain}. */
     @Override
     public void process(AudioBlock send, int frames, AudioBlock bus, float gain) {
@@ -104,6 +119,18 @@ public final class RoomReverb implements RoomBus {
                 passes[i] = new float[Math.max(4, (int) Math.round((ALL_PASSES[i] + spread) * scale))];
             }
             damp = (float) (0.1 + 0.6 * damping);
+        }
+
+        void reset() {
+            for (float[] line : combs) {
+                java.util.Arrays.fill(line, 0f);
+            }
+            for (float[] line : passes) {
+                java.util.Arrays.fill(line, 0f);
+            }
+            java.util.Arrays.fill(combAt, 0);
+            java.util.Arrays.fill(passAt, 0);
+            java.util.Arrays.fill(dulled, 0f);
         }
 
         float next(float in) {
