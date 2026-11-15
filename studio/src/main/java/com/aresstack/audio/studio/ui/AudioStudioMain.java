@@ -66,6 +66,9 @@ public final class AudioStudioMain {
             verifyDirectoryImport(registry, sandbox);
             Path tsv = copyBundledComposition(sandbox);
             verifyPieceModel(sandbox, tsv);
+            verifyModelRendering(registry, sandbox);
+            verifyVoiceAddition(registry, sandbox);
+            verifyRegionRework(registry, sandbox);
             Map<String, InstrumentLibrary> assignments =
                     new HashMap<String, InstrumentLibrary>();
             if (optionalSoundFont != null) {
@@ -98,7 +101,7 @@ public final class AudioStudioMain {
                     throw new IllegalStateException("The mixed WAV is unexpectedly short.");
                 }
             }
-            System.out.println("Studio smoke test passed: SFZ directory import, piece model, "
+            System.out.println("Studio smoke test passed: SFZ directory import, piece model, model rendering, voice addition, region rework, "
                     + (optionalSoundFont == null ? "Java fallback" : "GeneralUser sampled melody")
                     + ", MIDI export and WAV mix.");
         } finally {
@@ -147,6 +150,139 @@ public final class AudioStudioMain {
         }
         System.out.println("Piece model: " + session.get().composition().tracks().size() + " tracks, "
                 + session.get().composition().parts().size() + " parts taken over; old files kept.");
+    }
+
+    /**
+     * The bundled piece is rendered from its model and mixed on its stage; rendering it again
+     * renders nothing, because every stem is in the cache.
+     */
+    private static void verifyModelRendering(InstrumentRegistry registry, Path folder) throws Exception {
+        com.aresstack.audio.studio.application.ProjectSession session =
+                com.aresstack.audio.studio.application.ProjectSession.open(folder).get();
+        com.aresstack.audio.studio.application.PieceRendering rendering =
+                new com.aresstack.audio.studio.application.PieceRendering(registry);
+        java.util.Map<String, Integer> programs = new HashMap<String, Integer>();
+        com.aresstack.audio.studio.application.PieceRendering.Outcome first = rendering.render(session, null,
+                com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine.GERVILL, "fluidsynth",
+                "sfizz_render", programs, message -> { });
+        if (!Files.isRegularFile(first.mix()) || Files.size(first.mix()) < 1000
+                || first.stems().rendered().size() != session.composition().parts().size()
+                || !Files.isRegularFile(folder.resolve("arrangement.mid"))) {
+            throw new IllegalStateException("The piece was not rendered from its model.");
+        }
+        com.aresstack.audio.studio.application.PieceRendering.Outcome second = rendering.render(session, null,
+                com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine.GERVILL, "fluidsynth",
+                "sfizz_render", programs, message -> { });
+        if (!second.stems().rendered().isEmpty()) {
+            throw new IllegalStateException("An unchanged piece was rendered again: " + second.stems().rendered());
+        }
+        System.out.println("Model rendering: " + first.stems().rendered().size() + " stems rendered, then "
+                + second.stems().reused().size() + " taken from the cache.");
+    }
+
+    /**
+     * A voice is added to the bundled piece by a model that answers without network: the proposal
+     * is rendered in its preview folder, where only the new voice is rendered and the others come
+     * from the stems of the piece; taken, it is part of the piece, and nothing is rendered twice.
+     */
+    private static void verifyVoiceAddition(InstrumentRegistry registry, Path folder) throws Exception {
+        com.aresstack.audio.studio.application.ProjectSession session =
+                com.aresstack.audio.studio.application.ProjectSession.open(folder).get();
+        int partsBefore = session.composition().parts().size();
+        com.aresstack.audio.studio.ai.ChatModel model = (instruction, prompt, maxTokens, cache) -> {
+            String part = quoted(prompt, "part");
+            String section = quoted(prompt, "section");
+            return com.google.gson.JsonParser.parseString("{\"part\":\"" + part + "\",\"section\":\"" + section
+                    + "\",\"notes\":[{\"bar\":1,\"beat\":2,\"duration\":2,\"pitch\":72,\"velocity\":90},"
+                    + "{\"bar\":2,\"beat\":0,\"duration\":1,\"pitch\":74,\"velocity\":85}]}").getAsJsonObject();
+        };
+        com.aresstack.audio.studio.application.VoiceOffer offer = com.aresstack.audio.studio.application.VoiceOffer.start(
+                session, com.aresstack.audio.studio.ai.VoiceComposer.with(model),
+                com.aresstack.audio.studio.ai.AddVoiceRequest.of("Trompete", "Trumpet", 56, "melody"), message -> { });
+        String added = offer.soloPartId();
+        if (session.composition().parts().size() != partsBefore) {
+            throw new IllegalStateException("A proposed voice changed the piece before it was taken.");
+        }
+        com.aresstack.audio.studio.application.PieceRendering rendering =
+                new com.aresstack.audio.studio.application.PieceRendering(registry);
+        java.util.Map<String, Integer> programs = new HashMap<String, Integer>(offer.newPrograms());
+        com.aresstack.audio.studio.application.PieceRendering.Outcome heard = rendering.render(offer.preview(),
+                offer.proposed(), null, com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine.GERVILL,
+                "fluidsynth", "sfizz_render", programs, message -> { });
+        if (!heard.stems().rendered().equals(java.util.List.of(added)) || heard.stems().reused().size() != partsBefore
+                || !Files.isRegularFile(heard.mix()) || !Files.isRegularFile(heard.stems().stems().get(added))) {
+            throw new IllegalStateException("The preview of the new voice rendered " + heard.stems().rendered()
+                    + " instead of only the new voice.");
+        }
+        offer.accept();
+        if (session.composition().part(added) == null || session.composition().parts().size() != partsBefore + 1) {
+            throw new IllegalStateException("The new voice was not taken into the piece.");
+        }
+        com.aresstack.audio.studio.application.PieceRendering.Outcome after = rendering.render(session, null,
+                com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine.GERVILL, "fluidsynth",
+                "sfizz_render", programs, message -> { });
+        if (!after.stems().rendered().isEmpty()) {
+            throw new IllegalStateException("After taking the voice, parts were rendered again: "
+                    + after.stems().rendered());
+        }
+        System.out.println("Voice addition: proposed, only the new voice rendered, taken, nothing rendered twice.");
+    }
+
+    /**
+     * The first two bars of one part of the bundled piece are written anew by a model that answers
+     * without network: in the preview only that part is rendered, the proposal changes no other
+     * part, and after it is taken nothing is rendered twice.
+     */
+    private static void verifyRegionRework(InstrumentRegistry registry, Path folder) throws Exception {
+        com.aresstack.audio.studio.application.ProjectSession session =
+                com.aresstack.audio.studio.application.ProjectSession.open(folder).get();
+        com.aresstack.audio.composition.Composition before = session.composition();
+        String part = before.parts().get(0).id();
+        com.aresstack.audio.studio.ai.ChatModel model = (instruction, prompt, maxTokens, cache) ->
+                com.google.gson.JsonParser.parseString("{\"part\":\"" + quoted(prompt, "part") + "\",\"section\":\""
+                        + quoted(prompt, "section") + "\",\"notes\":[{\"bar\":1,\"beat\":0,\"duration\":2,\"pitch\":76,"
+                        + "\"velocity\":90},{\"bar\":2,\"beat\":1,\"duration\":1,\"pitch\":79,\"velocity\":85}]}")
+                        .getAsJsonObject();
+        com.aresstack.audio.studio.application.RegionOffer offer = com.aresstack.audio.studio.application.RegionOffer.start(
+                session, com.aresstack.audio.studio.ai.RegionComposer.with(model),
+                com.aresstack.audio.studio.ai.RegionRequest.replace(
+                        com.aresstack.audio.composition.edit.Selection.bars(before, java.util.List.of(part), 1, 2), ""),
+                java.util.List.of(part), 1, 2, message -> { });
+        for (com.aresstack.audio.composition.Part other : before.parts()) {
+            if (!other.id().equals(part) && !before.notesOf(other.id()).equals(offer.proposed().notesOf(other.id()))) {
+                throw new IllegalStateException("The rewritten passage changed another part: " + other.id());
+            }
+        }
+        com.aresstack.audio.studio.application.PieceRendering rendering =
+                new com.aresstack.audio.studio.application.PieceRendering(registry);
+        java.util.Map<String, Integer> programs = new HashMap<String, Integer>();
+        com.aresstack.audio.studio.application.PieceRendering.Outcome heard = rendering.render(offer.preview(),
+                offer.proposed(), null, com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine.GERVILL,
+                "fluidsynth", "sfizz_render", programs, message -> { });
+        if (!heard.stems().rendered().equals(java.util.List.of(part))) {
+            throw new IllegalStateException("The preview of the passage rendered " + heard.stems().rendered()
+                    + " instead of only " + part + ".");
+        }
+        offer.accept();
+        com.aresstack.audio.studio.application.PieceRendering.Outcome after = rendering.render(session, null,
+                com.aresstack.audio.studio.render.InstrumentSampleRenderer.Sf2Engine.GERVILL, "fluidsynth",
+                "sfizz_render", programs, message -> { });
+        if (!after.stems().rendered().isEmpty() || session.composition().equals(before)) {
+            throw new IllegalStateException("The passage was not taken, or parts were rendered again: "
+                    + after.stems().rendered());
+        }
+        System.out.println("Region rework: proposed, only the rewritten part rendered, taken, nothing rendered twice.");
+    }
+
+    /** The value between {@code "<key>":"} and the next quote in a prompt. */
+    private static String quoted(String prompt, String key) {
+        String marker = "\"" + key + "\":\"";
+        int from = prompt.lastIndexOf(marker);
+        if (from < 0) {
+            return "";
+        }
+        from += marker.length();
+        return prompt.substring(from, prompt.indexOf('"', from));
     }
 
     private static Path copyBundledComposition(Path directory) throws Exception {

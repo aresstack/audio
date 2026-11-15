@@ -36,6 +36,11 @@ public final class RegionComposer {
         this.generator = generator;
     }
 
+    /** A composer whose notes come from the rework role (follows composition). */
+    public static RegionComposer with(ModelLineup models) {
+        return new RegionComposer(new ChatRegionGenerator(models.model(ModelRoles.REWORK), 16384));
+    }
+
     /** A composer that asks a model for the notes. */
     public static RegionComposer with(ChatModel model) {
         return new RegionComposer(new ChatRegionGenerator(model, 16384));
