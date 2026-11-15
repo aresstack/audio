@@ -140,6 +140,9 @@ public final class AlbumsPanelTest {
         }
     }
 
+    /** Stands for the choice of the models the window puts beside the concept. */
+    private final javax.swing.JPanel models = new javax.swing.JPanel();
+
     private Object cell(int row, int column) throws Exception {
         return onEvents(() -> panel.table().getValueAt(row, column));
     }
@@ -166,10 +169,16 @@ public final class AlbumsPanelTest {
         onEvents(() -> {
             field("description").setText("A Christmas album, instrumental");
             ((javax.swing.JSpinner) member("trackCount")).setValue(3);
+            panel.setBesideConcept(models);
             panel.planTracks();
+            // While the AI plans: the circle turns over the list, and no model can be chosen.
+            assertTrue(panel.waitingForTracks());
+            assertFalse(models.isEnabled());
             return null;
         });
         until(() -> panel.table().getRowCount() == 3);
+        assertFalse(onEvents(() -> panel.waitingForTracks()));
+        assertTrue(onEvents(() -> models.isEnabled()));
         assertEquals(1, asked.size());
         assertTrue(asked.get(0).contains("A Christmas album, instrumental") && asked.get(0).contains("\"tracksWanted\":3"));
         assertEquals("Winter Waltz", cell(1, 1));
@@ -310,5 +319,35 @@ public final class AlbumsPanelTest {
         });
         assertEquals(5, (int) onEvents(() -> again[0].box(Field.STYLE).getItemCount()));
         assertFalse(onEvents(() -> again[0].proposingNow()));
+    }
+
+    /** A request that failed is told and asked again; it does not leave the lists empty for good. */
+    @Test
+    public void proposalsThatFailedAreToldAndAskedAgainWithTheSameWords() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger styleRequests = new java.util.concurrent.atomic.AtomicInteger();
+        com.aresstack.audio.studio.album.AlbumSuggester proposer = (field, title, description, style, known) -> {
+            if (field == Field.STYLE && styleRequests.incrementAndGet() == 1) {
+                throw new java.io.IOException("The model output was not complete (finish_reason=length).");
+            }
+            return field == Field.STYLE ? List.of("Orgelmusik") : List.of();
+        };
+        onEvents(() -> {
+            panel.suggester(proposer);
+            panel.createAlbum();
+            return null;
+        });
+        until(() -> !panel.proposingNow() && styleRequests.get() == 1);
+        assertEquals(0, (int) onEvents(() -> panel.box(Field.STYLE).getItemCount()));
+        assertTrue(onEvents(() -> panel.status()), onEvents(() -> panel.status()).contains("blieben aus"));
+        assertTrue(onEvents(() -> panel.box(Field.STYLE).getToolTipText()).contains("finish_reason=length"));
+
+        // The same words again: asked anew, because the first request gave no answer.
+        onEvents(() -> {
+            panel.propose(Field.STYLE);
+            return null;
+        });
+        until(() -> !panel.proposingNow() && panel.box(Field.STYLE).getItemCount() == 1);
+        assertEquals(2, styleRequests.get());
+        assertFalse(onEvents(() -> panel.box(Field.STYLE).getToolTipText()).contains("blieben aus"));
     }
 }
