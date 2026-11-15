@@ -29,7 +29,9 @@ import javax.sound.sampled.LineUnavailableException;
  * <p>The channels take their numbers from the same place as the file mix
  * ({@code SpatialStemMixer.parameters}): as long as nothing moves, live playback sounds exactly like
  * the file. A muted track keeps its channel and is turned down, so that it can be turned up again
- * while playing. The room is fixed for a live stage; another room means another live stage.
+ * while playing. The room is fixed for a live stage; another room means another live stage, and so
+ * does switching between loudspeakers and headphones or between algorithmic and convolved room
+ * ({@link StageSound}, work package D4). Height and moving the source around the head glide live.
  *
  * <p>Thread use: made off the event thread (it reads and resamples the stems); {@link #move} and
  * {@link #place} may be called from any thread, typically the event thread while dragging.
@@ -37,56 +39,71 @@ import javax.sound.sampled.LineUnavailableException;
 public final class LiveStage implements AutoCloseable {
     private final AcousticRoom room;
     private final double secondsPerBar;
+    private final StageSound sound;
     private final List<String> trackIds;
     private final LiveGraph graph;
 
     private LiveStage(List<float[][]> sounds, List<SoundSourcePlacement> placements, AcousticRoom room,
-                      double secondsPerBar) {
+                      double secondsPerBar, StageSound sound) {
         if (sounds.isEmpty() || sounds.size() != placements.size()) {
             throw new IllegalArgumentException("Every track on a live stage needs its placement.");
         }
         this.room = room;
         this.secondsPerBar = secondsPerBar;
+        this.sound = sound == null ? StageSound.LOUDSPEAKERS : sound;
         long length = 0;
-        for (float[][] sound : sounds) {
-            length = Math.max(length, sound[0].length);
+        for (float[][] stem : sounds) {
+            length = Math.max(length, stem[0].length);
         }
-        boolean reflects = SpatialStemMixer.reflects(room);
+        boolean reflects = SpatialStemMixer.walls(room, this.sound) > 0;
         int capacity = reflects ? SpatialStemMixer.longestEcho(room) : 0;
         List<LiveChannel> channels = new ArrayList<LiveChannel>();
         List<String> ids = new ArrayList<String>();
         for (int i = 0; i < sounds.size(); i++) {
-            float[][] sound = sounds.get(i);
+            float[][] stem = sounds.get(i);
             SoundSourcePlacement placement = placements.get(i);
             ids.add(placement.trackId());
-            channels.add(new LiveChannel(new ArraySource(sound[0], sound[1], SpatialStemMixer.RATE), length,
-                    parameters(placement), capacity, reflects ? SpatialStemMixer.echoLowPass(room) : null));
+            channels.add(new LiveChannel(new ArraySource(stem[0], stem[1], SpatialStemMixer.RATE), length,
+                    parameters(placement), capacity, reflects ? SpatialStemMixer.echoLowPass(room) : null,
+                    this.sound.headphones() ? this.sound.head() : null));
         }
         this.trackIds = List.copyOf(ids);
-        this.graph = new LiveGraph(channels, SpatialStemMixer.reverb(room), (float) room.amount(),
-                length + SpatialStemMixer.tail(length, room));
+        this.graph = new LiveGraph(channels, SpatialStemMixer.roomBus(room, this.sound), (float) room.amount(),
+                length + SpatialStemMixer.tail(length, room, this.sound));
     }
 
     /** A live stage of tracks that are in memory already. */
     public static LiveStage of(List<SpatialStemMixer.Signal> signals, List<SoundSourcePlacement> placements,
                                AcousticRoom room, double secondsPerBar) throws IOException {
+        return of(signals, placements, room, secondsPerBar, StageSound.LOUDSPEAKERS);
+    }
+
+    /** A live stage of tracks in memory, heard as {@code sound} says (headphones, convolved room; work package D4). */
+    public static LiveStage of(List<SpatialStemMixer.Signal> signals, List<SoundSourcePlacement> placements,
+                               AcousticRoom room, double secondsPerBar, StageSound sound) throws IOException {
         List<float[][]> sounds = new ArrayList<float[][]>();
         for (SpatialStemMixer.Signal signal : signals) {
             sounds.add(atMixRate(LinearResampler.at(new ArraySource(signal.left, signal.right, signal.rate),
                     signal.rate, SpatialStemMixer.RATE), LinearResampler.outputFrames(signal.left.length, signal.rate,
                     SpatialStemMixer.RATE)));
         }
-        return new LiveStage(sounds, placements, room, secondsPerBar);
+        return new LiveStage(sounds, placements, room, secondsPerBar, sound);
     }
 
     /** A live stage of the rendered stem files of a piece; reads them whole, so call it off the event thread. */
     public static LiveStage load(List<Path> files, List<SoundSourcePlacement> placements, AcousticRoom room,
                                  double secondsPerBar) throws Exception {
+        return load(files, placements, room, secondsPerBar, StageSound.LOUDSPEAKERS);
+    }
+
+    /** As {@link #load(List, List, AcousticRoom, double)}, heard as {@code sound} says. */
+    public static LiveStage load(List<Path> files, List<SoundSourcePlacement> placements, AcousticRoom room,
+                                 double secondsPerBar, StageSound sound) throws Exception {
         List<SpatialStemMixer.Signal> signals = new ArrayList<SpatialStemMixer.Signal>();
         for (Path file : files) {
             signals.add(SpatialStemMixer.read(file));
         }
-        return of(signals, placements, room, secondsPerBar);
+        return of(signals, placements, room, secondsPerBar, sound);
     }
 
     /** Reads a source at the rate of the mix into memory, with the block size of the file mix. */
@@ -115,7 +132,7 @@ public final class LiveStage implements AutoCloseable {
 
     /** The numbers of a channel for a placement on this stage; a muted track is turned down. */
     private ChannelParameters parameters(SoundSourcePlacement placement) {
-        ChannelParameters parameters = SpatialStemMixer.parameters(placement, room, secondsPerBar);
+        ChannelParameters parameters = SpatialStemMixer.parameters(placement, room, secondsPerBar, sound);
         return placement.muted() ? parameters.toBuilder().level(0).build() : parameters;
     }
 
@@ -125,6 +142,11 @@ public final class LiveStage implements AutoCloseable {
 
     public AcousticRoom room() {
         return room;
+    }
+
+    /** How this stage is heard; another sound means another live stage, as another room does. */
+    public StageSound sound() {
+        return sound;
     }
 
     /** The ids of the tracks, in the order of the channels. */

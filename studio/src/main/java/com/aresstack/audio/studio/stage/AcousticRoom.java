@@ -11,10 +11,10 @@ import java.util.Locale;
  * walls throw the sound back and how much they dull it.
  */
 public final class AcousticRoom {
-    public static final AcousticRoom STUDIO = new AcousticRoom("studio", "Trockenes Studio", 7, 6, 0.35, 0.18, 0.35, 0.7);
-    public static final AcousticRoom CHAMBER = new AcousticRoom("chamber", "Kammermusiksaal", 12, 14, 1.0, 0.30, 0.55, 0.5);
-    public static final AcousticRoom HALL = new AcousticRoom("hall", "Konzertsaal", 22, 30, 2.0, 0.38, 0.65, 0.4);
-    public static final AcousticRoom CATHEDRAL = new AcousticRoom("cathedral", "Kathedrale", 30, 60, 4.5, 0.50, 0.75, 0.3);
+    public static final AcousticRoom STUDIO = new AcousticRoom("studio", "Trockenes Studio", 7, 6, 3, 0.35, 0.18, 0.35, 0.7);
+    public static final AcousticRoom CHAMBER = new AcousticRoom("chamber", "Kammermusiksaal", 12, 14, 8, 1.0, 0.30, 0.55, 0.5);
+    public static final AcousticRoom HALL = new AcousticRoom("hall", "Konzertsaal", 22, 30, 15, 2.0, 0.38, 0.65, 0.4);
+    public static final AcousticRoom CATHEDRAL = new AcousticRoom("cathedral", "Kathedrale", 30, 60, 28, 4.5, 0.50, 0.75, 0.3);
     public static final List<AcousticRoom> PRESETS = Collections.unmodifiableList(
             Arrays.asList(STUDIO, CHAMBER, HALL, CATHEDRAL));
 
@@ -22,17 +22,19 @@ public final class AcousticRoom {
     private final String name;
     private final double widthMetres;
     private final double depthMetres;
+    private final double heightMetres;
     private final double reverbSeconds;
     private final double amount;
     private final double reflections;
     private final double damping;
 
-    private AcousticRoom(String kind, String name, double widthMetres, double depthMetres, double reverbSeconds,
-                         double amount, double reflections, double damping) {
+    private AcousticRoom(String kind, String name, double widthMetres, double depthMetres, double heightMetres,
+                         double reverbSeconds, double amount, double reflections, double damping) {
         this.kind = kind;
         this.name = name;
         this.widthMetres = widthMetres;
         this.depthMetres = depthMetres;
+        this.heightMetres = heightMetres;
         this.reverbSeconds = SoundSourcePlacement.within(reverbSeconds, 0.1, 8);
         this.amount = SoundSourcePlacement.within(amount, 0, 1);
         this.reflections = SoundSourcePlacement.within(reflections, 0, 1);
@@ -61,17 +63,19 @@ public final class AcousticRoom {
     }
 
     public AcousticRoom withReverbSeconds(double seconds) {
-        return new AcousticRoom(kind, name, widthMetres, depthMetres, seconds, amount, reflections, damping);
+        return new AcousticRoom(kind, name, widthMetres, depthMetres, heightMetres, seconds, amount, reflections, damping);
     }
 
     public AcousticRoom withAmount(double share) {
-        return new AcousticRoom(kind, name, widthMetres, depthMetres, reverbSeconds, share, reflections, damping);
+        return new AcousticRoom(kind, name, widthMetres, depthMetres, heightMetres, reverbSeconds, share, reflections, damping);
     }
 
     public String kind() { return kind; }
     public String name() { return name; }
     public double widthMetres() { return widthMetres; }
     public double depthMetres() { return depthMetres; }
+    /** From the floor to the ceiling (work package D4: floor and ceiling echoes, height of the stage). */
+    public double heightMetres() { return heightMetres; }
     public double reverbSeconds() { return reverbSeconds; }
     /** How much of the reverberation is mixed in, 0 (none) to 1. */
     public double amount() { return amount; }

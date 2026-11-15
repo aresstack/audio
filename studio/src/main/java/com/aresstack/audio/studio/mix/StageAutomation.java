@@ -36,13 +36,20 @@ public final class StageAutomation {
      * @param x      the place between -1 (left) and +1 (right)
      * @param depth  the place between 0 (front edge) and 1 (back wall)
      * @param reverb the share sent to the room, 0 to 1
+     * @param height the height above the ears, 0 to 1 (work package D4)
      */
-    public record Lanes(AutomationCurve level, AutomationCurve x, AutomationCurve depth, AutomationCurve reverb) {
-        static final Lanes STILL = new Lanes(null, null, null, null);
+    public record Lanes(AutomationCurve level, AutomationCurve x, AutomationCurve depth, AutomationCurve reverb,
+                        AutomationCurve height) {
+        static final Lanes STILL = new Lanes(null, null, null, null, null);
+
+        /** Curves without height, as before work package D4. */
+        public Lanes(AutomationCurve level, AutomationCurve x, AutomationCurve depth, AutomationCurve reverb) {
+            this(level, x, depth, reverb, null);
+        }
 
         /** Whether the track changes its place or its share of the room over time. */
         public boolean moves() {
-            return x != null || depth != null || reverb != null;
+            return x != null || depth != null || reverb != null || height != null;
         }
     }
 
@@ -73,7 +80,7 @@ public final class StageAutomation {
         }
         joined.replaceAll((track, none) -> {
             Lanes moving = movements.of(track);
-            return new Lanes(of(track).level(), moving.x(), moving.depth(), moving.reverb());
+            return new Lanes(of(track).level(), moving.x(), moving.depth(), moving.reverb(), moving.height());
         });
         return new StageAutomation(joined);
     }
@@ -117,8 +124,9 @@ public final class StageAutomation {
             AutomationCurve x = curve(mix.lane(channel.id(), AutomationLane.X), time);
             AutomationCurve depth = curve(mix.lane(channel.id(), AutomationLane.DEPTH), time);
             AutomationCurve reverb = curve(mix.lane(channel.id(), AutomationLane.REVERB), time);
-            if (level != null || x != null || depth != null || reverb != null) {
-                tracks.putIfAbsent(channel.owner().id(), new Lanes(level, x, depth, reverb));
+            AutomationCurve height = curve(mix.lane(channel.id(), AutomationLane.HEIGHT), time);
+            if (level != null || x != null || depth != null || reverb != null || height != null) {
+                tracks.putIfAbsent(channel.owner().id(), new Lanes(level, x, depth, reverb, height));
             }
         }
         return new StageAutomation(tracks);

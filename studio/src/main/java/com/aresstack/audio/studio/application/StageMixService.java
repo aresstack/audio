@@ -7,6 +7,7 @@ import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.mix.MixLevel;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
 import com.aresstack.audio.studio.mix.StageAutomation;
+import com.aresstack.audio.studio.mix.StageSound;
 import com.aresstack.audio.studio.project.CompositionJson;
 import com.aresstack.audio.studio.project.MixJson;
 import com.aresstack.audio.studio.progress.Progress;
@@ -41,6 +42,19 @@ public final class StageMixService {
 
     private final SpatialSceneStore store = new SpatialSceneStore();
     private final SpatialStemMixer mixer = new SpatialStemMixer();
+    private volatile StageSound sound = StageSound.LOUDSPEAKERS;
+
+    /**
+     * How the following mixes are heard (work package D4): loudspeakers or headphones,
+     * algorithmic or convolved room. The default is {@link StageSound#LOUDSPEAKERS}, the mix as before.
+     */
+    public void setSound(StageSound sound) {
+        this.sound = sound == null ? StageSound.LOUDSPEAKERS : sound;
+    }
+
+    public StageSound sound() {
+        return sound;
+    }
 
     /** The stage of a piece: the saved one, or the usual seating; always for exactly the tracks of the arrangement. */
     public SpatialScene scene(Path arrangement, Path directory) throws IOException {
@@ -111,7 +125,8 @@ public final class StageMixService {
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
             MixLevel chosen = level != null ? level : MixLevel.legacy(fitting.masterDb());
-            mixer.withAutomation(automation).mix(files, placements, fitting.room(), secondsPerBar, chosen, fresh, bits);
+            mixer.withAutomation(automation).withSound(sound)
+                    .mix(files, placements, fitting.room(), secondsPerBar, chosen, fresh, bits);
             Files.move(fresh, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(fresh);

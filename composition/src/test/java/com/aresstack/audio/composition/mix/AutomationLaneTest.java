@@ -63,11 +63,11 @@ public final class AutomationLaneTest {
 
     @Test
     public void anUnknownParameterIsKeptButNotKnown() {
-        AutomationLane later = lane("height", at(0, 7));
+        AutomationLane later = lane("brightness", at(0, 7));
         assertFalse(later.known());
         assertEquals(7, later.valueAt(0), 0);
         assertTrue(lane(AutomationLane.REVERB, at(0, 0.2)).known());
-        assertEquals(List.of("level", "x", "depth", "reverb"), AutomationLane.PARAMETERS);
+        assertEquals(List.of("level", "x", "depth", "reverb", "height"), AutomationLane.PARAMETERS);
     }
 
     @Test
