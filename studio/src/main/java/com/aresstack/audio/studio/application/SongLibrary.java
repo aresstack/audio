@@ -89,7 +89,8 @@ public final class SongLibrary {
         if (Files.isDirectory(root)) {
             try (DirectoryStream<Path> folders = Files.newDirectoryStream(root)) {
                 for (Path folder : folders) {
-                    if (Files.isDirectory(folder)) {
+                    // A folder that begins with a dot is not a piece: the albums are kept in one.
+                    if (Files.isDirectory(folder) && !folder.getFileName().toString().startsWith(".")) {
                         songs.add(song(folder));
                     }
                 }

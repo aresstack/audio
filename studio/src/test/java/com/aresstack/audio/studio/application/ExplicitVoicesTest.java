@@ -228,4 +228,41 @@ public final class ExplicitVoicesTest {
         assertEquals(Score.Clef.PERCUSSION, score.staves().get(0).clef());
         assertEquals(1, score.staves().get(0).voices());
     }
+
+    /**
+     * More voices on one staff than the file can name: each keeps a word of its own, the score
+     * shows them apart, and the file is refused instead of merging two voices into one.
+     */
+    @Test
+    public void moreVoicesThanTheFileCanNameAreNotMerged() {
+        List<Voice> voices = new ArrayList<>();
+        List<Note> notes = new ArrayList<>();
+        for (int v = 1; v <= 9; v++) {
+            voices.add(new Voice("v" + v, null, null, null));
+            notes.add(new Note("n" + v, 0, 1920, 80 - 2 * v, 80, "v" + v));
+        }
+        Part part = new Part("choir", null, "harmony", null, 52, null, Part.StaffLayout.SINGLE, voices, null);
+        com.aresstack.audio.composition.Track track = new com.aresstack.audio.composition.Track("choir", null,
+                com.aresstack.audio.composition.Track.Kind.MIDI, "choir",
+                List.of(new com.aresstack.audio.composition.MidiClip("c1", 0, 8 * 1920L, null, notes)));
+        Composition composition = new Composition(null, com.aresstack.audio.composition.TimeMap.of(108), null,
+                List.of(part), List.of(track), null);
+
+        assertEquals(9, new java.util.HashSet<>(com.aresstack.audio.studio.score.Voicing.tokens(part).values()).size());
+        assertFalse(com.aresstack.audio.studio.score.Voicing.expressible(part));
+        Score.Staff staff = Score.of(composition).staves().get(0);
+        assertEquals(9, staff.voices());
+        assertEquals("9", staff.voice(8));
+        assertArrayEquals(new int[]{62}, staff.bar(8, 0).get(0).pitches());
+        try {
+            TsvExport.lines(composition);
+            org.junit.Assert.fail("nine voices on one staff do not fit arrangement.tsv");
+        } catch (TsvExport.NotExpressible expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("choir"));
+        }
+        // Eight still fit, each with its own word.
+        Part eight = new Part("choir", null, "harmony", null, 52, null, Part.StaffLayout.SINGLE,
+                voices.subList(0, 8), null);
+        assertTrue(com.aresstack.audio.studio.score.Voicing.expressible(eight));
+    }
 }

@@ -1,7 +1,16 @@
 package com.aresstack.audio.studio.application;
 
+import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.Part;
+import com.aresstack.audio.composition.TimeMap;
+import com.aresstack.audio.composition.mix.MixScene;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
+import com.aresstack.audio.studio.mix.MixLevel;
+import com.aresstack.audio.studio.mix.MixOutcome;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
+import com.aresstack.audio.studio.mix.StageAutomation;
+import com.aresstack.audio.studio.project.CompositionJson;
+import com.aresstack.audio.studio.project.MixJson;
 import com.aresstack.audio.studio.progress.Progress;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
@@ -19,6 +28,11 @@ import java.util.Map;
  * Mixes the tracks that were already rendered, as they stand on the stage of the
  * piece. It needs neither the AI nor a synthesizer: after moving an instrument or a
  * fader, only this runs again.
+ *
+ * <p>The level curves come from the stage as the window keeps it ({@code spatial-scene.json});
+ * a movement of the place or of the room share, which only the mix document can hold, comes from
+ * {@code mix.json} of the piece, read through its time map (work package D3). A piece without
+ * such a lane mixes exactly as before.
  */
 public final class StageMixService {
     public static final String MIX_FILE = "arrangement-instruments.wav";
@@ -29,12 +43,89 @@ public final class StageMixService {
 
     private final SpatialSceneStore store = new SpatialSceneStore();
     private final SpatialStemMixer mixer = new SpatialStemMixer();
+    private volatile float legacyFactor = Float.NaN;
+
+    /**
+     * What the mix has to know of a piece: its tracks, and where its bars lie in time. A piece
+     * with a model is mixed {@linkplain #of(Composition) from the model}; the written
+     * {@code arrangement.tsv} is only read for a piece that has none, or for an arrangement the
+     * user chose from elsewhere ({@link #written(Path)}).
+     */
+    public static final class Piece {
+        private final List<MusicTrack> tracks;
+        /** The time of the model; {@code null} for a written arrangement, which has one tempo and one meter. */
+        private final TimeMap time;
+        private final int tempo;
+        private final double secondsPerBar;
+
+        private Piece(List<MusicTrack> tracks, TimeMap time, int tempo, double secondsPerBar) {
+            this.tracks = List.copyOf(tracks);
+            this.time = time;
+            this.tempo = tempo;
+            this.secondsPerBar = secondsPerBar;
+        }
+
+        /** The piece as its model has it: the parts as tracks, in their order, and the time map with all its changes. */
+        public static Piece of(Composition model) {
+            List<MusicTrack> tracks = new ArrayList<MusicTrack>();
+            for (Part part : model.parts()) {
+                String role = part.role() != null && MusicTrack.ROLES.contains(part.role()) ? part.role()
+                        : part.drums() ? MusicTrack.DRUMS
+                        : MusicTrack.ROLES.contains(part.id().trim()) ? part.id().trim() : MusicTrack.HARMONY;
+                tracks.add(new MusicTrack(part.id(), role, part.id(), Math.max(0, Math.min(127, part.program())),
+                        "builtin"));
+            }
+            if (tracks.isEmpty()) {
+                throw new IllegalArgumentException("Das Werk hat keine Stimme, die gemischt werden könnte.");
+            }
+            TimeMap time = model.timeMap();
+            double bpm = time.tempoAt(0);
+            return new Piece(tracks, time, (int) Math.round(bpm),
+                    time.meterAt(0).barTicks() / (double) TimeMap.PPQ * 60.0 / bpm);
+        }
+
+        /** A written arrangement, for a piece without a model or an arrangement chosen from elsewhere. */
+        public static Piece written(Path arrangement) throws IOException {
+            return new Piece(StageMixService.tracks(arrangement), null, StageMixService.tempo(arrangement),
+                    StageMixService.secondsPerBar(arrangement));
+        }
+
+        public List<MusicTrack> tracks() {
+            return tracks;
+        }
+
+        /** The tempo at the start of the piece, in whole beats per minute. */
+        public int tempo() {
+            return tempo;
+        }
+
+        /** How long the first bar lasts; every bar, while the piece keeps one tempo and one meter. */
+        public double secondsPerBar() {
+            return secondsPerBar;
+        }
+
+        /** The level curves of the stage, whose points are in bars: laid along the time of the piece. */
+        StageAutomation levels(List<SoundSourcePlacement> placements) {
+            return time == null || time.constant() || (time.tempos().size() == 1 && time.meters().size() == 1)
+                    ? StageAutomation.of(placements, secondsPerBar) : StageAutomation.of(placements, time);
+        }
+
+        /** The movements of the mix document, read through the time of the piece. */
+        StageAutomation movements(Path directory, Progress progress) {
+            return time == null ? StageMixService.movements(directory, tempo, progress)
+                    : StageMixService.movements(directory, time, progress);
+        }
+    }
 
     /** The stage of a piece: the saved one, or the usual seating; always for exactly the tracks of the arrangement. */
     public SpatialScene scene(Path arrangement, Path directory) throws IOException {
+        return scene(Piece.written(arrangement), directory);
+    }
+
+    /** The stage of a piece: the saved one, or the usual seating; always for exactly the tracks of the piece. */
+    public SpatialScene scene(Piece piece, Path directory) throws IOException {
         SpatialScene saved = store.load(directory);
-        List<MusicTrack> tracks = tracks(arrangement);
-        return saved == null ? SpatialScene.standard(tracks) : saved.fitting(tracks);
+        return saved == null ? SpatialScene.standard(piece.tracks()) : saved.fitting(piece.tracks());
     }
 
     /** Mixes the rendered tracks of the piece on its stage and returns the file of the mix. */
@@ -44,22 +135,51 @@ public final class StageMixService {
 
     public Path mix(Path arrangement, Path directory, SpatialScene scene, Progress progress)
             throws Exception {
-        return mix(arrangement, directory, scene, null, directory.resolve(MIX_FILE), 16, progress);
+        return mix(Piece.written(arrangement), directory, scene, progress);
     }
 
     /** One track alone, but as it stands on the stage: with its level, its place and the room. */
     public Path solo(Path arrangement, Path directory, SpatialScene scene, String trackId) throws Exception {
-        return mix(arrangement, directory, scene, trackId, directory.resolve(SOLO_FILE), 16, message -> { });
+        return solo(Piece.written(arrangement), directory, scene, trackId);
     }
 
     /** Writes the mix on the stage to a file of the user's choice, with 16 or 24 bits. */
     public Path export(Path arrangement, Path directory, SpatialScene scene, Path target, int bits) throws Exception {
-        return mix(arrangement, directory, scene, null, target, bits, message -> { });
+        return export(Piece.written(arrangement), directory, scene, target, bits);
     }
 
-    private Path mix(Path arrangement, Path directory, SpatialScene scene, String only, Path target, int bits,
+    /** Mixes the rendered tracks of a piece on its saved stage; no written arrangement is read for a model. */
+    public Path mix(Piece piece, Path directory, Progress progress) throws Exception {
+        return mix(piece, directory, scene(piece, directory), progress);
+    }
+
+    public Path mix(Piece piece, Path directory, SpatialScene scene, Progress progress) throws Exception {
+        return mix(piece, directory, scene, null, directory.resolve(MIX_FILE), 16, progress);
+    }
+
+    /** One track alone, but as it stands on the stage: with its level, its place and the room. */
+    public Path solo(Piece piece, Path directory, SpatialScene scene, String trackId) throws Exception {
+        return mix(piece, directory, scene, trackId, directory.resolve(SOLO_FILE), 16, message -> { });
+    }
+
+    /** Writes the mix on the stage to a file of the user's choice, with 16 or 24 bits. */
+    public Path export(Piece piece, Path directory, SpatialScene scene, Path target, int bits) throws Exception {
+        return mix(piece, directory, scene, null, target, bits, message -> { });
+    }
+
+    /**
+     * The factor the last mix of the whole stage to a file applied (peak normalization and master
+     * level), or NaN before the first. Files and exports are always mixed as before
+     * ({@code LEGACY_PEAK}); live playback takes this factor as its fixed gain
+     * ({@link MixLevel#liveMaster}) so that it sounds like the file.
+     */
+    public float legacyFactor() {
+        return legacyFactor;
+    }
+
+    private Path mix(Piece piece, Path directory, SpatialScene scene, String only, Path target, int bits,
                      Progress progress) throws Exception {
-        List<MusicTrack> tracks = tracks(arrangement);
+        List<MusicTrack> tracks = piece.tracks();
         SpatialScene fitting = scene.fitting(tracks);
         Map<String, String> stems = stems(directory);
         List<Path> files = new ArrayList<Path>();
@@ -79,16 +199,113 @@ public final class StageMixService {
             files.add(file);
             placements.add(placement);
         }
-        progress.update("Mische " + tracks.size() + " Spuren auf der Bühne · " + fitting.room().name()
+        heard |= addAudioLanes(directory, only, files, placements, progress);
+        progress.update("Mische " + files.size() + " Spuren auf der Bühne · " + fitting.room().name()
                 + (heard ? "" : " · alle Spuren sind stumm") + " ...");
+        double secondsPerBar = piece.secondsPerBar();
+        StageAutomation automation = piece.levels(placements).movingAs(piece.movements(directory, progress));
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
-            mixer.mix(files, placements, fitting.room(), secondsPerBar(arrangement), fitting.masterDb(), fresh, bits);
+            // Files and exports sound exactly as before (decision of the product owner: "export old, live new").
+            MixOutcome outcome = mixer.withAutomation(automation).mix(files, placements, fitting.room(), secondsPerBar,
+                    MixLevel.legacy(fitting.masterDb()), fresh, bits);
+            if (only == null) {
+                legacyFactor = outcome.legacyFactor();
+            }
             Files.move(fresh, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(fresh);
         }
         return target;
+    }
+
+    /** How the tracks move according to the mix document of the piece, along the time map of its model. */
+    static StageAutomation movements(Path directory, TimeMap time, Progress progress) {
+        MixScene document;
+        try {
+            document = MixJson.load(directory);
+        } catch (IOException | RuntimeException unreadable) {
+            progress.update("mix.json ist nicht lesbar; die Bühne wird ohne ihre Bewegungen gemischt.");
+            return StageAutomation.NONE;
+        }
+        return document == null || document.automation().isEmpty() ? StageAutomation.NONE
+                : StageAutomation.of(document, time);
+    }
+
+    /**
+     * The audio lanes of the model (work package B3), each as a stem of its clips under
+     * {@code render/audio/}, standing on the stage as their channel strip in {@code mix.json} says.
+     * A piece without a model or without audio lanes adds nothing. Returns whether one is heard.
+     */
+    static boolean addAudioLanes(Path directory, String only, List<Path> files, List<SoundSourcePlacement> placements,
+                                 Progress progress) throws IOException {
+        if (!Files.isRegularFile(directory.resolve(CompositionJson.FILE_NAME))) {
+            return false;
+        }
+        Composition model;
+        MixScene document;
+        try {
+            model = CompositionJson.load(directory);
+            document = MixJson.load(directory);
+        } catch (IOException | RuntimeException unreadable) {
+            progress.update("Das Werkmodell ist nicht lesbar; die Audiospuren fehlen im Mix.");
+            return false;
+        }
+        boolean heard = false;
+        for (com.aresstack.audio.composition.Track track : model.tracks()) {
+            if (track.kind() != com.aresstack.audio.composition.Track.Kind.AUDIO || track.clips().isEmpty()) {
+                continue;
+            }
+            Path stem = directory.resolve("render").resolve("audio").resolve(track.id() + ".wav");
+            for (String warning : com.aresstack.audio.studio.render.AudioTrackStem.write(model, directory, track, stem)) {
+                progress.update("WARN: " + warning);
+            }
+            com.aresstack.audio.composition.mix.MixChannel channel = document == null ? null
+                    : document.channelOf(new com.aresstack.audio.composition.mix.MixChannel.Owner(
+                    com.aresstack.audio.composition.mix.MixChannel.Owner.Kind.AUDIO_TRACK, track.id()));
+            SoundSourcePlacement placement = channel == null ? new SoundSourcePlacement(track.id(), 0, 0.35)
+                    : new SoundSourcePlacement(track.id(), channel.x(), channel.depth(), channel.levelDb(),
+                    channel.width(), channel.reverb(), channel.muted(), channel.locked(), null);
+            if (only != null) {
+                placement = placement.withMuted(!only.equals(track.id()));
+            }
+            heard |= !placement.muted();
+            files.add(stem);
+            placements.add(placement);
+        }
+        return heard;
+    }
+
+    /**
+     * How the tracks move according to the mix document of the piece: place and room share over
+     * time, for the tracks named as the owners of their channels. The time map of the model is
+     * taken while it has the tempo of the arrangement the stems were rendered from; otherwise one
+     * tempo. A piece without {@code mix.json}, or with one that cannot be read, does not move.
+     */
+    static StageAutomation movements(Path directory, int tempo, Progress progress) {
+        MixScene document;
+        try {
+            document = MixJson.load(directory);
+        } catch (IOException | RuntimeException unreadable) {
+            progress.update("mix.json ist nicht lesbar; die Bühne wird ohne ihre Bewegungen gemischt.");
+            return StageAutomation.NONE;
+        }
+        if (document == null || document.automation().isEmpty()) {
+            return StageAutomation.NONE;
+        }
+        // Seconds depend on the tempo alone, so one tempo is enough when the model does not fit.
+        TimeMap time = TimeMap.of(tempo);
+        if (Files.isRegularFile(directory.resolve(CompositionJson.FILE_NAME))) {
+            try {
+                Composition model = CompositionJson.load(directory);
+                if (model.timeMap().tempoAt(0) == tempo) {
+                    time = model.timeMap();
+                }
+            } catch (IOException | RuntimeException unreadable) {
+                // then the tempo of the arrangement, as the stems were rendered
+            }
+        }
+        return StageAutomation.of(document, time);
     }
 
     /** Notes which file holds the sound of each track, for the mixes that follow without rendering. */

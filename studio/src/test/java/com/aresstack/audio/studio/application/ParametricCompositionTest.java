@@ -115,6 +115,11 @@ public final class ParametricCompositionTest {
                 {9, 50, "A major", 5, 4, new String[]{"A", "D", "E7", "A"}},
                 {17, 180, "C major", 4, 4, new String[]{"C", "Am", "F", "G7"}},
                 {6, 400, "G minor", 7, 8, new String[]{"Gm", "Cm", "D7", "Gm"}},
+                // Shorter than the old eight bars, in the key and meter of the old pieces.
+                {1, 120, "C major", 4, 4, new String[]{"C"}},
+                {4, 120, "C major", 4, 4, new String[]{"C", "F", "G7", "C"}},
+                {7, 120, "C major", 4, 4, new String[]{"C", "F", "G7", "C"}},
+                {8, 100, "C major", 4, 4, new String[]{"C", "F", "G7", "C"}},
         };
         for (Object[] c : cases) {
             int bars = (Integer) c[0];
@@ -180,6 +185,51 @@ public final class ParametricCompositionTest {
         assertWave(out.resolve("lead.wav"), 720);
         assertEquals(360, Score.read(tsv).bars());
         com.aresstack.audio.studio.render.RenderLimits.STANDARD.checkPiece(720, "A14");
+    }
+
+    /** Eight bars in another key whose last bars are silent keep their length: the reader would infer fewer. */
+    @Test
+    public void eightBarsInAnotherKeyWithSilentLastBarsWriteTheirLength() {
+        CompositionSpec spec = CompositionSpec.of(8, 100, Key.parse("D minor"), 4, 4);
+        assertTrue(spec.headerLines(6).contains("bars\t8"));
+        assertFalse(spec.headerLines(8).contains("bars\t8"));
+        assertFalse("the legacy shape renders eight bars anyway",
+                CompositionSpec.of(8, 100, Key.C_MAJOR, 4, 4).headerLines(6).contains("bars\t8"));
+        assertTrue(CompositionSpec.of(3, 100, Key.C_MAJOR, 4, 4).headerLines(3).contains("bars\t3"));
+    }
+
+    /** Files from before F2 have no bars line and still sound eight bars long, however short their notes. */
+    @Test
+    public void legacyFilesStayEightBarsLong() throws Exception {
+        for (int bars : new int[]{2, 8}) {
+            Path tsv = folder.newFile("legacy-" + bars + ".tsv").toPath();
+            Files.write(tsv, List.of("tempo\t120", "track\tlead\t0\t0\tmelody",
+                    "note\tlead\t" + (bars - 1) * 1920 + "\t1920\t60\t90"), StandardCharsets.UTF_8);
+            Path out = folder.newFolder("legacy-out-" + bars).toPath();
+            Golden.renderReference(tsv, out);
+            try (AudioInputStream audio = AudioSystem.getAudioInputStream(out.resolve("lead.wav").toFile())) {
+                assertEquals("eight bars of 2 s and the tail", (long) Math.ceil(16.75 * 22050), audio.getFrameLength());
+            }
+        }
+        assertEquals("a new two-bar piece says its length", List.of("tempo\t120", "bars\t2"),
+                CompositionSpec.of(2, 120, Key.C_MAJOR, 4, 4).headerLines(2));
+        assertEquals("eight bars need no line, as before", List.of("tempo\t120"),
+                CompositionSpec.of(8, 120, Key.C_MAJOR, 4, 4).headerLines(8));
+    }
+
+    /** A sync from 4/4 C major to 3/4 D minor at an unchanged 120 BPM takes the new meter and key. */
+    @Test
+    public void aChangedMeterOrKeyInTheFileIsTakenIntoTheModel() throws Exception {
+        Path dir = folder.newFolder().toPath();
+        Files.write(dir.resolve("arrangement.tsv"), List.of("tempo\t120", "track\tlead\t0\t0\tmelody",
+                "note\tlead\t0\t1920\t60\t90"), StandardCharsets.UTF_8);
+        ProjectSession session = ProjectSession.open(dir).orElseThrow();
+        assertEquals(Key.C_MAJOR, session.composition().timeMap().keyAt(0));
+        Files.write(dir.resolve("arrangement.tsv"), List.of("tempo\t120", "meter\t3\t4", "key\tD\tminor",
+                "track\tlead\t0\t0\tmelody", "note\tlead\t0\t1440\t62\t90"), StandardCharsets.UTF_8);
+        assertTrue(session.synchronize());
+        assertEquals(Key.parse("D minor"), session.composition().timeMap().keyAt(0));
+        assertEquals(3, session.composition().timeMap().meterAt(0).numerator());
     }
 
     @Test

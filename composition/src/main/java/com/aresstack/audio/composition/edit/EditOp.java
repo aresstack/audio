@@ -1,5 +1,7 @@
 package com.aresstack.audio.composition.edit;
 
+import com.aresstack.audio.composition.Asset;
+import com.aresstack.audio.composition.AudioClip;
 import com.aresstack.audio.composition.Clip;
 import com.aresstack.audio.composition.Meta;
 import com.aresstack.audio.composition.Note;
@@ -17,8 +19,9 @@ import java.util.List;
 public sealed interface EditOp {
     /** The kinds of operation, as an {@link EditScope} allows them. */
     enum Kind {
-        ADD_PART, SET_PART, ADD_TRACK, ADD_CLIP, REMOVE_CLIP, MOVE_CLIP, SPLIT_CLIP, SET_CLIP_PART, ADD_NOTES,
-        REMOVE_NOTES, CHANGE_NOTE, SET_SECTIONS, SET_TIME_MAP, SET_META, SHIFT_TIME
+        ADD_PART, SET_PART, ADD_TRACK, ADD_CLIP, REMOVE_CLIP, MOVE_CLIP, RESIZE_CLIP, SPLIT_CLIP, SET_CLIP_PART,
+        ADD_NOTES, REMOVE_NOTES, CHANGE_NOTE, SET_SECTIONS, SET_TIME_MAP, SET_META, SHIFT_TIME, ADD_ASSET,
+        SET_AUDIO_CLIP
     }
 
     Kind kind();
@@ -107,6 +110,26 @@ public sealed interface EditOp {
     }
 
     /**
+     * Gives a MIDI clip another length; its start, part and notes stay. The end it has and the end
+     * it gets must both lie in the scope's time (from {@link EditScope#editFrom()} to
+     * {@link EditScope#toTick()}): a clip of the original may grow into the scope, so that a note of
+     * the transition can sound past its old end, but it cannot shrink out of it or grow beyond it.
+     */
+    record ResizeClip(String clipId, long lengthTicks) implements EditOp {
+        public ResizeClip {
+            require(clipId, "clipId");
+            if (lengthTicks < 1) {
+                throw new IllegalArgumentException("A clip is at least one tick long: " + lengthTicks);
+            }
+        }
+
+        @Override
+        public Kind kind() {
+            return Kind.RESIZE_CLIP;
+        }
+    }
+
+    /**
      * Cuts a MIDI clip in two at a tick of the piece. Notes that begin from there on go to the new
      * clip; a note that sounds across the cut ends at it.
      */
@@ -170,6 +193,33 @@ public sealed interface EditOp {
         @Override
         public Kind kind() {
             return Kind.CHANGE_NOTE;
+        }
+    }
+
+    /** A new audio file the piece uses as source material (work package B3). Its id must not be in use. */
+    record AddAsset(Asset asset) implements EditOp {
+        public AddAsset {
+            require(asset, "asset");
+        }
+
+        @Override
+        public Kind kind() {
+            return Kind.ADD_ASSET;
+        }
+    }
+
+    /**
+     * Replaces the audio clip of the same id where it lies: its gain, its fades, its length or its
+     * asset (work package B3). Moving it is {@link MoveClip}.
+     */
+    record SetAudioClip(AudioClip clip) implements EditOp {
+        public SetAudioClip {
+            require(clip, "clip");
+        }
+
+        @Override
+        public Kind kind() {
+            return Kind.SET_AUDIO_CLIP;
         }
     }
 

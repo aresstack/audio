@@ -118,7 +118,7 @@ public final class Voicing {
 
     private static int rank(String token) {
         Voice.Staff staff = staffOf(token);
-        return (staff == Voice.Staff.LOWER ? 100 : 0) + numberOf(token);
+        return (staff == Voice.Staff.LOWER ? 1_000_000 : 0) + numberOf(token);
     }
 
     /** The German name of a voice, as a voice of the model is called: "Rechte Hand", "Stimme 2". */
@@ -216,7 +216,9 @@ public final class Voicing {
     /**
      * The word of each voice of a part of the model: the voices of a single staff are counted
      * from the top in the order of the part, those of a grand staff for each system (a voice of a
-     * grand staff that names no system counts to the upper one).
+     * grand staff that names no system counts to the upper one). Every voice gets a word of its
+     * own, also beyond {@link #MOST_PER_STAFF}; {@code arrangement.tsv} then cannot say them
+     * ({@link #expressible}).
      */
     public static Map<String, String> tokens(Part part) {
         Map<String, String> tokens = new LinkedHashMap<>();
@@ -226,13 +228,23 @@ public final class Voicing {
         int single = 0;
         for (Voice voice : part.voices()) {
             if (!grand) {
-                tokens.put(voice.id(), token(null, Math.min(MOST_PER_STAFF, ++single)));
+                tokens.put(voice.id(), token(null, ++single));
             } else if (voice.staff() == Voice.Staff.LOWER) {
-                tokens.put(voice.id(), token(Voice.Staff.LOWER, Math.min(MOST_PER_STAFF, ++lower)));
+                tokens.put(voice.id(), token(Voice.Staff.LOWER, ++lower));
             } else {
-                tokens.put(voice.id(), token(Voice.Staff.UPPER, Math.min(MOST_PER_STAFF, ++upper)));
+                tokens.put(voice.id(), token(Voice.Staff.UPPER, ++upper));
             }
         }
         return tokens;
+    }
+
+    /** Whether {@code arrangement.tsv} can name every voice of a part: at most {@link #MOST_PER_STAFF} per system. */
+    public static boolean expressible(Part part) {
+        for (String token : tokens(part).values()) {
+            if (numberOf(token) > MOST_PER_STAFF) {
+                return false;
+            }
+        }
+        return true;
     }
 }

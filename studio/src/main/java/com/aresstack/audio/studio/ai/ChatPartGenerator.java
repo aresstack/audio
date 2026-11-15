@@ -93,15 +93,16 @@ public final class ChatPartGenerator implements PartGenerator {
                     + "lines at once uses \"rh2\" or \"lh2\" for its second line.";
         }
         String role = task.request().role();
-        if ("harmony".equals(role) || "texture".equals(role)) {
+        if (role == null || "harmony".equals(role) || "texture".equals(role)) {
             return "If the part plays independent lines at the same time, give every note a field voice: \"1\" for the "
                     + "top line, \"2\" for the next one, and so on.";
         }
         return "";
     }
 
-    private static String rules(String role) {
-        return switch (role) {
+    /** What a part of a role should do, in words for the model; a part without a role counts as texture. */
+    static String rules(String role) {
+        return switch (role == null ? "texture" : role) {
             case "melody" -> "Role melody: a singable line or counter-melody that answers the existing melody instead "
                     + "of doubling it, with rests where the other melody is busy.";
             case "harmony" -> "Role harmony: chord tones with smooth voice leading, supporting the given chords.";

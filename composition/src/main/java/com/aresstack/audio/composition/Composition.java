@@ -56,6 +56,8 @@ public record Composition(Meta meta, TimeMap timeMap, List<Section> sections, Li
             for (Clip clip : track.clips()) {
                 if (clip instanceof MidiClip midi) {
                     end = Math.max(end, midi.endTick());
+                } else if (clip instanceof AudioClip audio) {
+                    end = Math.max(end, audio.endTick(timeMap));
                 }
             }
         }
@@ -75,6 +77,19 @@ public record Composition(Meta meta, TimeMap timeMap, List<Section> sections, Li
             }
         }
         return notes;
+    }
+
+    public Asset asset(String id) {
+        for (Asset asset : assets) {
+            if (asset.id().equals(id)) {
+                return asset;
+            }
+        }
+        return null;
+    }
+
+    public Composition withAssets(List<Asset> changed) {
+        return new Composition(meta, timeMap, sections, parts, tracks, changed);
     }
 
     public Composition withMeta(Meta changed) {

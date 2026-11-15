@@ -4,6 +4,8 @@ import com.aresstack.audio.composition.Key;
 import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.ai.ChatModel;
+import com.aresstack.audio.studio.ai.ModelLineup;
+import com.aresstack.audio.studio.ai.ModelRoles;
 import com.aresstack.audio.studio.progress.Progress;
 import com.aresstack.audio.studio.progress.TrackProgress;
 import com.aresstack.audio.studio.score.Voicing;
@@ -49,6 +51,9 @@ public final class GemmaMusicComposer {
     private static final String[] CHORDS = {"C", "G", "Am", "F", "C", "G", "F", "G"};
     /** The bars of the previous section a request is told about. */
     private static final int CONTEXT_BARS = 2;
+    /** Asks for the plan: form, harmonies, tempo (role {@link ModelRoles#PLANNING}). */
+    private final ChatModel planner;
+    /** Asks for the notes of each track (role {@link ModelRoles#COMPOSITION}). */
     private final ChatModel client;
     private final int maxTokens;
     private final int maxParallel;
@@ -62,10 +67,27 @@ public final class GemmaMusicComposer {
     }
 
     public GemmaMusicComposer(ChatModel client, int maxTokens, int maxParallel) {
+        this(client, client, maxTokens, maxParallel);
+    }
+
+    /** Plans with the lineup's planning model and writes the notes with its composition model. */
+    public GemmaMusicComposer(ModelLineup models, int maxTokens, int maxParallel) {
+        this(models.model(ModelRoles.PLANNING), models.model(ModelRoles.COMPOSITION), maxTokens, maxParallel);
+    }
+
+    /**
+     * @param planner  the model that plans the piece
+     * @param composer the model that writes the notes; may be the same as the planner
+     */
+    public GemmaMusicComposer(ChatModel planner, ChatModel composer, int maxTokens, int maxParallel) {
+        if (planner == null || composer == null) {
+            throw new IllegalArgumentException("A planning and a composition model are needed.");
+        }
         if (maxTokens < 256 || maxParallel < 1 || maxParallel > 1024) {
             throw new IllegalArgumentException("Use at least 256 tokens and 1–1024 parallel requests.");
         }
-        this.client = client;
+        this.planner = planner;
+        this.client = composer;
         this.maxTokens = maxTokens;
         this.maxParallel = maxParallel;
     }
@@ -156,7 +178,7 @@ public final class GemmaMusicComposer {
                     + "instruments share the work, section by section)."
                     + "\nKeep tempoBpm, key, timeSignature and bars exactly as given. No notes yet. Return only JSON.";
         }
-        JsonObject plan = client.generate("Return valid JSON only, no Markdown.", prompt,
+        JsonObject plan = planner.generate("Return valid JSON only, no Markdown.", prompt,
                 Math.min(spec.isLegacy() ? 2048 : 4096, maxTokens), directory.resolve("composition-plan.json"));
         validatePlan(plan, spec, progress);
         return plan;
@@ -218,10 +240,9 @@ public final class GemmaMusicComposer {
                                         : promptFor(target, plan, spec, chords, section,
                                         s == 0 ? null : context(answers.get(s - 1), sections.get(s - 1), spec));
                                 Path cached = cachedResponse(directory, target, prompt, spec);
-                                allKnown &= Files.isRegularFile(cached);
-                                JsonObject answer = client.generate(
-                                        "Compose original instrumental music. Return valid JSON only.",
-                                        prompt, maxTokens, cached);
+                                String instruction = "Compose original instrumental music. Return valid JSON only.";
+                                allKnown &= client.hasAnswer(instruction, prompt, maxTokens, cached);
+                                JsonObject answer = client.generate(instruction, prompt, maxTokens, cached);
                                 validateResponse(target, answer);
                                 answers.add(answer);
                                 notes += answer.getAsJsonArray("notes").size();
