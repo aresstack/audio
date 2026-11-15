@@ -1,6 +1,6 @@
 # Entwurfsnotiz: Funktion „Alben“
 
-**Stand:** 15. November 2026 · **Geprüfter Code:** `aresstack/audio` `main` (nach F2, C1, C2, R1) · **Status:** Entwurf zur Prüfung durch die Architektur. Noch nichts davon ist umgesetzt.
+**Stand:** 15. November 2026 · **Geprüfter Code:** `aresstack/audio` `main` (nach F2, C1, C2, R1) · **Status:** Entwurf zur Prüfung durch die Architektur. Frage 3 (Bühne je Stück) ist vom Product Owner entschieden; Ablage, Renderer für A1 und Paket sind Architekturentscheidungen.
 
 Ein Album ist ein **Aggregat eigenständiger Stücke**, kein neuer Kompositionstyp. Jedes Stück eines Albums ist ein gewöhnliches Stück der Bibliothek mit eigenem Ordner und lässt sich im bisherigen Editor öffnen, ändern und einzeln abspielen. Die Albumfunktion plant, stößt an, merkt sich den Stand und stellt zusammen. Sie komponiert, rendert und mischt nicht selbst.
 
@@ -156,9 +156,9 @@ End-to-End-Ziel ist ein Weihnachtsalbum mit zwölf Stücken von je etwa fünf Mi
 
 ---
 
-## 8. Fragen an die Architektur
+## 8. Offene Fragen und Entscheidungen
 
 1. **Ablage:** `<Bibliothek>/.albums/` mit der Änderung an `SongLibrary.songs()`, oder ein Ordner neben der Bibliothek?
 2. **A1:** Soll der herausgelöste Autopilot schon auf `RenderService` (R1) aufsetzen oder zunächst auf `StudioMusicRenderer`, wie das Fenster heute?
-3. **Bühne je Stück:** Die Albumproduktion übernimmt die von der KI vorgeschlagene Bühne wie der Autopilot. Reicht das für die erste Version, oder soll ein Album eine gemeinsame Raumvorgabe haben?
+3. **Bühne je Stück: vom Product Owner entschieden (15. November 2026).** In der ersten Version gilt die Bühne je Stück; es gibt keine verpflichtende gemeinsame Raumvorgabe auf Albumebene. Ein Album ist eine Sammlung selbstständig editierbarer und einzeln abspielbarer Werke: `spatial-scene.json`, `mix.json`, Stems, Revisionen und die gewählte Bühne bleiben je Stück maßgeblich. Die Albumproduktion verändert fertige Stücke nicht still nach späteren Albumvorgaben. Eine gemeinsame Raum- oder Exportvorgabe kann später als bewusst gewählte Vorlage hinzukommen; sie überschreibt bestehende Einzelwerte nicht rückwirkend. Die einheitliche Ziellautheit beim Albumexport (Abschnitt 6) ist davon getrennt und bleibt.
 4. **Paket:** `studio.album` im Modul `studio`, weil die Funktion die Dienste dort orchestriert. Die reinen Daten (`Album`, `AlbumTrack`) könnten später nach `composition` wandern.
