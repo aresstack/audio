@@ -5,6 +5,8 @@ import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.TimeMap;
 import com.aresstack.audio.composition.mix.MixScene;
 import com.aresstack.audio.music.arrangement.ArrangementFile;
+import com.aresstack.audio.studio.mix.MixLevel;
+import com.aresstack.audio.studio.mix.MixOutcome;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
 import com.aresstack.audio.studio.mix.StageAutomation;
 import com.aresstack.audio.studio.project.CompositionJson;
@@ -41,6 +43,7 @@ public final class StageMixService {
 
     private final SpatialSceneStore store = new SpatialSceneStore();
     private final SpatialStemMixer mixer = new SpatialStemMixer();
+    private volatile float legacyFactor = Float.NaN;
 
     /**
      * What the mix has to know of a piece: its tracks, and where its bars lie in time. A piece
@@ -164,6 +167,16 @@ public final class StageMixService {
         return mix(piece, directory, scene, null, target, bits, message -> { });
     }
 
+    /**
+     * The factor the last mix of the whole stage to a file applied (peak normalization and master
+     * level), or NaN before the first. Files and exports are always mixed as before
+     * ({@code LEGACY_PEAK}); live playback takes this factor as its fixed gain
+     * ({@link MixLevel#liveMaster}) so that it sounds like the file.
+     */
+    public float legacyFactor() {
+        return legacyFactor;
+    }
+
     private Path mix(Piece piece, Path directory, SpatialScene scene, String only, Path target, int bits,
                      Progress progress) throws Exception {
         List<MusicTrack> tracks = piece.tracks();
@@ -193,8 +206,12 @@ public final class StageMixService {
         StageAutomation automation = piece.levels(placements).movingAs(piece.movements(directory, progress));
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
-            mixer.withAutomation(automation).mix(files, placements, fitting.room(), secondsPerBar, fitting.masterDb(),
-                    fresh, bits);
+            // Files and exports sound exactly as before (decision of the product owner: "export old, live new").
+            MixOutcome outcome = mixer.withAutomation(automation).mix(files, placements, fitting.room(), secondsPerBar,
+                    MixLevel.legacy(fitting.masterDb()), fresh, bits);
+            if (only == null) {
+                legacyFactor = outcome.legacyFactor();
+            }
             Files.move(fresh, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(fresh);

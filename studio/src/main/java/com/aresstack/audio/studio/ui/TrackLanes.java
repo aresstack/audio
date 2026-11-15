@@ -273,6 +273,12 @@ final class TrackLanes extends JPanel {
         }
     }
 
+    /** Puts a component above the lanes, over the same width: the form of the piece. */
+    void setHeader(javax.swing.JComponent header) {
+        scroll.setColumnHeaderView(header);
+        scroll.getColumnHeader().setBackground(AudioStudioTheme.WELL);
+    }
+
     private void fill(List<MusicTrack> tracks) {
         heads.clear();
         column.removeAll();

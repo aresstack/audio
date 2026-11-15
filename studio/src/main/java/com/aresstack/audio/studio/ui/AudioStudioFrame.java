@@ -7,6 +7,7 @@ import com.aresstack.audio.instruments.network.AudioProxyRoutes;
 import com.aresstack.audio.studio.ai.KipitzChatClient;
 import com.aresstack.audio.studio.application.GemmaMusicComposer;
 import com.aresstack.audio.studio.application.InstrumentProposalService;
+import com.aresstack.audio.studio.application.PieceAutopilot;
 import com.aresstack.audio.studio.application.MusicTrack;
 import com.aresstack.audio.studio.application.StudioMusicRenderer;
 import com.aresstack.audio.studio.application.TrackArrangement;
@@ -153,6 +154,8 @@ public final class AudioStudioFrame extends JFrame {
     });
     /** The piece written out as a conductor's score, on the page of the composition. */
     private final ScoreView scoreView = new ScoreView();
+    /** The form of the piece above the lanes: its sections with name, function, intensity and chords. */
+    private final SectionBar sectionBar = new SectionBar(arrangementView);
     private final com.aresstack.audio.studio.application.SongLibrary songs =
             com.aresstack.audio.studio.application.SongLibrary.standard();
     /** The model of the open piece; it follows what the studio still writes the old way. */
@@ -452,6 +455,8 @@ public final class AudioStudioFrame extends JFrame {
                 }
             }
         }, arrangementView);
+        trackTable.setHeader(sectionBar);
+        arrangementView.setCompanion(sectionBar);
         arrangementView.setEditing(pieceEditing);
         DeckWidgets.Module output = new DeckWidgets.Module("Arrangement", trackTable);
         output.setHeadEnd(sourceChoice);
@@ -484,6 +489,10 @@ public final class AudioStudioFrame extends JFrame {
                 + " Ziehen markieren");
         reworkItem.addActionListener(event -> reworkRegion());
         moreMenu.add(reworkItem);
+        javax.swing.JMenuItem extendItem = new javax.swing.JMenuItem("Stück verlängern …");
+        extendItem.setToolTipText("Die KI plant und schreibt weitere Takte ans Ende; das bisherige Stück bleibt erhalten");
+        extendItem.addActionListener(event -> extendPiece());
+        moreMenu.add(extendItem);
         // The same on the marked passage itself, with the right mouse button.
         javax.swing.JPopupMenu passageMenu = new javax.swing.JPopupMenu();
         javax.swing.JMenuItem reworkMarked = new javax.swing.JMenuItem("Passage ersetzen oder variieren …");
@@ -1387,6 +1396,11 @@ public final class AudioStudioFrame extends JFrame {
         if (!saveSettings(false)) {
             return;
         }
+        // What the autopilot needs from the window, read here on the event thread.
+        final com.aresstack.audio.studio.stage.SpatialScene stageBefore = scene;
+        final PieceAutopilot.Rendering rendering = new PieceAutopilot.Rendering(
+                sf2Engine.getSelectedIndex() == 1 ? Sf2Engine.FLUIDSYNTH : Sf2Engine.GERVILL,
+                fluidSynth.getText().trim(), sfizz.getText().trim());
         if (!autopilot) {
             // A proposal is asked for anew each time; the one kept from before would only come again.
             try {
@@ -1402,36 +1416,25 @@ public final class AudioStudioFrame extends JFrame {
             public Path execute(Progress progress) throws Exception {
                 try {
                     recordModels(output, autopilot ? "Autopilot" : "Instrumentenvorschlag", models);
+                    if (autopilot) {
+                        // The AI decides everything: the same steps the production of an album runs.
+                        PieceAutopilot pilot = new PieceAutopilot(registry, models, tokens, parallel, rendering);
+                        return composeIntoPiece(pilot, prompt, output, stageBefore, progress);
+                    }
                     final InstrumentProposalService.Staged staged = new InstrumentProposalService(
                             models.model(com.aresstack.audio.studio.ai.ModelRoles.INSTRUMENTS), tokens)
                             .proposeStaged(prompt, output, progress);
                     final TrackArrangement selected = withPreferredSoundbanks(staged.tracks());
-                    final AtomicReference<RenderSettings> rendering = new AtomicReference<RenderSettings>();
                     SwingUtilities.invokeAndWait(new Runnable() {
                         @Override
                         public void run() {
                             trackTable.setArrangement(selected);
-                            if (autopilot) {
-                                // The AI decides everything: its stage is taken too, but for what is protected.
-                                scene = scene.fitting(selected.tracks()).taking(staged.scene());
-                                saveScene();
-                                showStage();
-                                trackTable.refreshStage();
-                                rendering.set(captureRenderSettings(selected));
-                            } else {
-                                stagePanel.setProposal(staged.scene());
-                            }
+                            stagePanel.setProposal(staged.scene());
                         }
                     });
-                    if (!autopilot) {
-                        progress.update("Instrumentenvorschlag bereit. "
-                                + "Du kannst die Tabelle ändern und danach auf 'Aus Tabelle komponieren' klicken.");
-                        return null;
-                    }
-                    new TrackArrangementStore().save(output, selected);
-                    Path arrangement = composeIntoPiece(new GemmaMusicComposer(models, tokens, parallel),
-                            prompt, output, selected, spec, progress);
-                    return renderArrangement(arrangement, output, rendering.get(), progress);
+                    progress.update("Instrumentenvorschlag bereit. "
+                            + "Du kannst die Tabelle ändern und danach auf 'Aus Tabelle komponieren' klicken.");
+                    return null;
                 } finally {
                     activeModels = null;
                 }
@@ -1439,19 +1442,25 @@ public final class AudioStudioFrame extends JFrame {
         });
     }
 
+    /**
+     * The autopilot composes into the folder of the piece (see {@link #composeIntoPiece} above):
+     * the players and the stage the AI chose are shown as soon as they are there, the stage is
+     * taken but for what is protected, and what was composed becomes part of the model.
+     */
+    private Path composeIntoPiece(PieceAutopilot pilot, String prompt, Path output,
+                                  com.aresstack.audio.studio.stage.SpatialScene stageBefore,
+                                  Progress progress) throws Exception {
+        return pilot.run(prompt, output, null, stageBefore, songs, pieceModel, progress,
+                (selected, staged) -> SwingUtilities.invokeAndWait(() -> {
+                    trackTable.setArrangement(selected);
+                    scene = staged;
+                    showStage();
+                    trackTable.refreshStage();
+                })).rendered();
+    }
+
     private TrackArrangement withPreferredSoundbanks(TrackArrangement original) {
-        String preferred = "builtin";
-        for (InstrumentLibrary library : registry.installedInstruments()) {
-            if (library.id().startsWith("generaluser::") || library.id().equals("generaluser")) {
-                preferred = library.id();
-                break;
-            }
-        }
-        List<MusicTrack> selected = new ArrayList<MusicTrack>();
-        for (MusicTrack track : original.tracks()) {
-            selected.add(track.withLibrary(preferred));
-        }
-        return new TrackArrangement(selected);
+        return PieceAutopilot.withPreferredSoundbanks(original, registry);
     }
 
     /**
@@ -1898,7 +1907,7 @@ public final class AudioStudioFrame extends JFrame {
                     "Die KI hat die Spur „" + offer.trackId() + "“ neu komponiert.", new ProposalDialog.Listening() {
                         @Override
                         public void proposal() {
-                            listenTo(heard, "VORSCHLAG · " + offer.trackId().toUpperCase(java.util.Locale.ROOT));
+                            listenTo(heard, "VORSCHLAG · " + offer.trackId().toUpperCase(java.util.Locale.ROOT), 0);
                         }
 
                         @Override
@@ -1968,6 +1977,39 @@ public final class AudioStudioFrame extends JFrame {
                 com.aresstack.audio.studio.application.RegionOffer.start(session,
                         com.aresstack.audio.studio.ai.RegionComposer.with(model), asked.request(), asked.partIds(),
                         asked.firstBar(), asked.lastBar(), progress));
+    }
+
+    /** Asks how the AI shall make the piece longer, and has the new bars planned and written as a proposal. */
+    private void extendPiece() {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent()) {
+            message("Erst ein Stück komponieren: dann lässt es sich verlängern.");
+            return;
+        }
+        if (busy()) {
+            return;
+        }
+        final com.aresstack.audio.studio.ai.ContinuationRequest request =
+                ExtendForm.ask(this, piece.get().composition(), arrangementView.bars());
+        if (request == null) {
+            return;
+        }
+        offerFromAi(piece.get(), "Das Stück wird als Vorschlag um " + request.bars()
+                + (request.bars() == 1 ? " Takt" : " Takte") + " verlängert ("
+                + request.preset().label() + "); es bleibt, wie es ist, bis der Vorschlag übernommen wird.",
+                (session, model, progress) -> com.aresstack.audio.studio.application.ExtensionOffer.start(session,
+                        com.aresstack.audio.studio.ai.ContinuationComposer.with(model), request, progress));
+    }
+
+    /**
+     * Shows the form of the saved piece above the lanes and in the score: its sections with name,
+     * function, intensity and chords. It only reads the model; a piece without one shows no form.
+     */
+    private void showSections() {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        List<SectionMark> marks = SectionMark.of(piece.isPresent() ? piece.get().composition() : null);
+        sectionBar.setSections(marks);
+        scoreView.setSections(marks);
     }
 
     /** Has the AI make a proposal for the saved piece; what was asked for decides how. */
@@ -2047,12 +2089,12 @@ public final class AudioStudioFrame extends JFrame {
                     alone == null ? null : offer.soloName(), true, new ProposalDialog.Listening() {
                         @Override
                         public void proposal() {
-                            listenTo(whole, "VORSCHLAG");
+                            listenTo(whole, "VORSCHLAG", offer.listenFromSecond());
                         }
 
                         @Override
                         public void alone() {
-                            listenTo(alone, "VORSCHLAG · NUR DAS NEUE");
+                            listenTo(alone, "VORSCHLAG · NUR DAS NEUE", offer.listenFromSecond());
                         }
 
                         @Override
@@ -2099,11 +2141,14 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     /** Plays a file that is not one of the playback choices: the preview of a proposal. */
-    private void listenTo(Path file, String name) {
+    private void listenTo(Path file, String name, double fromSecond) {
         try {
             player.open(file);
             arrangementView.setMix(player.envelope(), "Vorschlag", null, player.length());
             lcd.setSource(name, true);
+            if (fromSecond > 0 && player.length() > fromSecond) {
+                player.seek(fromSecond / player.length()); // where the new bars begin, a little before
+            }
             player.play();
         } catch (Exception error) {
             message("Der Vorschlag lässt sich nicht abspielen: " + error.getMessage());
@@ -2759,6 +2804,7 @@ public final class AudioStudioFrame extends JFrame {
         }
         scoreView.setScore(com.aresstack.audio.studio.score.Score.read(folder.resolve("arrangement.tsv")), ids,
                 "Noch keine Noten: erst komponieren, dann steht hier die Partitur");
+        showSections();
         lcd.setSource(selected == null ? "—" : playbackName(selected), there);
         lcd.setTime(0, player.length());
     }
