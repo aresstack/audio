@@ -2,6 +2,7 @@ package com.aresstack.audio.studio.application;
 
 import com.aresstack.audio.instruments.InstrumentRegistry;
 import com.aresstack.audio.studio.ai.KipitzChatClient;
+import com.aresstack.audio.studio.progress.Progress;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -96,7 +97,7 @@ public final class ParallelArrangementIntegrationTest {
                     "http://127.0.0.1:" + server.getAddress().getPort() + "/v1/chat/completions",
                     "test-key", "test-model", "", 8080);
             GemmaMusicComposer composer = new GemmaMusicComposer(client, 8192, 32);
-            GemmaMusicComposer.Progress output = message -> { };
+            Progress output = message -> { };
 
             Path tsv = composer.compose("A quiet cinematic stroll", song, selected, output);
             Assert.assertTrue(Files.size(tsv) > 200);

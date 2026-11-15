@@ -2,6 +2,7 @@ package com.aresstack.audio.studio.application;
 
 import com.aresstack.audio.music.arrangement.ArrangementFile;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
+import com.aresstack.audio.studio.progress.Progress;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
 import com.aresstack.audio.studio.stage.SpatialSceneStore;
@@ -37,11 +38,11 @@ public final class StageMixService {
     }
 
     /** Mixes the rendered tracks of the piece on its stage and returns the file of the mix. */
-    public Path mix(Path arrangement, Path directory, GemmaMusicComposer.Progress progress) throws Exception {
+    public Path mix(Path arrangement, Path directory, Progress progress) throws Exception {
         return mix(arrangement, directory, scene(arrangement, directory), progress);
     }
 
-    public Path mix(Path arrangement, Path directory, SpatialScene scene, GemmaMusicComposer.Progress progress)
+    public Path mix(Path arrangement, Path directory, SpatialScene scene, Progress progress)
             throws Exception {
         return mix(arrangement, directory, scene, null, directory.resolve(MIX_FILE), 16, progress);
     }
@@ -57,7 +58,7 @@ public final class StageMixService {
     }
 
     private Path mix(Path arrangement, Path directory, SpatialScene scene, String only, Path target, int bits,
-                     GemmaMusicComposer.Progress progress) throws Exception {
+                     Progress progress) throws Exception {
         List<MusicTrack> tracks = tracks(arrangement);
         SpatialScene fitting = scene.fitting(tracks);
         Map<String, String> stems = stems(directory);
