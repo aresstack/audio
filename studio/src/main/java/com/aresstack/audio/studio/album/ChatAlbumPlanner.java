@@ -97,7 +97,8 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         prompt.append("{\"album\":\"").append(escape(album.title())).append("\",\"wish\":\"")
                 .append(escape(concept.description())).append("\",\"style\":\"").append(escape(concept.style()))
                 .append("\",\"tracksWanted\":").append(wanted).append(",\"secondsPerTrack\":")
-                .append(concept.secondsPerTrack()).append("}\n");
+                .append(concept.secondsPerTrack()).append(",\"secondsMin\":").append(concept.minSeconds())
+                .append(",\"secondsMax\":").append(concept.maxSeconds()).append("}\n");
         if (!kept.isEmpty()) {
             prompt.append("These tracks of the album exist already; do not repeat them, plan tracks that go with them:\n");
             for (AlbumTrack track : kept) {
@@ -113,8 +114,10 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
                         + "mood (a few words), tempoBpm (40-200), key (like \"D major\" or \"B minor\"), "
                         + "meter (like \"4/4\", \"3/4\", \"6/8\"), instrumentation (the players in words), "
                         + "form (the sections in order, enough to fill the length without repeating one short idea, "
-                        + "e.g. \"").append(DEFAULT_FORM).append("\"), targetSeconds (about ")
-                .append(concept.secondsPerTrack()).append(").");
+                        + "e.g. \"").append(DEFAULT_FORM).append("\"), targetSeconds (")
+                .append(concept.minSeconds() == concept.maxSeconds() ? "about " + concept.secondsPerTrack()
+                        : "between " + concept.minSeconds() + " and " + concept.maxSeconds()
+                        + "; let the lengths differ from track to track, as the music needs").append(").");
         return prompt.toString();
     }
 
@@ -122,10 +125,12 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         String title = AlbumFiles.text(entry, "title");
         String form = AlbumFiles.text(entry, "form");
         int seconds = AlbumFiles.number(entry, "targetSeconds", concept.secondsPerTrack());
-        // The user said how long a piece is; the model may differ a little, not by half.
-        if (seconds < concept.secondsPerTrack() / 2 || seconds > concept.secondsPerTrack() * 2) {
+        // The user said how long a piece may be: a length far off is replaced by the middle, one a
+        // little off is brought into the range.
+        if (seconds < concept.minSeconds() / 2 || seconds > concept.maxSeconds() * 2) {
             seconds = concept.secondsPerTrack();
         }
+        seconds = Math.max(concept.minSeconds(), Math.min(concept.maxSeconds(), seconds));
         int bpm = AlbumFiles.number(entry, "tempoBpm", 100);
         return new AlbumTrack(id, title.isBlank() ? "Titel " + number : title, AlbumFiles.text(entry, "mood"),
                 bpm < 40 || bpm > 200 ? 100 : bpm, AlbumFiles.text(entry, "key"), AlbumFiles.text(entry, "meter"),

@@ -3427,14 +3427,14 @@ public final class AudioStudioFrame extends JFrame {
                 }
                 if (target == null) {
                     target = albumMembers.albums().create(title,
-                            new com.aresstack.audio.studio.album.AlbumConcept("", "", 12, 300));
+                            com.aresstack.audio.studio.album.AlbumConcept.standard("", "", 12));
                 }
             }
             if (target == null) {
                 // No album named: an unnamed album of its own when the user left the album empty,
                 // the first unnamed one when nothing was chosen at all.
                 target = title != null ? albumMembers.albums().create(AlbumMembership.UNTITLED,
-                        new com.aresstack.audio.studio.album.AlbumConcept("", "", 12, 300)) : albumMembers.untitled();
+                        com.aresstack.audio.studio.album.AlbumConcept.standard("", "", 12)) : albumMembers.untitled();
             }
             Album now = albumMembers.add(target.id(), piece);
             currentAlbum = now.id();

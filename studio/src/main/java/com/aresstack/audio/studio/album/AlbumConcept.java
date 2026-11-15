@@ -2,16 +2,21 @@ package com.aresstack.audio.studio.album;
 
 /**
  * What the user says once for a whole album: what it is about, how it sounds, how many pieces it
- * has and how long each is meant to be.
+ * has and how long each may be. The length is a range: the plan gives every title its own length
+ * in it, so that not every piece lasts the same.
  *
- * @param description     the wish in the user's words, e.g. "a Christmas album, instrumental"
- * @param style           how it sounds, e.g. "classical, orchestral, festive"; may be empty
- * @param trackCount      the number of pieces, 1 to {@link #MAX_TRACKS}
- * @param secondsPerTrack about how long each piece is, 10 seconds to {@link #MAX_SECONDS}
+ * @param description the wish in the user's words, e.g. "a Christmas album, instrumental"
+ * @param style       how it sounds, e.g. "classical, orchestral, festive"; may be empty
+ * @param trackCount  the number of pieces, 1 to {@link #MAX_TRACKS}
+ * @param minSeconds  how long a piece is at least, 10 seconds to {@link #MAX_SECONDS}
+ * @param maxSeconds  how long a piece is at most, not below {@code minSeconds}
  */
-public record AlbumConcept(String description, String style, int trackCount, int secondsPerTrack) {
+public record AlbumConcept(String description, String style, int trackCount, int minSeconds, int maxSeconds) {
     public static final int MAX_TRACKS = 99;
     public static final int MAX_SECONDS = 3600;
+    /** The range an album gets unless the user says otherwise: four to six minutes. */
+    public static final int DEFAULT_MIN_SECONDS = 240;
+    public static final int DEFAULT_MAX_SECONDS = 360;
 
     public AlbumConcept {
         description = description == null ? "" : description.trim();
@@ -19,13 +24,39 @@ public record AlbumConcept(String description, String style, int trackCount, int
         if (trackCount < 1 || trackCount > MAX_TRACKS) {
             throw new IllegalArgumentException("Ein Album hat 1 bis " + MAX_TRACKS + " Stücke: " + trackCount);
         }
-        if (secondsPerTrack < 10 || secondsPerTrack > MAX_SECONDS) {
-            throw new IllegalArgumentException("Ein Stück dauert 10 Sekunden bis 60 Minuten: " + secondsPerTrack + " s");
+        if (minSeconds > maxSeconds) {
+            int swap = minSeconds;
+            minSeconds = maxSeconds;
+            maxSeconds = swap;
         }
+        if (minSeconds < 10 || maxSeconds > MAX_SECONDS) {
+            throw new IllegalArgumentException("Ein Stück dauert 10 Sekunden bis 60 Minuten: " + minSeconds + " bis "
+                    + maxSeconds + " s");
+        }
+    }
+
+    /** An album whose pieces all have about the same length. */
+    public AlbumConcept(String description, String style, int trackCount, int secondsPerTrack) {
+        this(description, style, trackCount, secondsPerTrack, secondsPerTrack);
+    }
+
+    /** An album with the usual range of four to six minutes a piece. */
+    public static AlbumConcept standard(String description, String style, int trackCount) {
+        return new AlbumConcept(description, style, trackCount, DEFAULT_MIN_SECONDS, DEFAULT_MAX_SECONDS);
+    }
+
+    /** The middle of the range: about how long a piece is. */
+    public int secondsPerTrack() {
+        return (minSeconds + maxSeconds) / 2;
+    }
+
+    /** Whether a length lies in the range. */
+    public boolean fits(int seconds) {
+        return seconds >= minSeconds && seconds <= maxSeconds;
     }
 
     /** About how long the whole album is, in seconds. */
     public int seconds() {
-        return trackCount * secondsPerTrack;
+        return trackCount * secondsPerTrack();
     }
 }

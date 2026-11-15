@@ -63,7 +63,7 @@ public final class AlbumMembership {
     /** The unnamed album, made if there is none. */
     public synchronized Album untitled() throws IOException {
         Optional<Album> found = findUntitled(albums.albums());
-        return found.isPresent() ? found.get() : albums.create(UNTITLED, new AlbumConcept("", "", 12, 300));
+        return found.isPresent() ? found.get() : albums.create(UNTITLED, AlbumConcept.standard("", "", 12));
     }
 
     private static Optional<Album> findUntitled(List<Album> all) {
