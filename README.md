@@ -9,7 +9,7 @@ Small, modular Java audio experiments for [3d4j](https://github.com/aresstack/3d
 - **`studio`** — Swing test application with KIPITZ/Gemma chat client, resumable multitrack composition, per-track sampled instruments and WAV mixing.
 - **`sounds`** — Game-event effect synthesis. Contains the original KIPITZ/Gemma PowerShell experiment and a Java renderer for the JSON sound plan. Uses Gson for input parsing and the Java Sound API for audio output.
 
-All Java sources compile with `--release 8`, including when the build itself runs on Java 21.
+All Java sources compile for **Java 21**. Only the small launcher of the studio JAR (`studio/src/launcher`) is compiled for Java 8: started by an older Java, by `java -jar` or a double-click, it looks for a Java 21 on the computer (`AUDIO_STUDIO_JAVA` or `-Daudio.java=...`, `JAVA_HOME`, the `PATH`, the usual installation folders) and starts the studio with it. The launcher is a copy of the one in 3d4j with its own settings (`~/.aresstack/audio/launcher.properties`).
 
 ## Rolling release
 
@@ -29,7 +29,7 @@ Both are runnable with `java -jar` and a JDK/JRE 8 or newer. The `sounds` JAR in
 
 ## Build
 
-Use the included **Gradle 8.14.3 wrapper** with JDK 17+ (JDK 21 recommended). Java compilation targets Java 8:
+Use the included **Gradle 8.14.3 wrapper** with JDK 21. Java compilation targets Java 21:
 
 ```sh
 bash ./gradlew clean build
@@ -81,7 +81,7 @@ Keep descriptive models and input validation separate from synthesizers, encoder
 
 ## Swing Audio Studio
 
-Start the current [audio-studio.jar](https://github.com/aresstack/audio/releases/download/latest/audio-studio.jar) with `java -jar audio-studio.jar` (Java 8 or newer). The Swing application is a **replacement for the PowerShell music experiment**.
+Start the current [audio-studio.jar](https://github.com/aresstack/audio/releases/download/latest/audio-studio.jar) with `java -jar audio-studio.jar` (needs a Java 21 on the computer; the JAR itself may be started by any Java from 8 on). The Swing application is a **replacement for the PowerShell music experiment**.
 
 ### First-time use
 
@@ -132,7 +132,7 @@ UI layout: a dark mixing desk on FlatLaf, with the rounded modules of 3d4j's dia
 
 The meters and the waveform are drawn from the rendered WAV files (loudness per hundredth of a second, `DeckPlayer.measure`); they show what was rendered, they do not change it. Each lane has a fader and a mute key; both act on the mix and show the same as the stage. The Java 8 runtime smoke test installs the theme, resolves a disabled proxy route, loads KeePassRPC and renders the supplied demo headlessly.
 
-**Scope:** CI validates Java 8, simulated KIPITZ calls through a local HTTP proxy, proxy routing modes, and KeePassRPC class loading. Actual company PAC/KeePass pairing and a GUI review must be tested on the target Windows environment; no corporate network or secret is available to CI.
+**Scope:** CI validates that the JAR started by a real Java 8 finds Java 21 and runs there, simulated KIPITZ calls through a local HTTP proxy, proxy routing modes, and KeePassRPC class loading. Actual company PAC/KeePass pairing and a GUI review must be tested on the target Windows environment; no corporate network or secret is available to CI.
 
 
 ### Built-in Java Gervill for SF2 (the new default)

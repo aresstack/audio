@@ -2,6 +2,25 @@ plugins {
     id 'application'
 }
 
+sourceSets {
+    // The launcher is compiled for Java 8, so that a plain "java -jar audio-studio.jar" or a
+    // double-click can load it with whatever Java the computer has. It then looks for a Java 21
+    // and starts that one. A class file carries its own version, and a JVM only minds the
+    // version of the classes it loads, so both kinds share the JAR.
+    launcher {
+        java {
+            srcDir 'src/launcher/java'
+        }
+    }
+}
+
+tasks.named('compileLauncherJava') {
+    options.release = 8
+    options.compilerArgs += ['-Xlint:-options'] // Java 8 as a target is deprecated, and meant here
+}
+
+def launcherClass = 'com.aresstack.audio.launcher.Launcher'
+
 dependencies {
     implementation project(':music')
     implementation project(':instruments')
@@ -21,8 +40,9 @@ def mergedServicesDirectory = layout.buildDirectory.dir('merged-service-provider
 tasks.named('jar') {
     dependsOn ':music:jar', ':instruments:jar', tasks.named('mergeServiceProviders')
     archiveFileName = 'audio-studio.jar'
+    from sourceSets.launcher.output
     manifest {
-        attributes 'Main-Class': application.mainClass.get()
+        attributes 'Main-Class': launcherClass
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from mergedServicesDirectory
