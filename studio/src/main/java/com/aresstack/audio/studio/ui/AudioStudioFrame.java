@@ -4039,8 +4039,10 @@ public final class AudioStudioFrame extends JFrame {
      * production in portions the plan still names the length it was first planned with.
      */
     private int modelBars(Path folder) {
-        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> model = pieceModel.of(folder);
-        if (!model.isPresent()) {
+        // Only reads the open session, and only if it is this piece.
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> model = pieceToEdit();
+        if (!model.isPresent() || !model.get().folder().toAbsolutePath().normalize()
+                .equals(folder.toAbsolutePath().normalize())) {
             return 0;
         }
         com.aresstack.audio.composition.Composition piece = model.get().composition();
