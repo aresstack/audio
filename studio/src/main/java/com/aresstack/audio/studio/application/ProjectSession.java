@@ -540,10 +540,12 @@ public final class ProjectSession {
             boolean same = old != null && model.track(part.id()) != null
                     && TsvExport.linesOf(imported, part.id()).equals(TsvExport.linesOf(model, part.id()));
             // tracks.json is still where the old studio keeps instrument and sound bank: they come
-            // from there even for a part whose notes stayed the same.
-            parts.add(!same ? part : part.instrument() == null ? old
-                    : new Part(old.id(), old.name(), old.role(), part.instrument(), old.program(), part.libraryId(),
-                            old.staffLayout(), old.voices(), old.legacyChannel()));
+            // from there even for a part whose notes stayed the same, each one that it names.
+            // A part tracks.json does not name imports with no instrument and the built-in sound.
+            boolean listed = part.instrument() != null || !"builtin".equals(part.libraryId());
+            parts.add(!same ? part : !listed ? old
+                    : new Part(old.id(), old.name(), old.role(), or(part.instrument(), old.instrument()),
+                            old.program(), part.libraryId(), old.staffLayout(), old.voices(), old.legacyChannel()));
             tracks.add(same ? model.track(part.id()) : imported.track(part.id()));
         }
         Meta a = imported.meta();

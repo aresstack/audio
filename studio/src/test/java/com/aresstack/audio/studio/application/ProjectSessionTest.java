@@ -537,6 +537,21 @@ public final class ProjectSessionTest {
         assertEquals(List.of(), com.aresstack.audio.composition.CompositionValidator.validate(session.composition()));
     }
 
+    @Test
+    public void aSoundBankWithoutInstrumentInTracksJsonIsTakenOverToo() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        Path tracks = piece.resolve(ProjectFolder.TRACKS);
+        String json = new String(Files.readAllBytes(tracks), StandardCharsets.UTF_8)
+                .replace("\"instrument\":\"Music box\",\"program\":10,\"libraryId\":\"builtin\"",
+                        "\"program\":10,\"libraryId\":\"generaluser::8\"");
+        Files.write(tracks, json.getBytes(StandardCharsets.UTF_8));
+        assertTrue(session.synchronize());
+        assertEquals("generaluser::8", session.composition().part("melody").libraryId());
+        assertEquals("the instrument the model had stays", "Music box", session.composition().part("melody").instrument());
+        assertEquals("the others stay", "String ensemble", session.composition().part("harmony").instrument());
+        assertEquals(session.composition(), ProjectSession.open(piece).orElseThrow().composition());
+    }
+
     private static Composition withVelocity(Composition composition, String trackId, int index, int velocity) {
         Track track = composition.track(trackId);
         MidiClip clip = (MidiClip) track.clips().get(0);
