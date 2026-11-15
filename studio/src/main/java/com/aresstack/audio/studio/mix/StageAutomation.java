@@ -59,6 +59,26 @@ public final class StageAutomation {
     }
 
     /**
+     * The level curves of this automation with the place and room share of another: for the
+     * studio, whose stage window still owns the level curves while only the mix document can hold
+     * a movement of the place or of the room share.
+     */
+    public StageAutomation movingAs(StageAutomation movements) {
+        Map<String, Lanes> joined = new LinkedHashMap<>();
+        for (String track : tracks.keySet()) {
+            joined.put(track, null);
+        }
+        for (String track : movements.tracks.keySet()) {
+            joined.put(track, null);
+        }
+        joined.replaceAll((track, none) -> {
+            Lanes moving = movements.of(track);
+            return new Lanes(of(track).level(), moving.x(), moving.depth(), moving.reverb());
+        });
+        return new StageAutomation(joined);
+    }
+
+    /**
      * The level curves of the old stage, whose points are in bars of a piece with one tempo:
      * what {@link SpatialStemMixer} has always heard of {@link SoundSourcePlacement#dynamics()},
      * to the last bit.
