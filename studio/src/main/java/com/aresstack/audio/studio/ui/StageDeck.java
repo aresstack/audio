@@ -25,7 +25,9 @@ final class StageDeck {
      */
     static final boolean LIVE_WANTED = !"false".equalsIgnoreCase(System.getProperty("audio.studio.live"));
 
-    private final DeckPlayer file = new DeckPlayer();
+    private DeckPlayer file = new DeckPlayer();
+    /** A title of an album that fades out while the next one comes in; {@code null} otherwise. */
+    private DeckPlayer outgoing;
     private final LiveDeck.Sinks sinks;
     private final ExecutorService loader = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "live-stage-loader");
@@ -92,6 +94,53 @@ final class StageDeck {
 
     DeckPlayer.Envelope envelope() {
         return file.envelope();
+    }
+
+    // ---- the overlap of two titles of an album ----
+
+    /**
+     * The file that plays now fades out over {@code seconds} and goes on beside whatever is opened
+     * next, until it is silent. Only for a file, not for a live stage.
+     *
+     * @return {@code false} if nothing could be handed over (a live stage, nothing playing)
+     */
+    boolean fadeOut(double seconds) {
+        if (live != null || !file.playing()) {
+            return false;
+        }
+        dropOutgoing();
+        outgoing = file;
+        outgoing.fade(0f, seconds);
+        file = new DeckPlayer();
+        return true;
+    }
+
+    /** The file that was just opened starts silent and comes in over {@code seconds}. */
+    void fadeIn(double seconds) {
+        if (live == null && file.ready()) {
+            file.silent();
+            file.fade(1f, seconds);
+        }
+    }
+
+    /** Whether a title still fades out. */
+    boolean fading() {
+        return outgoing != null;
+    }
+
+    /** Closes the title that faded out once it is silent or at its end; called often. */
+    void settle() {
+        if (outgoing != null && (outgoing.fadedOut() || !outgoing.playing())) {
+            dropOutgoing();
+        }
+    }
+
+    /** Stops a title that still fades out at once (Stop, Pause). */
+    void dropOutgoing() {
+        if (outgoing != null) {
+            outgoing.close();
+            outgoing = null;
+        }
     }
 
     // ---- the live stage ----
