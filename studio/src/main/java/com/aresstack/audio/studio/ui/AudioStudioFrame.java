@@ -221,6 +221,7 @@ public final class AudioStudioFrame extends JFrame {
         pageHolder.setOpaque(false);
         JPanel lanesPage = deckPage(); // also builds what the page of the piece shows
         pageHolder.add(songPage(), "song");
+        pageHolder.add(albumsPage(), "albums");
         pageHolder.add(lanesPage, "deck");
         pageHolder.add(stagePage(), "stage");
         pageHolder.add(libraryPage(), "library");
@@ -348,10 +349,11 @@ public final class AudioStudioFrame extends JFrame {
         display.setOpaque(false);
         display.add(lcd, BorderLayout.CENTER);
         // Under the display, as on a player: one key per page of the desk.
-        JPanel keysOfPages = new JPanel(new java.awt.GridLayout(1, 6, 6, 0));
+        JPanel keysOfPages = new JPanel(new java.awt.GridLayout(1, 7, 6, 0));
         keysOfPages.setOpaque(false);
         javax.swing.ButtonGroup onePage = new javax.swing.ButtonGroup();
-        String[][] entries = {{"song", "Komposition"}, {"deck", "Arrangement"}, {"stage", "Bühne"},
+        String[][] entries = {{"song", "Komposition"}, {"albums", "Alben"}, {"deck", "Arrangement"},
+                {"stage", "Bühne"},
                 {"library", "Soundbänke"}, {"settings", "Einstellungen"}, {"console", "Protokoll"}};
         for (final String[] entry : entries) {
             DeckWidgets.PageKey key = new DeckWidgets.PageKey(entry[1]);
@@ -810,6 +812,75 @@ public final class AudioStudioFrame extends JFrame {
                 }
             }
         });
+    }
+
+    /** The page of the albums: several pieces planned and made together, beside the single piece. */
+    private JPanel albumsPage() {
+        AlbumsPanel albums = new AlbumsPanel(new AlbumsPanel.Host() {
+            @Override
+            public com.aresstack.audio.studio.ai.ChatModel model() {
+                return createAiClient();
+            }
+
+            @Override
+            public int tokens() {
+                return (Integer) tokenLimit.getValue();
+            }
+
+            @Override
+            public int parallelRequests() {
+                return (Integer) parallelRequests.getValue();
+            }
+
+            @Override
+            public PieceAutopilot.Rendering rendering() {
+                return new PieceAutopilot.Rendering(
+                        sf2Engine.getSelectedIndex() == 1 ? Sf2Engine.FLUIDSYNTH : Sf2Engine.GERVILL,
+                        fluidSynth.getText().trim(), sfizz.getText().trim());
+            }
+
+            @Override
+            public void openPiece(Path folder) {
+                openSong(folder);
+                showPage("song");
+            }
+
+            @Override
+            public Path chooseFolder(String title) {
+                javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
+                chooser.setDialogTitle(title);
+                chooser.setFileSelectionMode(javax.swing.JFileChooser.DIRECTORIES_ONLY);
+                return chooser.showSaveDialog(AudioStudioFrame.this) == javax.swing.JFileChooser.APPROVE_OPTION
+                        ? chooser.getSelectedFile().toPath() : null;
+            }
+
+            @Override
+            public void log(String line) {
+                SwingUtilities.invokeLater(() -> append(line));
+            }
+
+            @Override
+            public String ask(String question, String proposal) {
+                return (String) JOptionPane.showInputDialog(AudioStudioFrame.this, question, "Alben",
+                        JOptionPane.PLAIN_MESSAGE, null, null, proposal);
+            }
+
+            @Override
+            public boolean confirm(String question) {
+                return JOptionPane.showConfirmDialog(AudioStudioFrame.this, question, "Alben",
+                        JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE) == JOptionPane.OK_OPTION;
+            }
+
+            @Override
+            public void piecesChanged() {
+                refreshSongs();
+            }
+        }, songs, registry);
+        JPanel page = new JPanel(new BorderLayout());
+        page.setOpaque(false);
+        page.add(new DeckWidgets.Module("Alben · mehrere Stücke in einem Zug", albums),
+                BorderLayout.CENTER);
+        return page;
     }
 
     private JPanel libraryPage() {
