@@ -100,6 +100,30 @@ public final class InstrumentProposalServiceTest {
         }
     }
 
+    @Test
+    public void theInstrumentsAreSeenOneByOneWhileTheProposalArrives() {
+        JsonObject proposal = new JsonObject();
+        JsonArray entries = new JsonArray();
+        entries.add(instrument("clarinet", "melody", "Warm clarinet", 71));
+        entries.add(instrument("harp", "harmony", "Concert harp", 46));
+        entries.add(instrument("odd", "conductor", "No such role", 46));
+        proposal.add("tracks", entries);
+        String answer = proposal.toString();
+
+        Assert.assertTrue(InstrumentProposalService.seenInstruments("").isEmpty());
+        int seen = 0;
+        for (int cut = 0; cut <= answer.length(); cut++) {
+            int now = InstrumentProposalService.seenInstruments(answer.substring(0, cut)).size();
+            Assert.assertTrue("instruments only come", now >= seen);
+            seen = now;
+        }
+        Assert.assertEquals("what cannot be a track is not shown", 2, seen);
+        java.util.List<String[]> first = InstrumentProposalService.seenInstruments(
+                answer.substring(0, answer.indexOf("harp")));
+        Assert.assertEquals(1, first.size());
+        Assert.assertArrayEquals(new String[]{"clarinet", "melody", "Warm clarinet", "71"}, first.get(0));
+    }
+
     private static JsonObject instrument(String id, String role, String name, int program) {
         JsonObject instrument = new JsonObject();
         instrument.addProperty("id", id);

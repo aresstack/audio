@@ -54,6 +54,39 @@ public final class InstrumentProposalService {
     private int most;
 
     /**
+     * The instruments of a proposal that is still being written: every entry that is whole and
+     * could be a track, as {@code {id, role, instrument, program}}.
+     */
+    static List<String[]> seenInstruments(String text) {
+        List<String[]> chosen = new ArrayList<String[]>();
+        try {
+            JsonObject seen = com.aresstack.audio.studio.ai.PartialJson.read(text);
+            if (seen == null || !seen.has("tracks") || !seen.get("tracks").isJsonArray()) {
+                return chosen;
+            }
+            for (JsonElement entry : seen.getAsJsonArray("tracks")) {
+                if (!entry.isJsonObject()) {
+                    continue;
+                }
+                JsonObject item = entry.getAsJsonObject();
+                if (item.has("id") && item.has("role") && item.has("instrument") && item.has("program")) {
+                    try {
+                        MusicTrack track = new MusicTrack(item.get("id").getAsString(), item.get("role").getAsString(),
+                                item.get("instrument").getAsString(), item.get("program").getAsInt(), "builtin");
+                        chosen.add(new String[]{track.id(), track.role(), track.instrument(),
+                                String.valueOf(track.program())});
+                    } catch (RuntimeException unfit) {
+                        // not a track to show; the whole proposal is checked when it is there
+                    }
+                }
+            }
+        } catch (RuntimeException unreadable) {
+            // a look at the proposal on its way
+        }
+        return chosen;
+    }
+
+    /**
      * How many instruments the proposal may have (the fields "Stimmen" of the Komposition page).
      * The same number twice asks for exactly that many. Without this the AI decides, at least 2.
      */
@@ -109,7 +142,19 @@ public final class InstrumentProposalService {
         JsonObject response = client.generate("Return valid JSON only, no Markdown.",
                 prompt, Math.min(maxTokens, 4096),
                 directory.resolve("instrument-proposal.json"),
-                watched == null ? null : text -> watched.preparing(step, text.length()));
+                watched == null ? null : new java.util.function.Consumer<String>() {
+                    private int told;
+
+                    @Override
+                    public void accept(String text) {
+                        watched.preparing(step, text.length());
+                        List<String[]> chosen = seenInstruments(text);
+                        if (chosen.size() != told) {
+                            told = chosen.size();
+                            watched.instruments(chosen);
+                        }
+                    }
+                });
         try {
             JsonArray options = response.getAsJsonArray("tracks");
             if (options.size() < 1) {

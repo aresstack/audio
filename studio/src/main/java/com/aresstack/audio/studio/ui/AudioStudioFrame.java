@@ -1407,16 +1407,21 @@ public final class AudioStudioFrame extends JFrame {
                             model != null
                                     ? new com.aresstack.audio.studio.application.MixDirector(
                                             models.model(com.aresstack.audio.studio.ai.ModelRoles.MIX), tokens)
+                                            .watching(seen -> SwingUtilities.invokeLater(() -> showMixArriving(seen)))
                                             .direct(prompt, model, current, output, progress)
                                     : new com.aresstack.audio.studio.application.MixDirector(
                                             models.model(com.aresstack.audio.studio.ai.ModelRoles.MIX), tokens)
+                                            .watching(seen -> SwingUtilities.invokeLater(() -> showMixArriving(seen)))
                                             .direct(prompt, arrangement, current, output, progress);
                     final com.aresstack.audio.studio.application.MovementDirector.Proposal moves =
                             withMovements ? proposeMovements(
                                     models.model(com.aresstack.audio.studio.ai.ModelRoles.MOVEMENTS), tokens, prompt, model, arrangement, current,
                                     proposed, movements, output, progress)
                                     : com.aresstack.audio.studio.application.MovementDirector.Proposal.NONE;
-                    SwingUtilities.invokeLater(() -> stagePanel.setProposal(proposed, moves));
+                    SwingUtilities.invokeLater(() -> {
+                        mixArriving = false;
+                        stagePanel.setProposal(proposed, moves);
+                    });
                     progress.update("Abmischung vorgeschlagen: auf der Bühne ansehen, dann übernehmen oder verwerfen.");
                     return null;
                 } finally {
@@ -2168,6 +2173,7 @@ public final class AudioStudioFrame extends JFrame {
                     SwingUtilities.invokeAndWait(new Runnable() {
                         @Override
                         public void run() {
+                            endChoosing(true);
                             trackTable.setArrangement(selected);
                             stagePanel.setProposal(staged.scene());
                         }
@@ -2192,6 +2198,7 @@ public final class AudioStudioFrame extends JFrame {
                                   Progress progress) throws Exception {
         return pilot.run(prompt, output, null, stageBefore, songs, pieceModel, progress,
                 (selected, staged) -> SwingUtilities.invokeAndWait(() -> {
+                    endChoosing(true);
                     trackTable.setArrangement(selected);
                     scene = staged;
                     showStage();
@@ -4119,6 +4126,11 @@ public final class AudioStudioFrame extends JFrame {
                     }
 
                     @Override
+                    public void instruments(final List<String[]> chosen) {
+                        SwingUtilities.invokeLater(() -> showChosenInstruments(chosen));
+                    }
+
+                    @Override
                     public void planned(final List<String> chords) {
                         SwingUtilities.invokeLater(() -> showPlanned(chords));
                     }
@@ -4178,6 +4190,11 @@ public final class AudioStudioFrame extends JFrame {
                 lcd.setBusy(false);
                 trackStates.clear();
                 trackTable.clearWork();
+                endChoosing(false); // a choice of instruments that did not get to its end
+                if (mixArriving) {
+                    mixArriving = false;
+                    stagePanel.setProposal(null); // a mix that did not get to its end is no proposal
+                }
                         try {
                     Path result = get();
                     if (result != null) {
@@ -4670,6 +4687,81 @@ public final class AudioStudioFrame extends JFrame {
             scoreView.setSections(marks);
         } catch (RuntimeException undrawn) {
             // a look at the plan on its way; the status line says the step as well
+        }
+    }
+
+    /** The players and the stage before the AI began to choose, to come back to if the choice fails. */
+    private TrackArrangement tracksBeforeChoice;
+    private com.aresstack.audio.studio.stage.SpatialScene sceneBeforeChoice;
+
+    /**
+     * The instruments while the AI chooses them: each appears as a lane and on the stage as soon
+     * as it is named. Only shown and saved nowhere; the whole proposal replaces it when it is
+     * there, and a choice that fails gives the lanes back as they were.
+     */
+    private void showChosenInstruments(List<String[]> chosen) {
+        if (worker == null || worker.isDone() || chosen.isEmpty()) {
+            return;
+        }
+        boolean loading = loadingTracks;
+        try {
+            List<MusicTrack> tracks = new ArrayList<MusicTrack>();
+            for (String[] one : chosen) {
+                tracks.add(new MusicTrack(one[0], one[1], one[2], Integer.parseInt(one[3]), "builtin"));
+            }
+            if (sceneBeforeChoice == null) {
+                sceneBeforeChoice = scene;
+                try {
+                    tracksBeforeChoice = trackTable.currentArrangement();
+                } catch (RuntimeException none) {
+                    tracksBeforeChoice = null; // no lanes yet: nothing to come back to
+                }
+            }
+            loadingTracks = true; // shown, not saved
+            trackTable.setArrangement(new TrackArrangement(tracks));
+            setStatus("Die KI wählt die Instrumente · bisher " + tracks.size() + ": " + chosen.get(chosen.size() - 1)[2]);
+        } catch (RuntimeException undrawn) {
+            // a look at the choice on its way; the proposal itself does not depend on it
+        } finally {
+            loadingTracks = loading;
+        }
+    }
+
+    /** The choice of the AI is there or has failed: {@code taken} keeps what the lanes show now. */
+    private void endChoosing(boolean taken) {
+        TrackArrangement before = tracksBeforeChoice;
+        com.aresstack.audio.studio.stage.SpatialScene stage = sceneBeforeChoice;
+        tracksBeforeChoice = null;
+        sceneBeforeChoice = null;
+        if (taken || before == null) {
+            return;
+        }
+        boolean loading = loadingTracks;
+        try {
+            loadingTracks = true;
+            scene = stage;
+            trackTable.setArrangement(before);
+        } catch (RuntimeException undrawn) {
+            // then the lanes stay as they are
+        } finally {
+            loadingTracks = loading;
+        }
+    }
+
+    /** Whether the stage shows a mix that is still being written and has not become a proposal yet. */
+    private boolean mixArriving;
+
+    /** The mix while the AI writes it: the players move on the stage, dashed, as their places arrive. */
+    private void showMixArriving(com.aresstack.audio.studio.stage.SpatialScene seen) {
+        if (worker == null || worker.isDone()) {
+            return;
+        }
+        try {
+            mixArriving = true;
+            stagePanel.setProposal(seen);
+            stagePanel.setStatus("Die KI mischt ab · die Plätze erscheinen gestrichelt, sobald sie ankommen");
+        } catch (RuntimeException undrawn) {
+            // a look at the mix on its way; the proposal itself does not depend on it
         }
     }
 
