@@ -44,7 +44,8 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
                         + " (a proposal taken, undo, redo, revisions) get it from one place",
                 List.of("renderArrangement", "savedPiece"), callers(source, "pieceModel\\.of\\("));
         assertEquals("only what the user asks for by name changes the saved piece",
-                new java.util.TreeSet<String>(List.of("addVoice", "composeAgain", "extendPiece", "pieceChanged", "reworkRegion",
+                new java.util.TreeSet<String>(List.of("addVoice", "composeAgain", "extendPiece", "insertBars",
+                        "intensityOverBars", "pieceChanged", "reorchestrate", "reworkRegion", "sectionIntensity",
                         "showRevisions", "showSections",
                         "undoPiece",
                         "popupMenuWillBecomeVisible", "savedPiece" /* its own header */)),
