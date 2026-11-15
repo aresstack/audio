@@ -33,6 +33,11 @@ public final class KipitzStreamingTest {
     @Rule
     public TemporaryFolder folder = new TemporaryFolder();
 
+    @org.junit.After
+    public void openTheGatesAgain() {
+        ConnectionGate.reset(); // a broken connection here must not narrow the gate of the next test
+    }
+
     private static String read(InputStream input) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         byte[] block = new byte[4096];

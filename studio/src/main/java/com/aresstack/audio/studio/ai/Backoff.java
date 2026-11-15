@@ -88,7 +88,11 @@ public final class Backoff {
      * interrupted or {@code cancelled} says so.
      */
     public static void pause(int attempt, BooleanSupplier cancelled) throws InterruptedIOException {
-        long until = System.currentTimeMillis() + delay(attempt);
+        long delay = delay(attempt);
+        // Up to a quarter more, by chance: requests that broke off together do not all come back
+        // at the same moment and break off together again.
+        long jitter = (long) (java.util.concurrent.ThreadLocalRandom.current().nextDouble() * delay / 4);
+        long until = System.currentTimeMillis() + delay + jitter;
         while (true) {
             if (Thread.currentThread().isInterrupted() || (cancelled != null && cancelled.getAsBoolean())) {
                 throw new InterruptedIOException("KI-Anfrage abgebrochen.");
