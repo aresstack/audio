@@ -226,11 +226,15 @@ public final class AudioStudioFrame extends JFrame {
             return assignment;
         }
         for (String key : own.stringPropertyNames()) {
-            com.aresstack.audio.studio.ai.ModelRole role = com.aresstack.audio.studio.ai.ModelRoles.byKey(key);
+            boolean thinking = key.endsWith(".thinking");
+            com.aresstack.audio.studio.ai.ModelRole role = com.aresstack.audio.studio.ai.ModelRoles.byKey(
+                    thinking ? key.substring(0, key.length() - ".thinking".length()) : key);
             String chosen = own.getProperty(key, "").trim();
-            if (role != null && !chosen.isEmpty()) {
-                assignment = assignment.with(role, chosen);
+            if (role == null || chosen.isEmpty()) {
+                continue;
             }
+            // "Standard" kept for the album means the model decides, also if the settings say otherwise.
+            assignment = thinking ? assignment.withEffort(role, chosen) : assignment.with(role, chosen);
         }
         return assignment;
     }
@@ -247,6 +251,11 @@ public final class AudioStudioFrame extends JFrame {
             String model = shown.modelFor(role);
             if (!model.equals(standard.modelFor(role))) {
                 own.setProperty(role.key(), model);
+            }
+            String effort = shown.effortFor(role) == null ? "standard" : shown.effortFor(role);
+            String usual = standard.effortFor(role) == null ? "standard" : standard.effortFor(role);
+            if (!effort.equals(usual)) {
+                own.setProperty(role.key() + ".thinking", effort);
             }
         }
         try (java.io.Writer writer = Files.newBufferedWriter(albumModelsFile(albumId),
@@ -2594,7 +2603,10 @@ public final class AudioStudioFrame extends JFrame {
             append("KI-Modelle: " + fixed);
         }
         return new com.aresstack.audio.studio.ai.ModelLineup(fixed,
-                name -> new KipitzChatClient(url, key, name, routes).legacyModel(fixed.base())
+                name -> new KipitzChatClient(url, key,
+                        com.aresstack.audio.studio.ai.ModelLineup.modelIn(name), routes)
+                        .reasoningEffort(com.aresstack.audio.studio.ai.ModelLineup.effortIn(name))
+                        .legacyModel(fixed.base())
                         .longerAnswers(longerAnswers, longerAnswerFactor)
                         // Every request to a model lights the AI lamp, whoever asks (an album too).
                         .activity(change -> SwingUtilities.invokeLater(() -> {
