@@ -101,6 +101,16 @@ public final class LoudnessMeter implements AudioProcessor {
      * unfinished last step of less than 100 ms is not counted.
      */
     public double integrated() {
+        return integrated(1);
+    }
+
+    /**
+     * The integrated loudness the same sound would have if it were scaled by {@code gain}, in
+     * LUFS. Not simply {@link #integrated()} plus the gain in dB: the absolute gate at −70 LUFS
+     * lets in or leaves out other blocks once the sound is louder or quieter.
+     */
+    public double integrated(double gain) {
+        double power = gain * gain;
         int blocks = stepCount - 3;
         if (blocks <= 0) {
             return Double.NEGATIVE_INFINITY;
@@ -110,7 +120,7 @@ public final class LoudnessMeter implements AudioProcessor {
         double sum = 0;
         int passed = 0;
         for (int b = 0; b < blocks; b++) {
-            energy[b] = (steps[b] + steps[b + 1] + steps[b + 2] + steps[b + 3]) / norm;
+            energy[b] = (steps[b] + steps[b + 1] + steps[b + 2] + steps[b + 3]) / norm * power;
             if (loudness(energy[b]) > ABSOLUTE_GATE) {
                 sum += energy[b];
                 passed++;

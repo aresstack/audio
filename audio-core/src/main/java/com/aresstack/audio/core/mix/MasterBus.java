@@ -118,18 +118,21 @@ public final class MasterBus implements AudioProcessor {
     public void process(AudioBlock block) {
         Settings now = settings;
         int frames = block.frames();
-        if (now != applied && now.gain() != gain && frames > 0) {
-            float from = gain;
-            float to = now.gain();
-            float[] left = block.left;
-            float[] right = block.right;
-            for (int i = 0; i < frames; i++) {
-                float g = from + (to - from) * (i + 1) / frames;
-                left[i] *= g;
-                right[i] *= g;
+        if (now != applied && now.gain() != gain) {
+            // a new gain is applied only by a block that has frames to ramp over
+            if (frames > 0) {
+                float from = gain;
+                float to = now.gain();
+                float[] left = block.left;
+                float[] right = block.right;
+                for (int i = 0; i < frames; i++) {
+                    float g = from + (to - from) * (i + 1) / frames;
+                    left[i] *= g;
+                    right[i] *= g;
+                }
+                gain = to;
+                applied = now;
             }
-            gain = to;
-            applied = now;
         } else {
             applied = now;
             if (gain != 1f) {

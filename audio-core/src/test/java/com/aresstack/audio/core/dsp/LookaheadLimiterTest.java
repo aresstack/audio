@@ -191,6 +191,24 @@ public final class LookaheadLimiterTest {
         Assert.assertTrue(highestAfter <= lower);
     }
 
+    @Test
+    public void aLoweredCeilingHoldsAlsoForWhatIsAlreadyInTheDelayLine() {
+        LookaheadLimiter limiter = new LookaheadLimiter();
+        limiter.prepare(RATE, 512);
+        AudioBlock block = new AudioBlock(512);
+        java.util.Arrays.fill(block.left, 0.8f);
+        java.util.Arrays.fill(block.right, 0.8f);
+        limiter.process(block);
+        LookaheadLimiter.Settings lower = new LookaheadLimiter.Settings(-6, 80);
+        limiter.setSettings(lower);
+        java.util.Arrays.fill(block.left, 0f);
+        java.util.Arrays.fill(block.right, 0f);
+        limiter.process(block);
+        for (int i = 0; i < 512; i++) {
+            Assert.assertTrue("frame " + i + ": " + block.left[i], Math.abs(block.left[i]) <= lower.ceiling());
+        }
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void aCeilingAboveSixDbIsRefused() {
         new LookaheadLimiter.Settings(7, 80);

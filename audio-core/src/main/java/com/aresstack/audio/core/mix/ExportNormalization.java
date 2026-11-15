@@ -90,6 +90,40 @@ public final class ExportNormalization {
         return Math.min(Math.pow(10, (target - loudness) / 20), ceiling / peak);
     }
 
+    /**
+     * The factor for a mix with this sample peak, where {@code loudnessAt} gives the integrated
+     * loudness the mix would have scaled by a factor. The absolute gate of BS.1770 makes that
+     * more than a shift in dB: a raised mix may let in passages that were below −70 LUFS. The
+     * factor is therefore refined until the scaled mix measures the target (within 0.001 LU),
+     * and never lets the peak pass the ceiling.
+     */
+    public double gain(float peak, java.util.function.DoubleUnaryOperator loudnessAt) {
+        double first = gain(peak, loudnessAt.applyAsDouble(1));
+        if (kind != Kind.LOUDNESS || first == 1 && Double.isInfinite(loudnessAt.applyAsDouble(1))) {
+            return first;
+        }
+        double most = Math.pow(10, peakCeilingDb / 20) / peak;
+        double candidate = first;
+        double best = first;
+        double bestError = Double.POSITIVE_INFINITY;
+        for (int round = 0; round < 30; round++) {
+            double measured = loudnessAt.applyAsDouble(candidate);
+            if (Double.isInfinite(measured) || Double.isNaN(measured)) {
+                break;
+            }
+            double error = target - measured;
+            if (Math.abs(error) < bestError) {
+                bestError = Math.abs(error);
+                best = candidate;
+            }
+            if (Math.abs(error) < 0.001 || candidate >= most && error > 0) {
+                break;
+            }
+            candidate = Math.min(most, candidate * Math.pow(10, error / 20));
+        }
+        return best;
+    }
+
     @Override
     public String toString() {
         switch (kind) {

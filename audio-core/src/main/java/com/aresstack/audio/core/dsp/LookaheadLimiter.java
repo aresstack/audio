@@ -232,6 +232,12 @@ public final class LookaheadLimiter implements AudioProcessor {
             if (++delayAt == n) {
                 delayAt = 0;
             }
+            // After the ceiling was lowered, frames already in the delay line were judged against the
+            // old ceiling; for them, and only then, the gain falls to what the new ceiling needs.
+            double outPeak = Math.max(Math.abs(outLeft), Math.abs(outRight));
+            if (outPeak * g > ceiling) {
+                g = ceiling / outPeak;
+            }
             if (g == 1.0) {
                 left[i] = outLeft;
                 right[i] = outRight;
