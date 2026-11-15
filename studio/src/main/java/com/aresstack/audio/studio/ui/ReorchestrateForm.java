@@ -121,8 +121,8 @@ final class ReorchestrateForm extends JPanel {
         JPanel content = new JPanel(new BorderLayout(0, 12));
         content.setBorder(BorderFactory.createEmptyBorder(16, 16, 14, 16));
         content.add(new JLabel("<html>Die KI verteilt das Material der gewählten Takte neu auf die Stimmen: wer"
-                + " übernimmt was.<br>Das Stück bleibt unverändert, bis der Vorschlag angehört und übernommen"
-                + " ist.</html>"), BorderLayout.NORTH);
+                + " übernimmt was.<br>Das Ergebnis gilt sofort; „Rückgängig“ bringt die alte Fassung"
+                + " zurück.</html>"), BorderLayout.NORTH);
         content.add(form, BorderLayout.CENTER);
         content.add(keys, BorderLayout.SOUTH);
         dialog.setContentPane(content);

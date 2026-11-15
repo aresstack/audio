@@ -76,6 +76,8 @@ final class ExtendForm extends JPanel {
         for (ContinuationEnding end : ContinuationEnding.values()) {
             ending.addItem(end.label());
         }
+        // Open unless the user says otherwise: an ending is chosen on purpose, never by leaving the form as it is.
+        ending.setSelectedIndex(ContinuationEnding.OPEN.ordinal());
         for (TransitionMode mode : TransitionMode.values()) {
             transition.addItem(mode.label());
         }
@@ -165,8 +167,8 @@ final class ExtendForm extends JPanel {
     /** Shows the form for a longer piece in a dialog and waits; the request, or {@code null} if the user gave up. */
     static ContinuationRequest ask(Window owner, Composition piece, int pieceBars) {
         return ask(owner, new ExtendForm(piece, pieceBars, 0), "Stück verlängern",
-                "<html>Die KI plant die neuen Takte (Abschnitte, Akkorde, Besetzung) und schreibt sie dann. Das Stück"
-                        + " bleibt<br>unverändert, bis der Vorschlag angehört und übernommen ist.</html>",
+                "<html>Die KI plant die neuen Takte (Abschnitte, Akkorde, Besetzung) und schreibt sie dann. Die neuen"
+                        + " Takte<br>kommen direkt ans Ende des Stücks; „Rückgängig“ nimmt sie wieder weg.</html>",
                 "Verlängern lassen");
     }
 
@@ -174,7 +176,7 @@ final class ExtendForm extends JPanel {
     static ContinuationRequest askInsert(Window owner, Composition piece, int pieceBars, int beforeBar) {
         return ask(owner, new ExtendForm(piece, pieceBars, Math.max(1, beforeBar)), "Takte einfügen",
                 "<html>Die KI schreibt neue Takte vor dem gewählten Takt; alles ab dort rückt unverändert nach"
-                        + " hinten.<br>Das Stück bleibt, wie es ist, bis der Vorschlag angehört und übernommen ist.</html>",
+                        + " hinten.<br>Die Takte kommen direkt ins Stück; „Rückgängig“ nimmt sie wieder heraus.</html>",
                 "Einfügen lassen");
     }
 

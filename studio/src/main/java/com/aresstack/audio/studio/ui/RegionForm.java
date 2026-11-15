@@ -186,7 +186,7 @@ final class RegionForm extends JPanel {
         keys.add(compose);
         keys.add(cancel);
         JLabel words = new JLabel("<html>Die KI schreibt nur die gewählten Spuren in den gewählten Takten neu; alles andere<br>"
-                + "bleibt Note für Note stehen. Das Stück ändert sich erst, wenn der Vorschlag übernommen ist.<br>"
+                + "bleibt Note für Note stehen. Das Ergebnis gilt sofort; „Rückgängig“ bringt die alte Passage zurück.<br>"
                 + "Tipp: Eine Passage lässt sich im Arrangement mit Umschalt und Ziehen markieren.</html>");
         JPanel content = new JPanel(new BorderLayout(0, 12));
         content.setBorder(BorderFactory.createEmptyBorder(16, 16, 14, 16));
