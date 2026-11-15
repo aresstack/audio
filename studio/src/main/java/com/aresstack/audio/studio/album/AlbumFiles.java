@@ -150,6 +150,8 @@ public final class AlbumFiles implements AlbumRepository {
         concept.addProperty("style", album.concept().style());
         concept.addProperty("trackCount", album.concept().trackCount());
         concept.addProperty("secondsPerTrack", album.concept().secondsPerTrack());
+        concept.addProperty("minSeconds", album.concept().minSeconds());
+        concept.addProperty("maxSeconds", album.concept().maxSeconds());
         json.add("concept", concept);
         JsonArray tracks = new JsonArray();
         for (AlbumTrack track : album.tracks()) {
@@ -185,9 +187,11 @@ public final class AlbumFiles implements AlbumRepository {
                         AlbumTrack.isFolderName(text(entry, "piece")) ? text(entry, "piece") : ""));
             }
         }
+        // An album from before the range has one length for all pieces.
+        int seconds = number(concept, "secondsPerTrack", 180);
         return new Album(id, text(json, "title"), new AlbumConcept(text(concept, "description"),
                 text(concept, "style"), number(concept, "trackCount", Math.max(1, tracks.size())),
-                number(concept, "secondsPerTrack", 180)), tracks);
+                number(concept, "minSeconds", seconds), number(concept, "maxSeconds", seconds)), tracks);
     }
 
     static String text(JsonObject json, String name) {

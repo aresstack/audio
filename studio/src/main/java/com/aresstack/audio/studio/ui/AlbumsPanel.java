@@ -145,7 +145,11 @@ final class AlbumsPanel extends JPanel {
     private final SuggestBox descriptionBox = new SuggestBox(description);
     private final SuggestBox styleBox = new SuggestBox(style);
     private final JSpinner trackCount = new JSpinner(new SpinnerNumberModel(12, 1, AlbumConcept.MAX_TRACKS, 1));
-    private final JSpinner minutes = new JSpinner(new SpinnerNumberModel(5.0, 0.5, 60.0, 0.5));
+    /** How long a piece may be: from … to … minutes; the plan gives each title its own length in it. */
+    private final JSpinner minutes = new JSpinner(new SpinnerNumberModel(
+            AlbumConcept.DEFAULT_MIN_SECONDS / 60.0, 0.5, 60.0, 0.5));
+    private final JSpinner minutesTo = new JSpinner(new SpinnerNumberModel(
+            AlbumConcept.DEFAULT_MAX_SECONDS / 60.0, 0.5, 60.0, 0.5));
     private final Tracks tracks = new Tracks();
     private final JTable table = new JTable(tracks);
     private final JLabel status = new JLabel(" ");
@@ -293,7 +297,15 @@ final class AlbumsPanel extends JPanel {
         c.gridx = 2;
         concept.add(dim("Minuten je Stück"), c);
         c.gridx = 3;
-        concept.add(minutes, c);
+        JPanel range = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        range.setOpaque(false);
+        minutes.setToolTipText("So lang ist ein Stück mindestens");
+        minutesTo.setToolTipText("So lang ist ein Stück höchstens; die KI gibt jedem Titel eine eigene Länge dazwischen");
+        range.add(dim("von"));
+        range.add(minutes);
+        range.add(dim("bis"));
+        range.add(minutesTo);
+        concept.add(range, c);
         c.gridx = 4;
         c.weightx = 1;
         concept.add(javax.swing.Box.createHorizontalGlue(), c);
@@ -442,7 +454,8 @@ final class AlbumsPanel extends JPanel {
         suggestions = chosen == null ? AlbumSuggestions.EMPTY : AlbumSuggestions.load(files.folder(chosen.id()));
         showProposals();
         trackCount.setValue(chosen == null ? 12 : chosen.concept().trackCount());
-        minutes.setValue(chosen == null ? 5.0 : chosen.concept().secondsPerTrack() / 60.0);
+        minutes.setValue(chosen == null ? AlbumConcept.DEFAULT_MIN_SECONDS / 60.0 : chosen.concept().minSeconds() / 60.0);
+        minutesTo.setValue(chosen == null ? AlbumConcept.DEFAULT_MAX_SECONDS / 60.0 : chosen.concept().maxSeconds() / 60.0);
         tracks.fireTableDataChanged();
         say(chosen == null ? "Noch kein Album. „Neues Album“ legt eines an." : summary());
         keys();
@@ -503,7 +516,7 @@ final class AlbumsPanel extends JPanel {
         AlbumTrack selected = there && row >= 0 && row < album.tracks().size() ? album.tracks().get(row) : null;
         create.setEnabled(!running && !busy);
         delete.setEnabled(free);
-        for (Component field : new Component[]{titleBox, descriptionBox, styleBox, trackCount, minutes}) {
+        for (Component field : new Component[]{titleBox, descriptionBox, styleBox, trackCount, minutes, minutesTo}) {
             field.setEnabled(free);
         }
         plan.setEnabled(free);
@@ -688,7 +701,8 @@ final class AlbumsPanel extends JPanel {
         try {
             AlbumConcept concept = new AlbumConcept(description.getText(), style.getText(),
                     (Integer) trackCount.getValue(),
-                    (int) Math.round(((Number) minutes.getValue()).doubleValue() * 60));
+                    (int) Math.round(((Number) minutes.getValue()).doubleValue() * 60),
+                    (int) Math.round(((Number) minutesTo.getValue()).doubleValue() * 60));
             // The titles as the file has them: the window may have put a piece into the album meanwhile.
             Album changed = files.album(album.id()).orElse(album).withTitle(title.getText()).withConcept(concept);
             if (!changed.equals(album)) {
@@ -751,7 +765,7 @@ final class AlbumsPanel extends JPanel {
         }
         try {
             Album made = files.create(name.isBlank() ? AlbumMembership.UNTITLED : name.trim(),
-                    new AlbumConcept("", "", 12, 300));
+                    AlbumConcept.standard("", "", 12));
             reload(made.id());
             host.albumChosen(made.id()); // the album chosen above follows the new one
             description.requestFocusInWindow();
