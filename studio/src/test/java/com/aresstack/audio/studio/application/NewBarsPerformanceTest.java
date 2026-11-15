@@ -101,7 +101,7 @@ public final class NewBarsPerformanceTest {
                 + "\"dynamics\":[{\"bar\":9,\"level\":\"pp\"},{\"bar\":2,\"level\":\"ff\"}],"
                 + "\"hairpins\":[{\"fromBar\":9,\"toBar\":13,\"to\":\"ff\"}]");
         PieceExtension extension = PieceExtension.start(session, ContinuationComposer.with(model),
-                ContinuationRequest.of(8, ContinuationPreset.FREE, ContinuationEnding.OPEN), Ids.seeded(5), QUIET);
+                ContinuationRequest.of(8, ContinuationPreset.STANDALONE, ContinuationEnding.OPEN), Ids.seeded(5), QUIET);
 
         assertTrue(model.prompts().get(0).contains("Plan the performance of the new bars 9-16"));
         Composition after = extension.proposal().result();
@@ -202,7 +202,7 @@ public final class NewBarsPerformanceTest {
     public void withoutPerformanceInTheAnswerNothingButTheNotesChanges() throws Exception {
         Composition before = session.composition();
         PieceExtension extension = PieceExtension.start(session, ContinuationComposer.with(model("\"x\":0")),
-                ContinuationRequest.of(8, ContinuationPreset.FREE, ContinuationEnding.OPEN), Ids.seeded(9), QUIET);
+                ContinuationRequest.of(8, ContinuationPreset.STANDALONE, ContinuationEnding.OPEN), Ids.seeded(9), QUIET);
         Composition after = extension.proposal().result();
         assertEquals(ContinuationPerformance.NONE, extension.continuation().plan().performance());
         assertEquals(before.timeMap(), after.timeMap());
