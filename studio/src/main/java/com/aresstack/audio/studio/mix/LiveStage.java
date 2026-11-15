@@ -39,14 +39,20 @@ public final class LiveStage implements AutoCloseable {
     private final double secondsPerBar;
     private final List<String> trackIds;
     private final LiveGraph graph;
+    /** Where each track was placed last, so that it can be placed again when its movements change. */
+    private final SoundSourcePlacement[] placed;
+    /** How the tracks move with the piece: place and room share from the mix document (work package D3). */
+    private volatile StageAutomation movements;
 
     private LiveStage(List<float[][]> sounds, List<SoundSourcePlacement> placements, AcousticRoom room,
-                      double secondsPerBar) {
+                      double secondsPerBar, StageAutomation movements) {
         if (sounds.isEmpty() || sounds.size() != placements.size()) {
             throw new IllegalArgumentException("Every track on a live stage needs its placement.");
         }
         this.room = room;
         this.secondsPerBar = secondsPerBar;
+        this.movements = movements == null ? StageAutomation.NONE : movements;
+        this.placed = placements.toArray(new SoundSourcePlacement[0]);
         long length = 0;
         for (float[][] sound : sounds) {
             length = Math.max(length, sound[0].length);
@@ -70,23 +76,40 @@ public final class LiveStage implements AutoCloseable {
     /** A live stage of tracks that are in memory already. */
     public static LiveStage of(List<SpatialStemMixer.Signal> signals, List<SoundSourcePlacement> placements,
                                AcousticRoom room, double secondsPerBar) throws IOException {
+        return of(signals, placements, room, secondsPerBar, StageAutomation.NONE);
+    }
+
+    /**
+     * A live stage of tracks in memory whose place and room share move with the piece, as the mix
+     * document says ({@link StageAutomation#of(com.aresstack.audio.composition.mix.MixScene,
+     * com.aresstack.audio.composition.TimeMap)}); the level curves stay those of the placements.
+     */
+    public static LiveStage of(List<SpatialStemMixer.Signal> signals, List<SoundSourcePlacement> placements,
+                               AcousticRoom room, double secondsPerBar, StageAutomation movements)
+            throws IOException {
         List<float[][]> sounds = new ArrayList<float[][]>();
         for (SpatialStemMixer.Signal signal : signals) {
             sounds.add(atMixRate(LinearResampler.at(new ArraySource(signal.left, signal.right, signal.rate),
                     signal.rate, SpatialStemMixer.RATE), LinearResampler.outputFrames(signal.left.length, signal.rate,
                     SpatialStemMixer.RATE)));
         }
-        return new LiveStage(sounds, placements, room, secondsPerBar);
+        return new LiveStage(sounds, placements, room, secondsPerBar, movements);
     }
 
     /** A live stage of the rendered stem files of a piece; reads them whole, so call it off the event thread. */
     public static LiveStage load(List<Path> files, List<SoundSourcePlacement> placements, AcousticRoom room,
                                  double secondsPerBar) throws Exception {
+        return load(files, placements, room, secondsPerBar, StageAutomation.NONE);
+    }
+
+    /** As above, with the movements of place and room share from the mix document. */
+    public static LiveStage load(List<Path> files, List<SoundSourcePlacement> placements, AcousticRoom room,
+                                 double secondsPerBar, StageAutomation movements) throws Exception {
         List<SpatialStemMixer.Signal> signals = new ArrayList<SpatialStemMixer.Signal>();
         for (Path file : files) {
             signals.add(SpatialStemMixer.read(file));
         }
-        return of(signals, placements, room, secondsPerBar);
+        return of(signals, placements, room, secondsPerBar, movements);
     }
 
     /** Reads a source at the rate of the mix into memory, with the block size of the file mix. */
@@ -115,7 +138,8 @@ public final class LiveStage implements AutoCloseable {
 
     /** The numbers of a channel for a placement on this stage; a muted track is turned down. */
     private ChannelParameters parameters(SoundSourcePlacement placement) {
-        ChannelParameters parameters = SpatialStemMixer.parameters(placement, room, secondsPerBar);
+        ChannelParameters parameters = SpatialStemMixer.parameters(placement,
+                movements.of(placement.trackId()), room, secondsPerBar);
         return placement.muted() ? parameters.toBuilder().level(0).build() : parameters;
     }
 
@@ -134,7 +158,25 @@ public final class LiveStage implements AutoCloseable {
 
     /** Moves the track at this place of the list; heard from the next block on. */
     public void move(int track, SoundSourcePlacement placement) {
+        placed[track] = placement;
         graph.channel(track).set(parameters(placement));
+    }
+
+    /**
+     * Other movements of place and room share (a curve was drawn while the piece plays): every
+     * track is placed again with them and follows them from the next block on. A parameter with a
+     * curve follows the curve; where a track has none, it stands where its placement says.
+     */
+    public void moving(StageAutomation changed) {
+        movements = changed == null ? StageAutomation.NONE : changed;
+        for (int track = 0; track < placed.length; track++) {
+            graph.channel(track).set(parameters(placed[track]));
+        }
+    }
+
+    /** The movements of place and room share this stage follows. */
+    public StageAutomation movements() {
+        return movements;
     }
 
     /** Moves the track with the id of the placement; {@code false} if the stage has no such track. */

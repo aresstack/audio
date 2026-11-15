@@ -166,6 +166,17 @@ final class StageDeck {
         return live == null || live.stage(scene, only);
     }
 
+    /**
+     * A curve of the place or of the room share of a track was saved with the piece: the live
+     * stage reads the movements again, in the background, and follows them while it plays.
+     */
+    void movementsChanged() {
+        final LiveDeck deck = live;
+        if (deck != null) {
+            loader.submit(deck::reloadMovements);
+        }
+    }
+
     /** The file mix found its factor (compatibility mode): live playback stays as loud as the file. */
     void legacyFactor(float factor, double masterDb) {
         if (live != null) {

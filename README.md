@@ -168,7 +168,11 @@ The course of a track's level can be set by hand in the field under the sliders 
 
 **KI mischt ab** is the last step before mixing: the AI is told what each track plays (notes per bar, range, velocities) and proposes levels, their course over the piece, places and the room. The proposal is drawn dashed over the stage and only applies after **Übernehmen**; protected instruments keep their place. With **KI wählt Instrumente**, the instrument proposal carries a stage in the same request and it is applied at once. Everything the AI says about the stage is clamped into range; unknown tracks are dropped, forgotten ones get their usual seat.
 
-No audio library was added for this. AskAI's `audio-dsp` module is a 16-bit speech pipeline; its filter formulas (Audio EQ Cookbook) were taken over, the float processing is new. The previous `WaveStemMixer` stays in the code as the plain reference. Not built yet: convolution reverb, HRTF/3D, moving sources, a real-time preview while dragging.
+No audio library was added for this. AskAI's `audio-dsp` module is a 16-bit speech pipeline; its filter formulas (Audio EQ Cookbook) were taken over, the float processing is new. Not built yet: convolution reverb, HRTF/3D, moving sources, a real-time preview while dragging.
+
+### Rendering from the model with a stem cache
+
+`RenderService` renders the stems of a piece straight from `composition.json`: each part becomes a MIDI file of its own (`PartMidi`) and is played by a `StemRenderer`: the built-in Java sound in-process (`BuiltinSynthesis` in the music module, the same samples as the reference renderer), Gervill in a child process, FluidSynth or sfizz. Stems go to `render/stems/<part>-<key>.wav`; the key is a hash of the part's MIDI, the engine and its settings, the sound bank (name, size, time of change), and for the Java sound the role and the length of the piece. A part is rendered only if no stem exists for its key, so a change to one part renders that part, a change to the mix renders nothing. `render/manifest.json` notes file, engine and key per part; `stems.tsv` is written as before for the mix on the stage. One `RenderLimits` (an hour of music by default, sampler time derived from the length of the piece) replaces the former three-minute limits. Not wired into the window yet.
 
 ## Variable instrumentation: manual, AI suggestion or autopilot
 

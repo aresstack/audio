@@ -5,6 +5,7 @@ import com.aresstack.audio.core.BiquadCoefficients;
 import com.aresstack.audio.core.SeekableSource;
 import com.aresstack.audio.core.dsp.GlidingBiquad;
 import com.aresstack.audio.core.dsp.StereoStrip;
+import com.aresstack.audio.core.mix.ChannelMotion;
 
 /**
  * One channel of a live mix: the same chain as {@link com.aresstack.audio.core.mix.StemChannel},
@@ -22,6 +23,12 @@ import com.aresstack.audio.core.dsp.StereoStrip;
  * ({@link GlidingBiquad}), changed echo delays by a crossfade. Two neighbouring samples therefore
  * never differ by more than the signal itself and a glide step allow. While nothing glides, the
  * channel computes exactly what {@code StemChannel} computes, sample for sample.
+ *
+ * <p>A source that moves with the piece ({@link ChannelParameters#motion()}, work package D3) is
+ * asked once per block where it will be at the end of that block, and its panner gains and sends
+ * glide there in a straight line: the same curve as in the file, looked at once per block instead
+ * of every {@link ChannelMotion#RAMP} frames. Other parameters handed over meanwhile, and a
+ * changed motion, are reached within that block, without a jump.
  */
 public final class LiveChannel {
     private final SeekableSource source;
@@ -45,6 +52,10 @@ public final class LiveChannel {
     private float curveStep;
     /** Set after a seek: the level curve is looked up afresh for the frame the channel goes on at. */
     private boolean realign;
+    /** Set after a seek or at the start: a moving source stands at once where its motion says. */
+    private boolean replace = true;
+    /** Where a moving source goes, written by its motion on the audio thread. */
+    private final float[] moved = new float[ChannelMotion.GAINS];
 
     /**
      * @param source       the sound of the channel at the rate of the mix
@@ -127,6 +138,7 @@ public final class LiveChannel {
     void seek(long frame) {
         source.seek(Math.min(frame, frames));
         realign = true;
+        replace = true;
         shelf.reset();
         if (reflections != null) {
             reflections.clear();
@@ -143,15 +155,35 @@ public final class LiveChannel {
             taken = now;
             level.glideTo(now.level(), glide);
             width.glideTo(now.width(), glide);
-            toLeft.glideTo(now.toLeft(), glide);
-            toRight.glideTo(now.toRight(), glide);
-            sendLeft.glideTo(now.sendLeft(), glide);
-            sendRight.glideTo(now.sendRight(), glide);
+            if (now.motion() == null) {
+                toLeft.glideTo(now.toLeft(), glide);
+                toRight.glideTo(now.toRight(), glide);
+                sendLeft.glideTo(now.sendLeft(), glide);
+                sendRight.glideTo(now.sendRight(), glide);
+            }
             shelf.glideTo(now.shelf(), glide);
             if (reflections != null) {
                 reflections.glideTo(now, glide);
             }
         }
+        ChannelMotion motion = now.motion();
+        if (motion != null) {
+            if (replace) {
+                // At the start and after a jump the source stands where it is at that frame.
+                motion.gainsAt(position, moved);
+                toLeft.reset(moved[ChannelMotion.TO_LEFT]);
+                toRight.reset(moved[ChannelMotion.TO_RIGHT]);
+                sendLeft.reset(moved[ChannelMotion.SEND_LEFT]);
+                sendRight.reset(moved[ChannelMotion.SEND_RIGHT]);
+            }
+            // Where it will be when this block ends: the gains glide there over the block.
+            motion.gainsAt(position + count, moved);
+            toLeft.glideTo(moved[ChannelMotion.TO_LEFT], count);
+            toRight.glideTo(moved[ChannelMotion.TO_RIGHT], count);
+            sendLeft.glideTo(moved[ChannelMotion.SEND_LEFT], count);
+            sendRight.glideTo(moved[ChannelMotion.SEND_RIGHT], count);
+        }
+        replace = false;
         int heard = 0;
         if (position < frames) {
             int asked = (int) Math.min(count, frames - position);

@@ -1,6 +1,8 @@
 package com.aresstack.audio.studio.ui;
 
+import com.aresstack.audio.composition.mix.AutomationLane;
 import com.aresstack.audio.studio.application.MusicTrack;
+import com.aresstack.audio.studio.application.StageMovements;
 import com.aresstack.audio.studio.stage.AcousticRoom;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
 import com.aresstack.audio.studio.stage.SpatialScene;
@@ -45,6 +47,15 @@ final class StagePanel extends JPanel {
          * peak) to the fixed level with the limiter. Returns whether they confirm it.
          */
         boolean confirmFixedLevel();
+
+        /**
+         * The user drew how a track moves over the bars: its place from left to right, its depth
+         * or its share of the room (the level is part of the scene).
+         *
+         * @param movements all movements as the page shows them now
+         * @param settled   {@code false} while a point is still being dragged
+         */
+        void movementChanged(StageMovements movements, String trackId, String parameter, boolean settled);
 
         /** The AI shall propose a mix. */
         void askDirector();
@@ -120,7 +131,12 @@ final class StagePanel extends JPanel {
     private final JToggleButton mute = new JToggleButton("Stumm");
     private final JToggleButton lock = new JToggleButton("Vor KI schützen");
     private final JLabel course = new JLabel(" ");
-    private final LevelCourse curve = new LevelCourse();
+    private final Course curve = new Course();
+    /** How the instruments move over the bars, beside the level the scene itself holds. */
+    private StageMovements movements = StageMovements.NONE;
+    /** Which curve the field shows: the level, or one of {@link StageMovements#PARAMETERS}. */
+    private String parameter = AutomationLane.LEVEL;
+    private final java.util.Map<String, JToggleButton> courseKeys = new java.util.LinkedHashMap<String, JToggleButton>();
     private Row master;
     private final JToggleButton fixed = new JToggleButton("Fester Pegel mit Limiter");
     private final JButton flat = new JButton("Verlauf löschen");
@@ -294,20 +310,39 @@ final class StagePanel extends JPanel {
         flags.add(lock);
         course.setForeground(AudioStudioTheme.TEXT_DIM);
         course.setFont(course.getFont().deriveFont(12f));
-        flat.setToolTipText("Die Spur bleibt über das ganze Stück gleich laut");
+        flat.setToolTipText("Nimmt den gezeigten Verlauf weg: die Spur bleibt darin über das ganze Stück gleich");
         flat.setMargin(new Insets(3, 8, 3, 8));
-        flat.addActionListener(event -> {
-            SoundSourcePlacement placement = placement();
-            if (placement != null) {
-                put(placement.withDynamics(null), true);
-            }
-        });
+        flat.addActionListener(event -> curve.set(new ArrayList<StageMovements.Point>(), true));
+        // Which curve the field shows: the level, or how the instrument moves on the stage.
+        JPanel kinds = new JPanel(new GridLayout(1, 4, 4, 0));
+        kinds.setOpaque(false);
+        javax.swing.ButtonGroup oneKind = new javax.swing.ButtonGroup();
+        String[][] named = {
+                {AutomationLane.LEVEL, "Pegel", "Wie laut die Spur über die Takte ist"},
+                {AutomationLane.X, "Seite", "Wie die Spur über die Takte von links nach rechts wandert"},
+                {AutomationLane.DEPTH, "Tiefe", "Wie die Spur über die Takte nach vorn und hinten wandert"},
+                {AutomationLane.REVERB, "Hall", "Wie viel von der Spur über die Takte in den Raum geht"}};
+        for (String[] kind : named) {
+            final String chosenKind = kind[0];
+            JToggleButton key = new JToggleButton(kind[1], chosenKind.equals(parameter));
+            key.setToolTipText(kind[2]);
+            key.setMargin(new Insets(2, 4, 2, 4));
+            key.setFont(key.getFont().deriveFont(11.5f));
+            key.addActionListener(event -> {
+                parameter = chosenKind;
+                showChosen();
+            });
+            oneKind.add(key);
+            kinds.add(key);
+            courseKeys.put(chosenKind, key);
+        }
         JPanel courseRow = new JPanel(new BorderLayout(8, 0));
         courseRow.setOpaque(false);
         courseRow.add(course, BorderLayout.CENTER);
         courseRow.add(flat, BorderLayout.EAST);
         JPanel sourceBox = column(chosen, where, Box.createVerticalStrut(6), source, Box.createVerticalStrut(6),
-                flags, Box.createVerticalStrut(8), courseRow, Box.createVerticalStrut(4), curve);
+                flags, Box.createVerticalStrut(8), kinds, Box.createVerticalStrut(4), courseRow,
+                Box.createVerticalStrut(4), curve);
 
         // Mixing.
         director.setFont(director.getFont().deriveFont(java.awt.Font.BOLD, 14f));
@@ -440,34 +475,33 @@ final class StagePanel extends JPanel {
     private int bars = 8;
 
     /**
-     * The course of a track's level over the bars, to be set by hand: a click in the field sets
-     * a point, a point is dragged to its place, and the right mouse button takes it away. Between
-     * the points the level moves in a straight line; before the first and after the last it stays.
+     * The course of one parameter of a track over the bars, to be set by hand: its level, its
+     * place from left to right, its depth or its share of the room. A click in the field sets a
+     * point, a point is dragged to its place, and the right mouse button takes it away. Between
+     * the points the value moves in a straight line; before the first and after the last it stays.
+     *
+     * <p>The level is part of the placement ({@code dynamics}); the others are the movements of
+     * the mix document. The dashed line is where the track stands when nothing moves.
      */
-    private final class LevelCourse extends javax.swing.JComponent {
-        private static final double TOP = 6;
-        private static final double BOTTOM = -18;
+    private final class Course extends javax.swing.JComponent {
         private SoundSourcePlacement shown;
         private int held = -1;
 
-        LevelCourse() {
+        Course() {
             setPreferredSize(new Dimension(100, 78));
             setMinimumSize(new Dimension(100, 78));
-            setToolTipText("Verlauf der Lautstärke über die Takte: klicken setzt einen Punkt, ziehen verschiebt, "
-                    + "Rechtsklick entfernt");
             java.awt.event.MouseAdapter mouse = new java.awt.event.MouseAdapter() {
                 @Override
                 public void mousePressed(java.awt.event.MouseEvent event) {
-                    if (shown == null) {
+                    if (shown == null || !editable()) {
                         return;
                     }
-                    List<SoundSourcePlacement.LevelPoint> points = new ArrayList<SoundSourcePlacement.LevelPoint>(
-                            shown.dynamics());
+                    List<StageMovements.Point> points = new ArrayList<StageMovements.Point>(points());
                     int near = near(event.getX(), event.getY());
                     if (javax.swing.SwingUtilities.isRightMouseButton(event)) {
                         if (near >= 0) {
                             points.remove(near);
-                            put(shown.withDynamics(points), true);
+                            set(points, true);
                         }
                         return;
                     }
@@ -475,11 +509,10 @@ final class StagePanel extends JPanel {
                         if (points.size() >= SoundSourcePlacement.MAX_POINTS) {
                             return;
                         }
-                        SoundSourcePlacement.LevelPoint added = point(event.getX(), event.getY());
+                        StageMovements.Point added = point(event.getX(), event.getY());
                         points.add(added);
-                        SoundSourcePlacement changed = shown.withDynamics(points);
-                        put(changed, false);
-                        near = changed.dynamics().indexOf(added);
+                        set(points, false);
+                        near = points().indexOf(added);
                     }
                     held = near;
                 }
@@ -498,16 +531,14 @@ final class StagePanel extends JPanel {
                 }
 
                 private void move(java.awt.event.MouseEvent event, boolean settled) {
-                    if (shown == null || held < 0 || held >= shown.dynamics().size()) {
+                    if (shown == null || held < 0 || held >= points().size()) {
                         return;
                     }
-                    List<SoundSourcePlacement.LevelPoint> points = new ArrayList<SoundSourcePlacement.LevelPoint>(
-                            shown.dynamics());
-                    SoundSourcePlacement.LevelPoint moved = point(event.getX(), event.getY());
+                    List<StageMovements.Point> points = new ArrayList<StageMovements.Point>(points());
+                    StageMovements.Point moved = point(event.getX(), event.getY());
                     points.set(held, moved);
-                    SoundSourcePlacement changed = shown.withDynamics(points);
-                    held = changed.dynamics().indexOf(moved); // it may have passed a neighbour
-                    put(changed, settled);
+                    set(points, settled);
+                    held = points().indexOf(moved); // it may have passed a neighbour
                 }
             };
             addMouseListener(mouse);
@@ -516,28 +547,96 @@ final class StagePanel extends JPanel {
 
         void show(SoundSourcePlacement placement) {
             shown = placement;
+            setToolTipText(!editable() && placement != null
+                    ? "Bewegungen auf der Bühne gehören zum Werkmodell des Stücks: erst komponieren, dann lassen sie sich zeichnen"
+                    : "Verlauf über die Takte: klicken setzt einen Punkt, ziehen verschiebt, Rechtsklick entfernt");
             repaint();
+        }
+
+        /** Whether the shown curve can be drawn: the level always, a movement only with a mix document. */
+        boolean editable() {
+            return shown != null && (level() || movements.editable(shown.trackId()));
+        }
+
+        private boolean level() {
+            return AutomationLane.LEVEL.equals(parameter);
+        }
+
+        /** The points of the shown curve, in order. */
+        List<StageMovements.Point> points() {
+            if (shown == null) {
+                return new ArrayList<StageMovements.Point>();
+            }
+            if (!level()) {
+                return movements.of(shown.trackId(), parameter);
+            }
+            List<StageMovements.Point> points = new ArrayList<StageMovements.Point>();
+            for (SoundSourcePlacement.LevelPoint point : shown.dynamics()) {
+                points.add(new StageMovements.Point(point.bar(), point.db()));
+            }
+            return points;
+        }
+
+        /** Another curve for the shown parameter; without points the track stays as it stands. */
+        void set(List<StageMovements.Point> points, boolean settled) {
+            if (shown == null || !editable()) {
+                return;
+            }
+            if (level()) {
+                List<SoundSourcePlacement.LevelPoint> dynamics = new ArrayList<SoundSourcePlacement.LevelPoint>();
+                for (StageMovements.Point point : points) {
+                    dynamics.add(new SoundSourcePlacement.LevelPoint(point.bar(), point.value()));
+                }
+                put(shown.withDynamics(dynamics.isEmpty() ? null : dynamics), settled);
+                return;
+            }
+            String trackId = shown.trackId();
+            movements = movements.with(trackId, parameter, points);
+            showChosen();
+            host.movementChanged(movements, trackId, parameter, settled);
+        }
+
+        /** The highest value of the field. */
+        private double top() {
+            return level() ? 6 : 1;
+        }
+
+        /** The lowest value of the field. */
+        private double bottom() {
+            return level() ? -18 : AutomationLane.X.equals(parameter) ? -1 : 0;
+        }
+
+        /** Where the track stands in the shown parameter when nothing moves. */
+        private double still() {
+            return level() || shown == null ? 0 : AutomationLane.X.equals(parameter) ? shown.x()
+                    : AutomationLane.DEPTH.equals(parameter) ? shown.depth() : shown.reverb();
         }
 
         private float x(double bar) {
             return 6 + (float) ((getWidth() - 12) * Math.min(1, bar / bars));
         }
 
-        private float y(double db) {
-            return 5 + (float) ((getHeight() - 10) * (TOP - Math.max(BOTTOM, Math.min(TOP, db))) / (TOP - BOTTOM));
+        private float y(double value) {
+            double top = top();
+            double bottom = bottom();
+            return 5 + (float) ((getHeight() - 10) * (top - Math.max(bottom, Math.min(top, value))) / (top - bottom));
         }
 
-        private SoundSourcePlacement.LevelPoint point(int px, int py) {
+        /** The point under the mouse: on a quarter of a bar, on a whole dB or a twentieth of the way. */
+        private StageMovements.Point point(int px, int py) {
+            double top = top();
+            double bottom = bottom();
             double bar = Math.max(0, Math.min(bars, (px - 6) / (double) Math.max(1, getWidth() - 12) * bars));
-            double db = TOP - (py - 5) / (double) Math.max(1, getHeight() - 10) * (TOP - BOTTOM);
-            return new SoundSourcePlacement.LevelPoint(Math.round(bar * 4) / 4.0,
-                    Math.round(Math.max(BOTTOM, Math.min(TOP, db))));
+            double value = Math.max(bottom, Math.min(top,
+                    top - (py - 5) / (double) Math.max(1, getHeight() - 10) * (top - bottom)));
+            return new StageMovements.Point(Math.round(bar * 4) / 4.0,
+                    level() ? Math.round(value) : Math.round(value * 20) / 20.0);
         }
 
         private int near(int px, int py) {
-            List<SoundSourcePlacement.LevelPoint> points = shown.dynamics();
+            List<StageMovements.Point> points = points();
             for (int i = 0; i < points.size(); i++) {
-                if (Math.hypot(x(points.get(i).bar()) - px, y(points.get(i).db()) - py) < 8) {
+                if (Math.hypot(x(points.get(i).bar()) - px, y(points.get(i).value()) - py) < 8) {
                     return i;
                 }
             }
@@ -553,40 +652,51 @@ final class StagePanel extends JPanel {
             g.fill(well);
             g.setColor(AudioStudioTheme.STROKE);
             g.draw(well);
-            // The bars, and the line of the track's own level.
+            // The bars, and the line of where the track stands when nothing moves.
             for (int bar = 0; bar <= bars; bar += bars > 32 ? 4 : bars > 16 ? 2 : 1) {
                 g.setColor(new java.awt.Color(255, 255, 255, bar % 4 == 0 ? 30 : 14));
                 g.draw(new java.awt.geom.Line2D.Float(x(bar), 4, x(bar), getHeight() - 4));
             }
+            double still = still();
             g.setColor(AudioStudioTheme.withAlpha(AudioStudioTheme.TEXT_FAINT, 170));
             g.setStroke(new java.awt.BasicStroke(1f, java.awt.BasicStroke.CAP_BUTT, java.awt.BasicStroke.JOIN_MITER,
                     1f, new float[]{3f, 4f}, 0f));
-            g.draw(new java.awt.geom.Line2D.Float(6, y(0), getWidth() - 6, y(0)));
+            g.draw(new java.awt.geom.Line2D.Float(6, y(still), getWidth() - 6, y(still)));
             g.setFont(AudioStudioTheme.lettering(8.5f));
-            g.drawString("±0", getWidth() - 22, y(0) - 3);
+            if (level()) {
+                g.drawString("±0", getWidth() - 22, y(0) - 3);
+            } else {
+                // What the upper and the lower edge of the field mean.
+                String[] edges = AutomationLane.X.equals(parameter) ? new String[]{"R", "L"}
+                        : AutomationLane.DEPTH.equals(parameter) ? new String[]{"hinten", "vorn"}
+                        : new String[]{"100 %", "0 %"};
+                java.awt.FontMetrics metrics = g.getFontMetrics();
+                g.drawString(edges[0], getWidth() - 8 - metrics.stringWidth(edges[0]), 14);
+                g.drawString(edges[1], getWidth() - 8 - metrics.stringWidth(edges[1]), getHeight() - 7);
+            }
             if (shown == null) {
                 g.dispose();
                 return;
             }
             java.awt.Color color = AudioStudioTheme.channel(Math.max(0, order.indexOf(shown.trackId())));
-            List<SoundSourcePlacement.LevelPoint> points = shown.dynamics();
+            List<StageMovements.Point> points = points();
             java.awt.geom.Path2D line = new java.awt.geom.Path2D.Float();
             if (points.isEmpty()) {
-                line.moveTo(6, y(0));
-                line.lineTo(getWidth() - 6, y(0));
+                line.moveTo(6, y(still));
+                line.lineTo(getWidth() - 6, y(still));
             } else {
-                line.moveTo(6, y(points.get(0).db()));
-                for (SoundSourcePlacement.LevelPoint point : points) {
-                    line.lineTo(x(point.bar()), y(point.db()));
+                line.moveTo(6, y(points.get(0).value()));
+                for (StageMovements.Point point : points) {
+                    line.lineTo(x(point.bar()), y(point.value()));
                 }
-                line.lineTo(getWidth() - 6, y(points.get(points.size() - 1).db()));
+                line.lineTo(getWidth() - 6, y(points.get(points.size() - 1).value()));
             }
             g.setStroke(new java.awt.BasicStroke(2f, java.awt.BasicStroke.CAP_ROUND, java.awt.BasicStroke.JOIN_ROUND));
-            g.setColor(points.isEmpty() ? AudioStudioTheme.withAlpha(color, 110) : color);
+            g.setColor(points.isEmpty() ? AudioStudioTheme.withAlpha(color, editable() ? 110 : 50) : color);
             g.draw(line);
-            for (SoundSourcePlacement.LevelPoint point : points) {
+            for (StageMovements.Point point : points) {
                 float px = x(point.bar());
-                float py = y(point.db());
+                float py = y(point.value());
                 g.setColor(AudioStudioTheme.WELL);
                 g.fill(new java.awt.geom.Ellipse2D.Float(px - 5, py - 5, 10, 10));
                 g.setColor(color);
@@ -595,6 +705,53 @@ final class StagePanel extends JPanel {
             }
             g.dispose();
         }
+    }
+
+    /** A value of a curve in the words of its slider: dB, left and right, metres, per cent. */
+    static String words(String parameter, double value) {
+        if (AutomationLane.LEVEL.equals(parameter)) {
+            return StageView.decibels(value);
+        }
+        if (AutomationLane.X.equals(parameter)) {
+            long side = Math.round(value * 100);
+            return side == 0 ? "Mitte" : Math.abs(side) + (side < 0 ? " L" : " R");
+        }
+        if (AutomationLane.DEPTH.equals(parameter)) {
+            return String.format(java.util.Locale.GERMANY, "%.1f m", 3 + value * 9);
+        }
+        return Math.round(value * 100) + " %";
+    }
+
+    /** What a curve is called on the page. */
+    private static String name(String parameter) {
+        return AutomationLane.LEVEL.equals(parameter) ? "Pegel" : AutomationLane.X.equals(parameter) ? "Seite"
+                : AutomationLane.DEPTH.equals(parameter) ? "Tiefe" : "Hall";
+    }
+
+    /**
+     * How the instruments of the piece move over the bars, as its mix document says: shown and
+     * drawn in the field under the sliders, beside the level.
+     */
+    void setMovements(StageMovements shown) {
+        movements = shown == null ? StageMovements.NONE : shown;
+        showChosen();
+    }
+
+    StageMovements movements() {
+        return movements;
+    }
+
+    /** Shows the curve of this parameter in the field, as its key does. */
+    void showCourse(String wanted) {
+        if (courseKeys.containsKey(wanted)) {
+            parameter = wanted;
+            showChosen();
+        }
+    }
+
+    /** The field the curves are drawn in. */
+    javax.swing.JComponent courseField() {
+        return curve;
     }
 
     /** Shows the stage of the piece for its tracks, as the studio holds it. */
@@ -709,6 +866,9 @@ final class StagePanel extends JPanel {
                 course.setText(" ");
                 flat.setVisible(false);
                 curve.show(null);
+                for (JToggleButton key : courseKeys.values()) {
+                    key.setEnabled(false);
+                }
                 return;
             }
             int index = order.indexOf(placement.trackId());
@@ -722,23 +882,33 @@ final class StagePanel extends JPanel {
             share.show((int) Math.round(placement.reverb() * 100));
             mute.setSelected(placement.muted());
             lock.setSelected(placement.locked());
-            List<SoundSourcePlacement.LevelPoint> points = placement.dynamics();
-            if (points.isEmpty()) {
-                course.setText("Verlauf: gleichbleibend laut");
-            } else {
-                StringBuilder text = new StringBuilder("Verlauf: ");
-                for (int i = 0; i < points.size() && i < 5; i++) {
-                    text.append(i == 0 ? "" : " → ").append("T").append(Math.round(points.get(i).bar()) + 1).append(' ')
-                            .append(StageView.decibels(points.get(i).db()).replace(" dB", ""));
-                }
-                course.setText(text + (points.size() > 5 ? " …" : " dB"));
-            }
-            course.setToolTipText("Wie sich die Lautstärke der Spur über die Takte ändert; die KI schlägt das mit vor");
-            if (points.isEmpty()) {
-                course.setText("Verlauf: gleichbleibend · ins Feld klicken setzt Punkte");
-            }
-            flat.setVisible(!points.isEmpty());
             curve.show(placement);
+            // The keys of the curves: a dot marks what moves.
+            for (java.util.Map.Entry<String, JToggleButton> key : courseKeys.entrySet()) {
+                boolean moving = AutomationLane.LEVEL.equals(key.getKey()) ? !placement.dynamics().isEmpty()
+                        : !movements.of(placement.trackId(), key.getKey()).isEmpty();
+                key.getValue().setEnabled(true);
+                key.getValue().setText(name(key.getKey()) + (moving ? " •" : ""));
+                key.getValue().setSelected(key.getKey().equals(parameter));
+            }
+            List<StageMovements.Point> points = curve.points();
+            String named = name(parameter);
+            if (!curve.editable()) {
+                course.setText(named + ": erst komponieren, dann lässt sich die Bewegung zeichnen");
+            } else if (points.isEmpty()) {
+                course.setText(named + ": gleichbleibend · ins Feld klicken setzt Punkte");
+            } else {
+                StringBuilder text = new StringBuilder(named + ": ");
+                for (int i = 0; i < points.size() && i < 4; i++) {
+                    text.append(i == 0 ? "" : " → ").append("T").append((int) Math.floor(points.get(i).bar()) + 1)
+                            .append(' ').append(words(parameter, points.get(i).value()).replace(" dB", ""));
+                }
+                course.setText(text + (points.size() > 4 ? " …" : AutomationLane.LEVEL.equals(parameter) ? " dB" : ""));
+            }
+            course.setToolTipText(AutomationLane.LEVEL.equals(parameter)
+                    ? "Wie sich die Lautstärke der Spur über die Takte ändert; die KI schlägt das mit vor"
+                    : "Wie sich die Spur über die Takte bewegt; solange hier Punkte stehen, gilt der Verlauf statt des Reglers");
+            flat.setVisible(curve.editable() && !points.isEmpty());
         } finally {
             filling = false;
         }

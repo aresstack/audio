@@ -2,6 +2,7 @@ package com.aresstack.audio.core.live;
 
 import com.aresstack.audio.core.BiquadCoefficients;
 import com.aresstack.audio.core.dsp.StereoStrip;
+import com.aresstack.audio.core.mix.ChannelMotion;
 import java.util.Arrays;
 
 /**
@@ -17,6 +18,10 @@ import java.util.Arrays;
  *   <li>{@code shelf}: the dulling of the heights with distance, {@code null} for none.</li>
  *   <li>{@code echoDelays}, {@code echoLeft}, {@code echoRight}: one entry per wall; a channel
  *       keeps the number of walls it was made with.</li>
+ *   <li>{@code motion}: for a source that moves with the piece (work package D3), where its
+ *       direct sound goes and what reaches the room at a frame; it then says these four gains
+ *       instead of {@code toLeft}, {@code toRight}, {@code sendLeft} and {@code sendRight}, which
+ *       are where the source stands when nothing moves. {@code null} for a source that stands.</li>
  * </ul>
  */
 public final class ChannelParameters {
@@ -31,8 +36,10 @@ public final class ChannelParameters {
     private final int[] echoDelays;
     private final float[] echoLeft;
     private final float[] echoRight;
+    private final ChannelMotion motion;
 
     private ChannelParameters(Builder builder) {
+        motion = builder.motion;
         level = finite(builder.level, "level");
         if (level < 0) {
             throw new IllegalArgumentException("A level is a factor of at least 0.");
@@ -87,6 +94,7 @@ public final class ChannelParameters {
         builder.echoDelays = echoDelays.clone();
         builder.echoLeft = echoLeft.clone();
         builder.echoRight = echoRight.clone();
+        builder.motion = motion;
         return builder;
     }
 
@@ -120,6 +128,11 @@ public final class ChannelParameters {
 
     public BiquadCoefficients shelf() {
         return shelf;
+    }
+
+    /** How the source moves with the piece, or {@code null} if it stands. */
+    public ChannelMotion motion() {
+        return motion;
     }
 
     public int echoes() {
@@ -166,6 +179,7 @@ public final class ChannelParameters {
         private int[] echoDelays = new int[0];
         private float[] echoLeft = new float[0];
         private float[] echoRight = new float[0];
+        private ChannelMotion motion;
 
         private Builder() {
         }
@@ -204,6 +218,12 @@ public final class ChannelParameters {
             this.echoDelays = delays.clone();
             this.echoLeft = toLeft.clone();
             this.echoRight = toRight.clone();
+            return this;
+        }
+
+        /** The source moves with the piece: the motion says its panner gains and its sends. */
+        public Builder motion(ChannelMotion motion) {
+            this.motion = motion;
             return this;
         }
 

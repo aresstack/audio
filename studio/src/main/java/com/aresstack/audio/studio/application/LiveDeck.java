@@ -44,6 +44,9 @@ public final class LiveDeck implements AutoCloseable {
     private final LiveStage stage;
     private final LivePlayback playback;
     private final boolean fixedLevel;
+    /** Where the mix document of the piece lies, and the tempo its stems were rendered at. */
+    private final Path directory;
+    private final int tempo;
     /** In the compatibility mode: the factor of the last file mix, and the master level it was found with. */
     private volatile float legacyFactor;
     private volatile double legacyMasterDb;
@@ -52,7 +55,10 @@ public final class LiveDeck implements AutoCloseable {
     private volatile double sought = -1;
     private volatile long soughtAtBlock;
 
-    private LiveDeck(LiveStage stage, LivePlayback playback, SpatialScene scene, float legacyFactor) {
+    private LiveDeck(LiveStage stage, LivePlayback playback, SpatialScene scene, float legacyFactor,
+                     Path directory, int tempo) {
+        this.directory = directory;
+        this.tempo = tempo;
         this.stage = stage;
         this.playback = playback;
         this.scene = scene;
@@ -98,11 +104,13 @@ public final class LiveDeck implements AutoCloseable {
         if (!fitting.fixedLevel() && !(factor > 0 && Float.isFinite(factor))) {
             factor = measuredFactor(arrangement, directory, fitting, only);
         }
-        LiveStage stage = LiveStage.load(files, placements, fitting.room(),
-                4 * 60.0 / StageMixService.tempo(arrangement));
+        // How the tracks move with the piece (place and room share) comes from its mix document, as for the file.
+        int tempo = StageMixService.tempo(arrangement);
+        LiveStage stage = LiveStage.load(files, placements, fitting.room(), 4 * 60.0 / tempo,
+                StageMixService.movements(directory, tempo, message -> { }));
         try {
             LivePlayback playback = stage.playback(master(fitting, factor, fitting.masterDb()), sinks.open());
-            return new LiveDeck(stage, playback, fitting, factor);
+            return new LiveDeck(stage, playback, fitting, factor, directory, tempo);
         } catch (Exception noSound) {
             stage.close();
             throw noSound;
@@ -175,6 +183,15 @@ public final class LiveDeck implements AutoCloseable {
     /** One track moved; the others stay. {@code false} if the stage has no such track. */
     public boolean move(SoundSourcePlacement placement, String only) {
         return stage.move(heard(placement, only));
+    }
+
+    /**
+     * A curve of the place or of the room share was drawn and saved (work package D3): the mix
+     * document is read again and every track follows its movements from the next block on. Reads
+     * files, so it belongs off the event thread.
+     */
+    public void reloadMovements() {
+        stage.moving(StageMixService.movements(directory, tempo, message -> { }));
     }
 
     /**

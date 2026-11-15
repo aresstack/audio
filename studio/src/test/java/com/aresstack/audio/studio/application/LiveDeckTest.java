@@ -273,6 +273,40 @@ public final class LiveDeckTest {
         awaitEnd(deck);
     }
 
+    /** D2 with D3: the movements the piece keeps in mix.json are heard live, also one saved while it plays. */
+    @Test
+    public void movementsOfTheMixDocumentAreHeardLiveAlsoWhenSavedWhilePlaying() throws Exception {
+        Path song = piece();
+        Path arrangement = song.resolve("arrangement.tsv");
+        SpatialScene scene = new StageMixService().scene(arrangement, song).withFixedLevel(true).withMaster(-14)
+                .inRoom(AcousticRoom.STUDIO.withAmount(0));
+        scene = scene.with(scene.placement("melody").at(-1, 0)).with(scene.placement("bass").withMuted(true));
+        // The piece says: the melody stands far right, whatever its disc says.
+        com.aresstack.audio.composition.mix.MixChannel channel = new com.aresstack.audio.composition.mix.MixChannel(
+                "c1", com.aresstack.audio.composition.mix.MixChannel.Owner.part("melody"), -1, 0, 0, 1, 0.3, false, false);
+        com.aresstack.audio.composition.mix.Room room = new com.aresstack.audio.composition.mix.Room("studio", 0.4, 0);
+        com.aresstack.audio.composition.mix.AutomationLane right = new com.aresstack.audio.composition.mix.AutomationLane(
+                "l1", "c1", "x", java.util.List.of(new com.aresstack.audio.composition.mix.AutomationLane.Point(0, 1)));
+        com.aresstack.audio.studio.project.MixJson.save(song, new com.aresstack.audio.composition.mix.MixScene(room, 0,
+                com.aresstack.audio.composition.mix.LevelMode.FIXED, java.util.List.of(channel), java.util.List.of(right)));
+        Tape tape = new Tape();
+        try (LiveDeck deck = LiveDeck.open(arrangement, song, scene, null, Float.NaN, () -> tape)) {
+            deck.play();
+            tape.allow(30);
+            tape.awaitFrames(30 * BLOCK);
+            Assert.assertTrue(tape.rms(true, 20 * BLOCK, 30 * BLOCK) > 3 * tape.rms(false, 20 * BLOCK, 30 * BLOCK));
+            // The curve is taken away and saved while the piece plays: the melody is where its disc is, on the left.
+            com.aresstack.audio.studio.project.MixJson.save(song, new com.aresstack.audio.composition.mix.MixScene(room,
+                    0, com.aresstack.audio.composition.mix.LevelMode.FIXED, java.util.List.of(channel),
+                    java.util.List.of()));
+            deck.reloadMovements();
+            tape.allow(30);
+            tape.awaitFrames(60 * BLOCK);
+            Assert.assertTrue(tape.rms(false, 50 * BLOCK, 60 * BLOCK) > 3 * tape.rms(true, 50 * BLOCK, 60 * BLOCK));
+            tape.allow(Integer.MAX_VALUE / 2);
+        }
+    }
+
     @Test
     public void aTrackThatIsNotRenderedIsNamedUnlessItIsMuted() throws Exception {
         Path song = piece();
