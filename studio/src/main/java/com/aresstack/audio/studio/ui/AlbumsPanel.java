@@ -89,6 +89,11 @@ final class AlbumsPanel extends JPanel {
             return com.aresstack.audio.studio.application.CompositionSpec.SECTION_BARS;
         }
 
+        /** How many titles of an album are made at the same time (studio.properties: albumPiecesAtOnce). */
+        default int piecesAtOnce() {
+            return PIECES_AT_ONCE;
+        }
+
         /** How many bars a long piece begins with and grows by (setting "Takte je Wachstumsschritt"). */
         default int growBars() {
             return PieceAutopilot.GROW_BARS;
@@ -983,7 +988,7 @@ final class AlbumsPanel extends JPanel {
                         models.through(model -> new LimitedChatModel(model, permits)), tokens, requests, rendering)
                         .sectionBars(sectionBars).growBars(growBars).voices(voices[0], voices[1]),
                         songs);
-            }, PIECES_AT_ONCE);
+            }, Math.max(1, host.piecesAtOnce()));
         } catch (RuntimeException invalid) {
             say(invalid.getMessage());
             return null;
@@ -1050,7 +1055,7 @@ final class AlbumsPanel extends JPanel {
             return;
         }
         say(onlyTrack != null ? "Der Titel wird neu produziert."
-                : "Das Album wird produziert: " + PIECES_AT_ONCE + " Stücke gleichzeitig.");
+                : "Das Album wird produziert: " + Math.max(1, host.piecesAtOnce()) + " Stücke gleichzeitig.");
         keys();
         final AlbumProductionCoordinator.Production running = production;
         Thread waiter = new Thread(() -> {
