@@ -216,6 +216,24 @@ public final class VoiceAdditionTest {
     }
 
     @Test
+    public void anAcceptedVoiceSurvivesTakingOverChangedOldFiles() throws Exception {
+        VoiceAddition addition = VoiceAddition.start(session, VoiceComposer.with(trumpetPlayer()),
+                trumpet(List.of(), false), Ids.seeded(17), QUIET);
+        addition.accept();
+        Composition accepted = session.composition();
+        String id = addition.voice().part().id();
+        Path song = piece.resolve("song.properties");
+        Files.writeString(song, Files.readString(song).replace("name=Morgen im Viertel", "name=Abend im Viertel"));
+        assertTrue(session.externalChanges());
+        session.synchronize();
+        Composition now = session.composition();
+        assertEquals("Abend im Viertel", now.meta().title());
+        assertEquals("part, track, clips and note ids of the new voice stay", accepted.part(id), now.part(id));
+        assertEquals(accepted.track(addition.voice().track().id()), now.track(addition.voice().track().id()));
+        assertEquals(accepted.notesOf(id), now.notesOf(id));
+    }
+
+    @Test
     public void discardLeavesThePieceAndRegenerateMakesAnotherVersion() throws Exception {
         FakeChatModel model = trumpetPlayer();
         Composition before = session.composition();
