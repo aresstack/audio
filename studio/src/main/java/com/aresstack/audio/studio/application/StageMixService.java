@@ -1,6 +1,7 @@
 package com.aresstack.audio.studio.application;
 
 import com.aresstack.audio.music.arrangement.ArrangementFile;
+import com.aresstack.audio.studio.mix.MixLevel;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
 import com.aresstack.audio.studio.progress.Progress;
 import com.aresstack.audio.studio.stage.SoundSourcePlacement;
@@ -44,21 +45,32 @@ public final class StageMixService {
 
     public Path mix(Path arrangement, Path directory, SpatialScene scene, Progress progress)
             throws Exception {
-        return mix(arrangement, directory, scene, null, directory.resolve(MIX_FILE), 16, progress);
+        return mix(arrangement, directory, scene, null, directory.resolve(MIX_FILE), 16, null, progress);
     }
 
     /** One track alone, but as it stands on the stage: with its level, its place and the room. */
     public Path solo(Path arrangement, Path directory, SpatialScene scene, String trackId) throws Exception {
-        return mix(arrangement, directory, scene, trackId, directory.resolve(SOLO_FILE), 16, message -> { });
+        return mix(arrangement, directory, scene, trackId, directory.resolve(SOLO_FILE), 16, null, message -> { });
     }
 
     /** Writes the mix on the stage to a file of the user's choice, with 16 or 24 bits. */
     public Path export(Path arrangement, Path directory, SpatialScene scene, Path target, int bits) throws Exception {
-        return mix(arrangement, directory, scene, null, target, bits, message -> { });
+        return mix(arrangement, directory, scene, null, target, bits, null, message -> { });
+    }
+
+    /**
+     * Writes the mix on the stage to a file with this level strategy: in {@code FIXED} with the
+     * limiter and, if chosen, a peak or loudness normalization of the file. Without a strategy
+     * ({@code null}) the piece is mixed in the compatibility mode with the master level of its
+     * stage, as every piece is until the user switches it.
+     */
+    public Path export(Path arrangement, Path directory, SpatialScene scene, Path target, int bits, MixLevel level)
+            throws Exception {
+        return mix(arrangement, directory, scene, null, target, bits, level, message -> { });
     }
 
     private Path mix(Path arrangement, Path directory, SpatialScene scene, String only, Path target, int bits,
-                     Progress progress) throws Exception {
+                     MixLevel level, Progress progress) throws Exception {
         List<MusicTrack> tracks = tracks(arrangement);
         SpatialScene fitting = scene.fitting(tracks);
         Map<String, String> stems = stems(directory);
@@ -83,7 +95,8 @@ public final class StageMixService {
                 + (heard ? "" : " · alle Spuren sind stumm") + " ...");
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
-            mixer.mix(files, placements, fitting.room(), 4 * 60.0 / tempo(arrangement), fitting.masterDb(), fresh, bits);
+            MixLevel chosen = level != null ? level : MixLevel.legacy(fitting.masterDb());
+            mixer.mix(files, placements, fitting.room(), 4 * 60.0 / tempo(arrangement), chosen, fresh, bits);
             Files.move(fresh, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(fresh);
