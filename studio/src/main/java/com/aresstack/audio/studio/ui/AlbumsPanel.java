@@ -94,6 +94,11 @@ final class AlbumsPanel extends JPanel {
             return PieceAutopilot.GROW_BARS;
         }
 
+        /** The fewest and the most instruments the AI may choose for a title; {@code {0, 0}} leaves it to the AI. */
+        default int[] voices() {
+            return new int[]{0, 0};
+        }
+
         PieceAutopilot.Rendering rendering();
 
         /** Opens a piece in the editor of the single piece. */
@@ -880,6 +885,7 @@ final class AlbumsPanel extends JPanel {
             final int requests = Math.max(1, host.parallelRequests());
             final int sectionBars = host.sectionBars();
             final int growBars = host.growBars();
+            final int[] voices = host.voices();
             final int tokens = host.tokens();
             final PieceAutopilot.Rendering rendering = host.rendering();
             // Every model of the production goes through the same permits: the limit holds over all pieces.
@@ -892,7 +898,7 @@ final class AlbumsPanel extends JPanel {
                 first[0] = null;
                 return new AutopilotPieceProduction(new PieceAutopilot(registry,
                         models.through(model -> new LimitedChatModel(model, permits)), tokens, requests, rendering)
-                        .sectionBars(sectionBars).growBars(growBars),
+                        .sectionBars(sectionBars).growBars(growBars).voices(voices[0], voices[1]),
                         songs);
             }, PIECES_AT_ONCE);
         } catch (RuntimeException invalid) {

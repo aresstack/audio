@@ -47,6 +47,38 @@ public final class InstrumentProposalService {
             + "Put the bass and the drums near the middle, spread the others to both sides so that the "
             + "stage is balanced, and put what leads in front.";
 
+    /** The fewest and the most instruments the user allows; 0 as the most leaves it to the AI. */
+    public static final int MIN_VOICES = 1;
+    public static final int MAX_VOICES = 32;
+    private int fewest = 2;
+    private int most;
+
+    /**
+     * How many instruments the proposal may have (the fields "Stimmen" of the Komposition page).
+     * The same number twice asks for exactly that many. Without this the AI decides, at least 2.
+     */
+    public InstrumentProposalService voices(int fewest, int most) {
+        if (fewest < MIN_VOICES || most > MAX_VOICES || most < fewest) {
+            throw new IllegalArgumentException("Stimmen: mindestens " + MIN_VOICES + ", höchstens " + MAX_VOICES
+                    + ", und das Maximum nicht unter dem Minimum.");
+        }
+        this.fewest = fewest;
+        this.most = most;
+        return this;
+    }
+
+    private String howMany() {
+        if (most == 0) {
+            return "Create as many complementary tracks as this music needs, a small ensemble or a full "
+                    + "orchestra, at least 2. ";
+        }
+        if (fewest == most) {
+            return "Create exactly " + most + " complementary " + (most == 1 ? "track" : "tracks") + ", no more and no fewer. ";
+        }
+        return "Create between " + fewest + " and " + most + " complementary tracks, as many as this music needs "
+                + "within that range, never more than " + most + " and never fewer than " + fewest + ". ";
+    }
+
     public TrackArrangement propose(String description, Path directory,
                                     Progress progress) throws IOException {
         return proposeStaged(description, directory, progress).tracks();
@@ -61,8 +93,7 @@ public final class InstrumentProposalService {
                 + "id (lowercase ASCII a-z, digits, _ or -; start with letter; unique), "
                 + "role (one of melody, harmony, bass, drums, texture), "
                 + "instrument (short human-readable name), program (zero-based General MIDI 0..127). "
-                + "Create as many complementary tracks as this music needs, a small ensemble or a full "
-                + "orchestra, at least 2. "
+                + howMany()
                 + "Choose actual instruments and GM programs suitable for the mood; "
                 + "do not repeat the same orchestral role unnecessarily. "
                 + "Use the GM drum kit on channel 10 for drums, with program=0. "
@@ -91,6 +122,14 @@ public final class InstrumentProposalService {
                         item.get("role").getAsString(),
                         item.get("instrument").getAsString(),
                         item.get("program").getAsInt(), "builtin"));
+            }
+            if (most > 0 && tracks.size() > most) {
+                progress.update("Die KI schlug " + tracks.size() + " Stimmen vor, erlaubt sind höchstens " + most
+                        + ": die ersten " + most + " bleiben.");
+                tracks = new ArrayList<MusicTrack>(tracks.subList(0, most));
+            } else if (most > 0 && tracks.size() < fewest) {
+                progress.update("WARN: Die KI schlug nur " + tracks.size() + " Stimmen vor, gewünscht waren mindestens "
+                        + fewest + ".");
             }
             TrackArrangement proposal = new TrackArrangement(tracks);
             progress.update("KI-Vorschlag: " + tracks.size()

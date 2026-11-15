@@ -49,6 +49,57 @@ public final class InstrumentProposalServiceTest {
                 .tracks().get(2).id());
     }
 
+    /** Answers with six instruments and remembers what it was asked. */
+    private static final class SixInstruments implements com.aresstack.audio.studio.ai.ChatModel {
+        String asked;
+
+        @Override
+        public JsonObject generate(String instruction, String prompt, int maxTokens, Path cache) {
+            asked = prompt;
+            JsonObject proposal = new JsonObject();
+            JsonArray entries = new JsonArray();
+            String[] roles = {"melody", "harmony", "bass", "drums", "texture", "melody"};
+            for (int i = 0; i < roles.length; i++) {
+                entries.add(instrument("voice" + i, roles[i], "Voice " + i, "drums".equals(roles[i]) ? 0 : 40 + i));
+            }
+            proposal.add("tracks", entries);
+            return proposal;
+        }
+
+        @Override
+        public void cancel() {
+        }
+    }
+
+    @Test
+    public void theUserSaysHowManyInstrumentsTheAiMayChoose() throws Exception {
+        SixInstruments model = new SixInstruments();
+        java.util.List<String> said = new java.util.ArrayList<String>();
+
+        TrackArrangement free = new InstrumentProposalService(model, 4096)
+                .propose("Country", folder.newFolder("free").toPath(), said::add);
+        Assert.assertTrue("without a range the AI decides", model.asked.contains("as many complementary tracks as this music needs"));
+        Assert.assertEquals(6, free.tracks().size());
+
+        TrackArrangement ranged = new InstrumentProposalService(model, 4096).voices(3, 4)
+                .propose("Country", folder.newFolder("ranged").toPath(), said::add);
+        Assert.assertTrue(model.asked.contains("between 3 and 4 complementary tracks"));
+        Assert.assertEquals("more than allowed are cut to the most", 4, ranged.tracks().size());
+        Assert.assertEquals("voice0", ranged.tracks().get(0).id());
+        Assert.assertTrue(said.stream().anyMatch(line -> line.contains("höchstens 4")));
+
+        new InstrumentProposalService(model, 4096).voices(6, 6)
+                .propose("Country", folder.newFolder("exact").toPath(), said::add);
+        Assert.assertTrue("the same number twice is an exact number", model.asked.contains("exactly 6 complementary tracks"));
+
+        try {
+            new InstrumentProposalService(model, 4096).voices(5, 3);
+            Assert.fail("the most is not below the fewest");
+        } catch (IllegalArgumentException expected) {
+            // said
+        }
+    }
+
     private static JsonObject instrument(String id, String role, String name, int program) {
         JsonObject instrument = new JsonObject();
         instrument.addProperty("id", id);
