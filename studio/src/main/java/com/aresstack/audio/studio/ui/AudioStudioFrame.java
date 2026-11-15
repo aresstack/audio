@@ -243,7 +243,7 @@ public final class AudioStudioFrame extends JFrame {
     private final JLabel songFacts = new JLabel(" ");
     private final javax.swing.JRadioButton aiChooses = new javax.swing.JRadioButton("die KI wählt sie");
     private final javax.swing.JRadioButton ownTracks = new javax.swing.JRadioButton("meine Spuren aus dem Arrangement");
-    private final JButton composeButton = new JButton("Komponieren");
+    private final JButton composeButton = new DeckWidgets.HeadKey("Komponieren");
     private final DeckDisplays.Meter masterLeft = new DeckDisplays.Meter(false);
     private final DeckDisplays.Meter masterRight = new DeckDisplays.Meter(false);
     private final DeckWidgets.TransportKey playKey = new DeckWidgets.TransportKey(
@@ -761,7 +761,6 @@ public final class AudioStudioFrame extends JFrame {
         aiChooses.setToolTipText("Die KI schlägt zur Beschreibung passende Instrumente vor und komponiert dann für sie");
         ownTracks.setToolTipText("Für genau die Spuren im Arrangement komponieren; was schon komponiert ist, bleibt");
         composeButton.setToolTipText("Komponieren und gleich rendern");
-        composeButton.setFont(composeButton.getFont().deriveFont(java.awt.Font.BOLD, 15f));
         composeButton.addActionListener(event -> compose());
         getRootPane().setDefaultButton(composeButton);
 
@@ -802,7 +801,7 @@ public final class AudioStudioFrame extends JFrame {
         JPanel scoreHead = new JPanel(new BorderLayout());
         scoreHead.setOpaque(false);
         scoreHead.add(DeckWidgets.lettering("Partitur · was die Instrumente spielen"), BorderLayout.WEST);
-        JButton performance = new JButton("Vortrag: Tempo, Dynamik, Artikulation …");
+        JButton performance = new DeckWidgets.HeadKey("Vortrag: Tempo, Dynamik, Artikulation");
         performance.setToolTipText("Tempowechsel (auch accelerando, ritardando), Dynamikzeichen und Gabeln, "
                 + "Artikulationen und was die Stufen bedeuten");
         performance.addActionListener(event -> performance());
@@ -814,32 +813,27 @@ public final class AudioStudioFrame extends JFrame {
         written.add(wish, BorderLayout.NORTH);
         written.add(notes, BorderLayout.CENTER);
 
-        // One choice of two, shown as what it is: radio buttons behind the question they answer.
-        JPanel whoRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
-        whoRow.setOpaque(false);
+        // In the head of the module, beside its name as on the arrangement page: the key that
+        // composes, and the one choice of two it depends on, as radio buttons behind their question.
+        JPanel composing = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        composing.setOpaque(false);
+        composing.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 0));
+        composing.add(composeButton);
         JLabel whoAsks = new JLabel("Instrumente:");
         whoAsks.setForeground(AudioStudioTheme.TEXT_DIM);
-        whoRow.add(whoAsks);
+        composing.add(javax.swing.Box.createHorizontalStrut(6));
+        composing.add(whoAsks);
         aiChooses.setOpaque(false);
         ownTracks.setOpaque(false);
         aiChooses.addActionListener(event -> updateComposeKey());
         ownTracks.addActionListener(event -> updateComposeKey());
-        whoRow.add(aiChooses);
-        whoRow.add(ownTracks);
-        composeButton.setPreferredSize(new Dimension(310, 44));
-        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
-        bottom.setOpaque(false);
-        bottom.add(whoRow);
-        bottom.add(javax.swing.Box.createHorizontalStrut(14));
-        bottom.add(composeButton);
+        composing.add(aiChooses);
+        composing.add(ownTracks);
 
-        JPanel session = new JPanel(new BorderLayout(0, 16));
-        session.setOpaque(false);
-        session.add(written, BorderLayout.CENTER);
-        session.add(bottom, BorderLayout.SOUTH);
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
-        DeckWidgets.Module module = new DeckWidgets.Module("Komposition", session);
+        DeckWidgets.Module module = new DeckWidgets.Module("Komposition", written);
+        module.setHeadStart(composing);
         module.setHeadEnd(withPieceMenu(songFacts));
         page.add(module, BorderLayout.CENTER);
         return page;
@@ -911,8 +905,8 @@ public final class AudioStudioFrame extends JFrame {
         JPanel page = new JPanel(new BorderLayout(0, 10));
         page.setOpaque(false);
         page.add(stagePanel, BorderLayout.CENTER);
-        page.add(new DeckWidgets.Module("Hören · Lautsprecher oder Kopfhörer, Raum", listeningPanel),
-                BorderLayout.SOUTH);
+        // How the stage is heard stands in the head of the stage, not in a module of its own under it.
+        stagePanel.setListening(listeningPanel.keys(), listeningPanel);
         applyListening(false); // what the settings said, read from the disk in the background
         return page;
     }
@@ -1537,7 +1531,8 @@ public final class AudioStudioFrame extends JFrame {
         JScrollPane scroll = new JScrollPane(log);
         scroll.setBorder(BorderFactory.createLineBorder(new java.awt.Color(0x24352C), 1, true));
         DeckWidgets.Module module = new DeckWidgets.Module("Protokoll", scroll);
-        JButton clear = new JButton("Leeren");
+        JButton clear = new DeckWidgets.HeadKey("Leeren");
+        clear.setToolTipText("Das Protokoll leeren");
         clear.addActionListener(event -> log.setText(""));
         module.setHeadEnd(clear);
         JPanel page = new JPanel(new BorderLayout());
