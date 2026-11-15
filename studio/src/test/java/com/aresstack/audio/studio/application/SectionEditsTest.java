@@ -15,6 +15,13 @@ import com.aresstack.audio.composition.edit.ChangeSet;
 import com.aresstack.audio.composition.edit.CompositionEditor;
 import com.aresstack.audio.composition.edit.EditResult;
 import com.aresstack.audio.composition.edit.Selection;
+import com.aresstack.audio.composition.Dynamics;
+import com.aresstack.audio.composition.TimeMap;
+import com.aresstack.audio.composition.mix.AutomationLane;
+import com.aresstack.audio.composition.mix.LevelMode;
+import com.aresstack.audio.composition.mix.MixChannel;
+import com.aresstack.audio.composition.mix.MixScene;
+import com.aresstack.audio.composition.mix.Room;
 import com.aresstack.audio.studio.ai.FakeChatModel;
 import com.aresstack.audio.studio.ai.RegionComposer;
 import com.aresstack.audio.studio.ai.RegionRequest;
@@ -204,5 +211,80 @@ public final class SectionEditsTest {
         session.undo();
         assertEquals(List.of("Strophe 1-4", "Lücke 5-8", "Ausklang 9-12"), names(session.composition()));
         assertEquals(0, notesBetween(session.composition(), 4 * BAR, 8 * BAR));
+    }
+
+    private static Composition withTimeAndDynamics(Composition piece, TimeMap time, Dynamics dynamics) {
+        return new Composition(piece.meta(), time, piece.sections(), piece.parts(), piece.tracks(), piece.assets(),
+                dynamics);
+    }
+
+    @Test
+    public void tempoKeyAndDynamicsTravelWithADraggedSection() {
+        // the outro is slower (80) and soft (p); the piece around it is 96 and mf
+        TimeMap time = new TimeMap(List.of(new TimeMap.Tempo(0, 96), new TimeMap.Tempo(8 * BAR, 80)),
+                TimeMap.of(96).meters(), TimeMap.of(96).keys());
+        Dynamics dynamics = new Dynamics(List.of(new Dynamics.Mark(0, Dynamics.Level.MF, null),
+                new Dynamics.Mark(8 * BAR, Dynamics.Level.P, null)), List.of(), Dynamics.Scale.STANDARD);
+        Composition piece = withTimeAndDynamics(RegionReworkTest.flutePiece(), time, dynamics);
+        Composition gap = applied(piece, SectionEdits.insertEmpty(piece, 4, 2, counting()));
+        // the chorus now lies in bars 7-10, the outro in 11-14 at 80; drag the outro into the gap (bars 5-6 are too few)
+        assertNotNull(SectionEdits.moveSection(gap, "outro", 4, counting()).refusal());
+
+        Composition later = applied(piece, SectionEdits.moveSection(piece, "outro", 14, counting()));
+        assertEquals("the outro keeps its tempo", 80, later.timeMap().tempoAt(14 * BAR), 1e-9);
+        assertEquals("the gap it left goes on at the tempo before", 96, later.timeMap().tempoAt(9 * BAR), 1e-9);
+        assertEquals(Dynamics.Level.P, levelAt(later.dynamics(), 15 * BAR));
+        assertEquals(Dynamics.Level.MF, levelAt(later.dynamics(), 9 * BAR));
+
+        Composition closed = applied(piece, SectionEdits.deleteSection(piece, "chorus", true, counting()));
+        assertEquals("the outro moved forward with its tempo", 80, closed.timeMap().tempoAt(4 * BAR), 1e-9);
+        assertEquals(96, closed.timeMap().tempoAt(3 * BAR), 1e-9);
+        assertEquals(Dynamics.Level.P, levelAt(closed.dynamics(), 4 * BAR));
+    }
+
+    private static Dynamics.Level levelAt(Dynamics dynamics, long tick) {
+        Dynamics.Level level = null;
+        for (Dynamics.Mark mark : dynamics.marks()) {
+            if (mark.tick() <= tick) {
+                level = mark.level();
+            }
+        }
+        return level;
+    }
+
+    @Test
+    public void theAutomationCurvesOfTheMixFollowTheMusic() {
+        MixScene mix = new MixScene(new Room("hall", 2, 0.4), 0, LevelMode.LEGACY_PEAK,
+                List.of(new MixChannel("c1", MixChannel.Owner.part("flute"), 0, 0.2, 0, 1, 0.3, false, false)),
+                List.of(new AutomationLane("l1", "c1", AutomationLane.X, List.of(new AutomationLane.Point(0, 0),
+                        new AutomationLane.Point(4 * BAR, 0), new AutomationLane.Point(8 * BAR, 1),
+                        new AutomationLane.Point(12 * BAR, -1)))));
+        // the chorus (bars 5-8) is taken out: the outro's sweep from 1 to -1 now runs in bars 5-8
+        AutomationLane closed = SectionEdits.closedMix(mix, 4 * BAR, 8 * BAR).automation().get(0);
+        assertEquals(0, closed.valueAt(2 * BAR), 1e-9);
+        assertEquals("the bars before end as they were", 0, closed.valueAt(4 * BAR), 1e-9);
+        assertEquals("then the curve goes on as it went after the chorus", 1, closed.valueAt(4 * BAR + 1), 1e-3);
+        assertEquals(-1, closed.valueAt(8 * BAR), 1e-9);
+
+        // the outro (bars 9-12) goes to bars 15-18: it sweeps there as it did, and bars 13-14 hold what was there
+        AutomationLane moved = SectionEdits.movedMix(mix, 8 * BAR, 12 * BAR, 14 * BAR).automation().get(0);
+        assertEquals(1, moved.valueAt(14 * BAR), 1e-9);
+        assertEquals(0, moved.valueAt(16 * BAR), 1e-3);
+        assertEquals("the chorus still rises as before", 0.5, moved.valueAt(6 * BAR), 1e-9);
+    }
+
+    @Test
+    public void undoTakesTheMixBackWithTheMusic() throws Exception {
+        Path folder = temporary.newFolder("mixed").toPath();
+        CompositionJson.save(folder, RegionReworkTest.flutePiece());
+        ProjectSession session = ProjectSession.open(folder).orElseThrow();
+        MixScene before = session.mix();
+        SectionEdits.SectionEdit edit = SectionEdits.deleteSection(session.composition(), "chorus", true, counting());
+        assertNotNull("closing a gap moves the curves", edit.mix());
+        session.apply(edit.patch(), edit.scope(), edit.mix());
+        assertEquals(List.of("Strophe 1-4", "Ausklang 5-8"), names(session.composition()));
+        session.undo();
+        assertEquals(List.of("Strophe 1-4", "Refrain 5-8", "Ausklang 9-12"), names(session.composition()));
+        assertEquals(before, session.mix());
     }
 }
