@@ -1,0 +1,11 @@
+plugins {
+    id 'java-library'
+}
+
+// The audio core: block-based mixing and processing in float, for Audio Studio, AskAI and 3d4j.
+// It depends on nothing but the JDK, uses no preview features and knows no application. Only the
+// package com.aresstack.audio.core.wav touches javax.sound (reading WAV files); everything else is
+// plain java.base, so that a game can attach its own output.
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}

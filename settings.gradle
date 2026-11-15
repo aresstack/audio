@@ -1,2 +1,2 @@
 rootProject.name = 'audio'
-include 'music', 'sounds', 'instruments', 'studio'
+include 'audio-core', 'music', 'sounds', 'instruments', 'studio'
