@@ -119,8 +119,9 @@ public record ContinuationPlan(List<PlannedSection> sections, List<NewPart> newP
 
     /**
      * The plan without a planning answer: sections of eight bars with names, functions and an
-     * intensity curve after the preset, the chords of the original again bar by bar, every part
-     * playing everywhere, no new instrument. Deterministic: the same task gives the same plan.
+     * intensity curve after the preset (or the curve of the request), the chords of the original
+     * again bar by bar, in each section the parts its intensity calls for ({@link Dramaturgy#ensemble}),
+     * no new instrument. Deterministic: the same task gives the same plan.
      */
     public static ContinuationPlan fallback(ContinuationTask task, Composition piece) {
         return fallback(task, piece, List.of("Kein Plan der KI; Plan nach der Vorgabe " + task.request().preset().label()
@@ -137,8 +138,8 @@ public record ContinuationPlan(List<PlannedSection> sections, List<NewPart> newP
             sizes.add(size);
             left -= size;
         }
-        List<String> parts = task.parts().stream().map(Part::id).toList();
         List<String> harmony = originalHarmony(piece);
+        List<Double> curve = request.curve() == null ? null : request.curve().forSections(sizes);
         Key key = task.time().keyAt(task.newStart());
         List<PlannedSection> sections = new ArrayList<>();
         int count = sizes.size();
@@ -151,8 +152,10 @@ public record ContinuationPlan(List<PlannedSection> sections, List<NewPart> newP
                     chords.add(harmony.get((bar + b) % harmony.size()));
                 }
             }
-            sections.add(new PlannedSection("s" + (i + 1), named[0], named[1], sizes.get(i),
-                    intensity(request, i, count), chords, named[2], parts));
+            double level = curve == null ? intensity(request, i, count) : curve.get(i);
+            List<String> parts = Dramaturgy.ensemble(level, task.parts(), Part::role).stream().map(Part::id).toList();
+            sections.add(new PlannedSection("s" + (i + 1), named[0], named[1], sizes.get(i), level, chords, named[2],
+                    parts));
             bar += sizes.get(i);
         }
         sections = closing(sections, request.ending(), key, new ArrayList<>());
@@ -247,6 +250,7 @@ public record ContinuationPlan(List<PlannedSection> sections, List<NewPart> newP
                 repairs.add("Neues Instrument " + part.name() + " spielt in keinem Abschnitt und entfällt.");
             }
         }
+        sections = following(sections, task.request().curve(), repairs);
         sections = closing(sections, task.request().ending(), task.time().keyAt(task.newStart()), repairs);
         return new ContinuationPlan(sections, used, motifs, arc, repairs);
     }
@@ -315,6 +319,30 @@ public record ContinuationPlan(List<PlannedSection> sections, List<NewPart> newP
             from += length;
         }
         return pieces;
+    }
+
+    /**
+     * With an intensity curve of the user, every section takes the intensity of the curve at its
+     * middle; a planned intensity that differs is replaced and recorded.
+     */
+    private static List<PlannedSection> following(List<PlannedSection> sections, IntensityCurve curve,
+                                                  List<String> repairs) {
+        if (curve == null) {
+            return sections;
+        }
+        List<Double> levels = curve.forSections(sections.stream().map(PlannedSection::bars).toList());
+        List<PlannedSection> changed = new ArrayList<>();
+        for (int i = 0; i < sections.size(); i++) {
+            PlannedSection s = sections.get(i);
+            double level = levels.get(i);
+            if (Double.compare(level, s.intensity()) != 0) {
+                repairs.add("Abschnitt " + s.name() + ": Intensität " + String.format(Locale.ROOT, "%.2f", s.intensity())
+                        + " nach der vorgegebenen Kurve auf " + String.format(Locale.ROOT, "%.2f", level) + " gesetzt.");
+            }
+            changed.add(new PlannedSection(s.key(), s.name(), s.function(), s.bars(), level, s.chords(), s.idea(),
+                    s.parts()));
+        }
+        return changed;
     }
 
     /** A closed ending ends on the tonic: a last chord that is not is set to it, and recorded. */
