@@ -585,7 +585,10 @@ public final class PieceExtensionTest {
                     }
                 };
         Composition before = session.composition();
-        List<String> original = com.aresstack.audio.studio.project.TsvExport.lines(before);
+        // the notes of the piece as the picture says them: without the voice a file may name
+        List<String> original = com.aresstack.audio.studio.project.TsvExport.lines(before).stream()
+                .map(line -> line.startsWith("note\t")
+                        ? String.join("\t", java.util.Arrays.copyOf(line.split("\t"), 6)) : line).toList();
         ContinuationRequest request = ContinuationRequest.of(16, ContinuationPreset.STANDALONE, ContinuationEnding.CLOSED);
 
         PieceExtension.start(session, composerWith(composer()), request, Ids.seeded(3), watcher);
