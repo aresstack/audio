@@ -46,14 +46,22 @@ public final class LineSinkTest {
 
     @Test
     public void aLineThatRunsEmptyWhilePlayingIsCounted() {
-        int[] waiting = {BUFFER / 2};
+        int[] waiting = {0};
         LineSink sink = new LineSink(line(waiting, new byte[1][]), 512);
         AudioBlock block = new AudioBlock(512);
         sink.write(block); // not started: nothing counted
         sink.start();
-        for (int i = 0; i < 5; i++) {
+        // right after the start the line is empty and fills: neither a drop-out nor a margin
+        for (int fill = 0; fill < 4; fill++) {
+            waiting[0] = fill * 512 * 4;
             sink.write(block);
         }
+        Assert.assertEquals(0, sink.underruns());
+        Assert.assertEquals(-1, sink.lowestBufferedFrames());
+        waiting[0] = BUFFER - 512 * 4; // full: from now on the fill is the margin
+        sink.write(block);
+        waiting[0] = BUFFER / 2;
+        sink.write(block);
         Assert.assertEquals(0, sink.underruns());
         Assert.assertEquals(BUFFER / 2 / 4, sink.lowestBufferedFrames());
         waiting[0] = 0; // the card has played everything: a drop-out

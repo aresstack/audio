@@ -31,7 +31,7 @@ public final class LineSink implements LiveSink {
     private final int frameSize;
     // written and read only by the audio thread, published for other threads
     private boolean started;
-    private int writesSinceStart;
+    private boolean filled;
     private volatile long underruns;
     private volatile int lowestBuffered = -1;
 
@@ -93,8 +93,12 @@ public final class LineSink implements LiveSink {
         }
         if (started) {
             int waiting = bufferedFrames();
-            // the first writes after a start fill the line; after them an empty line is a drop-out
-            if (++writesSinceStart > 2) {
+            // After a start the line is empty and fills block by block; only once it has been full
+            // (all but two blocks) does an empty line mean a drop-out and its fill a margin.
+            if (!filled && waiting >= line.getBufferSize() / frameSize - 2 * (bytes.length / frameSize)) {
+                filled = true;
+            }
+            if (filled) {
                 if (waiting == 0) {
                     underruns = underruns + 1;
                 }
@@ -120,7 +124,7 @@ public final class LineSink implements LiveSink {
     public void start() {
         line.start();
         started = true;
-        writesSinceStart = 0;
+        filled = false;
     }
 
     @Override
