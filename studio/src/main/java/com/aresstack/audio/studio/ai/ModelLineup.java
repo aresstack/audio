@@ -61,6 +61,11 @@ public final class ModelLineup {
         return mark < 0 ? null : name.substring(mark + 1);
     }
 
+    /** The chat model of this name ("model" or "model#effort"), made by the factory once. */
+    public ChatModel modelNamed(String name) {
+        return named(name);
+    }
+
     private ChatModel named(String name) {
         ChatModel model;
         boolean late;

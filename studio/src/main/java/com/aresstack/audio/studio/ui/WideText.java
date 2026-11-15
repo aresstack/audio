@@ -38,6 +38,14 @@ final class WideText extends JPanel {
     private final JTextArea area;
     private final JButton toggle = new DeckWidgets.HeadKey("Groß");
     private boolean open;
+    private final JPanel east = new JPanel(new BorderLayout());
+    private final JPanel keys = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 2, 0));
+
+    /** Puts a key beside "Groß", e.g. the AI help of this field. */
+    void aside(JButton key) {
+        keys.add(key);
+        revalidate();
+    }
 
     WideText(JTextField field, Component line) {
         super(new BorderLayout(6, 0));
@@ -49,9 +57,10 @@ final class WideText extends JPanel {
         shown.add(line, "line");
         shown.add(new JScrollPane(area), "box");
         add(shown, BorderLayout.CENTER);
-        JPanel east = new JPanel(new BorderLayout());
         east.setOpaque(false);
-        east.add(toggle, BorderLayout.NORTH);
+        keys.setOpaque(false);
+        keys.add(toggle);
+        east.add(keys, BorderLayout.NORTH);
         add(east, BorderLayout.EAST);
         toggle.setToolTipText("Öffnet das Feld als große Textbox für einen langen Text");
         toggle.addActionListener(event -> open(!open));

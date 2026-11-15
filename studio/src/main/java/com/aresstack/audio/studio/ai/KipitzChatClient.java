@@ -22,7 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Isolate the authenticated OpenAI-compatible KIPITZ protocol from music composition. */
-public final class KipitzChatClient implements ChatModel {
+public final class KipitzChatClient implements ChatModel, ToolChat {
     private final Gson gson = new Gson();
     private final String endpoint;
     private final String apiKey;
@@ -766,6 +766,72 @@ public final class KipitzChatClient implements ChatModel {
         } catch (RuntimeException invalid) {
             throw new IOException("Could not read the model list.", invalid);
         } finally {
+            activeConnections.remove(connection);
+            connection.disconnect();
+        }
+    }
+
+    /**
+     * One turn of a conversation with tools, not streamed: the model answers with text or with
+     * calls of tools, which the caller runs and gives back in the next turn.
+     */
+    @Override
+    public JsonObject converse(JsonArray messages, JsonArray tools, int maxTokens) throws IOException {
+        JsonObject request = new JsonObject();
+        request.addProperty("model", model);
+        request.addProperty("max_tokens", maxTokens);
+        request.addProperty("stream", false);
+        request.addProperty("user", "audio-swing-studio");
+        if (reasoningEffort != null) {
+            request.addProperty("reasoning_effort", reasoningEffort);
+        }
+        request.add("messages", messages);
+        if (tools != null && tools.size() > 0) {
+            request.add("tools", tools);
+            request.addProperty("tool_choice", "auto");
+        }
+        HttpURLConnection connection = openConnection();
+        activeConnections.add(connection);
+        busy(1);
+        try {
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(30000);
+            connection.setReadTimeout((int) Math.min(Integer.MAX_VALUE, firstByteMillis + silenceMillis));
+            connection.setDoOutput(true);
+            if (apiKey != null && !apiKey.trim().isEmpty()) {
+                connection.setRequestProperty("Authorization", "Bearer " + apiKey);
+            }
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            connection.setRequestProperty("Accept", "application/json");
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(gson.toJson(request).getBytes(StandardCharsets.UTF_8));
+            }
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                String said = "";
+                InputStream error = connection.getErrorStream();
+                if (error != null) {
+                    try (InputStream input = error) {
+                        said = readText(input, 4000);
+                    } catch (IOException unread) {
+                        // the status says enough
+                    }
+                }
+                throw new IOException("Die KI antwortete mit HTTP " + status + (said.isBlank() ? "" : ": "
+                        + said.strip()));
+            }
+            try (InputStream input = connection.getInputStream()) {
+                JsonObject answer = new JsonParser().parse(readText(input, 20_000_000)).getAsJsonObject();
+                JsonArray choices = answer.getAsJsonArray("choices");
+                if (choices == null || choices.size() == 0) {
+                    throw new IOException("Die Antwort der KI enthält keine Nachricht.");
+                }
+                return choices.get(0).getAsJsonObject().getAsJsonObject("message");
+            }
+        } catch (RuntimeException unreadable) {
+            throw new IOException("Die Antwort der KI ließ sich nicht lesen: " + unreadable.getMessage(), unreadable);
+        } finally {
+            busy(-1);
             activeConnections.remove(connection);
             connection.disconnect();
         }

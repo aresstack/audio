@@ -976,7 +976,16 @@ public final class AudioStudioFrame extends JFrame {
         description.setFont(description.getFont().deriveFont(15f));
         JPanel wish = new JPanel(new BorderLayout(0, 6));
         wish.setOpaque(false);
-        wish.add(DeckWidgets.lettering("Was für Musik soll es sein? Das bekommt die KI gesagt."), BorderLayout.NORTH);
+        JPanel wishHead = new JPanel(new BorderLayout());
+        wishHead.setOpaque(false);
+        wishHead.add(DeckWidgets.lettering("Was für Musik soll es sein? Das bekommt die KI gesagt."), BorderLayout.WEST);
+        wishHead.add(assistant().key("KI-Hilfe für die Beschreibung des Stücks", () -> Assistant.textField(
+                "Was für Musik soll es sein?", "piece-" + pieceKey(), description,
+                "the description of a piece of music for the AI that composes it: what it is about, mood, style, "
+                        + "players, form, how it develops. It may be long.",
+                () -> "Stück: " + pieceKey() + "\n" + songFacts.getText() + "\nLänge, Tempo, Tonart, Takt: "
+                        + specSaid(), null)), BorderLayout.EAST);
+        wish.add(wishHead, BorderLayout.NORTH);
         wish.add(prompt, BorderLayout.CENTER);
         wish.add(specFields, BorderLayout.SOUTH);
         prompt.setPreferredSize(new Dimension(300, 92));
@@ -1713,6 +1722,77 @@ public final class AudioStudioFrame extends JFrame {
         return true;
     }
 
+    /** The AI help of the fields, made once. */
+    private Assistant assistantOfFields;
+
+    private Assistant assistant() {
+        if (assistantOfFields == null) {
+            assistantOfFields = new Assistant(new Assistant.Connection() {
+                @Override
+                public com.aresstack.audio.studio.ai.ToolChat connect(String chosen) {
+                    String name = chosen == null || chosen.isBlank() ? currentAssignment().base() : chosen.trim();
+                    com.aresstack.audio.studio.ai.ChatModel made = startModels().modelNamed(name);
+                    if (made instanceof com.aresstack.audio.studio.ai.ToolChat tools) {
+                        return tools;
+                    }
+                    throw new IllegalArgumentException("Dieses Modell kann keine Werkzeuge aufrufen.");
+                }
+
+                @Override
+                public List<String> models() {
+                    List<String> known = modelChoices.knownModels();
+                    if (!known.isEmpty()) {
+                        return known;
+                    }
+                    java.util.LinkedHashSet<String> chosen = new java.util.LinkedHashSet<String>();
+                    com.aresstack.audio.studio.ai.ModelAssignment assignment = currentAssignment();
+                    chosen.add(assignment.base());
+                    for (com.aresstack.audio.studio.ai.ModelRole role : com.aresstack.audio.studio.ai.ModelRoles.all()) {
+                        chosen.add(assignment.modelFor(role));
+                    }
+                    return new ArrayList<String>(chosen);
+                }
+
+                @Override
+                public String defaultModel() {
+                    return currentAssignment().modelFor(com.aresstack.audio.studio.album.AlbumRoles.ALBUM);
+                }
+
+                @Override
+                public int maxTokens() {
+                    return (Integer) tokenLimit.getValue();
+                }
+
+                @Override
+                public Path folder() {
+                    return settingsStore.location().toAbsolutePath().getParent().resolve("assist");
+                }
+
+                @Override
+                public void log(String line) {
+                    append(line);
+                }
+            });
+        }
+        return assistantOfFields;
+    }
+
+    /** What the fields of length, tempo, key and meter say, or why they say nothing. */
+    private String specSaid() {
+        try {
+            return String.valueOf(specFields.spec());
+        } catch (IllegalArgumentException unclear) {
+            return unclear.getMessage();
+        }
+    }
+
+    /** The name of the open piece's folder, for the conversation of its description. */
+    private String pieceKey() {
+        String folder = directory.getText().trim();
+        Path name = folder.isEmpty() ? null : Paths.get(folder).getFileName();
+        return name == null ? "neu" : name.toString();
+    }
+
     /** The page of the albums: several pieces planned and made together, beside the single piece. */
     private JPanel albumsPage() {
         AlbumsPanel albums = new AlbumsPanel(new AlbumsPanel.Host() {
@@ -1739,6 +1819,11 @@ public final class AudioStudioFrame extends JFrame {
             @Override
             public com.aresstack.audio.studio.ai.ModelLineup models() {
                 return startModels(albumAssignment(albumShown)); // the models of the album shown
+            }
+
+            @Override
+            public Assistant assistant() {
+                return AudioStudioFrame.this.assistant();
             }
 
             @Override
