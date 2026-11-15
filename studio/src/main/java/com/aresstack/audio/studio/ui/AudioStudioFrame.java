@@ -1588,8 +1588,9 @@ public final class AudioStudioFrame extends JFrame {
         albums.setBesideConcept(albumModelChoices);
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
-        page.add(new DeckWidgets.Module("Alben · mehrere Stücke in einem Zug", albums),
-                BorderLayout.CENTER);
+        DeckWidgets.Module module = new DeckWidgets.Module("Album", albums);
+        module.setHeadStart(albums.headKeys());
+        page.add(module, BorderLayout.CENTER);
         return page;
     }
 

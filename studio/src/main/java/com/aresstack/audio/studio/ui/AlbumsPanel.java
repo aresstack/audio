@@ -151,16 +151,16 @@ final class AlbumsPanel extends JPanel {
     private final JLabel status = new JLabel(" ");
     private final JButton create = new JButton("Neues Album");
     private final JButton delete = new JButton("Löschen");
-    private final JButton plan = new JButton("Trackliste planen (KI)");
-    private final JButton add = new JButton("Titel hinzufügen");
-    private final JButton remove = new JButton("Titel entfernen");
-    private final JButton up = new JButton("▲");
-    private final JButton down = new JButton("▼");
-    private final JButton produce = new JButton("Album produzieren");
-    private final JButton cancel = new JButton("Abbrechen");
-    private final JButton again = new JButton("Titel neu produzieren");
-    private final JButton open = new JButton("Im Editor öffnen");
-    private final JButton export = new JButton("Exportieren …");
+    private final JButton plan = new DeckWidgets.HeadKey("Trackliste planen");
+    private final JButton add = new DeckWidgets.HeadKey("+ Titel");
+    private final JButton remove = new DeckWidgets.HeadKey("− Titel");
+    private final JButton up = new DeckWidgets.HeadKey("▲");
+    private final JButton down = new DeckWidgets.HeadKey("▼");
+    private final JButton produce = new DeckWidgets.HeadKey("Album produzieren");
+    private final JButton cancel = new DeckWidgets.HeadKey("Abbrechen");
+    private final JButton again = new DeckWidgets.HeadKey("Titel neu");
+    private final JButton open = new DeckWidgets.HeadKey("Öffnen");
+    private final JButton export = new DeckWidgets.HeadKey("Exportieren");
 
     private Album album;
     private AlbumProductionState state = AlbumProductionState.EMPTY;
@@ -296,10 +296,7 @@ final class AlbumsPanel extends JPanel {
         concept.add(minutes, c);
         c.gridx = 4;
         c.weightx = 1;
-        JPanel planRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
-        planRow.setOpaque(false);
-        planRow.add(plan);
-        concept.add(planRow, c);
+        concept.add(javax.swing.Box.createHorizontalGlue(), c);
 
         table.setRowHeight(28);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -326,25 +323,26 @@ final class AlbumsPanel extends JPanel {
         JScrollPane tableScroll = new JScrollPane(table);
         tableScroll.setBorder(BorderFactory.createLineBorder(AudioStudioTheme.STROKE, 1, true));
 
-        JPanel listEdit = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-        listEdit.setOpaque(false);
-        for (JButton key : new JButton[]{add, remove, up, down, open, again}) {
-            listEdit.add(key);
+        // The keys of the album stand in the head of its module, beside the name, as on the other
+        // pages: first what the AI does with the whole album, then the keys of the chosen title.
+        headKeys.setOpaque(false);
+        headKeys.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 0));
+        hint(plan, "Die KI plant aus dem Konzept die Trackliste des Albums");
+        hint(add, "Einen Titel ans Ende der Trackliste anfügen");
+        hint(remove, "Den gewählten Titel aus der Trackliste nehmen");
+        hint(up, "Den gewählten Titel nach oben schieben");
+        hint(down, "Den gewählten Titel nach unten schieben");
+        hint(open, "Den gewählten Titel im Editor öffnen");
+        hint(again, "Den gewählten Titel neu produzieren");
+        hint(export, "Das Album in einen Ordner exportieren");
+        hint(cancel, "Die laufende Produktion abbrechen");
+        for (java.awt.Component key : new java.awt.Component[]{plan, produce, cancel, export,
+                javax.swing.Box.createHorizontalStrut(10), add, remove, up, down, open, again}) {
+            headKeys.add(key);
         }
-        JPanel making = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
-        making.setOpaque(false);
-        making.add(export);
-        making.add(cancel);
-        making.add(produce);
-        produce.setPreferredSize(new Dimension(200, 40));
-        JPanel keys = new JPanel(new BorderLayout());
-        keys.setOpaque(false);
-        keys.add(listEdit, BorderLayout.WEST);
-        keys.add(making, BorderLayout.EAST);
         status.setForeground(AudioStudioTheme.TEXT_DIM);
         JPanel bottom = new JPanel(new BorderLayout(0, 8));
         bottom.setOpaque(false);
-        bottom.add(keys, BorderLayout.NORTH);
         bottom.add(status, BorderLayout.SOUTH);
 
         JPanel right = new JPanel(new BorderLayout(0, 12));
@@ -713,6 +711,20 @@ final class AlbumsPanel extends JPanel {
             showing = false;
         }
         host.albumChanged();
+    }
+
+    private final JPanel headKeys = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+
+    /** Gives a key its hint unless it has one already. */
+    private static void hint(JButton key, String text) {
+        if (key.getToolTipText() == null) {
+            key.setToolTipText(text);
+        }
+    }
+
+    /** The keys of the album, to stand in the head of its module beside the name. */
+    JPanel headKeys() {
+        return headKeys;
     }
 
     /** The window chooses the albums in a tree of its own: the list of the page is not shown. */
