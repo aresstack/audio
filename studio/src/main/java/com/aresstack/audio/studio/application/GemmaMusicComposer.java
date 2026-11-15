@@ -231,7 +231,7 @@ public final class GemmaMusicComposer {
         }
         // A piece made again keeps its plan: the answer kept with it is used, the AI is not asked.
         progress.update(planner.hasAnswer("Return valid JSON only, no Markdown.", prompt,
-                Math.min(spec.isLegacy() ? 2048 : 4096, maxTokens), directory.resolve("composition-plan.json"))
+                (spec.isLegacy() ? Math.min(2048, maxTokens) : maxTokens), directory.resolve("composition-plan.json"))
                 ? "Composition plan (aus dem Speicher dieses Stücks) ..." : "Composition plan ...");
         final SketchProgress watched = progress instanceof SketchProgress ? (SketchProgress) progress : null;
         final String step = "Die KI plant Struktur und Harmonien";
@@ -241,7 +241,7 @@ public final class GemmaMusicComposer {
             showForm(watched, spec, null, false, chordsShown);
         }
         JsonObject plan = planner.generate("Return valid JSON only, no Markdown.", prompt,
-                Math.min(spec.isLegacy() ? 2048 : 4096, maxTokens), directory.resolve("composition-plan.json"),
+                (spec.isLegacy() ? Math.min(2048, maxTokens) : maxTokens), directory.resolve("composition-plan.json"),
                 watched == null ? null : text -> {
                     watched.preparing(step, text.length());
                     showForm(watched, spec, com.aresstack.audio.studio.ai.PartialJson.read(text), false, chordsShown);

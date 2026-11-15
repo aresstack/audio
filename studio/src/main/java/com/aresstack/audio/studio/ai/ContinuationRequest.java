@@ -31,7 +31,7 @@ import java.util.List;
 public record ContinuationRequest(int bars, ContinuationPreset preset, String instruction,
                                   ContinuationEnding ending, TransitionMode transition, int tailBars,
                                   List<String> partIds, int newParts, int insertBeforeBar, IntensityCurve curve) {
-    public static final int MAX_BARS = 256;
+    public static final int MAX_BARS = 512;
     public static final int MAX_TAIL_BARS = 8;
     public static final int MAX_NEW_PARTS = 4;
     /** Bars of the original rewritten in the transition mode if the user names no number. */

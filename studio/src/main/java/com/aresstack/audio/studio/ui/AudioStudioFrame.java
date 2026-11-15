@@ -101,7 +101,7 @@ public final class AudioStudioFrame extends JFrame {
     private final JPasswordField apiKey = new JPasswordField(38);
     private final JTextField model = new JTextField("google/gemma-4-31B-it", 23);
     private final JSpinner tokenLimit = new JSpinner(
-            new SpinnerNumberModel(16384, 256, Integer.MAX_VALUE, 256));
+            new SpinnerNumberModel(AiDefaults.MAX_TOKENS, 256, Integer.MAX_VALUE, 256));
     private final JSpinner sectionBars = new JSpinner(new SpinnerNumberModel(8, 2, 64, 1));
     /** How many bars a long piece begins with and grows by per step of the continuation. */
     private final JSpinner growBars = new JSpinner(new SpinnerNumberModel(PieceAutopilot.GROW_BARS,
@@ -1758,7 +1758,7 @@ public final class AudioStudioFrame extends JFrame {
         tokenLimit.setPreferredSize(new Dimension(110, 30));
         parallelRequests.setPreferredSize(new Dimension(110, 30));
         addRow(ai, row++, "Antwortlänge",
-                line(tokenLimit, note("Tokens je Antwort; der Kompositionsplan nutzt höchstens 2.048.")));
+                line(tokenLimit, note("Tokens je Antwort, höchstens; auch der Plan eines langen Stücks bekommt so viel Platz.")));
         sectionBars.setPreferredSize(new Dimension(110, 30));
         sectionBars.setToolTipText("So viele Takte schreibt die KI je Anfrage und Spur, 2 bis 64");
         addRow(ai, row++, "Takte je Abschnitt",
@@ -4226,7 +4226,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("maxTokens", tokenLimit.getValue().toString());
             saved.setProperty("sectionBars", sectionBars.getValue().toString());
             saved.setProperty("detailedLog", Boolean.toString(detailedLog.isSelected()));
-            saved.setProperty("pieceBars", growBars.getValue().toString());
+            saved.setProperty("portionBars", growBars.getValue().toString());
             saved.setProperty("longerAnswers", Integer.toString(longerAnswers));
             saved.remove("albumPiecesAtOnce"); // no more: the parallel requests alone set how much runs at once
             saved.setProperty("longerAnswerFactor", Integer.toString(longerAnswerFactor));

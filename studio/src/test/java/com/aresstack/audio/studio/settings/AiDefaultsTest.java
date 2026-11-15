@@ -50,7 +50,7 @@ public final class AiDefaultsTest {
         own.setProperty("maxTokens", "12");
         Assert.assertEquals(256, AiDefaults.maxTokens(own));
         own.setProperty("maxTokens", "viele");
-        Assert.assertEquals(16384, AiDefaults.maxTokens(own));
+        Assert.assertEquals(AiDefaults.MAX_TOKENS, AiDefaults.maxTokens(own));
     }
 
     @Test
