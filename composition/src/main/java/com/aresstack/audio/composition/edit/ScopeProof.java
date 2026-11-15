@@ -105,7 +105,8 @@ public final class ScopeProof {
             }
             for (Clip clip : track.clips()) {
                 if (!reach.clipInScope(track, clip)) {
-                    entries.put("clip:" + clip.id(), "track=" + track.id() + " " + frame(clip));
+                    entries.put("clip:" + clip.id(), "track=" + track.id() + " "
+                            + (reach.endInScope(track, clip) ? frameUpTo((MidiClip) clip, scope.editFrom()) : frame(clip)));
                 }
                 if (clip instanceof MidiClip midi) {
                     String part = track.partOf(midi);
@@ -124,6 +125,11 @@ public final class ScopeProof {
             entries.put("asset:" + asset.id(), asset.toString());
         }
         return entries;
+    }
+
+    /** The frame of a MIDI clip whose end lies in the scope: where it ends only as "from here on". */
+    private static String frameUpTo(MidiClip clip, long editFrom) {
+        return "midi start=" + clip.startTick() + " end>=" + editFrom + " part=" + clip.partId();
     }
 
     private static String frame(Clip clip) {
