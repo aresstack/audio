@@ -117,7 +117,11 @@ public final class ArrangementReadingCharacterizationTest {
         refuses("Invalid input line: chord\ta\tC", "tempo\t108", track, "chord\ta\tC", note);
         refuses("Invalid input line: track\ta\t0", "tempo\t108", "track\ta\t0", note);
         refuses("Invalid input line: note\ta\t0\t480\t60", "tempo\t108", track, "note\ta\t0\t480\t60");
-        refuses("Invalid input line: note\ta\t0\t480\t60\t90\t1", "tempo\t108", track, "note\ta\t0\t480\t60\t90\t1");
+        // S1: a seventh column names the voice of a note; an eighth is still refused.
+        refuses("Invalid input line: note\ta\t0\t480\t60\t90\t1\tx", "tempo\t108", track,
+                "note\ta\t0\t480\t60\t90\t1\tx");
+        refuses("Invalid input line: staff\ta\thuge", "tempo\t108", track, "staff\ta\thuge", note);
+        refuses("Unknown part: b", "tempo\t108", track, "staff\tb\tgrand", note);
         // F2: the tempo is free within what every reader accepts, 20..400 (before: 60..180).
         refuses("Require tempo 20..400 and at least one track.", "tempo\t401", track, note);
         refuses("Require tempo 20..400 and at least one track.", "tempo\t19", track, note);

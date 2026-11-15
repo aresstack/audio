@@ -24,10 +24,10 @@ import java.io.IOException;
  * {@link ChannelMotion} gives the gains of the panner and of the send over time, and the channel
  * glides between them every {@link ChannelMotion#RAMP} frames (work package D3). A motion that
  * does not move gives exactly the mix of the standing channel. The distance shelf and the early
- * reflections stay where the channel is set up; that they follow a moving source is part of the
- * later work on height and binaural sound.
+ * reflections stay where the channel is set up; a source whose shelf, echoes and (for
+ * headphones) direction follow it as well is a {@link SpatialChannel} (work package D4).
  */
-public final class StemChannel {
+public final class StemChannel extends MixChannel {
     private final AudioSource source;
     private final long frames;
     private final StereoStrip strip;
@@ -98,6 +98,7 @@ public final class StemChannel {
         this.motion = motion;
     }
 
+    @Override
     void prepare(int sampleRate, int maxBlockFrames) {
         block = new AudioBlock(maxBlockFrames);
         if (motion != null) {
@@ -116,6 +117,7 @@ public final class StemChannel {
     }
 
     /** Adds the next {@code count} frames of the channel to the master bus and, if there is one, to the send bus. */
+    @Override
     void render(int count, AudioBlock master, AudioBlock send) throws IOException {
         int heard = 0;
         if (!ended) {
@@ -186,6 +188,7 @@ public final class StemChannel {
         }
     }
 
+    @Override
     void close() throws IOException {
         source.close();
     }

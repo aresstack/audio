@@ -26,6 +26,7 @@ dependencies {
     implementation project(':composition')
     implementation project(':music')
     implementation project(':instruments')
+    implementation project(':sounds')
     implementation 'com.google.code.gson:gson:2.10.1'
     implementation 'org.java-websocket:Java-WebSocket:1.5.2'
     implementation 'com.formdev:flatlaf:3.5.4'
@@ -40,7 +41,7 @@ application {
 def mergedServicesDirectory = layout.buildDirectory.dir('merged-service-providers')
 
 tasks.named('jar') {
-    dependsOn ':audio-core:jar', ':composition:jar', ':music:jar', ':instruments:jar', tasks.named('mergeServiceProviders')
+    dependsOn ':audio-core:jar', ':composition:jar', ':music:jar', ':instruments:jar', ':sounds:jar', tasks.named('mergeServiceProviders')
     archiveFileName = 'audio-studio.jar'
     from sourceSets.launcher.output
     manifest {
@@ -57,12 +58,20 @@ tasks.named('jar') {
             'module-info.class', 'META-INF/versions/*/module-info.class'
 }
 
+tasks.named('test') {
+    // The real download of the optional MIT KEMAR set runs only when asked (CI, hrtf-download.yml).
+    systemProperty 'hrtf.live', System.getProperty('hrtf.live', 'false')
+    if (Boolean.getBoolean('hrtf.live')) {
+        testLogging.showStandardStreams = true // the measured ears in the CI log
+    }
+}
+
 tasks.named('run') {
     workingDir rootProject.projectDir
 }
 
 tasks.register('mergeServiceProviders') {
-    dependsOn ':audio-core:jar', ':composition:jar', ':music:jar', ':instruments:jar'
+    dependsOn ':audio-core:jar', ':composition:jar', ':music:jar', ':instruments:jar', ':sounds:jar'
     inputs.files(configurations.runtimeClasspath)
     outputs.dir(mergedServicesDirectory)
     doLast {

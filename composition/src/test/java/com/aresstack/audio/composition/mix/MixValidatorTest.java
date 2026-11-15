@@ -34,12 +34,12 @@ public final class MixValidatorTest {
         assertEquals(List.of(
                         "l2: a second lane for x of melody-ch",
                         "l3: unknown channel gone-ch",
-                        "l4: unknown parameter height",
+                        "l4: unknown parameter brightness",
                         "l5: the master has a level only, not x",
                         "l6: id used twice"),
                 problems(List.of(MELODY),
                         lane("l1", "melody-ch", AutomationLane.X), lane("l2", "melody-ch", AutomationLane.X),
-                        lane("l3", "gone-ch", AutomationLane.LEVEL), lane("l4", "melody-ch", "height"),
+                        lane("l3", "gone-ch", AutomationLane.LEVEL), lane("l4", "melody-ch", "brightness"),
                         lane("l5", null, AutomationLane.X), lane("l6", "melody-ch", AutomationLane.LEVEL),
                         lane("l6", "melody-ch", AutomationLane.REVERB)));
     }

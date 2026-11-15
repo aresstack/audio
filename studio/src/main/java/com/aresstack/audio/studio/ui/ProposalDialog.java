@@ -41,6 +41,8 @@ final class ProposalDialog extends JDialog {
     private final JButton hearProposal = new JButton("Vorschlag anhören");
     private final JButton hearCurrent = new JButton("Bisherige Fassung anhören");
     private final JButton stop = new JButton("Stopp");
+    /** The tick that says the user saw what the original loses; {@code null} if it loses nothing. */
+    private LossConfirmation confirm;
 
     ProposalDialog(Window owner, String title, String what, Listening listening) {
         this(owner, title, what, java.util.Collections.<String>emptyList(), null, false, listening);
@@ -53,6 +55,16 @@ final class ProposalDialog extends JDialog {
      */
     ProposalDialog(Window owner, String title, String what, java.util.List<String> notes, String alone,
                    boolean again, Listening listening) {
+        this(owner, title, what, notes, java.util.Collections.<String>emptyList(), alone, again, listening);
+    }
+
+    /**
+     * @param toConfirm what the proposal takes from the original and cannot give back, one line
+     *                  each: every line is shown, and the proposal can only be taken once the user
+     *                  ticked that they saw them
+     */
+    ProposalDialog(Window owner, String title, String what, java.util.List<String> notes,
+                   java.util.List<String> toConfirm, String alone, boolean again, Listening listening) {
         super(owner, title, ModalityType.APPLICATION_MODAL);
         StringBuilder said = new StringBuilder("<html><b>").append(escape(what)).append("</b><br>");
         for (String note : notes) {
@@ -82,13 +94,28 @@ final class ProposalDialog extends JDialog {
         JPanel content = new JPanel(new BorderLayout(0, 14));
         content.setBorder(BorderFactory.createEmptyBorder(16, 16, 14, 16));
         content.add(words, BorderLayout.NORTH);
-        content.add(hearing, BorderLayout.CENTER);
+        if (toConfirm.isEmpty()) {
+            content.add(hearing, BorderLayout.CENTER);
+        } else {
+            // What the original loses is listed in full, and taking waits for the user's word.
+            confirm = new LossConfirmation(toConfirm, () -> take.setEnabled(confirm.confirmed()));
+            take.setEnabled(false);
+            take.setToolTipText("Erst die gekürzten Noten bestätigen");
+            JPanel middle = new JPanel(new BorderLayout(0, 14));
+            middle.add(confirm, BorderLayout.CENTER);
+            middle.add(hearing, BorderLayout.SOUTH);
+            content.add(middle, BorderLayout.CENTER);
+        }
         content.add(verdict, BorderLayout.SOUTH);
         setContentPane(content);
         hearProposal.addActionListener(event -> listening.proposal());
         hearCurrent.addActionListener(event -> listening.current());
         stop.addActionListener(event -> listening.stop());
-        take.addActionListener(event -> close(Verdict.TAKE));
+        take.addActionListener(event -> {
+            if (confirm == null || confirm.confirmed()) { // never taken without the user's word
+                close(Verdict.TAKE);
+            }
+        });
         drop.addActionListener(event -> close(Verdict.DROP));
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         getRootPane().setDefaultButton(hearProposal);
@@ -115,6 +142,20 @@ final class ProposalDialog extends JDialog {
 
     Verdict verdict() {
         return verdict;
+    }
+
+    /** Whether the dialog asks the user to confirm what the original loses. */
+    boolean asksToConfirm() {
+        return confirm != null;
+    }
+
+    /** Ticks or unticks the confirmation as a user would; for tests. */
+    void tickConfirm(boolean ticked) {
+        confirm.tick(ticked);
+    }
+
+    boolean canTake() {
+        return take.isEnabled();
     }
 
     /** Presses "Neu erzeugen" as a user would; for tests. */

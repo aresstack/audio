@@ -9,6 +9,7 @@ import com.aresstack.audio.studio.mix.MixLevel;
 import com.aresstack.audio.studio.mix.MixOutcome;
 import com.aresstack.audio.studio.mix.SpatialStemMixer;
 import com.aresstack.audio.studio.mix.StageAutomation;
+import com.aresstack.audio.studio.mix.StageSound;
 import com.aresstack.audio.studio.project.CompositionJson;
 import com.aresstack.audio.studio.project.MixJson;
 import com.aresstack.audio.studio.progress.Progress;
@@ -44,6 +45,19 @@ public final class StageMixService {
     private final SpatialSceneStore store = new SpatialSceneStore();
     private final SpatialStemMixer mixer = new SpatialStemMixer();
     private volatile float legacyFactor = Float.NaN;
+    private volatile StageSound sound = StageSound.LOUDSPEAKERS;
+
+    /**
+     * How the following mixes are heard (work package D4): loudspeakers or headphones,
+     * algorithmic or convolved room. The default is {@link StageSound#LOUDSPEAKERS}, the mix as before.
+     */
+    public void setSound(StageSound sound) {
+        this.sound = sound == null ? StageSound.LOUDSPEAKERS : sound;
+    }
+
+    public StageSound sound() {
+        return sound;
+    }
 
     /**
      * What the mix has to know of a piece: its tracks, and where its bars lie in time. A piece
@@ -148,6 +162,16 @@ public final class StageMixService {
         return export(Piece.written(arrangement), directory, scene, target, bits);
     }
 
+    /**
+     * The factor the last mix of the whole stage to a file applied (peak normalization and master
+     * level), or NaN before the first. Files and exports are always mixed as before
+     * ({@code LEGACY_PEAK}); live playback takes this factor as its fixed gain
+     * ({@link MixLevel#liveMaster}) so that it sounds like the file.
+     */
+    public float legacyFactor() {
+        return legacyFactor;
+    }
+
     /** Mixes the rendered tracks of a piece on its saved stage; no written arrangement is read for a model. */
     public Path mix(Piece piece, Path directory, Progress progress) throws Exception {
         return mix(piece, directory, scene(piece, directory), progress);
@@ -165,16 +189,6 @@ public final class StageMixService {
     /** Writes the mix on the stage to a file of the user's choice, with 16 or 24 bits. */
     public Path export(Piece piece, Path directory, SpatialScene scene, Path target, int bits) throws Exception {
         return mix(piece, directory, scene, null, target, bits, message -> { });
-    }
-
-    /**
-     * The factor the last mix of the whole stage to a file applied (peak normalization and master
-     * level), or NaN before the first. Files and exports are always mixed as before
-     * ({@code LEGACY_PEAK}); live playback takes this factor as its fixed gain
-     * ({@link MixLevel#liveMaster}) so that it sounds like the file.
-     */
-    public float legacyFactor() {
-        return legacyFactor;
     }
 
     private Path mix(Piece piece, Path directory, SpatialScene scene, String only, Path target, int bits,
@@ -199,15 +213,16 @@ public final class StageMixService {
             files.add(file);
             placements.add(placement);
         }
-        progress.update("Mische " + tracks.size() + " Spuren auf der Bühne · " + fitting.room().name()
+        heard |= addAudioLanes(directory, only, files, placements, progress);
+        progress.update("Mische " + files.size() + " Spuren auf der Bühne · " + fitting.room().name()
                 + (heard ? "" : " · alle Spuren sind stumm") + " ...");
         double secondsPerBar = piece.secondsPerBar();
         StageAutomation automation = piece.levels(placements).movingAs(piece.movements(directory, progress));
         Path fresh = target.resolveSibling("mix-" + System.nanoTime() + ".part");
         try {
             // Files and exports sound exactly as before (decision of the product owner: "export old, live new").
-            MixOutcome outcome = mixer.withAutomation(automation).mix(files, placements, fitting.room(), secondsPerBar,
-                    MixLevel.legacy(fitting.masterDb()), fresh, bits);
+            MixOutcome outcome = mixer.withAutomation(automation).withSound(sound)
+                    .mix(files, placements, fitting.room(), secondsPerBar, MixLevel.legacy(fitting.masterDb()), fresh, bits);
             if (only == null) {
                 legacyFactor = outcome.legacyFactor();
             }
@@ -229,6 +244,50 @@ public final class StageMixService {
         }
         return document == null || document.automation().isEmpty() ? StageAutomation.NONE
                 : StageAutomation.of(document, time);
+    }
+
+    /**
+     * The audio lanes of the model (work package B3), each as a stem of its clips under
+     * {@code render/audio/}, standing on the stage as their channel strip in {@code mix.json} says.
+     * A piece without a model or without audio lanes adds nothing. Returns whether one is heard.
+     */
+    static boolean addAudioLanes(Path directory, String only, List<Path> files, List<SoundSourcePlacement> placements,
+                                 Progress progress) throws IOException {
+        if (!Files.isRegularFile(directory.resolve(CompositionJson.FILE_NAME))) {
+            return false;
+        }
+        Composition model;
+        MixScene document;
+        try {
+            model = CompositionJson.load(directory);
+            document = MixJson.load(directory);
+        } catch (IOException | RuntimeException unreadable) {
+            progress.update("Das Werkmodell ist nicht lesbar; die Audiospuren fehlen im Mix.");
+            return false;
+        }
+        boolean heard = false;
+        for (com.aresstack.audio.composition.Track track : model.tracks()) {
+            if (track.kind() != com.aresstack.audio.composition.Track.Kind.AUDIO || track.clips().isEmpty()) {
+                continue;
+            }
+            Path stem = directory.resolve("render").resolve("audio").resolve(track.id() + ".wav");
+            for (String warning : com.aresstack.audio.studio.render.AudioTrackStem.write(model, directory, track, stem)) {
+                progress.update("WARN: " + warning);
+            }
+            com.aresstack.audio.composition.mix.MixChannel channel = document == null ? null
+                    : document.channelOf(new com.aresstack.audio.composition.mix.MixChannel.Owner(
+                    com.aresstack.audio.composition.mix.MixChannel.Owner.Kind.AUDIO_TRACK, track.id()));
+            SoundSourcePlacement placement = channel == null ? new SoundSourcePlacement(track.id(), 0, 0.35)
+                    : new SoundSourcePlacement(track.id(), channel.x(), channel.depth(), channel.levelDb(),
+                    channel.width(), channel.reverb(), channel.muted(), channel.locked(), null);
+            if (only != null) {
+                placement = placement.withMuted(!only.equals(track.id()));
+            }
+            heard |= !placement.muted();
+            files.add(stem);
+            placements.add(placement);
+        }
+        return heard;
     }
 
     /**

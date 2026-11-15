@@ -13,7 +13,10 @@ import com.aresstack.audio.studio.progress.Progress;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import com.aresstack.audio.studio.score.Voicing;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 
 /**
@@ -84,7 +87,8 @@ public final class VoiceComposer {
         }
         boolean drums = Role.DRUMS.equals(request.role());
         VoiceNormalizer normalizer = new VoiceNormalizer(piece.timeMap(), task.range(), drums);
-        List<MidiClip> clips = new ArrayList<>();
+        List<VoiceFrame> played = new ArrayList<>();
+        List<List<ShapedNote>> playedNotes = new ArrayList<>();
         String connection = "";
         for (VoiceFrame frame : task.frames()) {
             if (Thread.currentThread().isInterrupted()) {
@@ -104,20 +108,54 @@ public final class VoiceComposer {
                 connection = "";
                 continue;
             }
-            List<Note> notes = new ArrayList<>();
-            for (ShapedNote n : shaped) {
-                notes.add(new Note(ids.more().get(), n.tick(), n.length(), n.pitch(), n.velocity(), ids.voiceId()));
-            }
-            clips.add(new MidiClip(ids.more().get(), frame.startTick(), frame.lengthTicks(), null, notes));
+            played.add(frame);
+            playedNotes.add(shaped);
             connection = connection(piece.timeMap(), frame, shaped);
         }
-        if (clips.isEmpty()) {
+        if (played.isEmpty()) {
             throw new IOException("Keine spielbaren Noten für die neue Stimme " + request.name()
                     + "; die Antworten bleiben im Cache zur Diagnose.");
         }
+        // The voices (work package S1): as the answers name them, else as the score guesses them.
+        List<long[]> written = new ArrayList<>();
+        List<String> named = new ArrayList<>();
+        for (int f = 0; f < played.size(); f++) {
+            for (ShapedNote n : playedNotes.get(f)) {
+                written.add(new long[]{played.get(f).startTick() + n.tick(), n.length(), n.pitch()});
+                named.add(n.voice());
+            }
+        }
+        boolean grand = task.grand();
+        String[] tokenOf = Voicing.assign(written, drums ? null : named.toArray(new String[0]), drums, grand);
+        List<String> tokens = new ArrayList<>();
+        for (String token : tokenOf) {
+            if (!tokens.contains(token)) {
+                tokens.add(token);
+            }
+        }
+        tokens.sort(Voicing.ORDER);
+        List<Voice> voices = new ArrayList<>();
+        Map<String, String> voiceIds = new HashMap<>();
+        for (String token : tokens) {
+            List<String> sameStaff = tokens.stream().filter(t -> Voicing.staffOf(t) == Voicing.staffOf(token)).toList();
+            String id = voices.isEmpty() ? ids.voiceId() : ids.more().get();
+            voiceIds.put(token, id);
+            voices.add(new Voice(id, tokens.size() == 1 && !grand ? request.name() : Voicing.name(token),
+                    Voicing.staffOf(token), tokens.size() == 1 ? null : Voicing.stem(token, sameStaff)));
+        }
+        List<MidiClip> clips = new ArrayList<>();
+        int index = 0;
+        for (int f = 0; f < played.size(); f++) {
+            List<Note> notes = new ArrayList<>();
+            for (ShapedNote n : playedNotes.get(f)) {
+                notes.add(new Note(ids.more().get(), n.tick(), n.length(), n.pitch(), n.velocity(),
+                        voiceIds.get(tokenOf[index++])));
+            }
+            VoiceFrame frame = played.get(f);
+            clips.add(new MidiClip(ids.more().get(), frame.startTick(), frame.lengthTicks(), null, notes));
+        }
         Part part = new Part(ids.partId(), request.name(), request.role(), request.instrument(), request.program(),
-                request.libraryId(), Part.StaffLayout.SINGLE, List.of(new Voice(ids.voiceId(), request.name(), null, null)),
-                null);
+                request.libraryId(), grand ? Part.StaffLayout.GRAND : Part.StaffLayout.SINGLE, voices, null);
         Track track = new Track(ids.trackId(), request.name(), Track.Kind.MIDI, ids.partId(), List.of());
         ComposedVoice voice = new ComposedVoice(part, track, clips, task.frames(), plan, task.context(),
                 normalizer.corrections(), attempt);

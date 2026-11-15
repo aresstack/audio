@@ -9,7 +9,7 @@ import com.aresstack.audio.core.AudioBlock;
  * by 60 dB in the wanted time, and a low-pass in each loop makes the high notes die away sooner,
  * as walls do. The ring starts after a pre-delay.
  */
-public final class RoomReverb {
+public final class RoomReverb implements RoomBus {
     private static final int[] COMBS = {1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617};
     private static final int[] ALL_PASSES = {556, 441, 341, 225};
     private static final int SPREAD = 23;
@@ -41,6 +41,7 @@ public final class RoomReverb {
         this.settings = settings;
     }
 
+    @Override
     public void prepare(int sampleRate, int maxBlockFrames) {
         left = new Channel(sampleRate, settings.seconds(), settings.damping(), 0);
         right = new Channel(sampleRate, settings.seconds(), settings.damping(), SPREAD);
@@ -50,7 +51,23 @@ public final class RoomReverb {
         position = 0;
     }
 
+    /**
+     * Forgets everything that rings, as after {@link #prepare} but without allocating: for a jump in
+     * live playback, so that the room does not go on ringing with a passage that is no longer played.
+     */
+    @Override
+    public void reset() {
+        java.util.Arrays.fill(delayedLeft, 0f);
+        java.util.Arrays.fill(delayedRight, 0f);
+        if (left != null) {
+            left.reset();
+            right.reset();
+        }
+        position = 0;
+    }
+
     /** Adds the ring of the first {@code frames} frames that were sent to the bus, scaled by {@code gain}. */
+    @Override
     public void process(AudioBlock send, int frames, AudioBlock bus, float gain) {
         int size = delayedLeft.length;
         int at = (int) (position % size);
@@ -77,6 +94,7 @@ public final class RoomReverb {
         position = now;
     }
 
+    @Override
     public int latencyFrames() {
         return 0;
     }
@@ -101,6 +119,18 @@ public final class RoomReverb {
                 passes[i] = new float[Math.max(4, (int) Math.round((ALL_PASSES[i] + spread) * scale))];
             }
             damp = (float) (0.1 + 0.6 * damping);
+        }
+
+        void reset() {
+            for (float[] line : combs) {
+                java.util.Arrays.fill(line, 0f);
+            }
+            for (float[] line : passes) {
+                java.util.Arrays.fill(line, 0f);
+            }
+            java.util.Arrays.fill(combAt, 0);
+            java.util.Arrays.fill(passAt, 0);
+            java.util.Arrays.fill(dulled, 0f);
         }
 
         float next(float in) {

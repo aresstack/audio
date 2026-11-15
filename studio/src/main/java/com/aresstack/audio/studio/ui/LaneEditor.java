@@ -63,7 +63,7 @@ final class LaneEditor extends MouseAdapter {
             new Grid("Aus", 0));
     private static final int EDGE = 5;
 
-    private enum Drag { NONE, MOVE, RESIZE, BAND, CLIP }
+    private enum Drag { NONE, MOVE, RESIZE, BAND, CLIP, FADE_IN, FADE_OUT }
 
     private final ArrangementView view;
     private final PieceEditing editing;
@@ -82,6 +82,8 @@ final class LaneEditor extends MouseAdapter {
     /** The clip selected at its band, or {@code null}. */
     private String selectedClip;
     private ArrangementView.ClipBox draggedClip;
+    /** Where the dragged handle of a fade is. */
+    private long fadeTick;
     private int clipLane = -1;
     /** Where pasted notes go: a lane and a tick. */
     private int cursorLane = -1;
@@ -166,6 +168,9 @@ final class LaneEditor extends MouseAdapter {
         int pressedLane = view.laneAt(event.getY());
         boolean inBand = event.getY() < view.laneTop(pressedLane) + view.clipBand() + 2;
         ArrangementView.ClipBox box = view.clipAt(pressedLane, view.tickAt(event.getX()));
+        if (box == null && inBand) {
+            box = handleNear(pressedLane, event.getX());
+        }
         if (SwingUtilities.isRightMouseButton(event) || event.isPopupTrigger()) {
             if (box != null && (inBand || noteAt(event.getX(), event.getY()) == null)) {
                 selectedClip = box.id;
@@ -250,12 +255,25 @@ final class LaneEditor extends MouseAdapter {
         draggedClip = box;
         clipLane = dragLane;
         drag = Drag.CLIP;
+        if (box.audio) {
+            // The handles of the fades sit on the band, where the slopes meet the top of the clip.
+            if (Math.abs(event.getX() - view.xOf(box.fadeInEnd)) <= EDGE) {
+                drag = Drag.FADE_IN;
+            } else if (Math.abs(event.getX() - view.xOf(box.fadeOutStart)) <= EDGE) {
+                drag = Drag.FADE_OUT;
+            }
+            fadeTick = drag == Drag.FADE_IN ? box.fadeInEnd : box.fadeOutStart;
+        }
         view.repaint();
     }
 
     @Override
     public void mouseDragged(MouseEvent event) {
         switch (drag) {
+            case FADE_IN, FADE_OUT -> {
+                fadeTick = Math.max(draggedClip.start, Math.min(draggedClip.end, view.tickAt(event.getX())));
+                view.repaint();
+            }
             case CLIP -> {
                 long wanted = Math.round((event.getX() - pressX) * view.ticksPerPixel());
                 long step = gridTicks() <= 0 ? 1 : gridTicks();
@@ -295,7 +313,10 @@ final class LaneEditor extends MouseAdapter {
         drag = Drag.NONE;
         band = null;
         view.freezeWindows(false);
-        if (ended == Drag.CLIP && draggedClip != null) {
+        if ((ended == Drag.FADE_IN || ended == Drag.FADE_OUT) && draggedClip != null) {
+            fadeTo(draggedClip, ended == Drag.FADE_IN, fadeTick);
+            draggedClip = null;
+        } else if (ended == Drag.CLIP && draggedClip != null) {
             String target = clipLane == dragLane || clipLane < 0 ? null : trackOf(view.order().get(clipLane));
             boolean copying = event.isControlDown() || event.isMetaDown();
             if (clipLane != dragLane && clipLane >= 0 && target == null) {
@@ -432,6 +453,14 @@ final class LaneEditor extends MouseAdapter {
                     }
                 }
             }
+        }
+        if ((drag == Drag.FADE_IN || drag == Drag.FADE_OUT) && draggedClip != null && dragLane >= 0) {
+            float x = view.xOf(fadeTick);
+            int top = view.laneTop(dragLane);
+            float corner = drag == Drag.FADE_IN ? view.xOf(draggedClip.start) : view.xOf(draggedClip.end);
+            g.setColor(Color.WHITE);
+            g.setStroke(new BasicStroke(1.6f));
+            g.draw(new Line2D.Float(corner, top + view.laneHeight() - 3, x, top + ArrangementView.CLIP_BAND + 6));
         }
         if (drag == Drag.CLIP && draggedClip != null && clipLane >= 0) {
             float x = view.xOf(draggedClip.start + byTicks);
@@ -586,6 +615,79 @@ final class LaneEditor extends MouseAdapter {
         return null;
     }
 
+    /** An audio clip of a lane whose fade handle lies at a place across the view, or {@code null}. */
+    private ArrangementView.ClipBox handleNear(int lane, int x) {
+        ArrangementView.Arrangement shown = view.arrangement();
+        List<ArrangementView.ClipBox> boxes = shown == null || lane < 0 ? null : shown.clips.get(view.order().get(lane));
+        if (boxes != null) {
+            for (ArrangementView.ClipBox box : boxes) {
+                if (box.audio && (Math.abs(x - view.xOf(box.fadeInEnd)) <= EDGE
+                        || Math.abs(x - view.xOf(box.fadeOutStart)) <= EDGE)) {
+                    return box;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Sets one fade of an audio clip so that it ends (or begins) at a tick; the other fade stays. */
+    private void fadeTo(ArrangementView.ClipBox box, boolean in, long tick) {
+        java.util.Optional<com.aresstack.audio.composition.Composition> piece = editing.composition();
+        if (piece.isEmpty()) {
+            return;
+        }
+        com.aresstack.audio.composition.TimeMap time = piece.get().timeMap();
+        com.aresstack.audio.studio.application.ClipEdits.find(piece.get(), box.id).ifPresent(placed -> {
+            if (placed.clip() instanceof com.aresstack.audio.composition.AudioClip audio) {
+                double rate = com.aresstack.audio.composition.AudioClip.SAMPLE_RATE;
+                double start = time.seconds(audio.startTick());
+                long at = Math.round((time.seconds(tick) - start) * rate);
+                long fadeIn = in ? at : audio.fadeInSamples();
+                long fadeOut = in ? audio.fadeOutSamples() : audio.lengthSamples() - at;
+                tell(editing.fades(audio.id(), Math.max(0, fadeIn), Math.max(0, fadeOut)));
+            }
+        });
+    }
+
+    /** Whether a row is an audio lane of the piece. */
+    private boolean audioLane(int lane) {
+        if (lane < 0 || lane >= view.order().size()) {
+            return false;
+        }
+        return view.isAudioLane(view.order().get(lane));
+    }
+
+    /** What the menu offers on an audio lane: sound effects and files to place, gain and fades of a clip. */
+    private void audioMenu(JPopupMenu menu, ArrangementView.ClipBox clip) {
+        String lane = view.order().get(cursorLane);
+        if (clip != null) {
+            menu.add(item("Clip löschen", true, () -> tell(editing.deleteClip(clip.id))));
+            menu.add(item("Pegel +3 dB", true, () -> tell(editing.gain(clip.id, clip.gainDb + 3))));
+            menu.add(item("Pegel −3 dB", true, () -> tell(editing.gain(clip.id, clip.gainDb - 3))));
+            menu.add(item("Weiche Blenden (0,5 s)", true, () -> tell(editing.fades(clip.id, 22050, 22050))));
+            menu.add(item("Blenden entfernen", true, () -> tell(editing.fades(clip.id, 0, 0))));
+            menu.addSeparator();
+        }
+        JMenu effects = new JMenu("Soundeffekt einfügen");
+        try {
+            for (com.aresstack.audio.sounds.SoundDesign effect : com.aresstack.audio.studio.application.AudioAssets.effects()) {
+                effects.add(item(effect.id() + " · " + effect.durationMs() + " ms", true,
+                        () -> tell(editing.placeEffect(lane, cursorTick, effect))));
+            }
+        } catch (java.io.IOException unreadable) {
+            effects.setEnabled(false);
+        }
+        menu.add(effects);
+        menu.add(item("Audiodatei einfügen …", true, () -> {
+            javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
+            chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("WAV-Dateien", "wav"));
+            if (chooser.showOpenDialog(view) == javax.swing.JFileChooser.APPROVE_OPTION) {
+                tell(editing.placeFile(lane, cursorTick, chooser.getSelectedFile().toPath()));
+            }
+        }));
+        menu.addSeparator();
+    }
+
     /** The lane id as a track of the piece, or {@code null} if the row is a part without a lane. */
     private String trackOf(String laneId) {
         return editing.composition().map(piece -> piece.track(laneId) == null ? null : laneId).orElse(null);
@@ -672,13 +774,19 @@ final class LaneEditor extends MouseAdapter {
         JPopupMenu menu = new JPopupMenu();
         boolean any = !selected.isEmpty();
         ArrangementView.ClipBox clip = box(selectedClip);
+        if (audioLane(cursorLane)) {
+            audioMenu(menu, clip != null && clip.audio ? clip : null);
+            menu.add(item("Rückgängig", editing.canUndo(), () -> tell(editing.undo())));
+            menu.add(item("Wiederholen", editing.canRedo(), () -> tell(editing.redo())));
+            return menu;
+        }
         if (clip != null) {
             menu.add(item("Clip am Cursor teilen (S)", cursorTick > clip.start && cursorTick < clip.end, this::splitClip));
             menu.add(item("Clip duplizieren (Strg+D)", true, this::duplicateClip));
             menu.add(item("Clip löschen", true, () -> tell(editing.deleteClip(clip.id))));
             menu.add(playedBy(clip));
             menu.addSeparator();
-        } else if (cursorLane >= 0 && trackOf(view.order().get(cursorLane)) != null
+        } else if (cursorLane >= 0 && !audioLane(cursorLane) && trackOf(view.order().get(cursorLane)) != null
                 && view.clipAt(cursorLane, cursorTick) == null) {
             menu.add(item("Neuer Clip hier (4 Takte)", true, () -> {
                 long bar = bar();

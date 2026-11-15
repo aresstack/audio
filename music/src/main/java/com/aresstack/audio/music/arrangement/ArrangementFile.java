@@ -22,12 +22,21 @@ import java.util.OptionalInt;
  * key    &lt;tonic&gt;  &lt;major|minor&gt;              (optional; C major if missing)
  * bars   &lt;number of bars&gt;                     (optional; see {@link #bars()})
  * track  &lt;id&gt;  &lt;program&gt;  &lt;channel&gt;  [&lt;role&gt;]
- * note   &lt;track id&gt;  &lt;tick&gt;  &lt;length&gt;  &lt;pitch&gt;  &lt;velocity&gt;
+ * staff  &lt;track id&gt;  &lt;single|grand&gt;            (optional; single if missing)
+ * note   &lt;track id&gt;  &lt;tick&gt;  &lt;length&gt;  &lt;pitch&gt;  &lt;velocity&gt;  [&lt;voice&gt;]
  * </pre>
  * Ticks are at {@link #PPQ} per quarter note. The tonic of a key is written as a letter with
  * {@code #} or {@code b}, for example {@code key  D  minor} or {@code key  Bb  major}. Pieces
  * from before work package F2 have no {@code meter}, {@code key} or {@code bars} line; they
  * are four quarters to the bar in C major, as the studio then only knew.
+ *
+ * <p>Since work package S1 a track may be written on a grand staff ({@code staff  piano  grand}:
+ * treble and bass system, braced, as for piano, harp or organ), and a note may name the voice it
+ * belongs to in a seventh column. A voice is written as a short word: {@code 1}, {@code 2},
+ * {@code 3}, ... on a single staff, from the top voice down; {@code rh}, {@code rh2}, ... for the
+ * voices of the upper system of a grand staff (right hand) and {@code lh}, {@code lh2}, ... for
+ * those of the lower one (left hand). A track whose notes name no voice is set by the heuristic
+ * of the score, as every piece from before S1. Neither line nor column changes what sounds.
  * Byte order marks are ignored, and so are blank lines and lines that start with {@code #}.
  *
  * <p>The reader itself is lenient: it records what each line says, in the order of the
@@ -47,7 +56,7 @@ public final class ArrangementFile {
     public static final int LEGACY_BARS = 8;
 
     /** One understood or not understood line, in the order of the file. */
-    public sealed interface Entry permits Tempo, Meter, Key, Bars, Track, Note, Problem {
+    public sealed interface Entry permits Tempo, Meter, Key, Bars, Track, Staff, Note, Problem {
         /** The line number, counted from 1. */
         int line();
 
@@ -119,9 +128,18 @@ public final class ArrangementFile {
         }
     }
 
-    /** A {@code note} line with at least six columns whose four numbers can all be read. */
+    /** A {@code staff} line: whether a track is written on a grand staff (since S1). */
+    public record Staff(int line, String text, String trackId, boolean grand) implements Entry {
+    }
+
+    /**
+     * A {@code note} line with at least six columns whose four numbers can all be read.
+     *
+     * @param voice the voice the seventh column names, without blanks; {@code null} if the line
+     *              has no seventh column or it is blank (since S1)
+     */
     public record Note(int line, String text, int columns, String trackId, long tick, long length, int pitch,
-                       int velocity) implements Entry {
+                       int velocity, String voice) implements Entry {
     }
 
     /** A line that is neither a comment nor any of the above. */
@@ -170,6 +188,10 @@ public final class ArrangementFile {
                         ? new Track(number, line, fields.length, fields[1], fields[2], fields[3],
                                 fields.length >= 5 ? fields[4] : null)
                         : new Problem(number, line, "a track line has at least four columns"));
+            } else if ("staff".equals(keyword)) {
+                entries.add(fields.length == 3 && fields[2].trim().matches("single|grand")
+                        ? new Staff(number, line, fields[1], "grand".equals(fields[2].trim()))
+                        : new Problem(number, line, "a staff line names a track and single or grand"));
             } else if ("note".equals(keyword)) {
                 entries.add(note(number, line, fields));
             } else {
@@ -198,7 +220,8 @@ public final class ArrangementFile {
         try {
             return new Note(number, line, fields.length, fields[1], Long.parseLong(fields[2].trim()),
                     Long.parseLong(fields[3].trim()), Integer.parseInt(fields[4].trim()),
-                    Integer.parseInt(fields[5].trim()));
+                    Integer.parseInt(fields[5].trim()),
+                    fields.length >= 7 && !fields[6].trim().isEmpty() ? fields[6].trim() : null);
         } catch (NumberFormatException odd) {
             return new Problem(number, line, "a note needs whole numbers for tick, length, pitch and velocity");
         }
@@ -328,6 +351,17 @@ public final class ArrangementFile {
         return notes;
     }
 
+    /** Whether a track is written on a grand staff, as the last {@code staff} line for it says (since S1). */
+    public boolean grandStaff(String trackId) {
+        boolean grand = false;
+        for (Entry entry : entries) {
+            if (entry instanceof Staff staff && staff.trackId().equals(trackId)) {
+                grand = staff.grand();
+            }
+        }
+        return grand;
+    }
+
     /** The lines that could not be understood. */
     public List<Problem> problems() {
         List<Problem> problems = new ArrayList<Problem>();
@@ -340,8 +374,8 @@ public final class ArrangementFile {
     }
 
     /**
-     * The lines of an arrangement with a track renamed: its {@code track} line and its
-     * {@code note} lines name the new id; every other line, and every other column, stays exactly
+     * The lines of an arrangement with a track renamed: its {@code track} line, its {@code staff}
+     * line and its {@code note} lines name the new id; every other line, and every other column, stays exactly
      * as written, including empty trailing columns.
      */
     public static List<String> renameTrack(List<String> lines, String from, String to) {
@@ -349,7 +383,8 @@ public final class ArrangementFile {
         for (String line : lines) {
             String[] fields = line.split("\\t", -1);
             String keyword = fields[0].replace("﻿", "");
-            if (fields.length >= 2 && ("track".equals(keyword) || "note".equals(keyword)) && fields[1].equals(from)) {
+            if (fields.length >= 2 && ("track".equals(keyword) || "staff".equals(keyword)
+                    || "note".equals(keyword)) && fields[1].equals(from)) {
                 fields[1] = to;
                 line = String.join("\t", fields);
             }

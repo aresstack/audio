@@ -1,7 +1,8 @@
 /**
  * The audio core: sound as blocks of float samples, pulled through a graph of sources and
- * processors by whichever thread wants the next block. The same graph serves the offline mix
- * and, later, live playback.
+ * processors by whichever thread wants the next block. The same chain serves the offline mix
+ * ({@code mix}) and live playback ({@code live}: channels that move while they play, gliding
+ * parameters, one audio thread pulling into a {@code LiveSink}; {@code line}: the sound card).
  *
  * <p>Rules for every processor (binding, architecture review section 4b.1):
  * <ol>

@@ -51,6 +51,31 @@ final class PartSeats {
     }
 
     /**
+     * The mix with a channel strip for every audio lane of {@code after} that is new against
+     * {@code before} and has none (work package B3): an audio lane is no player, but its sound
+     * stands on the stage like any source, in the middle, a little back, with some room.
+     */
+    static MixScene seatNewAudioTracks(MixScene mix, Composition before, Composition after, Supplier<String> ids) {
+        if (mix == null) {
+            return null;
+        }
+        List<MixChannel> channels = new ArrayList<>(mix.channels());
+        boolean added = false;
+        for (com.aresstack.audio.composition.Track track : after.tracks()) {
+            if (track.kind() != com.aresstack.audio.composition.Track.Kind.AUDIO || before.track(track.id()) != null) {
+                continue;
+            }
+            MixChannel.Owner owner = new MixChannel.Owner(MixChannel.Owner.Kind.AUDIO_TRACK, track.id());
+            if (mix.channelOf(owner) != null) {
+                continue;
+            }
+            channels.add(new MixChannel(ids.get(), owner, 0, 0.35, -6, 0.6, 0.3, false, false));
+            added = true;
+        }
+        return added ? new MixScene(mix.room(), mix.masterDb(), mix.levelMode(), channels, mix.automation()) : mix;
+    }
+
+    /**
      * Brings {@code tracks.json} and {@code spatial-scene.json}, where the piece has them, in line
      * with the parts a change added or removed. Entries of other parts stay as they are.
      */
