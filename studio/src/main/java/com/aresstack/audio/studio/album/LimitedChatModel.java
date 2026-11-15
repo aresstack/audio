@@ -35,6 +35,12 @@ public final class LimitedChatModel implements ChatModel {
 
     @Override
     public JsonObject generate(String instruction, String prompt, int maxTokens, Path cache) throws IOException {
+        return generate(instruction, prompt, maxTokens, cache, null);
+    }
+
+    @Override
+    public JsonObject generate(String instruction, String prompt, int maxTokens, Path cache,
+                               java.util.function.Consumer<String> heard) throws IOException {
         try {
             free.acquire();
         } catch (InterruptedException stopped) {
@@ -42,7 +48,7 @@ public final class LimitedChatModel implements ChatModel {
             throw new InterruptedIOException("Abgebrochen, bevor die KI gefragt wurde.");
         }
         try {
-            return model.generate(instruction, prompt, maxTokens, cache);
+            return model.generate(instruction, prompt, maxTokens, cache, heard);
         } finally {
             free.release();
         }

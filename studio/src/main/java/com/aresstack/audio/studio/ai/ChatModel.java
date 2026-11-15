@@ -25,6 +25,18 @@ public interface ChatModel {
     JsonObject generate(String instruction, String prompt, int maxTokens, Path cache) throws IOException;
 
     /**
+     * Answers a prompt and lets the answer be read while it is written, if the model streams it.
+     *
+     * @param heard is given the text of the answer so far, a few times a second at most, on the
+     *              thread that asks; never called for a kept answer or by a model that does not
+     *              stream. May be {@code null}.
+     */
+    default JsonObject generate(String instruction, String prompt, int maxTokens, Path cache,
+                                java.util.function.Consumer<String> heard) throws IOException {
+        return generate(instruction, prompt, maxTokens, cache);
+    }
+
+    /**
      * The name of the model, as the service knows it ({@code google/gemma-4-31B-it}); empty when
      * unknown. Written down with every kept answer, so that an answer of one model is never
      * given for another.
@@ -48,6 +60,12 @@ public interface ChatModel {
             @Override
             public JsonObject generate(String instruction, String prompt, int maxTokens, Path cache) throws IOException {
                 return client.generate(instruction, prompt, maxTokens, cache);
+            }
+
+            @Override
+            public JsonObject generate(String instruction, String prompt, int maxTokens, Path cache,
+                                       java.util.function.Consumer<String> heard) throws IOException {
+                return client.generate(instruction, prompt, maxTokens, cache, heard);
             }
 
             @Override

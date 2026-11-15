@@ -137,4 +137,26 @@ public final class KipitzStreamingTest {
         Assert.assertEquals("{\"part\":\"melody\",\"notes\":[]}", answer.text);
         Assert.assertEquals("stop", answer.finishReason);
     }
+
+    @Test
+    public void theAnswerCanBeReadWhileItArrives() throws Exception {
+        String finished = FIRST + SECOND + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n";
+        List<String> heard = new ArrayList<String>();
+        KipitzChatClient.Answer answer = KipitzChatClient.readStream(
+                new java.io.ByteArrayInputStream(finished.getBytes("UTF-8")), heard::add);
+        Assert.assertFalse("the text so far is shown at least once", heard.isEmpty());
+        for (String soFar : heard) {
+            Assert.assertTrue(soFar, answer.text.startsWith(soFar));
+        }
+    }
+
+    @Test
+    public void aListenerThatFailsDoesNotBreakTheAnswer() throws Exception {
+        String finished = FIRST + SECOND + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n";
+        KipitzChatClient.Answer answer = KipitzChatClient.readStream(
+                new java.io.ByteArrayInputStream(finished.getBytes("UTF-8")), text -> {
+                    throw new IllegalStateException("cannot draw");
+                });
+        Assert.assertEquals("{\"part\":\"melody\",\"notes\":[]}", answer.text);
+    }
 }

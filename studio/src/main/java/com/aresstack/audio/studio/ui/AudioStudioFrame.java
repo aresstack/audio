@@ -3214,9 +3214,6 @@ public final class AudioStudioFrame extends JFrame {
         if (worker != null && !worker.isDone()) {
             return;
         }
-        if (pageKeys.get("song").isSelected()) {
-            showPage("deck"); // composing is watched where the tracks are
-        }
         generateButton.setEnabled(false);
         composeButton.setEnabled(false);
         keepSong();
@@ -3235,7 +3232,13 @@ public final class AudioStudioFrame extends JFrame {
         worker = new SwingWorker<Path, String>() {
             @Override
             protected Path doInBackground() throws Exception {
-                return action.execute(new TrackProgress() {
+                return action.execute(new com.aresstack.audio.studio.progress.SketchProgress() {
+                    @Override
+                    public void sketch(final List<String> arrangement) {
+                        SwingUtilities.invokeLater(() -> showSketch(arrangement));
+                    }
+
+
                     @Override
                     public void update(String update) {
                         publish(update);
@@ -3660,6 +3663,32 @@ public final class AudioStudioFrame extends JFrame {
                 : state == TrackProgress.State.DONE ? TrackLanes.Work.DONE : TrackLanes.Work.FAILED;
         trackTable.setWork(trackId, work, stage == TrackProgress.Stage.COMPOSE ? "KI" : "Rendern", detail);
         showTrackWork();
+    }
+
+    /**
+     * The piece while the AI writes it: the score on the page of the composition grows with every
+     * note that arrives. Only shown; the saved piece is shown again when the work is over.
+     */
+    private void showSketch(List<String> arrangement) {
+        if (worker == null || worker.isDone()) {
+            return; // a late picture after the work ended: the score shows the piece itself again
+        }
+        try {
+            List<String> ids = new ArrayList<String>();
+            for (MusicTrack track : trackTable.tracks()) {
+                ids.add(track.id());
+            }
+            for (String line : arrangement) {
+                String[] cells = line.split("\t");
+                if (cells.length > 1 && "track".equals(cells[0]) && !ids.contains(cells[1])) {
+                    ids.add(cells[1]);
+                }
+            }
+            scoreView.setScore(com.aresstack.audio.studio.score.Score.of(arrangement), ids,
+                    "Die KI schreibt · die ersten Noten erscheinen gleich");
+        } catch (RuntimeException unreadable) {
+            // a picture on the way that cannot be drawn is left out; the next one comes at once
+        }
     }
 
     private boolean tracksAtWork() {
