@@ -38,23 +38,52 @@ public final class ChatContinuationPlanner implements ContinuationPlanner {
         int first = task.firstNewBar() + 1;
         int last = task.firstNewBar() + request.bars();
         StringBuilder prompt = new StringBuilder(task.context().text());
-        prompt.append("\n# TASK\nPlan the continuation of this piece: ").append(request.bars()).append(" new bars, bars ")
-                .append(first).append('-').append(last).append(" of the piece (the original has ")
-                .append(task.firstNewBar()).append(" bars). The continuation must grow out of the existing music: its "
-                        + "themes, motifs, harmony, rhythm and the way the parts complement each other.\n");
-        prompt.append("Kind of continuation: ").append(request.preset().brief()).append('\n');
+        if (task.inserts()) {
+            prompt.append("\n# TASK\nPlan ").append(request.bars()).append(" new bars to be INSERTED into this piece, "
+                    + "bars ").append(first).append('-').append(last).append(" of the piece: they come after bar ")
+                    .append(task.firstNewBar()).append(" of the original, and the original bars ").append(first)
+                    .append('-').append(task.originalBars()).append(" follow them as bars ").append(task.barAfter())
+                    .append('-').append(task.originalBars() + request.bars()).append(" (the context already shows "
+                            + "the piece with this empty room). The inserted bars must grow out of the music before "
+                            + "them and lead naturally into the music after them: its themes, motifs, harmony, "
+                            + "rhythm and the way the parts complement each other.\n");
+        } else {
+            prompt.append("\n# TASK\nPlan the continuation of this piece: ").append(request.bars())
+                    .append(" new bars, bars ").append(first).append('-').append(last).append(" of the piece (the "
+                            + "original has ").append(task.firstNewBar()).append(" bars). The continuation must grow "
+                            + "out of the existing music: its themes, motifs, harmony, rhythm and the way the parts "
+                            + "complement each other.\n");
+        }
+        prompt.append(task.inserts() ? "Kind of inserted passage: " : "Kind of continuation: ")
+                .append(request.preset().brief()).append('\n');
         if (!request.instruction().isEmpty()) {
             prompt.append("User instruction: ").append(request.instruction()).append('\n');
         }
-        prompt.append("Ending: ").append(request.ending().brief()).append('\n');
+        if (task.inserts()) {
+            prompt.append("Ending: the last inserted bar leads seamlessly into bar ").append(task.barAfter())
+                    .append(", where the original goes on; no final cadence unless the music after begins anew.\n");
+        } else {
+            prompt.append("Ending: ").append(request.ending().brief()).append('\n');
+        }
+        String kept = task.inserts() ? "every note before bar " + (task.firstNewBar() - request.tailBars() + 1)
+                + " and from bar " + task.barAfter() + " on stays exactly as it is"
+                : "everything before stays";
         if (task.revisesTail()) {
             prompt.append("Transition: the last ").append(request.tailBars()).append(" bars of the original (bars ")
                     .append(task.firstTailBar() + 1).append('-').append(task.firstNewBar()).append(") will be rewritten "
-                            + "together with the continuation so that the join is natural; everything before stays.\n");
+                            + "together with the new bars so that the join is natural; ").append(kept).append(".\n");
+        } else if (task.inserts()) {
+            prompt.append("Transition: ").append(kept).append("; the inserted bars join seamlessly at both ends.\n");
         } else {
             prompt.append("Transition: every note of bars 1-").append(task.firstNewBar()).append(" stays exactly as it "
                     + "is; the continuation joins seamlessly at bar ").append(first).append(".\n");
         }
+        if (request.curve() != null) {
+            prompt.append("Intensity curve given by the user from the first to the last new bar: ")
+                    .append(request.curve()).append("; give every section the intensity of the curve at its "
+                            + "place.\n");
+        }
+        prompt.append(Dramaturgy.ensembleRule(task.parts().size())).append('\n');
         prompt.append("Tempo, meter and key stay as they are.\n");
         prompt.append("Parts that go on (use their ids):\n");
         for (Part part : task.parts()) {
@@ -90,31 +119,7 @@ public final class ChatContinuationPlanner implements ContinuationPlanner {
     public static ContinuationPlan read(JsonObject answer, ContinuationTask task, Composition piece) {
         List<String> repairs = new ArrayList<>();
         Map<String, String> renamed = new HashMap<>();
-        List<ContinuationPlan.NewPart> newParts = new ArrayList<>();
-        for (JsonObject given : objects(answer, "newParts")) {
-            String name = text(given, "name");
-            String key = text(given, "key");
-            Integer program = integer(given, "program");
-            if (name == null || name.isBlank() || program == null || program < 0 || program > 127) {
-                repairs.add("Neues Instrument " + (name == null ? key : name) + " ohne Namen oder gültiges Programm "
-                        + "verworfen.");
-                if (key != null) {
-                    renamed.put(key, "verworfen:" + key); // its mentions must not name a later new part
-                }
-                continue;
-            }
-            String role = text(given, "role");
-            if (!Role.ALL.contains(role)) {
-                repairs.add("Neues Instrument " + name + ": unbekannte Rolle " + role + ", als texture übernommen.");
-                role = Role.TEXTURE;
-            }
-            String fixed = "new" + (newParts.size() + 1);
-            if (key != null) {
-                renamed.put(key, fixed);
-            }
-            newParts.add(new ContinuationPlan.NewPart(fixed, name, text(given, "instrument"), program, role,
-                    text(given, "idea")));
-        }
+        List<ContinuationPlan.NewPart> newParts = newParts(answer, repairs, renamed);
         List<ContinuationPlan.PlannedSection> sections = new ArrayList<>();
         int index = 0;
         for (JsonObject given : objects(answer, "sections")) {
@@ -149,7 +154,42 @@ public final class ChatContinuationPlanner implements ContinuationPlanner {
                 repairs);
     }
 
-    private static List<JsonObject> objects(JsonObject object, String name) {
+    /**
+     * The new instruments of a planning answer, renamed to new1, new2, ... in their order; an
+     * instrument without name or valid program is dropped, an unknown role becomes texture. How
+     * the keys of the answer were renamed goes into {@code renamed}.
+     */
+    static List<ContinuationPlan.NewPart> newParts(JsonObject answer, List<String> repairs,
+                                                   Map<String, String> renamed) {
+        List<ContinuationPlan.NewPart> newParts = new ArrayList<>();
+        for (JsonObject given : objects(answer, "newParts")) {
+            String name = text(given, "name");
+            String key = text(given, "key");
+            Integer program = integer(given, "program");
+            if (name == null || name.isBlank() || program == null || program < 0 || program > 127) {
+                repairs.add("Neues Instrument " + (name == null ? key : name) + " ohne Namen oder gültiges Programm "
+                        + "verworfen.");
+                if (key != null) {
+                    renamed.put(key, "verworfen:" + key); // its mentions must not name a later new part
+                }
+                continue;
+            }
+            String role = text(given, "role");
+            if (!Role.ALL.contains(role)) {
+                repairs.add("Neues Instrument " + name + ": unbekannte Rolle " + role + ", als texture übernommen.");
+                role = Role.TEXTURE;
+            }
+            String fixed = "new" + (newParts.size() + 1);
+            if (key != null) {
+                renamed.put(key, fixed);
+            }
+            newParts.add(new ContinuationPlan.NewPart(fixed, name, text(given, "instrument"), program, role,
+                    text(given, "idea")));
+        }
+        return newParts;
+    }
+
+    static List<JsonObject> objects(JsonObject object, String name) {
         List<JsonObject> found = new ArrayList<>();
         JsonElement value = object.get(name);
         if (value != null && value.isJsonArray()) {
@@ -162,7 +202,7 @@ public final class ChatContinuationPlanner implements ContinuationPlanner {
         return found;
     }
 
-    private static List<String> texts(JsonObject object, String name) {
+    static List<String> texts(JsonObject object, String name) {
         List<String> found = new ArrayList<>();
         JsonElement value = object.get(name);
         if (value != null && value.isJsonArray()) {
@@ -174,17 +214,17 @@ public final class ChatContinuationPlanner implements ContinuationPlanner {
         return found;
     }
 
-    private static String text(JsonObject object, String name) {
+    static String text(JsonObject object, String name) {
         JsonElement value = object.get(name);
         return value == null || value.isJsonNull() || !value.isJsonPrimitive() ? null : value.getAsString();
     }
 
-    private static Integer integer(JsonObject object, String name) {
+    static Integer integer(JsonObject object, String name) {
         Double value = number(object, name);
         return value == null || value != Math.rint(value) || Math.abs(value) > 100_000 ? null : value.intValue();
     }
 
-    private static Double number(JsonObject object, String name) {
+    static Double number(JsonObject object, String name) {
         JsonElement value = object.get(name);
         if (value == null || !value.isJsonPrimitive()) {
             return null;

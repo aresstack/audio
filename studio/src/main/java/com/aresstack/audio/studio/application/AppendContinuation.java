@@ -67,9 +67,16 @@ public final class AppendContinuation {
      */
     public static Patch patch(Composition piece, ComposedContinuation continuation) {
         List<EditOp> operations = new ArrayList<>();
-        List<Section> form = new ArrayList<>(piece.sections());
-        form.addAll(continuation.sections());
-        operations.add(new EditOp.SetSections(form));
+        operations.add(new EditOp.SetSections(continuation.form()));
+        operations.addAll(body(continuation));
+        var request = continuation.task().request();
+        return new Patch("Stück um " + request.bars() + " Takte verlängert (" + request.preset().label() + ", "
+                + request.ending().label() + ", " + request.transition().label() + ")", operations);
+    }
+
+    /** What every patch of new bars holds after the form: new parts and tracks, the transition notes, the new clips. */
+    static List<EditOp> body(ComposedContinuation continuation) {
+        List<EditOp> operations = new ArrayList<>();
         for (Part part : continuation.newParts()) {
             operations.add(new EditOp.AddPart(part));
         }
@@ -87,9 +94,7 @@ public final class AppendContinuation {
         for (ComposedContinuation.PlacedClip placed : continuation.clips()) {
             operations.add(new EditOp.AddClip(placed.trackId(), placed.clip()));
         }
-        var request = continuation.task().request();
-        return new Patch("Stück um " + request.bars() + " Takte verlängert (" + request.preset().label() + ", "
-                + request.ending().label() + ", " + request.transition().label() + ")", operations);
+        return operations;
     }
 
     /**
@@ -172,7 +177,7 @@ public final class AppendContinuation {
         }
     }
 
-    private static List<String> notes(Composition piece, String partId, long untilTick) {
+    static List<String> notes(Composition piece, String partId, long untilTick) {
         List<String> lines = new ArrayList<>();
         for (PlacedNote n : piece.notesOf(partId)) {
             if (n.tick() < untilTick) {
@@ -184,7 +189,7 @@ public final class AppendContinuation {
         return lines;
     }
 
-    private static String frame(Clip clip) {
+    static String frame(Clip clip) {
         return clip instanceof MidiClip midi ? "midi " + midi.startTick() + " " + midi.lengthTicks() + " " + midi.partId()
                 : clip.toString();
     }
