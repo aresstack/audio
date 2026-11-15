@@ -8,6 +8,7 @@ import com.aresstack.audio.core.dsp.RoomReverb;
 import com.aresstack.audio.core.dsp.StereoBiquad;
 import com.aresstack.audio.core.dsp.StereoPanner;
 import com.aresstack.audio.core.dsp.StereoStrip;
+import com.aresstack.audio.core.live.ChannelParameters;
 import com.aresstack.audio.core.mix.ChannelMotion;
 import com.aresstack.audio.core.mix.LegacyPeakNormalization;
 import com.aresstack.audio.core.mix.LevelMode;
@@ -270,16 +271,15 @@ public final class SpatialStemMixer {
         AudioSource open(int index) throws IOException;
     }
 
-    /** How long the room rings after the last track has ended. */
-    private static long tail(long length, AcousticRoom room) {
-        boolean rings = room.amount() > 0.001;
-        return length == 0 ? 0 : (int) (RATE * (rings ? Math.min(8, room.reverbSeconds() + 0.4) : 0.3));
+    /** How long the room rings after the last track has ended, in frames. */
+    static long tail(long length, AcousticRoom room) {
+        return length == 0 ? 0 : (int) (RATE * (rings(room) ? Math.min(8, room.reverbSeconds() + 0.4) : 0.3));
     }
 
     /** The graph of the audio core for the tracks on this stage in this room. */
     private MixGraph graph(int count, List<SoundSourcePlacement> placements, AcousticRoom room,
                            double secondsPerBar, long length, long total, Sources sources) throws IOException {
-        boolean rings = room.amount() > 0.001;
+        boolean rings = rings(room);
         StageAutomation moving = automation != null ? automation : StageAutomation.of(placements, secondsPerBar);
         List<StemChannel> channels = new ArrayList<StemChannel>();
         try {
@@ -294,30 +294,24 @@ public final class SpatialStemMixer {
             new MixGraph(channels, null, 0, 0).close();
             throw failed;
         }
-        RoomReverb reverb = null;
-        if (rings) {
-            double preDelay = Math.min(0.045, room.depthMetres() / SOUND_SPEED * 0.35);
-            reverb = new RoomReverb(new RoomReverb.Settings(room.reverbSeconds(), room.damping(), preDelay));
-        }
+        RoomReverb reverb = reverb(room);
         return new MixGraph(channels, reverb, (float) room.amount(), total);
     }
 
     /** One track on the stage as a channel of the audio core. */
     private static StemChannel channel(AudioSource source, SoundSourcePlacement placement,
                                        StageAutomation.Lanes lanes, AcousticRoom room, long length, boolean rings) {
-        // Level, also over time, and width: the middle stays, the difference of the sides is scaled.
-        float level = (float) Math.pow(10, (placement.levelDb() + lanes.trimDb()) / 20);
-        float width = (float) placement.width();
-        StereoStrip.LevelCurve curve = lanes.level() == null ? null
-                : frame -> (float) Math.pow(10, lanes.level().valueAt(frame) / 20);
-        StereoStrip strip = new StereoStrip(new StereoStrip.Settings(level, width, curve));
-        double distance = distance(placement);
-        // Distance: duller in the heights.
-        double dull = -Math.min(9, (distance - LISTENER) * 0.55 * (0.6 + room.damping()));
-        StereoBiquad shelf = dull < -0.2
-                ? new StereoBiquad(BiquadCoefficients.highShelf(RATE, below(4500), dull, 1)) : null;
-        EarlyReflections reflections = room.reflections() > 0.001 && room.amount() > 0.001
-                ? reflections(placement, room, distance) : null;
+        ChannelParameters p = parameters(placement, lanes, room);
+        StereoStrip strip = new StereoStrip(new StereoStrip.Settings(p.level(), p.width(), p.curve()));
+        StereoBiquad shelf = p.shelf() != null ? new StereoBiquad(p.shelf()) : null;
+        EarlyReflections reflections = null;
+        if (p.echoes() > 0) {
+            List<EarlyReflections.Tap> taps = new ArrayList<EarlyReflections.Tap>();
+            for (int wall = 0; wall < p.echoes(); wall++) {
+                taps.add(new EarlyReflections.Tap(p.echoDelay(wall), p.echoLeft(wall), p.echoRight(wall)));
+            }
+            reflections = new EarlyReflections(taps, echoLowPass(room));
+        }
         if (lanes.moves()) {
             // A moving source: its panorama, its distance gain and its send follow the curves; the
             // shelf and the echoes of the walls stay where it is set up (see StemChannel).
@@ -327,11 +321,74 @@ public final class SpatialStemMixer {
                     lanes.reverb() == null ? placement.reverb() : lanes.reverb().valueAt(frame), rings, gains);
             return new StemChannel(source, length, strip, shelf, motion, reflections);
         }
+        StereoPanner panner = StereoPanner.ofGains(p.toLeft(), p.toRight());
+        return new StemChannel(source, length, strip, p.sendLeft(), p.sendRight(), shelf, panner, reflections);
+    }
+
+    /** Whether the room rings at all. */
+    static boolean rings(AcousticRoom room) {
+        return room.amount() > 0.001;
+    }
+
+    /** Whether the walls of the room answer with early echoes. */
+    static boolean reflects(AcousticRoom room) {
+        return room.reflections() > 0.001 && room.amount() > 0.001;
+    }
+
+    /** How the walls dull the echoes. */
+    static BiquadCoefficients echoLowPass(AcousticRoom room) {
+        return BiquadCoefficients.lowPass(RATE, below(9000 - 6000 * room.damping()), Math.sqrt(0.5));
+    }
+
+    /** The shared room of the stage, or {@code null} if it does not ring. */
+    static RoomReverb reverb(AcousticRoom room) {
+        if (!rings(room)) {
+            return null;
+        }
+        double preDelay = Math.min(0.045, room.depthMetres() / SOUND_SPEED * 0.35);
+        return new RoomReverb(new RoomReverb.Settings(room.reverbSeconds(), room.damping(), preDelay));
+    }
+
+    /**
+     * Where a track stands on the stage, as the numbers of a channel of the audio core, with the
+     * level curve of its placement: see {@link #parameters(SoundSourcePlacement, StageAutomation.Lanes,
+     * AcousticRoom)}.
+     */
+    static ChannelParameters parameters(SoundSourcePlacement placement, AcousticRoom room, double secondsPerBar) {
+        return parameters(placement, StageAutomation.of(List.of(placement), secondsPerBar).of(placement.trackId()),
+                room);
+    }
+
+    /**
+     * Where a track stands on the stage, as the numbers of a channel of the audio core: level
+     * (trim and curve from its lanes) and width, place between left and right with the distance
+     * gain, send to the room, distance shelf and wall echoes, all at the place of the placement.
+     * The file mix and live playback both take their channels from here, so the stage sounds the
+     * same in both. A muted track is not handled here; the caller leaves it out (file) or turns it
+     * down (live).
+     */
+    static ChannelParameters parameters(SoundSourcePlacement placement, StageAutomation.Lanes lanes,
+                                        AcousticRoom room) {
+        // Level, also over time, and width: the middle stays, the difference of the sides is scaled.
+        float level = (float) Math.pow(10, (placement.levelDb() + lanes.trimDb()) / 20);
+        float width = (float) placement.width();
+        StereoStrip.LevelCurve curve = lanes.level() == null ? null
+                : frame -> (float) Math.pow(10, lanes.level().valueAt(frame) / 20);
+        double distance = distance(placement);
+        // Distance: duller in the heights.
+        double dull = -Math.min(9, (distance - LISTENER) * 0.55 * (0.6 + room.damping()));
+        BiquadCoefficients shelf = dull < -0.2 ? BiquadCoefficients.highShelf(RATE, below(4500), dull, 1) : null;
         float[] gains = new float[ChannelMotion.GAINS];
-        seat(placement.x(), placement.depth(), placement.reverb(), rings, gains);
-        StereoPanner panner = new StereoPanner(pan(placement), near(distance));
-        return new StemChannel(source, length, strip, gains[ChannelMotion.SEND_LEFT], gains[ChannelMotion.SEND_RIGHT],
-                shelf, panner, reflections);
+        seat(placement.x(), placement.depth(), placement.reverb(), rings(room), gains);
+        ChannelParameters.Builder parameters = ChannelParameters.builder()
+                .strip(level, width, curve)
+                .pan(gains[ChannelMotion.TO_LEFT], gains[ChannelMotion.TO_RIGHT])
+                .send(gains[ChannelMotion.SEND_LEFT], gains[ChannelMotion.SEND_RIGHT])
+                .shelf(shelf);
+        if (reflects(room)) {
+            reflections(placement, room, distance, parameters);
+        }
+        return parameters.build();
     }
 
     /**
@@ -364,23 +421,40 @@ public final class SpatialStemMixer {
     }
 
     /** The first echoes: the track mirrored in the left wall, the right wall and the back wall. */
-    private static EarlyReflections reflections(SoundSourcePlacement placement, AcousticRoom room, double direct) {
+    private static void reflections(SoundSourcePlacement placement, AcousticRoom room, double direct,
+                                    ChannelParameters.Builder parameters) {
         double x = placement.x() * HALF_WIDTH;
         double y = LISTENER + placement.depth() * DEPTH;
         double wall = Math.max(HALF_WIDTH + 0.5, room.widthMetres() / 2);
         double back = LISTENER + DEPTH + Math.max(0.5, room.depthMetres() * 0.15);
         double[][] images = {{-2 * wall - x, y}, {2 * wall - x, y}, {x, 2 * back - y}};
-        List<EarlyReflections.Tap> taps = new ArrayList<EarlyReflections.Tap>();
-        for (double[] image : images) {
+        int[] delays = new int[images.length];
+        float[] toLeft = new float[images.length];
+        float[] toRight = new float[images.length];
+        for (int i = 0; i < images.length; i++) {
+            double[] image = images[i];
             double distance = Math.hypot(image[0], image[1]);
-            int delay = (int) Math.round((distance - direct) / SOUND_SPEED * RATE);
+            delays[i] = (int) Math.round((distance - direct) / SOUND_SPEED * RATE);
             float gain = (float) (room.reflections() * room.amount() * 1.6 * Math.pow(LISTENER / distance, 0.45));
             double position = Math.max(-1, Math.min(1, Math.atan2(image[0], image[1]) / Math.toRadians(60)));
             double angle = (position + 1) * Math.PI / 4;
-            taps.add(new EarlyReflections.Tap(delay, (float) Math.cos(angle) * gain, (float) Math.sin(angle) * gain));
+            toLeft[i] = (float) Math.cos(angle) * gain;
+            toRight[i] = (float) Math.sin(angle) * gain;
         }
-        return new EarlyReflections(taps,
-                BiquadCoefficients.lowPass(RATE, below(9000 - 6000 * room.damping()), Math.sqrt(0.5)));
+        parameters.echoes(delays, toLeft, toRight);
+    }
+
+    /**
+     * The longest echo delay any place on the stage can have in this room, in frames: what a live
+     * channel must keep of its history so that a track can be moved anywhere.
+     */
+    static int longestEcho(AcousticRoom room) {
+        double wall = Math.max(HALF_WIDTH + 0.5, room.widthMetres() / 2);
+        double back = LISTENER + DEPTH + Math.max(0.5, room.depthMetres() * 0.15);
+        // The farthest image: from a corner of the stage to the farther side wall or to the back wall.
+        double side = Math.hypot(2 * wall + HALF_WIDTH, LISTENER + DEPTH);
+        double rear = Math.hypot(HALF_WIDTH, 2 * back - LISTENER);
+        return (int) Math.ceil(Math.max(side, rear) / SOUND_SPEED * RATE) + 1;
     }
 
     /** The studio has always kept its filters below 0.45 of the rate. */

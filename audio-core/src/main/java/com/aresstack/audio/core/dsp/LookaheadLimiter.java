@@ -199,6 +199,29 @@ public final class LookaheadLimiter implements AudioProcessor {
         apply(settings);
     }
 
+    /**
+     * Forgets the sound it holds: the look-ahead delay is emptied and the gain is back at 1, as after
+     * {@link #prepare}, but without allocating. For a jump in the material, so that nothing from before
+     * the jump leaks out after it. The lowest gain meter is kept. Call it on the audio thread.
+     */
+    public void reset() {
+        if (delayLeft == null) {
+            return;
+        }
+        java.util.Arrays.fill(delayLeft, 0f);
+        java.util.Arrays.fill(delayRight, 0f);
+        delayAt = 0;
+        minHead = 0;
+        minTail = 0;
+        minCount = 0;
+        time = 0;
+        java.util.Arrays.fill(average, 1.0);
+        averageAt = 0;
+        averageSum = n;
+        released = 1.0;
+        lastGain = 1f;
+    }
+
     private void apply(Settings now) {
         applied = now;
         ceiling = now.ceiling();

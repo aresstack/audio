@@ -1,10 +1,10 @@
 package com.aresstack.audio.core.stream;
 
 import com.aresstack.audio.core.AudioBlock;
-import com.aresstack.audio.core.AudioSource;
+import com.aresstack.audio.core.SeekableSource;
 
-/** Sound that is already in memory, delivered block by block. */
-public final class ArraySource implements AudioSource {
+/** Sound that is already in memory, delivered block by block; it can jump to any frame. */
+public final class ArraySource implements SeekableSource {
     private final float[] left;
     private final float[] right;
     private final float sampleRate;
@@ -23,8 +23,14 @@ public final class ArraySource implements AudioSource {
         return sampleRate;
     }
 
-    public int frames() {
+    @Override
+    public long frames() {
         return left.length;
+    }
+
+    @Override
+    public void seek(long frame) {
+        position = (int) Math.max(0, Math.min(left.length, frame));
     }
 
     @Override
