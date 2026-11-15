@@ -143,6 +143,37 @@ public record ArticulationSounds(Map<Articulation, Sound> sounds, Sound normal, 
         return new ArticulationSounds(sounds, normal, velocity, lead);
     }
 
+    /** The lines of the file beside a bank that say these sounds, as {@link #beside} reads them. */
+    public String text() {
+        StringBuilder text = new StringBuilder("# Articulation samples of this sound bank (Audio Studio)\n");
+        if (normal != null) {
+            text.append("normal = ").append(line(normal)).append('\n');
+        }
+        for (Map.Entry<Articulation, Sound> entry : sounds.entrySet()) {
+            text.append(entry.getKey().token()).append(" = ").append(line(entry.getValue())).append('\n');
+        }
+        text.append("keyswitch.velocity = ").append(velocity).append('\n');
+        text.append("keyswitch.lead = ").append(leadTicks).append('\n');
+        return text.toString();
+    }
+
+    private static String line(Sound sound) {
+        return (sound.kind() == Kind.KEYSWITCH ? "keyswitch " : "program ") + sound.value();
+    }
+
+    /**
+     * Writes these sounds into the file beside a sound bank; without any sound the file is
+     * removed, so that the bank plays as before.
+     */
+    public void saveBeside(Path soundbank) throws IOException {
+        Path file = fileOf(soundbank);
+        if (isEmpty()) {
+            Files.deleteIfExists(file);
+            return;
+        }
+        Files.writeString(file, text(), StandardCharsets.UTF_8);
+    }
+
     /** A short text for the cache identity of a stem. */
     public String describe() {
         return isEmpty() ? "none" : "normal=" + normal + " " + sounds + " v" + velocity + " lead" + leadTicks;

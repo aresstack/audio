@@ -1530,6 +1530,10 @@ public final class AudioStudioFrame extends JFrame {
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
         page.add(new DeckWidgets.Module("Soundbänke · SF2, SF3 und SFZ", libraries), BorderLayout.CENTER);
+        ArticulationSoundsPanel articulations = new ArticulationSoundsPanel(this::append);
+        libraries.whenSelected(articulations::display);
+        page.add(new DeckWidgets.Module("Artikulationen der gewählten Soundbank · Keyswitch oder Programm",
+                articulations), BorderLayout.SOUTH);
         return page;
     }
 

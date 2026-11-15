@@ -46,6 +46,7 @@ public final class InstrumentLibraryPanel extends JPanel {
     private final JButton cancelButton = new JButton("Download abbrechen");
     private final JProgressBar progressBar = new JProgressBar();
     private SwingWorker<Integer, String> downloadWorker;
+    private java.util.function.BiConsumer<InstrumentLibrary, java.nio.file.Path> selectionListener = (library, bank) -> { };
 
     public InstrumentLibraryPanel(InstrumentRegistry registry,
                                   Supplier<AudioProxyRoutes> proxyRoutes,
@@ -71,7 +72,12 @@ public final class InstrumentLibraryPanel extends JPanel {
         table.getColumnModel().getColumn(0).setCellRenderer(new NameRenderer());
         table.getTableHeader().setFont(AudioStudioTheme.lettering(10.5f));
         table.getTableHeader().setReorderingAllowed(false);
-        table.getSelectionModel().addListSelectionListener(event -> updateDownloadButton());
+        table.getSelectionModel().addListSelectionListener(event -> {
+            updateDownloadButton();
+            if (!event.getValueIsAdjusting()) {
+                tellSelection();
+            }
+        });
         JScrollPane scroll = new JScrollPane(table);
         scroll.setBorder(BorderFactory.createLineBorder(AudioStudioTheme.STROKE, 1, true));
         add(scroll, BorderLayout.CENTER);
@@ -123,6 +129,27 @@ public final class InstrumentLibraryPanel extends JPanel {
         actions.add(right, BorderLayout.EAST);
         container.add(actions, BorderLayout.SOUTH);
         return container;
+    }
+
+    /**
+     * Hears which library is selected, with its installed sound bank file ({@code null} if it is
+     * not installed); told at once and on every change of selection or installation.
+     */
+    public void whenSelected(java.util.function.BiConsumer<InstrumentLibrary, java.nio.file.Path> listener) {
+        selectionListener = listener;
+        tellSelection();
+    }
+
+    private void tellSelection() {
+        InstrumentLibrary library = selectedLibrary(false);
+        java.nio.file.Path bank = null;
+        if (library != null && registry.isInstalled(library.id())) {
+            bank = registry.find(library.id());
+            if (bank != null && !java.nio.file.Files.isRegularFile(bank)) {
+                bank = null;
+            }
+        }
+        selectionListener.accept(library, bank);
     }
 
     private void updateDownloadButton() {
@@ -330,8 +357,13 @@ public final class InstrumentLibraryPanel extends JPanel {
     }
 
     private void refresh() {
+        int selected = table.getSelectedRow();
         ((LibraryTableModel) table.getModel()).fireTableDataChanged();
+        if (selected >= 0 && selected < table.getRowCount()) {
+            table.setRowSelectionInterval(selected, selected);
+        }
         onRegistryChanged.run();
+        tellSelection();
     }
 
     private final class LibraryTableModel extends AbstractTableModel {
