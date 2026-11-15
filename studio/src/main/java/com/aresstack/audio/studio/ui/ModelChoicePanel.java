@@ -28,7 +28,7 @@ import javax.swing.JPanel;
 /**
  * The models next to a prompt for the AI: one choice per role the page works with (planning and
  * composition beside the composition prompt; the album's model too on the album page), filled
- * from "Modelle laden", and the extended assignment of every role behind a button. The choice is
+ * from the refresh sign beside the heading, and the extended assignment of every role behind a button. The choice is
  * only a wish: a production takes it over when it starts.
  */
 final class ModelChoicePanel extends JPanel {
@@ -68,7 +68,16 @@ final class ModelChoicePanel extends JPanel {
         at.anchor = GridBagConstraints.WEST;
         at.fill = GridBagConstraints.HORIZONTAL;
         at.weightx = 1;
-        add(DeckWidgets.lettering("KI-Modelle"), at);
+        // The heading, and right beside it the sign that fetches the models of the service anew.
+        DeckWidgets.RefreshKey load = new DeckWidgets.RefreshKey(
+                "Modelle neu laden: die Modelle des eingestellten Dienstes in die Auswahl holen");
+        load.addActionListener(event -> this.loadModels.run());
+        JPanel head = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        head.setOpaque(false);
+        head.add(DeckWidgets.lettering("KI-Modelle"));
+        head.add(javax.swing.Box.createHorizontalStrut(8));
+        head.add(load);
+        add(head, at);
         for (ModelRole role : this.roles) {
             JComboBox<String> box = box(role);
             boxes.add(box);
@@ -93,16 +102,11 @@ final class ModelChoicePanel extends JPanel {
             add(purpose, at);
             at.gridx = 0;
         }
-        JButton load = new JButton("Modelle laden");
-        load.setToolTipText("Die Modelle des eingestellten Dienstes in die Auswahl holen");
-        load.addActionListener(event -> this.loadModels.run());
         JButton extended = new JButton("Erweiterte Modellzuordnung …");
         extended.setToolTipText("Jeder KI-Aufgabe ein eigenes Modell geben");
         extended.addActionListener(event -> showExtended());
         JPanel buttons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         buttons.setOpaque(false);
-        buttons.add(load);
-        buttons.add(javax.swing.Box.createHorizontalStrut(8));
         buttons.add(extended);
         at.gridy++;
         at.gridx = 0;
