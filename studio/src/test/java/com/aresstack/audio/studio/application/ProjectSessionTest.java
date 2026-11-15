@@ -505,6 +505,35 @@ public final class ProjectSessionTest {
         StemManifest.current(StemManifest.load(piece), beyond); // the stem check needs no TSV
     }
 
+    /**
+     * A piece in 3/4 from the first bar, at a tempo the TSV cannot write: a pure stage change is
+     * taken over whole, model, mix and stem manifest, with no part of it applied halfway.
+     */
+    @Test
+    public void aStageChangeIsTakenOverForAPieceInThreeFour() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        Composition c = session.composition();
+        TimeMap time = new TimeMap(List.of(new TimeMap.Tempo(0, 96.5)), List.of(new TimeMap.Meter(0, 3, 4)),
+                List.of(new TimeMap.KeyChange(0, Key.C_MAJOR)));
+        Composition waltz = new Composition(c.meta(), time, c.sections(), c.parts(), c.tracks(), c.assets());
+        CompositionJson.save(piece, waltz);
+        StemManifest.save(piece, List.of(new StemManifest.Entry("melody", "melody.wav", "reference",
+                StemManifest.ADOPTED, StemManifest.digest(waltz, "melody"))));
+        session = ProjectSession.open(piece).orElseThrow();
+        assertFalse(session.withinTsv());
+
+        String scene = new String(Files.readAllBytes(piece.resolve(ProjectFolder.SCENE)), StandardCharsets.UTF_8)
+                .replace("\"kind\":\"chamber\"", "\"kind\":\"cathedral\"");
+        Files.write(piece.resolve(ProjectFolder.SCENE), scene.getBytes(StandardCharsets.UTF_8));
+        assertTrue(session.synchronize());
+        assertEquals(waltz, session.composition());
+        assertEquals(waltz, CompositionJson.load(piece));
+        assertEquals("cathedral", session.mix().room().kind());
+        assertEquals("cathedral", MixJson.load(piece).room().kind());
+        assertEquals(1, StemManifest.load(piece).size());
+        assertFalse(session.externalChanges());
+    }
+
     /** PO edge case: taking over new old files keeps the form of the piece. */
     @Test
     public void takingOverNewOldFilesKeepsTheSections() throws Exception {
