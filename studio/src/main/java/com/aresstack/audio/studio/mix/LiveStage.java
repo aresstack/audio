@@ -51,6 +51,8 @@ public final class LiveStage implements AutoCloseable {
     private java.util.concurrent.ScheduledExecutorService glider;
     /** How the tracks move with the piece: place and room share from the mix document (work package D3). */
     private volatile StageAutomation movements;
+    /** How the level curve of a placement lies in the time of the piece; {@code null}: in bars of one length. */
+    private volatile java.util.function.Function<List<SoundSourcePlacement>, StageAutomation> levels;
 
     private LiveStage(List<float[][]> sounds, List<SoundSourcePlacement> placements, AcousticRoom room,
                       double secondsPerBar, StageAutomation movements, StageSound sound) {
@@ -176,8 +178,13 @@ public final class LiveStage implements AutoCloseable {
 
     /** The numbers of a channel for a placement on this stage; a muted track is turned down. */
     private ChannelParameters parameters(SoundSourcePlacement placement) {
-        ChannelParameters parameters = SpatialStemMixer.parameters(placement,
-                movements.of(placement.trackId()), room, secondsPerBar, sound);
+        java.util.function.Function<List<SoundSourcePlacement>, StageAutomation> timed = levels;
+        ChannelParameters parameters = timed == null
+                ? SpatialStemMixer.parameters(placement, movements.of(placement.trackId()), room, secondsPerBar, sound)
+                // As the file mix joins them: the level curve of the placement as it stands now, in the
+                // time of the piece, with the movements of the mix document.
+                : SpatialStemMixer.parameters(placement,
+                        timed.apply(List.of(placement)).movingAs(movements).of(placement.trackId()), room, sound);
         return placement.muted() ? parameters.toBuilder().level(0).build() : parameters;
     }
 
@@ -322,6 +329,22 @@ public final class LiveStage implements AutoCloseable {
     public void moving(StageAutomation changed) {
         synchronized (glides) {
             movements = changed == null ? StageAutomation.NONE : changed;
+            for (int track = 0; track < current.length; track++) {
+                graph.channel(track).set(parameters(current[track]));
+            }
+        }
+    }
+
+    /**
+     * How the level curves of the placements lie in the time of the piece: what the file mix
+     * hears of them ({@code StageAutomation.of(placements, timeMap)} for a piece whose tempo or
+     * meter changes). Every track is placed again with it; a track moved later gets the curve of
+     * its new placement the same way. Without this, a level curve is read in bars of one length
+     * ({@code secondsPerBar}), which is the same for a piece with one tempo and one meter.
+     */
+    public void levels(java.util.function.Function<List<SoundSourcePlacement>, StageAutomation> timed) {
+        synchronized (glides) {
+            levels = timed;
             for (int track = 0; track < current.length; track++) {
                 graph.channel(track).set(parameters(current[track]));
             }

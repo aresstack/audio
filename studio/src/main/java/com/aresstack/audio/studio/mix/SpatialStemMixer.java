@@ -564,6 +564,29 @@ public final class SpatialStemMixer {
         return standing.toBuilder().motion(motion(placement, movements, room, sound, standing(standing))).build();
     }
 
+    /**
+     * The numbers of a channel as the file mix makes them from the curves of a track: the level
+     * curve and the trim of {@code lanes} (laid along the time of the piece, see {@link
+     * StageAutomation#of(List, com.aresstack.audio.composition.TimeMap)}), and its movements. Live
+     * playback of a piece whose tempo or meter changes takes its channels from here, so that a
+     * level curve lies live where it lies in the file.
+     */
+    static ChannelParameters parameters(SoundSourcePlacement placement, StageAutomation.Lanes lanes,
+                                        AcousticRoom room, StageSound sound) {
+        StereoStrip.LevelCurve curve = lanes.level() == null ? null
+                : frame -> (float) Math.pow(10, lanes.level().valueAt(frame) / 20);
+        ChannelParameters standing = parameters(placement, room, curve, sound);
+        if (lanes.trimDb() != 0) {
+            // What the mix document says beyond the range of the placement (D3), as in the file.
+            standing = standing.toBuilder()
+                    .level((float) Math.pow(10, (placement.levelDb() + lanes.trimDb()) / 20)).build();
+        }
+        if (!lanes.moves()) {
+            return standing;
+        }
+        return standing.toBuilder().motion(motion(placement, lanes, room, sound, standing(standing))).build();
+    }
+
     /** As {@link #parameters(SoundSourcePlacement, AcousticRoom, double)}, with the level curve given. */
     static ChannelParameters parameters(SoundSourcePlacement placement, AcousticRoom room,
                                         StereoStrip.LevelCurve curve) {

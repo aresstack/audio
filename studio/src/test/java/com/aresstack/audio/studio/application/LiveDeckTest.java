@@ -401,6 +401,69 @@ public final class LiveDeckTest {
         Assert.assertTrue(rms(still.left) > 3 * rms(still.right));
     }
 
+    /**
+     * PO finding on the D4 stage, "live as the WAV when the tempo changes": a piece with a model
+     * whose tempo drops in the middle, and a level curve of the stage across that place. The
+     * points of the curve are in bars; live lays them along the time map as the file mix does,
+     * not along bars of one length. Played in blocks of 512 against the mixed file, for
+     * loudspeakers and for headphones.
+     */
+    @Test
+    public void aLevelCurveAcrossAChangeOfTempoIsHeardLiveAsInTheFile() throws Exception {
+        Path song = piece();
+        new PieceModel(line -> { }).open(song); // takes the written piece into a model
+        com.aresstack.audio.composition.Composition composed =
+                com.aresstack.audio.studio.project.CompositionJson.load(song);
+        com.aresstack.audio.composition.TimeMap time = composed.timeMap();
+        // 120 in the first bar (2 s), 80 from the second on (3 s each).
+        com.aresstack.audio.composition.Composition slower = new com.aresstack.audio.composition.Composition(
+                composed.meta(), new com.aresstack.audio.composition.TimeMap(
+                Arrays.asList(new com.aresstack.audio.composition.TimeMap.Tempo(0, 120),
+                        new com.aresstack.audio.composition.TimeMap.Tempo(1920, 80)), time.meters(), time.keys()),
+                composed.sections(), composed.parts(), composed.tracks(), composed.assets());
+        Files.delete(song.resolve("arrangement.tsv"));
+        StageMixService.Piece piece = StageMixService.Piece.of(slower);
+        StageMixService service = new StageMixService();
+        SpatialScene scene = service.scene(piece, song).withFixedLevel(true).withMaster(-14)
+                .inRoom(AcousticRoom.STUDIO.withAmount(0));
+        // Loud through the first bar, then down by 18 dB over the second: until 5 s, not until 4 s.
+        scene = scene.with(scene.placement("melody").at(-0.6, 0.1).withDynamics(java.util.List.of(
+                new SoundSourcePlacement.LevelPoint(0, 0), new SoundSourcePlacement.LevelPoint(1, 0),
+                new SoundSourcePlacement.LevelPoint(2, -18)))).with(scene.placement("bass").withMuted(true));
+        for (com.aresstack.audio.studio.mix.StageSound sound : new com.aresstack.audio.studio.mix.StageSound[]{
+                com.aresstack.audio.studio.mix.StageSound.LOUDSPEAKERS,
+                com.aresstack.audio.studio.mix.StageSound.binaural()}) {
+            service.setSound(sound);
+            SpatialStemMixer.Signal file = SpatialStemMixer.read(service.mix(piece, song, scene, message -> { }));
+            // The curve is where the time map has it: at 4 s the melody is two thirds of the way down, not all of it.
+            double early = rms(file, RATE, RATE + RATE / 2);
+            Assert.assertEquals("at 4 s: 12 of the 18 dB", -12,
+                    20 * Math.log10(rms(file, 4 * RATE - RATE / 20, 4 * RATE + RATE / 20) / early), 0.7);
+            Tape tape = new Tape();
+            tape.allow(Integer.MAX_VALUE);
+            try (LiveDeck deck = LiveDeck.open(piece, song, scene, null, Float.NaN, () -> tape, sound)) {
+                deck.play();
+                awaitEnd(deck);
+                int late = deck.playback().master().latencyFrames();
+                double worst = 0;
+                for (int i = 0; i < file.left.length; i++) {
+                    worst = Math.max(worst, Math.max(Math.abs(file.left[i] - tape.left[i + late]),
+                            Math.abs(file.right[i] - tape.right[i + late])));
+                }
+                // The limit of the test with moving noise; the file has 16 bits (steps of 3e-5).
+                Assert.assertEquals("headphones " + sound.headphones() + ": live against the file", 0, worst, 1e-3);
+            }
+        }
+    }
+
+    private static double rms(SpatialStemMixer.Signal signal, int from, int to) {
+        double sum = 0;
+        for (int i = from; i < to; i++) {
+            sum += signal.left[i] * (double) signal.left[i] + signal.right[i] * (double) signal.right[i];
+        }
+        return Math.sqrt(sum / Math.max(1, to - from));
+    }
+
     private static double rms(float[] side) {
         double sum = 0;
         for (float sample : side) {

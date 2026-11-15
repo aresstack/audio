@@ -130,6 +130,8 @@ public final class LiveDeck implements AutoCloseable {
         // How the tracks move with the piece (place and room share) comes from its mix document, as for the file.
         LiveStage stage = LiveStage.load(files, placements, fitting.room(), piece.secondsPerBar(),
                 piece.movements(directory, message -> { }), heardAs);
+        // The level curves lie in the time of the piece, as the file mix lays them (tempo and meter may change).
+        stage.levels(piece::levels);
         try {
             LivePlayback playback = stage.playback(master(fitting, factor, fitting.masterDb()), sinks.open());
             return new LiveDeck(stage, playback, fitting, factor, directory, piece);
