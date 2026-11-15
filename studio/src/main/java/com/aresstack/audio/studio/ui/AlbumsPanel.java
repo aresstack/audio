@@ -12,9 +12,13 @@ import com.aresstack.audio.studio.album.AlbumProductionCoordinator;
 import com.aresstack.audio.studio.album.AlbumProductionState;
 import com.aresstack.audio.studio.album.AlbumProductionState.Status;
 import com.aresstack.audio.studio.album.AlbumRoles;
+import com.aresstack.audio.studio.album.AlbumSuggester;
+import com.aresstack.audio.studio.album.AlbumSuggester.Field;
+import com.aresstack.audio.studio.album.AlbumSuggestions;
 import com.aresstack.audio.studio.album.AlbumTrack;
 import com.aresstack.audio.studio.album.AutopilotPieceProduction;
 import com.aresstack.audio.studio.album.ChatAlbumPlanner;
+import com.aresstack.audio.studio.album.ChatAlbumSuggester;
 import com.aresstack.audio.studio.album.LimitedChatModel;
 import com.aresstack.audio.studio.application.PieceAutopilot;
 import com.aresstack.audio.studio.application.SongLibrary;
@@ -29,10 +33,13 @@ import java.awt.Insets;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -47,6 +54,9 @@ import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
 
@@ -102,6 +112,9 @@ final class AlbumsPanel extends JPanel {
     private final JTextField title = new JTextField();
     private final JTextField description = new JTextField();
     private final JTextField style = new JTextField();
+    private final SuggestBox titleBox = new SuggestBox(title);
+    private final SuggestBox descriptionBox = new SuggestBox(description);
+    private final SuggestBox styleBox = new SuggestBox(style);
     private final JSpinner trackCount = new JSpinner(new SpinnerNumberModel(12, 1, AlbumConcept.MAX_TRACKS, 1));
     private final JSpinner minutes = new JSpinner(new SpinnerNumberModel(5.0, 0.5, 60.0, 0.5));
     private final Tracks tracks = new Tracks();
@@ -127,6 +140,29 @@ final class AlbumsPanel extends JPanel {
     private AlbumProductionCoordinator.Production production;
     private boolean busy;
     private boolean showing;
+
+    /** How long the user must have stopped typing before the AI is asked for proposals. */
+    static final int TYPING_PAUSE_MILLIS = 900;
+    /** The proposals made for the fields of the album shown; kept with the album. */
+    private AlbumSuggestions suggestions = AlbumSuggestions.EMPTY;
+    /** Who proposes; {@code null} asks the model of the settings. Set by a test. */
+    private AlbumSuggester suggester;
+    /** One request after the other, so that typing never floods the model. */
+    private final ExecutorService proposing = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "album-proposals");
+        thread.setDaemon(true);
+        return thread;
+    });
+    /** What each field was last asked with, so that the same question is not asked twice. */
+    private final Map<Field, String> askedWith = new EnumMap<Field, String>(Field.class);
+    private final Map<Field, Integer> waiting = new EnumMap<Field, Integer>(Field.class);
+    private final Timer afterTitle = pause(() -> {
+        propose(Field.STYLE);
+        propose(Field.DESCRIPTION);
+        propose(Field.TITLE);
+    });
+    private final Timer afterDescription = pause(() -> propose(Field.STYLE));
+    private final Timer afterStyle = pause(() -> propose(Field.STYLE));
 
     AlbumsPanel(Host host, SongLibrary songs, InstrumentRegistry registry) {
         super(new BorderLayout(14, 0));
@@ -171,9 +207,12 @@ final class AlbumsPanel extends JPanel {
         c.insets = new Insets(0, 0, 6, 8);
         c.anchor = GridBagConstraints.WEST;
         c.fill = GridBagConstraints.HORIZONTAL;
-        row(concept, c, 0, "Titel", title, 3);
-        row(concept, c, 1, "Worum geht es? Das bekommt die KI gesagt.", description, 3);
-        row(concept, c, 2, "Stil", style, 3);
+        row(concept, c, 0, "Titel", titleBox, 3);
+        row(concept, c, 1, "Worum geht es? Das bekommt die KI gesagt.", descriptionBox, 3);
+        row(concept, c, 2, "Stil", styleBox, 3);
+        typed(title, afterTitle);
+        typed(description, afterDescription);
+        typed(style, afterStyle);
         c.gridy = 3;
         c.gridwidth = 1;
         c.gridx = 0;
@@ -310,11 +349,23 @@ final class AlbumsPanel extends JPanel {
         title.setText(chosen == null ? "" : chosen.title());
         description.setText(chosen == null ? "" : chosen.concept().description());
         style.setText(chosen == null ? "" : chosen.concept().style());
+        afterTitle.stop();
+        afterDescription.stop();
+        afterStyle.stop();
+        askedWith.clear();
+        suggestions = chosen == null ? AlbumSuggestions.EMPTY : AlbumSuggestions.load(files.folder(chosen.id()));
+        showProposals();
         trackCount.setValue(chosen == null ? 12 : chosen.concept().trackCount());
         minutes.setValue(chosen == null ? 5.0 : chosen.concept().secondsPerTrack() / 60.0);
         tracks.fireTableDataChanged();
         say(chosen == null ? "Noch kein Album. „Neues Album“ legt eines an." : summary());
         keys();
+        if (chosen != null && suggestions.of(Field.STYLE).isEmpty()) {
+            // The title stands: first directions for the style, and ideas for the other fields.
+            propose(Field.STYLE);
+            propose(Field.DESCRIPTION);
+            propose(Field.TITLE);
+        }
     }
 
     /** The album shown, for a test. */
@@ -349,7 +400,7 @@ final class AlbumsPanel extends JPanel {
         AlbumTrack selected = there && row >= 0 && row < album.tracks().size() ? album.tracks().get(row) : null;
         create.setEnabled(!running && !busy);
         delete.setEnabled(free);
-        for (Component field : new Component[]{title, description, style, trackCount, minutes}) {
+        for (Component field : new Component[]{titleBox, descriptionBox, styleBox, trackCount, minutes}) {
             field.setEnabled(free);
         }
         plan.setEnabled(free);
@@ -362,6 +413,136 @@ final class AlbumsPanel extends JPanel {
         again.setEnabled(free && selected != null && selected.hasPiece());
         open.setEnabled(there && selected != null && selected.hasPiece());
         export.setEnabled(free && state.count(album, Status.DONE) > 0);
+    }
+
+    // ---- proposals of the AI for the fields ----
+
+    private static Timer pause(Runnable then) {
+        Timer timer = new Timer(TYPING_PAUSE_MILLIS, event -> then.run());
+        timer.setRepeats(false);
+        return timer;
+    }
+
+    /** When the user has typed into a field and paused, proposals are asked for. */
+    private void typed(JTextField field, Timer timer) {
+        field.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent event) {
+                changed();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent event) {
+                changed();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent event) {
+            }
+
+            private void changed() {
+                // Only what the user types counts, not what the page puts into the field itself.
+                if (album != null && field.isFocusOwner()) {
+                    timer.restart();
+                }
+            }
+        });
+    }
+
+    void suggester(AlbumSuggester suggester) {
+        this.suggester = suggester;
+    }
+
+    SuggestBox box(Field field) {
+        return field == Field.TITLE ? titleBox : field == Field.DESCRIPTION ? descriptionBox : styleBox;
+    }
+
+    private void showProposals() {
+        for (Field field : Field.values()) {
+            List<String> known = suggestions.of(field);
+            box(field).proposals(known);
+            box(field).setToolTipText(known.isEmpty() ? "Vorschläge der KI erscheinen hier, sobald ein Titel steht."
+                    : known.size() + " Vorschläge der KI: mit dem Pfeil öffnen.");
+        }
+        // A style proposed while none is written yet shows faintly in the field, as a first idea.
+        List<String> styles = suggestions.of(Field.STYLE);
+        style.putClientProperty("JTextField.placeholderText", styles.isEmpty() ? null : styles.get(0));
+        style.repaint();
+    }
+
+    /**
+     * Asks for proposals for a field with what the fields say now, in the background; they are
+     * added in front of the ones made before and kept with the album. Nothing is asked without a
+     * title, twice with the same words, or while an album is being produced.
+     */
+    void propose(Field field) {
+        Album asked = album;
+        if (asked == null || busy || (production != null && production.running())) {
+            return;
+        }
+        String named = title.getText().trim();
+        String about = description.getText().trim();
+        String sounds = style.getText().trim();
+        if (named.isEmpty()) {
+            return;
+        }
+        String with = field == Field.TITLE ? named + "\n" + about
+                : field == Field.DESCRIPTION ? named + "\n" + sounds : named + "\n" + about + "\n" + sounds;
+        if (with.equals(askedWith.get(field))) {
+            return;
+        }
+        final AlbumSuggester proposer;
+        try {
+            proposer = suggester != null ? suggester
+                    : new ChatAlbumSuggester(ModelLineup.of(host.model()).model(AlbumRoles.ALBUM), host.tokens());
+        } catch (RuntimeException noModel) {
+            // Without a model there are no proposals; the fields work as before.
+            return;
+        }
+        askedWith.put(field, with);
+        List<String> known = suggestions.of(field);
+        waiting.merge(field, 1, Integer::sum);
+        box(field).setToolTipText("Die KI sucht Vorschläge …");
+        proposing.execute(() -> {
+            List<String> fresh;
+            try {
+                fresh = proposer.suggest(field, named, about, sounds, known);
+            } catch (IOException | RuntimeException failed) {
+                fresh = List.of();
+                host.log("Vorschläge der KI (" + field.key() + ") blieben aus: " + failed.getMessage());
+            }
+            List<String> found = fresh;
+            SwingUtilities.invokeLater(() -> {
+                waiting.merge(field, -1, Integer::sum);
+                if (album == null || !album.id().equals(asked.id())) {
+                    return;
+                }
+                AlbumSuggestions grown = suggestions.with(field, found);
+                if (grown != suggestions) {
+                    suggestions = grown;
+                    try {
+                        suggestions.save(files.folder(asked.id()));
+                    } catch (IOException failed) {
+                        host.log("Die Vorschläge ließen sich nicht speichern: " + failed.getMessage());
+                    }
+                }
+                boolean open = box(field).isPopupVisible();
+                showProposals();
+                if (open) {
+                    box(field).showPopup();
+                }
+            });
+        });
+    }
+
+    /** Whether proposals are still being asked for (for a test). */
+    boolean proposingNow() {
+        for (int count : waiting.values()) {
+            if (count > 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ---- the concept ----
