@@ -1061,15 +1061,17 @@ final class AlbumsPanel extends JPanel {
                 Path file = sorted.get(i);
                 int at = row + i;
                 if (at >= changed.size()) {
-                    String name = file.getFileName().toString();
-                    String named = name.contains(".") ? name.substring(0, name.lastIndexOf('.')) : name;
-                    AlbumTrack fresh = new AlbumTrack(growing.freshTrackId(), named.replace('_', ' '), "", 100,
+                    AlbumTrack fresh = new AlbumTrack(growing.freshTrackId(), titleOf(file), "", 100,
                             "C major", "4/4", "", "", album.concept().secondsPerTrack(), "");
                     changed.add(fresh);
                     growing = growing.withTracks(changed);
                     at = changed.size() - 1;
                 }
                 templates.put(album.id(), changed.get(at).id(), file);
+                // A title the album only numbered takes the name the notes give, not one the AI invents.
+                if (changed.get(at).title().matches("Titel \\d+|Ohne Titel")) {
+                    changed.set(at, changed.get(at).withTitle(titleOf(file)));
+                }
                 given++;
             }
         } catch (IOException | RuntimeException failed) {
@@ -1087,6 +1089,25 @@ final class AlbumsPanel extends JPanel {
                     : given + " Titel folgen jetzt Notenvorlagen; „Album produzieren“ macht sie daraus.");
         }
         keys();
+    }
+
+    /**
+     * The name of a piece as its notes give it: the title of a MusicXML score (work and movement)
+     * or of a MIDI file, else the name of the file. Nothing is asked of the AI here.
+     */
+    static String titleOf(Path file) {
+        String name = file.getFileName().toString();
+        String named = (name.contains(".") ? name.substring(0, name.lastIndexOf('.')) : name).replace('_', ' ').trim();
+        try {
+            com.aresstack.audio.studio.template.TemplateScore score =
+                    com.aresstack.audio.studio.template.TemplateReader.read(file, null, 0, 0, file.getParent(), null);
+            if (!score.title().isBlank() && !score.title().equals(named)) {
+                return score.title();
+            }
+        } catch (IOException | RuntimeException notReadableHere) {
+            // text notations are read by the AI later; the file's name does until then
+        }
+        return named.isEmpty() ? "Ohne Titel" : named;
     }
 
     private void dropScore() {

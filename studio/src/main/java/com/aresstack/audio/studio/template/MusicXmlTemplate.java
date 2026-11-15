@@ -135,10 +135,11 @@ public final class MusicXmlTemplate {
         }
 
         TemplateScore read() {
-            String named = text(first(first(root, "work"), "work-title"));
-            if (named.isEmpty()) {
-                named = text(first(root, "movement-title"));
-            }
+            // "La primavera" and "Allegro": a movement is named with its work where the file names both.
+            String work = text(first(first(root, "work"), "work-title"));
+            String movement = text(first(root, "movement-title"));
+            String named = work.isEmpty() ? movement : movement.isEmpty() || movement.equals(work) ? work
+                    : work + " – " + movement;
             Map<String, String> names = new LinkedHashMap<String, String>();
             Map<String, Integer> programs = new HashMap<String, Integer>();
             Map<String, Boolean> drums = new HashMap<String, Boolean>();
