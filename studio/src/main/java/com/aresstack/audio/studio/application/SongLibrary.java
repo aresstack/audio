@@ -169,6 +169,18 @@ public final class SongLibrary {
     public void planned(Path folder, String description) throws IOException {
         Properties properties = properties(folder);
         properties.setProperty("plannedFrom", description == null ? "" : description);
+        store(folder, properties);
+    }
+
+    /**
+     * Writes the file of a piece, but only if it would say something new: the file belongs to
+     * what the work model watches, and writing it unchanged (with a new date in its head) would
+     * look like a change made behind the model's back.
+     */
+    private static void store(Path folder, Properties properties) throws IOException {
+        if (Files.isRegularFile(folder.resolve(FILE_NAME)) && properties.equals(properties(folder))) {
+            return;
+        }
         Files.createDirectories(folder);
         try (Writer writer = Files.newBufferedWriter(folder.resolve(FILE_NAME), StandardCharsets.UTF_8)) {
             properties.store(writer, "Audio Studio piece");
@@ -230,10 +242,23 @@ public final class SongLibrary {
         if (properties.isEmpty()) {
             return;
         }
-        Files.createDirectories(folder);
-        try (Writer writer = Files.newBufferedWriter(folder.resolve(FILE_NAME), StandardCharsets.UTF_8)) {
-            properties.store(writer, "Audio Studio piece");
+        store(folder, properties);
+    }
+
+    /**
+     * Takes a piece out of the library without destroying it: its folder goes into
+     * {@code .papierkorb} in the library, where no list shows it and from where it can be taken back.
+     *
+     * @return where the piece is now
+     */
+    public Path discard(Path folder) throws IOException {
+        Path bin = root.resolve(".papierkorb");
+        Files.createDirectories(bin);
+        Path target = bin.resolve(folder.getFileName().toString());
+        for (int number = 2; Files.exists(target); number++) {
+            target = bin.resolve(folder.getFileName() + "-" + number);
         }
+        return Files.move(folder, target);
     }
 
     private static Properties properties(Path folder) {

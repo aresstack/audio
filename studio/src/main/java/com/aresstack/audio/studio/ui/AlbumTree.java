@@ -48,8 +48,8 @@ final class AlbumTree extends JPanel {
         /** The user clicked a title that has a piece: open it. */
         void pieceClicked(String albumId, Path folder);
 
-        /** The user clicked a title that has no piece yet: show its album. */
-        default void plannedClicked(String albumId) {
+        /** The user clicked a title that has no piece yet: its piece is made now and opened. */
+        default void plannedClicked(String albumId, String trackId) {
             albumClicked(albumId);
         }
 
@@ -61,6 +61,28 @@ final class AlbumTree extends JPanel {
         void newComposition();
 
         void deleteAlbum(String albumId);
+
+        /** A new piece in this album. */
+        default void newCompositionIn(String albumId) {
+            newComposition();
+        }
+
+        /** Asks for a new name of the album and gives it. */
+        default void renameAlbum(String albumId) {
+        }
+
+        /** Asks for a new name of the title and gives it, to its piece as well. */
+        default void renameTitle(String albumId, String trackId) {
+        }
+
+        /** Asks whether the title (and its piece) should go, and takes it away. */
+        default void deleteTitle(String albumId, String trackId) {
+        }
+
+        /** Produces the album, as its page does. */
+        default void produceAlbum(String albumId) {
+            albumClicked(albumId);
+        }
     }
 
     /** A node of an album. */
@@ -83,6 +105,7 @@ final class AlbumTree extends JPanel {
     private final DefaultMutableTreeNode root = new DefaultMutableTreeNode("Projekt");
     private final DefaultTreeModel model = new DefaultTreeModel(root);
     private final JTree tree = new JTree(model);
+    private final JScrollPane scroll;
     private boolean filling;
     /** When the selection last told the window, so that the click that made it does not tell it twice. */
     private long announcedAt = -1;
@@ -95,12 +118,21 @@ final class AlbumTree extends JPanel {
         tree.setRootVisible(false);
         tree.setShowsRootHandles(true);
         tree.setRowHeight(24);
+        // Part of the desk, like the menu that was here before: the module's own dark, no frame of its own.
+        tree.setBackground(AudioStudioTheme.MODULE);
+        tree.setForeground(AudioStudioTheme.TEXT);
+        tree.setOpaque(true);
         tree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
         tree.setCellRenderer(new DefaultTreeCellRenderer() {
             @Override
             public Component getTreeCellRendererComponent(JTree owner, Object value, boolean selected, boolean expanded,
                                                           boolean leaf, int row, boolean focused) {
                 Object shown = value instanceof DefaultMutableTreeNode node ? node.getUserObject() : value;
+                setBackgroundNonSelectionColor(AudioStudioTheme.MODULE);
+                setTextNonSelectionColor(AudioStudioTheme.TEXT);
+                setBackgroundSelectionColor(AudioStudioTheme.RAISED);
+                setTextSelectionColor(AudioStudioTheme.TEXT);
+                setBorderSelectionColor(AudioStudioTheme.ACCENT);
                 Component label = super.getTreeCellRendererComponent(owner, shown, selected, expanded, leaf, row,
                         focused);
                 setIcon(null);
@@ -128,7 +160,7 @@ final class AlbumTree extends JPanel {
                 if (title.folder() != null) {
                     host.pieceClicked(title.album().id(), title.folder());
                 } else {
-                    host.plannedClicked(title.album().id());
+                    host.plannedClicked(title.album().id(), title.track().id());
                 }
             }
         });
@@ -142,13 +174,7 @@ final class AlbumTree extends JPanel {
                 }
                 Object chosen = ((DefaultMutableTreeNode) path.getLastPathComponent()).getUserObject();
                 if (javax.swing.SwingUtilities.isRightMouseButton(event) || event.isPopupTrigger()) {
-                    if (chosen instanceof AlbumNode album) {
-                        JPopupMenu menu = new JPopupMenu();
-                        JMenuItem delete = new JMenuItem("Album löschen …");
-                        delete.addActionListener(click -> host.deleteAlbum(album.album().id()));
-                        menu.add(delete);
-                        menu.show(tree, event.getX(), event.getY());
-                    }
+                    menu(chosen).show(tree, event.getX(), event.getY());
                     return;
                 }
                 if (path.equals(tree.getSelectionPath()) && event.getWhen() != announcedAt) {
@@ -160,14 +186,34 @@ final class AlbumTree extends JPanel {
                 }
             }
         });
+        tree.getInputMap(JComponent.WHEN_FOCUSED).put(javax.swing.KeyStroke.getKeyStroke("F2"), "albumTreeRename");
+        tree.getActionMap().put("albumTreeRename", action(() -> {
+            Object chosen = selected();
+            if (chosen instanceof AlbumNode album) {
+                host.renameAlbum(album.album().id());
+            } else if (chosen instanceof TitleNode title) {
+                host.renameTitle(title.album().id(), title.track().id());
+            }
+        }));
+        tree.getInputMap(JComponent.WHEN_FOCUSED).put(javax.swing.KeyStroke.getKeyStroke("DELETE"), "albumTreeDelete");
+        tree.getActionMap().put("albumTreeDelete", action(() -> {
+            Object chosen = selected();
+            if (chosen instanceof AlbumNode album) {
+                host.deleteAlbum(album.album().id());
+            } else if (chosen instanceof TitleNode title) {
+                host.deleteTitle(title.album().id(), title.track().id());
+            }
+        }));
         if (!java.awt.GraphicsEnvironment.isHeadless()) {
             tree.setDragEnabled(true); // throws HeadlessException without a screen (CI)
         }
         tree.setDropMode(javax.swing.DropMode.ON_OR_INSERT);
         tree.setTransferHandler(new Moving());
 
-        JScrollPane scroll = new JScrollPane(tree);
-        scroll.setBorder(BorderFactory.createLineBorder(AudioStudioTheme.STROKE, 1, true));
+        scroll = new JScrollPane(tree);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.getViewport().setBackground(AudioStudioTheme.MODULE);
+        scroll.setBackground(AudioStudioTheme.MODULE);
         add(scroll, BorderLayout.CENTER);
         JButton newAlbum = new JButton("Neues Album");
         newAlbum.setToolTipText("Ein Album anlegen; ohne Titel heißt es „" + AlbumMembership.UNTITLED + "“");
@@ -187,6 +233,8 @@ final class AlbumTree extends JPanel {
      * open; the piece in use, or else the album chosen, is selected without telling the window.
      */
     void show(List<Album> albums, SongLibrary songs, String chosenAlbum, Path current) {
+        String selectedBefore = key(selected());
+        java.awt.Point seen = scroll.getViewport().getViewPosition();
         Set<String> closed = new HashSet<String>();
         Set<String> known = new HashSet<String>();
         for (int i = 0; i < root.getChildCount(); i++) {
@@ -234,10 +282,14 @@ final class AlbumTree extends JPanel {
                     tree.expandPath(new TreePath(node.getPath()));
                 }
             }
+            // Where the user scrolled stays: the list jumps to the selection only when that is a new one.
+            scroll.getViewport().setViewPosition(seen);
             if (select != null) {
                 TreePath path = new TreePath(select.getPath());
                 tree.setSelectionPath(path);
-                tree.scrollPathToVisible(path);
+                if (!key(select.getUserObject()).equals(selectedBefore)) {
+                    tree.scrollPathToVisible(path);
+                }
             } else {
                 tree.clearSelection();
             }
@@ -261,6 +313,76 @@ final class AlbumTree extends JPanel {
                 return;
             }
         }
+    }
+
+    /** What is selected: an album node, a title node, or {@code null}. */
+    private Object selected() {
+        TreePath path = tree.getSelectionPath();
+        return path == null ? null : ((DefaultMutableTreeNode) path.getLastPathComponent()).getUserObject();
+    }
+
+    /** What a node stands for, so that the same album or title is known again after a reload. */
+    private static String key(Object node) {
+        if (node instanceof AlbumNode album) {
+            return "a:" + album.album().id();
+        }
+        if (node instanceof TitleNode title) {
+            return "t:" + title.album().id() + "/" + title.track().id();
+        }
+        return "";
+    }
+
+    private static javax.swing.Action action(Runnable run) {
+        return new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent event) {
+                run.run();
+            }
+        };
+    }
+
+    private static JMenuItem item(String text, Runnable run) {
+        JMenuItem item = new JMenuItem(text);
+        item.addActionListener(event -> run.run());
+        return item;
+    }
+
+    /** The menu of the right mouse key, for an album or a title. */
+    JPopupMenu menu(Object chosen) {
+        JPopupMenu menu = new JPopupMenu();
+        if (chosen instanceof AlbumNode node) {
+            String id = node.album().id();
+            menu.add(item("Album öffnen", () -> host.albumClicked(id)));
+            menu.add(item("Neue Komposition in diesem Album …", () -> host.newCompositionIn(id)));
+            menu.add(item("Album produzieren", () -> host.produceAlbum(id)));
+            menu.addSeparator();
+            menu.add(item("Umbenennen …   (F2)", () -> host.renameAlbum(id)));
+            menu.add(item("Album löschen …   (Entf)", () -> host.deleteAlbum(id)));
+        } else if (chosen instanceof TitleNode title) {
+            String album = title.album().id();
+            String track = title.track().id();
+            menu.add(item(title.folder() == null ? "Komposition anlegen und öffnen" : "Komposition öffnen", () -> {
+                if (title.folder() != null) {
+                    host.pieceClicked(album, title.folder());
+                } else {
+                    host.plannedClicked(album, track);
+                }
+            }));
+            menu.add(item("Umbenennen …   (F2)", () -> host.renameTitle(album, track)));
+            javax.swing.JMenu into = new javax.swing.JMenu("In Album verschieben");
+            for (int i = 0; i < root.getChildCount(); i++) {
+                AlbumNode other = (AlbumNode) ((DefaultMutableTreeNode) root.getChildAt(i)).getUserObject();
+                if (!other.album().id().equals(album)) {
+                    String label = other.label().replaceAll("\\s+·\\s+\\d+$", "");
+                    into.add(item(label, () -> host.moveTitle(album, track, other.album().id(), -1)));
+                }
+            }
+            into.setEnabled(into.getItemCount() > 0);
+            menu.add(into);
+            menu.addSeparator();
+            menu.add(item("Titel löschen …   (Entf)", () -> host.deleteTitle(album, track)));
+        }
+        return menu;
     }
 
     /** The titles shown, as "album id / title", for a test. */

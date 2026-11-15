@@ -3187,6 +3187,152 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
+            public void plannedClicked(String albumId, String trackId) {
+                if (albumsPanel != null && albumsPanel.producing()) {
+                    showAlbum(albumId); // the production makes the piece itself
+                    return;
+                }
+                try {
+                    Path piece = albumMembers.pieceFor(albumId, trackId);
+                    if (albumsPanel != null) {
+                        albumsPanel.follow(albumId); // the page must not write back the title without its piece
+                    }
+                    if (piece != null) {
+                        pieceClicked(albumId, piece);
+                    }
+                } catch (IOException | RuntimeException failed) {
+                    message("Die Komposition ließ sich nicht anlegen: " + failed.getMessage());
+                }
+                refreshSongs();
+            }
+
+            @Override
+            public void newCompositionIn(String albumId) {
+                currentAlbum = albumId;
+                newComposition();
+            }
+
+            @Override
+            public void produceAlbum(String albumId) {
+                showAlbum(albumId);
+                if (albumsPanel != null && albumsPanel.album() != null && albumsPanel.album().id().equals(albumId)) {
+                    albumsPanel.produceAlbum();
+                }
+            }
+
+            @Override
+            public void renameAlbum(String albumId) {
+                Album album = albumMembers.albums().album(albumId).orElse(null);
+                if (album == null || refuseWhileProducing()) {
+                    return;
+                }
+                Object typed = JOptionPane.showInputDialog(AudioStudioFrame.this,
+                        "Neuer Name des Albums (leer: „" + AlbumMembership.UNTITLED + "“):", "Album umbenennen",
+                        JOptionPane.PLAIN_MESSAGE, null, null, AlbumMembership.isUntitled(album) ? "" : album.title());
+                if (typed == null) {
+                    return;
+                }
+                try {
+                    albumMembers.renameAlbum(albumId, typed.toString());
+                    if (albumsPanel != null && currentAlbum != null) {
+                        albumsPanel.follow(currentAlbum);
+                    }
+                } catch (IOException | RuntimeException failed) {
+                    message("Das Album ließ sich nicht umbenennen: " + failed.getMessage());
+                }
+                refreshSongs();
+            }
+
+            @Override
+            public void renameTitle(String albumId, String trackId) {
+                Album album = albumMembers.albums().album(albumId).orElse(null);
+                com.aresstack.audio.studio.album.AlbumTrack track = album == null ? null : album.track(trackId);
+                if (track == null || refuseWhileProducing()) {
+                    return;
+                }
+                Path folder = track.hasPiece() ? songs.root().resolve(track.piece()) : null;
+                String now = folder != null && Files.isDirectory(folder) ? songs.name(folder) : track.title();
+                Object typed = JOptionPane.showInputDialog(AudioStudioFrame.this, "Neuer Name des Titels:",
+                        "Titel umbenennen", JOptionPane.PLAIN_MESSAGE, null, null, now);
+                if (typed == null || typed.toString().isBlank()) {
+                    return;
+                }
+                try {
+                    Path renamed = albumMembers.renameTitle(albumId, trackId, typed.toString());
+                    if (renamed != null) {
+                        if (renamed.equals(Paths.get(directory.getText().trim()))) {
+                            pieceModel.synchronize(); // the model follows the piece to its new name
+                        } else {
+                            com.aresstack.audio.studio.application.PieceModel other =
+                                    new com.aresstack.audio.studio.application.PieceModel(line -> { });
+                            other.open(renamed);
+                            other.synchronize();
+                        }
+                    }
+                    if (albumsPanel != null && currentAlbum != null) {
+                        albumsPanel.follow(currentAlbum);
+                    }
+                } catch (IOException | RuntimeException failed) {
+                    message("Der Titel ließ sich nicht umbenennen: " + failed.getMessage());
+                }
+                refreshSongs();
+            }
+
+            @Override
+            public void deleteTitle(String albumId, String trackId) {
+                Album album = albumMembers.albums().album(albumId).orElse(null);
+                com.aresstack.audio.studio.album.AlbumTrack track = album == null ? null : album.track(trackId);
+                if (track == null || refuseWhileProducing()) {
+                    return;
+                }
+                Path folder = track.hasPiece() ? songs.root().resolve(track.piece()) : null;
+                boolean piece = folder != null && Files.isDirectory(folder);
+                Path open = Paths.get(directory.getText().trim());
+                if (piece && folder.equals(open) && worker != null && !worker.isDone()) {
+                    message("Erst den laufenden Vorgang beenden oder abbrechen.");
+                    return;
+                }
+                String name = piece ? songs.name(folder) : track.title();
+                String question = piece
+                        ? "„" + name + "“ löschen?\n\nDie Komposition kommt in den Papierkorb der Bibliothek "
+                        + "(Ordner „.papierkorb“) und lässt sich von dort zurückholen."
+                        : "Den geplanten Titel „" + name + "“ aus dem Album löschen?";
+                if (JOptionPane.showConfirmDialog(AudioStudioFrame.this, question, "Titel löschen",
+                        JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.OK_OPTION) {
+                    return;
+                }
+                try {
+                    if (piece && folder.equals(open)) {
+                        stopPlayback();
+                    }
+                    Path gone = albumMembers.removeTitle(albumId, trackId);
+                    if (gone != null) {
+                        songs.discard(gone);
+                        append("„" + name + "“ liegt jetzt im Papierkorb der Bibliothek.");
+                    }
+                    if (albumsPanel != null && currentAlbum != null) {
+                        albumsPanel.follow(currentAlbum);
+                    }
+                    if (gone != null && gone.equals(open)) {
+                        java.util.List<com.aresstack.audio.studio.application.SongLibrary.Song> left = songs.songs();
+                        Path next = left.isEmpty() ? songs.create("Neues Stück") : left.get(0).folder();
+                        openSong(next);
+                    }
+                } catch (IOException | RuntimeException failed) {
+                    message("Der Titel ließ sich nicht löschen: " + failed.getMessage());
+                }
+                refreshSongs();
+            }
+
+            private boolean refuseWhileProducing() {
+                if (albumsPanel != null && (albumsPanel.producing() || albumsPanel.busy())) {
+                    message("Während ein Album geplant oder produziert wird, bleiben Alben und Titel, wie sie sind.");
+                    return true;
+                }
+                return false;
+            }
+
+            @Override
             public void moveTitle(String fromAlbum, String trackId, String toAlbum, int index) {
                 if (albumsPanel != null && albumsPanel.producing()) {
                     message("Während ein Album produziert wird, werden keine Titel verschoben.");
@@ -3299,6 +3445,10 @@ public final class AudioStudioFrame extends JFrame {
     private void keepSong() {
         Path folder = Paths.get(directory.getText().trim());
         if (Files.isDirectory(folder)) {
+            String kept = songs.description(folder);
+            if (description.getText().equals(kept == null ? "" : Album.withoutBrief(kept))) {
+                return; // nothing new: the file stays untouched, so the work model sees no change
+            }
             try {
                 songs.save(folder, null, description.getText());
             } catch (IOException ignored) {

@@ -195,4 +195,48 @@ public final class AlbumMembershipTest {
         assertEquals("Eins: ruhig.", Album.withoutBrief("Eins: ruhig.\nThis piece is track 1 of 2 of the album ..."));
         assertEquals("nur eigene Worte", Album.withoutBrief("nur eigene Worte"));
     }
+
+    @Test
+    public void aPlannedTitleGetsItsPieceAndTitlesAndAlbumsCanBeRenamedAndRemoved() throws Exception {
+        Path library = temporary.newFolder("compositions").toPath();
+        SongLibrary songs = new SongLibrary(library);
+        AlbumFiles files = new AlbumFiles(library);
+        AlbumMembership members = new AlbumMembership(files, songs);
+        Album album = files.create("Winter", new AlbumConcept("", "", 12, 300));
+        files.save(album.withTracks(List.of(new AlbumTrack("t1", "Eisblume", "still", 72, "E minor", "6/8", "", "",
+                180, ""))));
+
+        Path piece = members.pieceFor(album.id(), "t1");
+        assertTrue(Files.isDirectory(piece));
+        assertEquals("Eisblume", songs.name(piece));
+        assertEquals(piece.getFileName().toString(), files.album(album.id()).get().track("t1").piece());
+        assertEquals("the same piece again", piece, members.pieceFor(album.id(), "t1"));
+
+        assertEquals(piece, members.renameTitle(album.id(), "t1", "Raureif"));
+        assertEquals("Raureif", songs.name(piece));
+        assertEquals("Raureif", files.album(album.id()).get().track("t1").title());
+        assertTrue(members.renameAlbum(album.id(), "Frost"));
+        assertEquals("Frost", files.album(album.id()).get().title());
+        assertTrue(members.renameAlbum(album.id(), " "));
+        assertTrue(AlbumMembership.isUntitled(files.album(album.id()).get()));
+
+        assertEquals(piece, members.removeTitle(album.id(), "t1"));
+        assertTrue(files.album(album.id()).get().tracks().isEmpty());
+        Path binned = songs.discard(piece);
+        assertFalse(Files.exists(piece));
+        assertTrue(Files.isDirectory(binned));
+        assertTrue("a piece in the bin is no piece of the library", songs.songs().isEmpty());
+    }
+
+    @Test
+    public void keepingThePieceUnchangedLeavesItsFileUntouched() throws Exception {
+        Path library = temporary.newFolder("compositions").toPath();
+        SongLibrary songs = new SongLibrary(library);
+        Path piece = songs.create("Ruhe");
+        songs.save(piece, null, "leise");
+        byte[] before = Files.readAllBytes(piece.resolve(SongLibrary.FILE_NAME));
+        Thread.sleep(1100); // a new write would carry a new date in its head
+        songs.save(piece, "Ruhe", "leise");
+        assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(piece.resolve(SongLibrary.FILE_NAME))));
+    }
 }
