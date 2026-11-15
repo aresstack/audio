@@ -246,7 +246,9 @@ public final class GemmaMusicComposer {
                                         s == 0 ? null : context(answers.get(s - 1), sections.get(s - 1), spec));
                                 Path cached = cachedResponse(directory, target, prompt, spec);
                                 String instruction = "Compose original instrumental music. Return valid JSON only.";
-                                allKnown &= client.hasAnswer(instruction, prompt, maxTokens, cached);
+                                boolean known = client.hasAnswer(instruction, prompt, maxTokens, cached);
+                                allKnown &= known;
+                                arriving.asked(known);
                                 final int at = s;
                                 JsonObject answer = client.generate(instruction, prompt, maxTokens, cached,
                                         text -> {
@@ -285,6 +287,7 @@ public final class GemmaMusicComposer {
                 responses.put(generated.id, generated.responses);
                 progress.update("Finished " + generated.id + " (" + generated.notes + " notes)");
             }
+            progress.update(arriving.summary());
             return responses;
         } catch (InterruptedException cancelled) {
             Thread.currentThread().interrupt();
@@ -589,7 +592,12 @@ public final class GemmaMusicComposer {
         private static final long EVERY = 15000;
         private final Progress progress;
         private final Map<String, Integer> lengths = new HashMap<String, Integer>();
-        private long last = System.currentTimeMillis();
+        private final long began = System.currentTimeMillis();
+        private long last = began;
+        private long first = -1;
+        private int deliveries;
+        private int kept;
+        private int fresh;
 
         private Arriving(Progress progress) {
             this.progress = progress;
@@ -598,6 +606,10 @@ public final class GemmaMusicComposer {
         /** The answer to one request has this many characters by now. */
         synchronized void heard(String request, int characters) {
             lengths.put(request, characters);
+            deliveries++;
+            if (first < 0) {
+                first = System.currentTimeMillis() - began;
+            }
             long sum = 0;
             for (int length : lengths.values()) {
                 sum += length;
@@ -611,6 +623,34 @@ public final class GemmaMusicComposer {
                 last = time;
                 progress.update("Die KI schreibt: " + sum + " Zeichen bisher");
             }
+        }
+
+        /** A request is about to be made: answered from what was kept, or by the model. */
+        synchronized void asked(boolean fromKept) {
+            if (fromKept) {
+                kept++;
+            } else {
+                fresh++;
+            }
+        }
+
+        /** One line for the protocol when all tracks are composed: how the answers came. */
+        synchronized String summary() {
+            if (fresh == 0) {
+                return "KI-Antworten: alle " + kept + " aus dem Speicher dieses Stücks, die KI wurde nicht neu gefragt "
+                        + "(deshalb liefen keine Noten mit).";
+            }
+            if (deliveries == 0) {
+                return "KI-Antworten: " + fresh + " neu gefragt, " + kept + " aus dem Speicher. Der Dienst hat keine "
+                        + "Antwort stückweise geliefert, jede kam erst am Ende als Ganzes (deshalb liefen keine Noten mit).";
+            }
+            long sum = 0;
+            for (int length : lengths.values()) {
+                sum += length;
+            }
+            return "KI-Antworten: " + fresh + " neu gefragt, " + kept + " aus dem Speicher. Stückweise angekommen: "
+                    + sum + " Zeichen in " + deliveries + " Lieferungen, die erste nach "
+                    + String.format(Locale.GERMANY, "%.1f", first / 1000.0) + " s.";
         }
     }
 
