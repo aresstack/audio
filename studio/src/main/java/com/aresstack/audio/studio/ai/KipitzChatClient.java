@@ -486,7 +486,7 @@ public final class KipitzChatClient implements ChatModel {
         private static boolean begins(byte[] buffer, int offset, int count) {
             String seen = new String(buffer, offset, count, StandardCharsets.UTF_8);
             return seen.contains("\"content\":\"") || seen.contains("\"reasoning_content\":\"")
-                    || seen.contains("\"reasoning\":\"") || seen.contains("\"choices\"") && seen.contains("\"message\"");
+                    || seen.contains("\"reasoning\":\"") || seen.contains("\"thinking\":\"") || seen.contains("\"choices\"") && seen.contains("\"message\"");
         }
     }
     private static final int RESPONSE_LIMIT = 2_000_000;
