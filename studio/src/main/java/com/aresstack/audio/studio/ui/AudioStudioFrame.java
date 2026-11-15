@@ -614,6 +614,7 @@ public final class AudioStudioFrame extends JFrame {
      */
     private void sceneChanged(com.aresstack.audio.studio.stage.SpatialScene changed, boolean settled,
                               boolean fromMixer) {
+        boolean levelSwitched = scene != null && changed.fixedLevel() != scene.fixedLevel();
         scene = changed;
         if (fromMixer) {
             showStage();
@@ -624,6 +625,14 @@ public final class AudioStudioFrame extends JFrame {
             saveScene();
             remixTimer.restart();
         }
+        if (levelSwitched) {
+            levelSwitched(changed.fixedLevel());
+        }
+    }
+
+    /** The user's switch of the level is noted in the model of the piece too, and nothing else with it. */
+    private void levelSwitched(boolean fixed) {
+        pieceModel.levelFixed(fixed);
     }
 
     private void showStage() {

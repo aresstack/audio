@@ -32,8 +32,10 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
             users.add(methodAround(source, use.start()));
         }
         assertEquals("opening loads the model, composing and renaming bring it in step; nothing else reaches it",
-                new java.util.TreeSet<String>(List.of("composeIntoPiece", "loadArrangementForCurrentDirectory",
-                        "renamed")), users);
+                new java.util.TreeSet<String>(List.of("composeIntoPiece", "levelSwitched",
+                        "loadArrangementForCurrentDirectory", "renamed")), users);
+        assertEquals("the switch of the level writes only the level mode", List.of("levelSwitched"),
+                callers(source, "pieceModel\\.levelFixed\\("));
         assertEquals("renaming synchronizes itself, right after its files were written", List.of("renamed"),
                 callers(source, "pieceModel\\.synchronize\\(\\)"));
         assertEquals("opening only opens", List.of("loadArrangementForCurrentDirectory"),

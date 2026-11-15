@@ -317,7 +317,9 @@ public final class LegacyImport {
             }
         }
         Room room = new Room(fitted.room().kind(), fitted.room().reverbSeconds(), fitted.room().amount());
-        return new MixScene(room, fitted.masterDb(), LevelMode.LEGACY_PEAK, channels, automation);
+        // A piece is mixed the old way until its user switched it; the stage file says so.
+        return new MixScene(room, fitted.masterDb(), fitted.fixedLevel() ? LevelMode.FIXED : LevelMode.LEGACY_PEAK,
+                channels, automation);
     }
 
     /** The rendered files that are there, each taken over for the part as it sounds now. */
