@@ -4,7 +4,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.Part;
 import com.aresstack.audio.composition.Section;
+import com.aresstack.audio.composition.Track;
 import com.google.gson.JsonParser;
 import java.util.ArrayList;
 import java.util.List;
@@ -108,6 +110,22 @@ public final class ContinuationPlanTest {
         assertTrue(prompt.contains("id=melody, name=\"Flöte\""));
         assertTrue(prompt.contains("Do not add new instruments"));
         assertTrue(prompt.contains("add up to exactly 16"));
+    }
+
+    @Test
+    public void aNewPartNeverTakesTheIdOfAnExistingPart() {
+        Composition piece = ContinuationContextTest.piece(8);
+        Composition renamed = new Composition(piece.meta(), piece.timeMap(), piece.sections(),
+                List.of(new Part("new1", "Alt", null, null, 0, null, null, piece.parts().get(0).voices(), null)),
+                List.of(new Track("t1", "Alt", Track.Kind.MIDI, "new1", piece.tracks().get(0).clips())), List.of());
+        ContinuationRequest request = ContinuationRequest.of(8, ContinuationPreset.DRAMATIC_BUILD, ContinuationEnding.OPEN);
+        ContinuationTask task = ContinuationTask.of(renamed, request, 1);
+        ContinuationPlan plan = ChatContinuationPlanner.read(JsonParser.parseString("{\"sections\":[{\"name\":\"A\","
+                + "\"bars\":8,\"intensity\":0.5,\"parts\":[\"new1\",\"x\"]}],\"newParts\":[{\"key\":\"x\","
+                + "\"name\":\"Horn\",\"program\":60}]}").getAsJsonObject(), task, renamed);
+        assertEquals("new2", plan.newParts().get(0).key());
+        assertEquals("texture", plan.newParts().get(0).role()); // a missing role is repaired, not a crash
+        assertEquals(List.of("new1", "new2"), plan.sections().get(0).parts());
     }
 
     @Test(expected = IllegalArgumentException.class)
