@@ -71,6 +71,7 @@ public final class RegionComposer {
         Files.createDirectories(cacheDirectory);
         Map<String, List<NewNote>> passages = new LinkedHashMap<>();
         List<String> corrections = new ArrayList<>();
+        final EditSketch sketch = EditSketch.of(piece, progress);
         for (String partId : request.selection().parts(piece)) {
             RegionTask task = RegionTask.of(piece, request, context, partId, attempt);
             VoiceNormalizer normalizer = new VoiceNormalizer(piece.timeMap(), task.range(), task.part().drums());
@@ -84,8 +85,15 @@ public final class RegionComposer {
                 VoiceFrame frame = frames.get(i);
                 progress.update((request.mode() == RegionRequest.Mode.VARIATE ? "Variiere " : "Schreibe neu: ")
                         + task.part().name() + ", " + frame.name() + " ...");
-                GeneratedNotes generated = generator.generate(task, frame, i == frames.size() - 1, connection,
-                        cacheDirectory);
+                GeneratedNotes generated;
+                try (Listening.Scope watching = Listening.to(sketch == null ? null
+                        : sketch.hearing(partId, task.part().program(), task.part().role(), frame))) {
+                    generated = generator.generate(task, frame, i == frames.size() - 1, connection,
+                            cacheDirectory);
+                }
+                if (sketch != null) {
+                    sketch.written(partId, task.part().program(), task.part().role(), frame, generated);
+                }
                 List<ShapedNote> shaped = normalizer.shape(frame, generated);
                 for (ShapedNote n : shaped) {
                     notes.add(new NewNote(frame.startTick() + n.tick(), n.length(), n.pitch(), n.velocity()));

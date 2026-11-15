@@ -79,7 +79,10 @@ public final class OrchestrationComposer {
         Files.createDirectories(cacheDirectory);
         progress.update("Plane die Umorchestrierung der Takte " + request.firstBar() + "-" + request.lastBar() + " ("
                 + request.preset().label() + ") ...");
-        OrchestrationPlan plan = planner.plan(task, piece, cacheDirectory);
+        OrchestrationPlan plan;
+        try (Listening.Scope planning = EditSketch.preparing(progress, "Die KI plant die Umorchestrierung")) {
+            plan = planner.plan(task, piece, cacheDirectory);
+        }
         if (plan.frames().size() != task.frames().size()) {
             throw new IOException("Der Plan hat " + plan.frames().size() + " statt " + task.frames().size()
                     + " Abschnitte.");
@@ -117,10 +120,11 @@ public final class OrchestrationComposer {
             return thread;
         });
         Map<String, Future<Written>> running = new LinkedHashMap<>();
+        final EditSketch sketch = EditSketch.of(piece, progress);
         try {
             for (ContinuationVoice voice : voices) {
                 running.put(voice.key(), pool.submit(() -> writePart(piece, task, plan, material, voice, cache,
-                        progress)));
+                        progress, sketch)));
             }
             Map<String, Written> written = new HashMap<>();
             for (Map.Entry<String, Future<Written>> entry : running.entrySet()) {
@@ -142,8 +146,8 @@ public final class OrchestrationComposer {
     }
 
     private Written writePart(Composition piece, OrchestrationTask task, OrchestrationPlan plan,
-                              Map<String, String> material, ContinuationVoice voice, Path cache, Progress progress)
-            throws IOException {
+                              Map<String, String> material, ContinuationVoice voice, Path cache, Progress progress,
+                              EditSketch sketch) throws IOException {
         VoiceNormalizer normalizer = new VoiceNormalizer(task.time(), voice.range(), voice.drums());
         List<String> densities = new ArrayList<>();
         Map<String, List<ShapedNote>> notes = new LinkedHashMap<>();
@@ -158,8 +162,15 @@ public final class OrchestrationComposer {
                 continue;
             }
             progress.update("Orchestriere " + voice.name() + " für " + frame.name() + " ...");
-            GeneratedNotes generated = generator.generate(task, plan, voice, frame, assignment,
-                    material.get(frame.sectionId()), connection, cache);
+            GeneratedNotes generated;
+            try (Listening.Scope watching = Listening.to(sketch == null ? null
+                    : sketch.hearing(voice.key(), voice.program(), voice.role(), frame))) {
+                generated = generator.generate(task, plan, voice, frame, assignment,
+                        material.get(frame.sectionId()), connection, cache);
+            }
+            if (sketch != null) {
+                sketch.written(voice.key(), voice.program(), voice.role(), frame, generated);
+            }
             List<ShapedNote> shaped = normalizer.shape(frame, generated);
             List<String> thinned = new ArrayList<>();
             shaped = Dramaturgy.thin(frame, task.time(), frame.intensity(), voice.role(), shaped, thinned);

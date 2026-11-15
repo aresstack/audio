@@ -112,7 +112,11 @@ public final class ContinuationComposer {
         // For an insertion everything is written into the piece with the room already made: the
         // music after the room is where it will be once the patch has shifted it.
         Composition room = task.room(piece);
-        ContinuationPlan plan = planner.plan(task, room, cacheDirectory);
+        ContinuationPlan plan;
+        try (Listening.Scope planning = EditSketch.preparing(progress, task.inserts()
+                ? "Die KI plant die eingefügten Takte" : "Die KI plant die Fortsetzung")) {
+            plan = planner.plan(task, room, cacheDirectory);
+        }
         if (plan.bars() != request.bars()) {
             throw new IOException("Der Plan deckt " + plan.bars() + " statt " + request.bars() + " Takte ab.");
         }
@@ -124,7 +128,8 @@ public final class ContinuationComposer {
         task.parts().forEach(part -> voices.add(ContinuationVoice.of(part)));
         plan.newParts().forEach(part -> voices.add(ContinuationVoice.of(part)));
 
-        Map<String, Written> written = write(room, piece, task, plan, frames, voices, cacheDirectory, progress);
+        Map<String, Written> written = write(room, piece, task, plan, frames, voices, cacheDirectory, progress,
+                EditSketch.of(room, progress));
         ComposedContinuation result = assemble(room, task, plan, frames, voices, written, new Fresh(room, ids),
                 task.inserts() ? holds(piece, task) : List.of());
         if (result.clips().stream().allMatch(c -> c.clip().notes().isEmpty())) {
@@ -144,7 +149,7 @@ public final class ContinuationComposer {
     private Map<String, Written> write(Composition piece, Composition original, ContinuationTask task,
                                        ContinuationPlan plan,
                                        List<VoiceFrame> frames, List<ContinuationVoice> voices, Path cache,
-                                       Progress progress) throws IOException {
+                                       Progress progress, EditSketch sketch) throws IOException {
         ExecutorService pool = Executors.newFixedThreadPool(Math.min(threads, Math.max(1, voices.size())), runnable -> {
             Thread thread = new Thread(runnable, "continuation");
             thread.setDaemon(true);
@@ -154,7 +159,7 @@ public final class ContinuationComposer {
         try {
             for (ContinuationVoice voice : voices) {
                 running.put(voice.key(), pool.submit(() -> writePart(piece, original, task, plan, frames, voice, cache,
-                        progress)));
+                        progress, sketch)));
             }
             Map<String, Written> written = new HashMap<>();
             for (Map.Entry<String, Future<Written>> entry : running.entrySet()) {
@@ -177,7 +182,8 @@ public final class ContinuationComposer {
 
     private Written writePart(Composition piece, Composition original, ContinuationTask task, ContinuationPlan plan,
                               List<VoiceFrame> frames,
-                              ContinuationVoice voice, Path cache, Progress progress) throws IOException {
+                              ContinuationVoice voice, Path cache, Progress progress, EditSketch sketch)
+            throws IOException {
         VoiceNormalizer normalizer = new VoiceNormalizer(task.time(), voice.range(), voice.drums());
         List<String> densities = new ArrayList<>();
         Map<String, List<ShapedNote>> notes = new LinkedHashMap<>();
@@ -194,7 +200,14 @@ public final class ContinuationComposer {
                 continue;
             }
             progress.update("Komponiere " + voice.name() + " für " + frame.name() + " ...");
-            GeneratedNotes generated = generator.generate(task, plan, voice, frame, connection, cache);
+            GeneratedNotes generated;
+            try (Listening.Scope watching = Listening.to(sketch == null ? null
+                    : sketch.hearing(voice.key(), voice.program(), voice.role(), frame))) {
+                generated = generator.generate(task, plan, voice, frame, connection, cache);
+            }
+            if (sketch != null) {
+                sketch.written(voice.key(), voice.program(), voice.role(), frame, generated);
+            }
             List<ShapedNote> shaped = normalizer.shape(frame, generated, transition ? ringOut(task) : 0);
             if (frame.intensity() != null) {
                 List<String> thinned = new ArrayList<>();
