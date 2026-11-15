@@ -531,6 +531,7 @@ public final class ProjectSession {
             }
         }
         shifted = PartSeats.seatNewParts(shifted, proposal.base(), proposal.result(), ids);
+        shifted = PartSeats.seatNewAudioTracks(shifted, proposal.base(), proposal.result(), ids);
         history.push(new State(proposal.result(), shifted), description);
         return become(history.current());
     }

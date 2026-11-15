@@ -55,10 +55,14 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
                         + " (a proposal taken, undo, redo, revisions) get it from one place",
                 List.of("renderArrangement", "savedPiece"), callers(source, "pieceModel\\.of\\("));
         assertEquals("only what the user asks for by name changes the saved piece",
-                new java.util.TreeSet<String>(List.of("addVoice", "composeAgain", "pieceChanged", "reworkRegion", "showRevisions",
+                new java.util.TreeSet<String>(List.of("addVoice", "composeAgain", "extendPiece", "pieceChanged", "reworkRegion",
+                        "showRevisions", "showSections",
                         "undoPiece",
                         "popupMenuWillBecomeVisible", "savedPiece" /* its own header */)),
                 new java.util.TreeSet<String>(callers(source, "savedPiece\\(\\)")));
+        assertTrue("showing the form of the piece only reads the model",
+                !bodyOf(source, "private void showSections()").contains(".apply(")
+                        && !bodyOf(source, "private void showSections()").contains("accept("));
         assertEquals(1, callers(source, "pieceModel\\.").stream().filter("renderArrangement"::equals).count());
         assertEquals("the note editor only gets the open session; it changes it through the edit core alone",
                 "return pieceModel.session();",
