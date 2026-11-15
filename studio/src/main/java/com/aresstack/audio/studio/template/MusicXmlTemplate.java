@@ -165,7 +165,8 @@ public final class MusicXmlTemplate {
                 long[] upbeat = {-1};
                 notesOfParts.add(notes(part, staffCount, upbeat));
                 staves.add(staffCount);
-                if (shift < 0 && upbeat[0] >= 0) {
+                // The first part decides whether the piece begins with an upbeat; all parts move alike.
+                if (notesOfParts.size() == 1) {
                     shift = upbeat[0];
                 }
             }
@@ -218,8 +219,9 @@ public final class MusicXmlTemplate {
             int divisions = 1;
             int velocity = UNMARKED_VELOCITY;
             long measureStart = 0;
-            int partNumerator = 4;
-            int partDenominator = 4;
+            // A part that names no meter of its own is in the meter an earlier part named.
+            int partNumerator = numerator > 0 ? numerator : 4;
+            int partDenominator = denominator > 0 ? denominator : 4;
             boolean firstMeasure = true;
             for (Element measure : children(part, "measure")) {
                 long cursor = measureStart;
