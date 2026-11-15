@@ -36,7 +36,10 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
         assertEquals("opening loads the model, composing and renaming bring it in step, rendering reads it;"
                         + " nothing else reaches it",
                 new java.util.TreeSet<String>(List.of("composeIntoPiece", "loadArrangementForCurrentDirectory",
-                        "pieceToEdit", "renamed", "renderArrangement", "savedPiece")), users);
+                        "loadDemo", "pieceToEdit", "renamed", "renderArrangement", "savedPiece")), users);
+        assertTrue("loading the demo replaces the piece on the user's word, through the one place that"
+                        + " protects a model the demo cannot replace",
+                bodyOf(source, "private void loadDemo() {").contains("DemoIntoPiece.load(input, folder, pieceModel)"));
         assertEquals("rendering only reads the saved model; the changes the user asks for by name"
                         + " (a proposal taken, undo, redo, revisions) get it from one place",
                 List.of("renderArrangement", "savedPiece"), callers(source, "pieceModel\\.of\\("));
