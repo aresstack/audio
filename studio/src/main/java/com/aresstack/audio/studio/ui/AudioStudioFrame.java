@@ -465,6 +465,7 @@ public final class AudioStudioFrame extends JFrame {
         pageHolder.add(libraryPage(), "library");
         pageHolder.add(settingsPanel(), "settings");
         pageHolder.add(consolePage(), "console");
+        pageHolder.add(playerPage(), "player");
         // At the left the albums of the project as a tree, beside it the page of what was clicked there.
         JPanel work = new JPanel(new BorderLayout(14, 0));
         work.setOpaque(false);
@@ -621,13 +622,13 @@ public final class AudioStudioFrame extends JFrame {
         display.add(lcd, BorderLayout.CENTER);
         // Under the display, as on a player: one key per page of the work on the piece. The
         // settings and the sound banks are not among them; they sit behind two round keys in the corner.
-        JPanel keysOfPages = new JPanel(new java.awt.GridLayout(1, 4, 6, 0));
+        JPanel keysOfPages = new JPanel(new java.awt.GridLayout(1, 5, 6, 0));
         keysOfPages.setOpaque(false);
         javax.swing.ButtonGroup onePage = pageGroup;
         // The albums are in the tree at the left: a click on an album shows its page, a click on a title its piece.
         String[][] entries = {{"song", "Komposition"}, {"deck", "Arrangement"},
                 {"stage", "Bühne"},
-                {"console", "Protokoll"}};
+                {"console", "Protokoll"}, {"player", "Player"}};
         for (final String[] entry : entries) {
             DeckWidgets.PageKey key = new DeckWidgets.PageKey(entry[1]);
             key.addActionListener(event -> showPage(entry[0]));
@@ -1813,16 +1814,6 @@ public final class AudioStudioFrame extends JFrame {
         }, songs, registry);
         albumsPanel = albums;
         albums.listInTree(); // the albums are chosen in the tree at the left
-        albums.setPlayerOptions(albumHeardPercent, albumCrossfadeSeconds, albumOnlyNew);
-        albums.onPlayerOptions(() -> {
-            albumHeardPercent = albums.heardPercent();
-            albumCrossfadeSeconds = albums.crossfadeSeconds();
-            albumOnlyNew = albums.onlyNew();
-            if (!albumOnlyNew) {
-                stopAlbumWaiting(); // waiting for new titles belongs to "Nur neue"
-            }
-            saveSettings(false);
-        });
         albums.setBesideConcept(albumModelChoices);
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
@@ -3898,11 +3889,19 @@ public final class AudioStudioFrame extends JFrame {
         albumTree = new AlbumTree(new AlbumTree.Host() {
             @Override
             public void albumClicked(String albumId) {
+                if ("player".equals(shownPage)) {
+                    playerAlbumClicked(albumId); // the player stays: this album plays from now on
+                    return;
+                }
                 showAlbum(albumId);
             }
 
             @Override
             public void pieceClicked(String albumId, Path folder) {
+                if ("player".equals(shownPage)) {
+                    playerTitleClicked(albumId, folder); // the player stays and plays the title
+                    return;
+                }
                 currentAlbum = albumId;
                 openSong(folder);
                 if (Paths.get(directory.getText().trim()).equals(folder)) {
@@ -3912,6 +3911,10 @@ public final class AudioStudioFrame extends JFrame {
 
             @Override
             public void plannedClicked(String albumId, String trackId) {
+                if ("player".equals(shownPage)) {
+                    playerAlbumClicked(albumId); // nothing to hear yet
+                    return;
+                }
                 if (albumsPanel != null && albumsPanel.producing()) {
                     showAlbum(albumId); // the production makes the piece itself
                     return;
@@ -4106,6 +4109,7 @@ public final class AudioStudioFrame extends JFrame {
                 refreshSongs();
             }
         });
+        albumTree.setNewTitles(this::newInTree); // marked on the player page only
         return albumTree;
     }
 
@@ -4433,9 +4437,7 @@ public final class AudioStudioFrame extends JFrame {
                     com.aresstack.audio.studio.application.HeardTitles.DEFAULT_PERCENT));
             albumCrossfadeSeconds = number(saved, "albumCrossfadeSeconds", 0.0);
             albumOnlyNew = Boolean.parseBoolean(saved.getProperty("albumOnlyNew", "false"));
-            if (albumsPanel != null) {
-                albumsPanel.setPlayerOptions(albumHeardPercent, albumCrossfadeSeconds, albumOnlyNew);
-            }
+            playerPanel.setOptions(albumHeardPercent, albumCrossfadeSeconds, albumOnlyNew);
             trackTable.setFit(fitArrangement.isSelected());
             // Zoom of the arrangement when it is not fitted (Strg + Mausrad): step per notch and the most.
             trackTable.setZoomLimits(number(saved, "arrangementZoomStep", ArrangementView.ZOOM_STEP),
@@ -5132,12 +5134,13 @@ public final class AudioStudioFrame extends JFrame {
     private void albumPieceProduced(Path piece) {
         try {
             com.aresstack.audio.studio.application.HeardTitles.producedAgain(piece); // a new mix is new again
+            if (!com.aresstack.audio.studio.application.HeardTitles.heard(piece)) {
+                hearing.reset(); // the new mix is counted from its start
+            }
         } catch (IOException kept) {
             append("WARN: Ob „" + piece.getFileName() + "“ neu ist, ließ sich nicht vermerken: " + kept.getMessage());
         }
-        if (albumsPanel != null) {
-            albumsPanel.heardChanged();
-        }
+        heardChanged();
         boolean shown = piece.equals(albumLive);
         if (shown) {
             albumLive = null;
@@ -5482,37 +5485,68 @@ public final class AudioStudioFrame extends JFrame {
             player.pause();
             player.dropOutgoing();
             albumPlay = false; // paused by the user: no next title
-        } else {
-            boolean onAlbum = "albums".equals(shownPage) && albumsPanel != null;
-            Path current = Paths.get(directory.getText().trim());
-            // On the album page Play plays the title selected in the album's table, not the one
-            // that happens to be open.
-            Path chosen = onAlbum ? albumsPanel.selectedPiece() : null;
-            if (onAlbum && albumsPanel.onlyNew()) {
-                // "Nur neue": only a title not heard yet; the one selected or open if it is new.
-                java.util.List<Path> fresh = albumsPanel.newPieces();
-                chosen = among(fresh, chosen) ? chosen : among(fresh, current) ? current
-                        : fresh.isEmpty() ? null : fresh.get(0);
-                if (chosen == null) {
-                    startAlbumWaiting();
-                    return;
-                }
-                stopAlbumWaiting();
-            }
-            if (chosen != null && !same(chosen, current)) {
-                openSong(chosen);
-                if (!chosen.equals(Paths.get(directory.getText().trim()))) {
-                    return; // could not be opened (said)
-                }
-                albumsPanel.selectPiece(chosen);
-                play();
-            } else if (player.ready() && !(onAlbum && player.live())) {
-                player.play();
-            } else {
-                play(); // on the album page the mix file, which can overlap with the next title
-            }
-            armAlbumPlay();
+            return;
         }
+        Path current = Paths.get(directory.getText().trim());
+        if ("player".equals(shownPage)) {
+            playOnPlayerPage(current);
+            return;
+        }
+        // On the album page Play plays the title selected in the album's table, not the one
+        // that happens to be open; only to check it: no title follows there.
+        Path chosen = "albums".equals(shownPage) && albumsPanel != null ? albumsPanel.selectedPiece() : null;
+        if (chosen != null && !same(chosen, current)) {
+            openSong(chosen);
+            if (!chosen.equals(Paths.get(directory.getText().trim()))) {
+                return; // could not be opened (said)
+            }
+            play();
+        } else if (player.ready() && !("albums".equals(shownPage) && player.live())) {
+            player.play();
+        } else {
+            play(); // on the album page the finished mix, not a live stage paused elsewhere
+        }
+    }
+
+    /** Play on the player page: the open title, or with "Nur neue" a title not heard yet; the album goes on. */
+    private void playOnPlayerPage(Path current) {
+        String album = playerAlbum(current);
+        Path chosen = current;
+        if (album != null && !inAlbum(album, current)) {
+            // Another album was chosen in the tree: it begins with its first title that has a mix.
+            chosen = nextAlbumPiece(album, current);
+            if (chosen == null && !playerPanel.onlyNew()) {
+                message("In diesem Album ist noch kein Titel fertig gemischt.");
+                return;
+            }
+        }
+        if (playerPanel.onlyNew()) {
+            java.util.List<Path> fresh = newPieces(album);
+            chosen = among(fresh, current) ? current : fresh.isEmpty() ? null : fresh.get(0);
+            if (chosen == null) {
+                startAlbumWaiting();
+                return;
+            }
+            stopAlbumWaiting();
+        }
+        if (!same(chosen, current)) {
+            openSong(chosen);
+            if (!chosen.equals(Paths.get(directory.getText().trim()))) {
+                return; // could not be opened (said)
+            }
+            playAlbumTitle(0);
+        } else if (player.ready() && !player.live()) {
+            player.play(); // goes on where it was paused
+        } else {
+            playAlbumTitle(0);
+        }
+        armAlbumPlay();
+    }
+
+    /** Whether the piece is a title of the album. */
+    private boolean inAlbum(String albumId, Path piece) {
+        Album album = albumMembers.albums().album(albumId).orElse(null);
+        return album != null && albumMembers.pieces(album).stream().anyMatch(song -> same(song.folder(), piece));
     }
 
     private static boolean same(Path one, Path other) {
@@ -5529,21 +5563,26 @@ public final class AudioStudioFrame extends JFrame {
         return false;
     }
 
+    /** The page "Player": the titles of an album one after the other, chosen in the tree. */
+    private final PlayerPanel playerPanel = new PlayerPanel();
+    /** The album the player plays; {@code null}: the album of the open title. */
+    private String playerAlbumId;
+
     /**
-     * Play pressed: if the album page is open, the next title of the album follows when this one
-     * has played to its end. Only while the album page stays open; pause or stop ends it.
+     * Play pressed on the player page: the next title of the album follows when this one has
+     * played to its end. Only while the player page stays open; pause or stop ends it.
      */
     private boolean albumPlay;
 
     /** Whether the title armed for the album has been heard playing: only then its silence is its end. */
     private boolean albumPlaySounded;
 
-    /** The settings of the album's player (album page, under the table), kept in the settings file. */
+    /** The settings of the player, kept in the settings file. */
     private int albumHeardPercent = com.aresstack.audio.studio.application.HeardTitles.DEFAULT_PERCENT;
     private double albumCrossfadeSeconds;
     private boolean albumOnlyNew;
 
-    /** "Nur neue" and no new title left: the player waits on the album page until one is finished. */
+    /** "Nur neue" and no new title left: the player waits on its page until one is finished. */
     private boolean albumWaiting;
     private long albumWaitingLooked;
     /** How often the waiting player looks for a new title, in milliseconds. */
@@ -5559,18 +5598,133 @@ public final class AudioStudioFrame extends JFrame {
     /** A longer pause between two ticks than this (a busy window) is not counted as heard. */
     private static final double HEARING_GAP_SECONDS = 0.5;
 
+    /** Which pieces are new, as last read for the tree; read again after {@link #NEW_READ_MILLIS}. */
+    private final Map<Path, Boolean> newShown = new HashMap<Path, Boolean>();
+    private long newShownRead;
+    private static final long NEW_READ_MILLIS = 1000;
+
+    /** The page of the player, with the settings it was saved with. */
+    private JPanel playerPage() {
+        playerPanel.setOptions(albumHeardPercent, albumCrossfadeSeconds, albumOnlyNew);
+        playerPanel.onOptions(() -> {
+            albumHeardPercent = playerPanel.heardPercent();
+            albumCrossfadeSeconds = playerPanel.crossfadeSeconds();
+            albumOnlyNew = playerPanel.onlyNew();
+            if (!albumOnlyNew) {
+                stopAlbumWaiting(); // waiting for new titles belongs to "Nur neue"
+            }
+            saveSettings(false);
+        });
+        JPanel page = new JPanel(new BorderLayout());
+        page.setOpaque(false);
+        DeckWidgets.Module module = new DeckWidgets.Module("Player", playerPanel);
+        module.setHeadStart(playerPanel.headKeys());
+        page.add(module, BorderLayout.CENTER);
+        return page;
+    }
+
+    /** The album the player plays: the one chosen in the tree, else the album of the open title. */
+    private String playerAlbum(Path current) {
+        if (playerAlbumId != null && albumMembers.albums().album(playerAlbumId).isPresent()) {
+            return playerAlbumId;
+        }
+        Album own = albumMembers.albumOf(current).orElse(null);
+        return own == null ? null : own.id();
+    }
+
+    /** A title was clicked in the tree while the player page is open: it plays now, the album goes on. */
+    private void playerTitleClicked(String albumId, Path folder) {
+        playerAlbumId = albumId;
+        currentAlbum = albumId;
+        stopAlbumWaiting();
+        openSong(folder);
+        if (!same(folder, Paths.get(directory.getText().trim()))) {
+            return; // could not be opened (said)
+        }
+        playAlbumTitle(0);
+        armAlbumPlay();
+    }
+
+    /** An album was clicked in the tree while the player page is open: Play plays it from now on. */
+    private void playerAlbumClicked(String albumId) {
+        playerAlbumId = albumId;
+        currentAlbum = albumId;
+        Album album = albumMembers.albums().album(albumId).orElse(null);
+        if (!player.playing() && album != null) {
+            playerPanel.setNowPlaying(album.title(), null);
+        }
+    }
+
+    /**
+     * The finished titles of an album that nobody has heard yet, in the order of the album; a
+     * title that is being made right now is not finished.
+     */
+    private java.util.List<Path> newPieces(String albumId) {
+        java.util.List<Path> found = new java.util.ArrayList<Path>();
+        Album album = albumId == null ? null : albumMembers.albums().album(albumId).orElse(null);
+        if (album == null) {
+            return found;
+        }
+        com.aresstack.audio.studio.album.AlbumProductionState state =
+                com.aresstack.audio.studio.album.AlbumProductionState.load(albumMembers.albums().folder(album.id()));
+        for (com.aresstack.audio.studio.album.AlbumTrack track : album.tracks()) {
+            if (!track.hasPiece()) {
+                continue;
+            }
+            com.aresstack.audio.studio.album.AlbumProductionState.Status status = state.status(track.id());
+            if (status == com.aresstack.audio.studio.album.AlbumProductionState.Status.RUNNING
+                    || status == com.aresstack.audio.studio.album.AlbumProductionState.Status.QUEUED) {
+                continue; // being made: not finished yet
+            }
+            Path piece = songs.root().resolve(track.piece());
+            if (com.aresstack.audio.studio.application.HeardTitles.isNew(piece)) {
+                found.add(piece);
+            }
+        }
+        return found;
+    }
+
+    /** Whether the tree marks this title as not heard yet: only while the player page is open. */
+    private boolean newInTree(Path piece) {
+        if (!"player".equals(shownPage) || piece == null) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (now - newShownRead > NEW_READ_MILLIS) {
+            newShown.clear();
+            newShownRead = now;
+        }
+        return newShown.computeIfAbsent(piece, com.aresstack.audio.studio.application.HeardTitles::isNew);
+    }
+
+    /** A title was heard or became new: the tree shows it at once. */
+    private void heardChanged() {
+        newShownRead = 0;
+        if (albumTree != null) {
+            albumTree.repaint();
+        }
+    }
+
     private void armAlbumPlay() {
-        albumPlay = "albums".equals(shownPage);
+        albumPlay = "player".equals(shownPage);
         albumPlaySounded = false;
+        showNowPlaying();
     }
 
-    /** Whether the album page is open and free to go on with the next title. */
-    private boolean albumPageFree() {
-        return "albums".equals(shownPage) && albumsPanel != null && albumsPanel.album() != null
-                && (worker == null || worker.isDone());
+    /** Shows on the player page which title of which album plays. */
+    private void showNowPlaying() {
+        Path current = Paths.get(directory.getText().trim());
+        Album album = albumMembers.albumOf(current).orElse(null);
+        String title = current.getFileName() == null ? "" : current.getFileName().toString();
+        playerPanel.setNowPlaying(album == null ? null : album.title(), title);
     }
 
-    /** Called thirty times a second: a title that played to its end on the album page is followed by the next one. */
+    /** Whether the player page is open and free to go on with the next title. */
+    private boolean playerPageFree() {
+        return "player".equals(shownPage) && (worker == null || worker.isDone());
+    }
+
+    /** Called thirty times a second: a title that played to its end on the player page is followed by the next one. */
     private void followAlbumPlay(boolean playing) {
         player.settle();
         if (albumWaiting) {
@@ -5589,12 +5743,12 @@ public final class AudioStudioFrame extends JFrame {
             return; // still getting ready to play
         }
         albumPlay = false;
-        if (!albumPageFree()) {
-            return; // the album page was closed meanwhile: the playback ends with this title
+        if (!playerPageFree()) {
+            return; // the player page was closed meanwhile: the playback ends with this title
         }
         Path next = nextForAlbum();
         if (next == null) {
-            if (albumsPanel.onlyNew()) {
+            if (playerPanel.onlyNew()) {
                 startAlbumWaiting(); // the next title that is finished plays
             }
             return; // the last title of the album
@@ -5604,8 +5758,8 @@ public final class AudioStudioFrame extends JFrame {
 
     /** Near the end of a title the next one comes in while this one fades out, if the setting says so. */
     private void overlapNextTitle() {
-        double fade = albumsPanel == null ? 0 : albumsPanel.crossfadeSeconds();
-        if (!(fade > 0) || player.live() || player.fading() || !albumPageFree()) {
+        double fade = playerPanel.crossfadeSeconds();
+        if (!(fade > 0) || player.live() || player.fading() || !playerPageFree()) {
             return;
         }
         double length = player.length();
@@ -5614,37 +5768,55 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         Path next = nextForAlbum();
+        Path fading = heardPiece();
         if (next == null || !player.fadeOut(left)) {
             return; // nothing follows: this title plays to its end as it is
+        }
+        // The tail that fades out is heard beside the next title: it counts for this one now.
+        if (fading != null && hearing.heard(fading, left, length, albumHeardPercent)
+                && !com.aresstack.audio.studio.application.HeardTitles.heard(fading)) {
+            try {
+                com.aresstack.audio.studio.application.HeardTitles.markHeard(fading);
+            } catch (IOException failed) {
+                append("WARN: Dass „" + fading.getFileName() + "“ gehört ist, ließ sich nicht vermerken: "
+                        + failed.getMessage());
+            }
+            heardChanged();
         }
         albumPlay = false;
         goToAlbumTitle(next, left);
     }
 
-    /** The title that follows on the album page: the next one with a mix, or with "Nur neue" a new one. */
+    /** The title that follows: the next one of the album with a mix, or with "Nur neue" a new one. */
     private Path nextForAlbum() {
         Path current = Paths.get(directory.getText().trim());
-        if (albumsPanel.onlyNew()) {
-            for (Path each : albumsPanel.newPieces()) {
+        String album = playerAlbum(current);
+        if (album == null) {
+            return null;
+        }
+        if (playerPanel.onlyNew()) {
+            for (Path each : newPieces(album)) {
                 if (!same(each, current)) {
                     return each;
                 }
             }
             return null;
         }
-        return nextAlbumPiece(albumsPanel.album().id(), current);
+        return nextAlbumPiece(album, current);
     }
 
     /** Opens the next title of the album and plays it; with an overlap at once, coming in over {@code fade}. */
     private void goToAlbumTitle(Path next, double fade) {
-        currentAlbum = albumsPanel.album().id();
+        String album = playerAlbum(Paths.get(directory.getText().trim()));
+        if (album != null) {
+            currentAlbum = album;
+        }
         keepFading = fade > 0;
         try {
             openSong(next);
         } finally {
             keepFading = false;
         }
-        albumsPanel.selectPiece(next);
         if (!next.equals(Paths.get(directory.getText().trim()))) {
             player.dropOutgoing();
             return; // the piece could not be opened (said)
@@ -5655,10 +5827,10 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         SwingUtilities.invokeLater(() -> {
-            if (!"albums".equals(shownPage)) {
+            if (!"player".equals(shownPage)) {
                 return;
             }
-            play();
+            playAlbumTitle(0);
             armAlbumPlay();
         });
     }
@@ -5666,37 +5838,35 @@ public final class AudioStudioFrame extends JFrame {
     private void startAlbumWaiting() {
         albumWaiting = true;
         albumWaitingLooked = System.currentTimeMillis();
-        if (albumsPanel != null) {
-            albumsPanel.setPlayerNote("Wartet auf einen neuen Titel …");
-        }
+        playerPanel.setNote("Wartet auf einen neuen Titel …");
     }
 
     private void stopAlbumWaiting() {
-        if (albumWaiting && albumsPanel != null) {
-            albumsPanel.setPlayerNote("");
+        if (albumWaiting) {
+            playerPanel.setNote("");
         }
         albumWaiting = false;
     }
 
     /** Waiting with "Nur neue": the first title that is finished and not heard plays. */
     private void lookForNewTitle(boolean playing) {
-        if (playing || !"albums".equals(shownPage) || albumsPanel == null || !albumsPanel.onlyNew()) {
+        if (playing || !"player".equals(shownPage) || !playerPanel.onlyNew()) {
             stopAlbumWaiting(); // something else plays, or the page was left
             return;
         }
         long now = System.currentTimeMillis();
-        if (now - albumWaitingLooked < ALBUM_WAITING_LOOK_MILLIS || !albumPageFree()) {
+        if (now - albumWaitingLooked < ALBUM_WAITING_LOOK_MILLIS || !playerPageFree()) {
             return;
         }
         albumWaitingLooked = now;
-        java.util.List<Path> fresh = albumsPanel.newPieces();
+        java.util.List<Path> fresh = newPieces(playerAlbum(Paths.get(directory.getText().trim())));
         if (!fresh.isEmpty()) {
             stopAlbumWaiting();
             goToAlbumTitle(fresh.get(0), 0);
         }
     }
 
-    /** On the album page the finished mix of the title plays, read from the disk while it plays: at once. */
+    /** The finished mix of the open title, read from the disk while it plays: it starts at once. */
     private void playAlbumTitle(double fadeIn) {
         Path mix = Paths.get(directory.getText().trim()).resolve(com.aresstack.audio.studio.application.HeardTitles.MIX);
         if (!Files.isRegularFile(mix)) {
@@ -5737,9 +5907,7 @@ public final class AudioStudioFrame extends JFrame {
             append("WARN: Dass „" + piece.getFileName() + "“ gehört ist, ließ sich nicht vermerken: "
                     + failed.getMessage());
         }
-        if (albumsPanel != null) {
-            albumsPanel.heardChanged();
-        }
+        heardChanged();
     }
 
     /** The piece whose mix plays now; {@code null} while a track plays alone. */
@@ -5799,8 +5967,8 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     private void play() {
-        if ("albums".equals(shownPage)) {
-            playAlbumTitle(0); // the album is listened to: its finished mix, at once
+        if ("albums".equals(shownPage) || "player".equals(shownPage)) {
+            playAlbumTitle(0); // a title is listened to: its finished mix, at once
             return;
         }
         String selected = (String) playbackSelection.getSelectedItem();
@@ -5934,6 +6102,7 @@ public final class AudioStudioFrame extends JFrame {
         shownPage = page;
         pages.show(pageHolder, page);
         markAlbumInTree();
+        heardChanged(); // titles not heard yet are marked in the tree on the player page only
         javax.swing.JToggleButton key = pageKeys.get(page);
         if (key != null) {
             key.setSelected(true);

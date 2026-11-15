@@ -182,40 +182,7 @@ final class AlbumsPanel extends JPanel {
     private final JSpinner minutesTo = new JSpinner(new SpinnerNumberModel(
             AlbumConcept.DEFAULT_MAX_SECONDS / 60.0, 0.5, 60.0, 0.5));
     private final Tracks tracks = new Tracks();
-    private final JTable table = new JTable(tracks) {
-        @Override
-        public Component prepareRenderer(javax.swing.table.TableCellRenderer renderer, int row, int column) {
-            Component cell = super.prepareRenderer(renderer, row, column);
-            if (!isRowSelected(row) && isNewRow(row)) {
-                cell.setBackground(NEW_ROW); // not heard yet: the accent of the theme lies under the row
-            }
-            return cell;
-        }
-    };
-    /** The background of a title nobody has heard yet: the accent of the theme over the table. */
-    static final java.awt.Color NEW_ROW = blend(AudioStudioTheme.WELL, AudioStudioTheme.ACCENT, 0.28f);
-    /** The longest overlap of two titles the setting takes, in seconds. */
-    static final double MOST_CROSSFADE_SECONDS = 30.0;
-    /** How the overlap setting steps, in seconds. */
-    static final double CROSSFADE_STEP_SECONDS = 0.5;
-    /** How long the table trusts what it read about the titles heard, in milliseconds. */
-    static final long HEARD_READ_MILLIS = 1000;
-    /** "Nur neue": Play plays only the titles not heard yet, in any order, and waits for new ones. */
-    private final javax.swing.JCheckBox onlyNew = new javax.swing.JCheckBox("Nur neue");
-    /** From how many percent heard a title counts as heard. */
-    private final JSpinner heardPercent = new JSpinner(new SpinnerNumberModel(
-            com.aresstack.audio.studio.application.HeardTitles.DEFAULT_PERCENT,
-            com.aresstack.audio.studio.application.HeardTitles.LEAST_PERCENT,
-            com.aresstack.audio.studio.application.HeardTitles.MOST_PERCENT, 5));
-    /** How long two titles overlap when the album plays on; 0 is no overlap. */
-    private final JSpinner crossfade = new JSpinner(new SpinnerNumberModel(0.0, 0.0, MOST_CROSSFADE_SECONDS,
-            CROSSFADE_STEP_SECONDS));
-    /** What the player of the album does right now, e.g. that it waits for a new title. */
-    private final JLabel playerNote = new JLabel("");
-    private final java.util.List<Runnable> playerOptionsChanged = new java.util.ArrayList<Runnable>();
-    /** Which pieces of the album shown are new, as last read. */
-    private final Map<String, Boolean> newPieces = new HashMap<String, Boolean>();
-    private long newPiecesRead;
+    private final JTable table = new JTable(tracks);
     private final JLabel status = new JLabel(" ");
     private final JButton create = new JButton("Neues Album");
     private final JButton delete = new JButton("Löschen");
@@ -458,13 +425,12 @@ final class AlbumsPanel extends JPanel {
         status.setForeground(AudioStudioTheme.TEXT_DIM);
         JPanel bottom = new JPanel(new BorderLayout(0, 8));
         bottom.setOpaque(false);
-        // Below the list: what the page says at the left, settings of the album and its player at the right.
+        // Below the list: what the page says at the left, settings of the album at the right.
         JPanel foot = new JPanel(new BorderLayout(12, 0));
         foot.setOpaque(false);
         foot.add(status, BorderLayout.CENTER);
         JPanel settings = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 12, 0));
         settings.setOpaque(false);
-        settings.add(playerOptions());
         settings.add(original);
         foot.add(settings, BorderLayout.EAST);
         bottom.add(foot, BorderLayout.SOUTH);
@@ -612,149 +578,6 @@ final class AlbumsPanel extends JPanel {
 
     String status() {
         return status.getText();
-    }
-
-    // ---- the player of the album: titles heard, only new ones, overlap ----
-
-    /** The settings of the player, right under the table: only new titles, when heard, overlap. */
-    private JPanel playerOptions() {
-        JPanel row = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 0));
-        row.setOpaque(false);
-        playerNote.setForeground(AudioStudioTheme.ACCENT_SOFT);
-        onlyNew.setOpaque(false);
-        onlyNew.setToolTipText("Play spielt nur Titel, die noch nicht gehört sind, in beliebiger Reihenfolge;"
-                + " gibt es keinen mehr, wartet der Player, bis ein neuer fertig wird");
-        heardPercent.setToolTipText("Ab so viel Prozent gehört gilt ein Titel als gehört; ungehörte Titel sind farbig"
-                + " hinterlegt");
-        crossfade.setToolTipText("So viele Sekunden überblenden zwei Titel ineinander, wenn das Album weiterspielt;"
-                + " 0 = keine Überblendung");
-        narrow(heardPercent, 4);
-        narrow(crossfade, 4);
-        JLabel heardLabel = new JLabel("Gehört ab");
-        JLabel percentLabel = new JLabel("%");
-        JLabel fadeLabel = new JLabel("Überblendung");
-        JLabel secondsLabel = new JLabel("s");
-        for (JLabel label : new JLabel[]{heardLabel, percentLabel, fadeLabel, secondsLabel}) {
-            label.setForeground(AudioStudioTheme.TEXT_DIM);
-        }
-        row.add(playerNote);
-        row.add(javax.swing.Box.createHorizontalStrut(8));
-        row.add(onlyNew);
-        row.add(javax.swing.Box.createHorizontalStrut(8));
-        row.add(heardLabel);
-        row.add(heardPercent);
-        row.add(percentLabel);
-        row.add(javax.swing.Box.createHorizontalStrut(8));
-        row.add(fadeLabel);
-        row.add(crossfade);
-        row.add(secondsLabel);
-        onlyNew.addActionListener(event -> playerOptionsChanged());
-        heardPercent.addChangeListener(event -> playerOptionsChanged());
-        crossfade.addChangeListener(event -> playerOptionsChanged());
-        return row;
-    }
-
-    private static void narrow(JSpinner spinner, int columns) {
-        if (spinner.getEditor() instanceof JSpinner.DefaultEditor) {
-            ((JSpinner.DefaultEditor) spinner.getEditor()).getTextField().setColumns(columns);
-        }
-    }
-
-    private void playerOptionsChanged() {
-        for (Runnable each : playerOptionsChanged) {
-            each.run();
-        }
-    }
-
-    /** Told whenever the user changes a setting of the player. */
-    void onPlayerOptions(Runnable changed) {
-        playerOptionsChanged.add(changed);
-    }
-
-    /** Sets the settings of the player as they were saved, without telling anyone. */
-    void setPlayerOptions(int percent, double seconds, boolean onlyNewTitles) {
-        java.util.List<Runnable> told = new java.util.ArrayList<Runnable>(playerOptionsChanged);
-        playerOptionsChanged.clear();
-        try {
-            heardPercent.setValue(Math.max(com.aresstack.audio.studio.application.HeardTitles.LEAST_PERCENT,
-                    Math.min(com.aresstack.audio.studio.application.HeardTitles.MOST_PERCENT, percent)));
-            crossfade.setValue(Math.max(0.0, Math.min(MOST_CROSSFADE_SECONDS, seconds)));
-            onlyNew.setSelected(onlyNewTitles);
-        } finally {
-            playerOptionsChanged.addAll(told);
-        }
-    }
-
-    int heardPercent() {
-        return ((Number) heardPercent.getValue()).intValue();
-    }
-
-    double crossfadeSeconds() {
-        return ((Number) crossfade.getValue()).doubleValue();
-    }
-
-    boolean onlyNew() {
-        return onlyNew.isSelected();
-    }
-
-    /** Says beside the settings what the player does (e.g. that it waits); empty says nothing. */
-    void setPlayerNote(String note) {
-        playerNote.setText(note == null ? "" : note);
-    }
-
-    String playerNote() {
-        return playerNote.getText();
-    }
-
-    /** A title was heard (or became new): the table shows it at once. */
-    void heardChanged() {
-        newPiecesRead = 0;
-        table.repaint();
-    }
-
-    /** Whether the title in this row has a mix nobody has heard yet. */
-    boolean isNewRow(int row) {
-        if (album == null || row < 0 || row >= album.tracks().size()) {
-            return false;
-        }
-        long now = System.currentTimeMillis();
-        if (now - newPiecesRead > HEARD_READ_MILLIS) {
-            newPieces.clear();
-            newPiecesRead = now;
-        }
-        AlbumTrack track = album.tracks().get(row);
-        if (!track.hasPiece()) {
-            return false;
-        }
-        return newPieces.computeIfAbsent(track.id(), id -> state.status(id) != Status.RUNNING
-                && com.aresstack.audio.studio.application.HeardTitles.isNew(songs.root().resolve(track.piece())));
-    }
-
-    /**
-     * The finished titles of the album shown that nobody has heard yet, in the order of the album;
-     * a title that is being made right now is not finished.
-     */
-    List<Path> newPieces() {
-        List<Path> found = new java.util.ArrayList<Path>();
-        if (album == null) {
-            return found;
-        }
-        for (AlbumTrack track : album.tracks()) {
-            if (track.hasPiece() && state.status(track.id()) != Status.RUNNING) {
-                Path piece = songs.root().resolve(track.piece());
-                if (com.aresstack.audio.studio.application.HeardTitles.isNew(piece)) {
-                    found.add(piece);
-                }
-            }
-        }
-        return found;
-    }
-
-    private static java.awt.Color blend(java.awt.Color under, java.awt.Color over, float share) {
-        return new java.awt.Color(
-                Math.round(under.getRed() + (over.getRed() - under.getRed()) * share),
-                Math.round(under.getGreen() + (over.getGreen() - under.getGreen()) * share),
-                Math.round(under.getBlue() + (over.getBlue() - under.getBlue()) * share));
     }
 
     private String summary() {
