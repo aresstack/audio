@@ -47,6 +47,7 @@ import java.util.concurrent.Semaphore;
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -187,6 +188,16 @@ final class AlbumsPanel extends JPanel {
             AlbumConcept.DEFAULT_MIN_SECONDS / 60.0, 0.5, 60.0, 0.5));
     private final JSpinner minutesTo = new JSpinner(new SpinnerNumberModel(
             AlbumConcept.DEFAULT_MAX_SECONDS / 60.0, 0.5, 60.0, 0.5));
+    /** Whether the number of pieces is set here ("automatisch") or follows the track list. */
+    private final JComboBox<String> countMode = new JComboBox<String>(new String[]{"automatisch", "aus der Trackliste"});
+    /** The advanced settings of the title chosen, opened by its ⚙ in the list. */
+    private final SpecChoice rowSpec = new SpecChoice(SpecChoice.Length.MINUTES);
+    private final JPanel rowSettings = new JPanel(new BorderLayout(10, 0));
+    private final JLabel rowSettingsTitle = new JLabel(" ");
+    private final JButton rowSettingsClose = new DeckWidgets.HeadKey("Schließen");
+    /** The id of the title whose advanced settings are open; {@code null} while they are closed. */
+    private String rowSettingsOf;
+    private boolean rowSettingsShowing;
     private final Tracks tracks = new Tracks();
     private final JTable table = new JTable(tracks);
     private final JLabel status = new JLabel(" ");
@@ -359,7 +370,19 @@ final class AlbumsPanel extends JPanel {
         c.weightx = 0;
         concept.add(dim("Stücke"), c);
         c.gridx = 1;
-        concept.add(trackCount, c);
+        JPanel counted = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        counted.setOpaque(false);
+        countMode.setToolTipText("automatisch: die KI plant so viele Titel, wie hier steht. Aus der Trackliste: die "
+                + "Titel der Liste (oder einer Liste in „Worum geht es?“) sind das Album; die Zahl ergibt sich daraus.");
+        counted.add(countMode);
+        counted.add(trackCount);
+        concept.add(counted, c);
+        countMode.addActionListener(event -> {
+            if (!showing) {
+                showCountMode();
+                keepConcept();
+            }
+        });
         c.gridx = 2;
         concept.add(dim("Minuten je Stück"), c);
         c.gridx = 3;
@@ -371,6 +394,9 @@ final class AlbumsPanel extends JPanel {
         range.add(minutes);
         range.add(dim("bis"));
         range.add(minutesTo);
+        if (assistant != null) {
+            range.add(assistant.key("KI-Hilfe für Anzahl und Länge der Stücke", this::piecesHelp));
+        }
         concept.add(range, c);
         c.gridx = 4;
         original.setOpaque(false);
@@ -393,7 +419,7 @@ final class AlbumsPanel extends JPanel {
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         table.setFillsViewportHeight(true);
         table.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
-        int[] widths = {34, 210, 170, 56, 90, 56, 200, 120, 190};
+        int[] widths = {34, 210, 170, 56, 90, 56, 200, 120, 34, 190};
         // The columns keep their widths; only the state at the end takes what is left. A long
         // message there is cut with "…" and shows whole as the tooltip, instead of squeezing the others.
         table.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
@@ -419,6 +445,40 @@ final class AlbumsPanel extends JPanel {
             }
         });
         table.getSelectionModel().addListSelectionListener(event -> keys());
+        DefaultTableCellRenderer gear = new DefaultTableCellRenderer();
+        gear.setHorizontalAlignment(JLabel.CENTER);
+        gear.setToolTipText("Erweitert: Länge, Tempo, Tonart und Taktart dieses Titels. Automatisch wählt die KI; "
+                + "was du setzt, hält die Planung ein.");
+        table.getColumnModel().getColumn(Tracks.GEAR).setCellRenderer(gear);
+        table.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent event) {
+                int row = table.rowAtPoint(event.getPoint());
+                if (table.columnAtPoint(event.getPoint()) == Tracks.GEAR && album != null && preview == null
+                        && row >= 0 && row < album.tracks().size()) {
+                    String id = album.tracks().get(row).id();
+                    rowSettingsOf = id.equals(rowSettingsOf) ? null : id;
+                    showRowSettings();
+                }
+            }
+        });
+        rowSettings.setOpaque(false);
+        rowSettings.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, AudioStudioTheme.STROKE),
+                BorderFactory.createEmptyBorder(8, 4, 4, 4)));
+        rowSettingsTitle.setForeground(AudioStudioTheme.TEXT_DIM);
+        rowSettings.add(rowSettingsTitle, BorderLayout.NORTH);
+        rowSettings.add(rowSpec, BorderLayout.CENTER);
+        JPanel closing = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        closing.setOpaque(false);
+        closing.add(rowSettingsClose);
+        rowSettings.add(closing, BorderLayout.EAST);
+        rowSettings.setVisible(false);
+        rowSettingsClose.addActionListener(event -> {
+            rowSettingsOf = null;
+            showRowSettings();
+        });
+        rowSpec.onChange(this::keepRowSettings);
         JScrollPane tableScroll = new JScrollPane(table);
         tableScroll.setBorder(BorderFactory.createLineBorder(AudioStudioTheme.STROKE, 1, true));
 
@@ -485,7 +545,11 @@ final class AlbumsPanel extends JPanel {
         tableScroll.setAlignmentY(0.5f);
         listed.add(planning);
         listed.add(tableScroll);
-        right.add(listed, BorderLayout.CENTER);
+        JPanel listedWithSettings = new JPanel(new BorderLayout(0, 0));
+        listedWithSettings.setOpaque(false);
+        listedWithSettings.add(listed, BorderLayout.CENTER);
+        listedWithSettings.add(rowSettings, BorderLayout.SOUTH);
+        right.add(listedWithSettings, BorderLayout.CENTER);
         right.add(bottom, BorderLayout.SOUTH);
         add(right, BorderLayout.CENTER);
 
@@ -569,7 +633,10 @@ final class AlbumsPanel extends JPanel {
         boolean wasShowing = showing;
         showing = true;
         original.setSelected(chosen != null && chosen.concept().original());
+        countMode.setSelectedIndex(chosen != null && chosen.concept().fromList() ? 1 : 0);
         showing = wasShowing;
+        showCountMode();
+        showRowSettings();
         readTemplates();
         tracks.fireTableDataChanged();
         say(chosen == null ? "Noch kein Album. „Neues Album“ legt eines an." : summary());
@@ -630,10 +697,13 @@ final class AlbumsPanel extends JPanel {
         AlbumTrack selected = there && row >= 0 && row < album.tracks().size() ? album.tracks().get(row) : null;
         create.setEnabled(!busy);
         delete.setEnabled(free);
-        for (Component field : new Component[]{titleBox, descriptionWide, styleWide, trackCount, minutes, minutesTo,
+        for (Component field : new Component[]{titleBox, descriptionWide, styleWide, countMode, minutes, minutesTo,
                 original}) {
             field.setEnabled(free);
         }
+        // With the list the number of pieces follows from it.
+        trackCount.setEnabled(free && countMode.getSelectedIndex() == 0);
+        rowSpec.lock(!rowSettingsEditable());
         plan.setEnabled(free);
         if (beside != null) {
             // Each album has models of its own: those of an album being produced stay as they are.
@@ -826,6 +896,95 @@ final class AlbumsPanel extends JPanel {
         return false;
     }
 
+    // ---- the advanced settings of a title ----
+
+    /** The title whose advanced settings are open; {@code null} while none are. */
+    private AlbumTrack rowSettingsTrack() {
+        return album == null || rowSettingsOf == null ? null : album.track(rowSettingsOf);
+    }
+
+    /** Whether the title whose settings are open can still be changed: not while it is made or once it is. */
+    private boolean rowSettingsEditable() {
+        AlbumTrack track = rowSettingsTrack();
+        if (track == null || busy || preview != null || shownRunning()) {
+            return false;
+        }
+        Status at = state.status(track.id());
+        return at != Status.DONE && at != Status.RUNNING;
+    }
+
+    /** Shows the advanced settings of the title chosen by its ⚙, or hides them. */
+    private void showRowSettings() {
+        AlbumTrack track = rowSettingsTrack();
+        if (track == null) {
+            rowSettingsOf = null;
+            rowSettings.setVisible(false);
+            return;
+        }
+        rowSettingsShowing = true;
+        try {
+            com.aresstack.audio.studio.application.CompositionSpec spec = track.spec();
+            rowSpec.show(new SpecChoice.Values(track.targetSeconds() / 60.0, track.bpm(), spec.key(),
+                    spec.numerator(), spec.denominator()), track.fixed());
+            rowSpec.lock(!rowSettingsEditable());
+            rowSettingsTitle.setText("Erweitert für „" + track.title() + "“ – automatisch wählt die KI, "
+                    + "was du setzt, hält sie ein");
+        } finally {
+            rowSettingsShowing = false;
+        }
+        rowSettings.setVisible(true);
+        rowSettings.revalidate();
+    }
+
+    /** Takes the advanced settings into the title: what is set is the user's, the rest is left to planning. */
+    private void keepRowSettings() {
+        AlbumTrack track = rowSettingsTrack();
+        if (rowSettingsShowing || track == null || !rowSettingsEditable()) {
+            return;
+        }
+        try {
+            SpecChoice.Values values = rowSpec.values();
+            java.util.Set<String> set = rowSpec.fixed();
+            java.util.Set<String> fixed = new java.util.TreeSet<String>(track.fixed());
+            fixed.removeAll(SpecChoice.FIELDS);
+            fixed.addAll(set);
+            AlbumTrack changed = track.withFixed(fixed);
+            if (set.contains(AlbumTrack.LENGTH)) {
+                changed = changed.withSeconds((int) Math.round(values.length() * 60));
+            }
+            if (set.contains(AlbumTrack.BPM)) {
+                changed = changed.withBpm(values.bpm());
+            }
+            if (set.contains(AlbumTrack.KEY)) {
+                changed = changed.withKey(values.key().name());
+            }
+            if (set.contains(AlbumTrack.METER)) {
+                changed = changed.withMeter(values.numerator() + "/" + values.denominator());
+            }
+            if (!changed.equals(track)) {
+                keep(album.with(changed));
+                int row = album.tracks().indexOf(changed);
+                if (row >= 0) {
+                    tracks.fireTableRowsUpdated(row, row);
+                }
+                say(summary());
+            }
+        } catch (IllegalArgumentException | IOException failed) {
+            say("Die Einstellung ließ sich nicht speichern: " + failed.getMessage());
+        }
+    }
+
+    /** Shows the count as the mode says: with the list it is the number of its titles. */
+    private void showCountMode() {
+        if (countMode.getSelectedIndex() == 1 && album != null) {
+            boolean was = showing;
+            showing = true;
+            trackCount.setValue(Math.max(1, Math.min(AlbumConcept.MAX_TRACKS, album.tracks().size())));
+            showing = was;
+        }
+        keys();
+    }
+
     // ---- the concept ----
 
     /** Takes what the fields say into the album and keeps it. {@code false} if it cannot be kept. */
@@ -838,7 +997,12 @@ final class AlbumsPanel extends JPanel {
                     (Integer) trackCount.getValue(),
                     (int) Math.round(((Number) minutes.getValue()).doubleValue() * 60),
                     (int) Math.round(((Number) minutesTo.getValue()).doubleValue() * 60))
-                    .withOriginal(original.isSelected());
+                    .withOriginal(original.isSelected()).withFromList(countMode.getSelectedIndex() == 1);
+            if (concept.fromList()) {
+                // the list says how many pieces: as many as it has titles
+                concept = concept.withTrackCount(Math.max(1, Math.min(AlbumConcept.MAX_TRACKS,
+                        files.album(album.id()).orElse(album).tracks().size())));
+            }
             // The titles as the file has them: the window may have put a piece into the album meanwhile.
             Album changed = files.album(album.id()).orElse(album).withTitle(title.getText()).withConcept(concept);
             if (!changed.equals(album)) {
@@ -1048,6 +1212,111 @@ final class AlbumsPanel extends JPanel {
         };
     }
 
+    /** The help of the number and length of the pieces: it reads the album and sets only these. */
+    private Assistant.Field piecesHelp() {
+        if (album == null) {
+            say("Erst ein Album wählen oder anlegen.");
+            return null;
+        }
+        final String id = album.id();
+        return new Assistant.Field() {
+            @Override
+            public String label() {
+                return "Stücke";
+            }
+
+            @Override
+            public String key() {
+                return "album-" + id + "-pieces";
+            }
+
+            @Override
+            public String system() {
+                return "You help the user of a music studio with how many pieces an album has and how long they "
+                        + "are. Talk with the user in their language. Read the album first with read_album. "
+                        + "mode 'automatic' means the planning makes as many titles as count says; mode 'list' "
+                        + "means the titles of the track list (or of a list in the description) are the album and "
+                        + "the count follows from them. A length range in minutes (from 0.25 to 60, from <= to) "
+                        + "gives each piece its own length between the two. You can change nothing else. After a "
+                        + "change, say in a sentence what you set.";
+            }
+
+            @Override
+            public List<com.aresstack.audio.studio.assist.AssistTool> tools() {
+                return List.of(
+                        com.aresstack.audio.studio.assist.AssistTool.reading("read_album",
+                                "Reads the album: title, description, style, number of pieces and length range, the "
+                                        + "titles with their numbers, and the main theme.",
+                                arguments -> Assistant.onScreen(() -> AlbumTools.read(current(id)))),
+                        com.aresstack.audio.studio.assist.AssistTool.of("set_pieces",
+                                "Sets how the number of pieces is found and how long they are; fields left out stay.",
+                                "{\"type\":\"object\",\"properties\":{"
+                                        + "\"mode\":{\"type\":\"string\",\"enum\":[\"automatic\",\"list\"]},"
+                                        + "\"count\":{\"type\":\"integer\"},"
+                                        + "\"minutes_from\":{\"type\":\"number\"},"
+                                        + "\"minutes_to\":{\"type\":\"number\"}}}",
+                                arguments -> Assistant.onScreen(() -> setPieces(id, arguments))));
+            }
+
+            @Override
+            public Runnable snapshot() {
+                Album was = current(id);
+                return () -> {
+                    if (album != null && album.id().equals(id) && !busy && !shownRunning()) {
+                        showPieces(was.concept());
+                        keepConcept();
+                    }
+                };
+            }
+        };
+    }
+
+    /** Sets number and length of the pieces as the help asks, in the fields, and keeps them. */
+    private String setPieces(String id, com.google.gson.JsonObject arguments) {
+        if (album == null || !album.id().equals(id)) {
+            throw new IllegalStateException("Das Album ist nicht mehr gezeigt.");
+        }
+        if (busy || shownRunning()) {
+            throw new IllegalStateException("Das Album wird gerade geplant oder produziert; bitte danach.");
+        }
+        AlbumConcept now = album.concept();
+        boolean fromList = arguments.has("mode") ? "list".equals(arguments.get("mode").getAsString())
+                : now.fromList();
+        int count = arguments.has("count") ? arguments.get("count").getAsInt() : now.trackCount();
+        double from = arguments.has("minutes_from") ? arguments.get("minutes_from").getAsDouble()
+                : now.minSeconds() / 60.0;
+        double to = arguments.has("minutes_to") ? arguments.get("minutes_to").getAsDouble() : now.maxSeconds() / 60.0;
+        if (count < 1 || count > AlbumConcept.MAX_TRACKS) {
+            throw new IllegalArgumentException("count is 1 to " + AlbumConcept.MAX_TRACKS);
+        }
+        if (from < 0.25 || to > 60 || from > to) {
+            throw new IllegalArgumentException("minutes are 0.25 to 60, from <= to");
+        }
+        showPieces(new AlbumConcept(now.description(), now.style(), count, (int) Math.round(from * 60),
+                (int) Math.round(to * 60)).withFromList(fromList));
+        if (!keepConcept()) {
+            throw new IllegalArgumentException("not kept");
+        }
+        AlbumConcept kept = album.concept();
+        return "Set: " + (kept.fromList() ? "from the track list" : "automatic") + ", " + kept.trackCount()
+                + " pieces, " + kept.minSeconds() / 60.0 + " to " + kept.maxSeconds() / 60.0 + " minutes.";
+    }
+
+    /** Shows count, its mode and the length range of a concept in the fields, without keeping them. */
+    private void showPieces(AlbumConcept concept) {
+        boolean was = showing;
+        showing = true;
+        try {
+            countMode.setSelectedIndex(concept.fromList() ? 1 : 0);
+            trackCount.setValue(concept.trackCount());
+            minutes.setValue(concept.minSeconds() / 60.0);
+            minutesTo.setValue(concept.maxSeconds() / 60.0);
+        } finally {
+            showing = was;
+        }
+        showCountMode();
+    }
+
     /** The help of the score template of the title chosen in the list. */
     private Assistant.Field scoreHelp() {
         int row = table.getSelectedRow();
@@ -1115,6 +1384,12 @@ final class AlbumsPanel extends JPanel {
         }
         if (album.concept().description().isEmpty()) {
             say("Erst sagen, worum es in dem Album geht.");
+            return;
+        }
+        if (album.concept().fromList() && album.tracks().isEmpty()
+                && com.aresstack.audio.studio.album.TitleList.in(album.concept().description()).isEmpty()) {
+            say("„Stücke: aus der Trackliste“: erst Titel in die Liste eintragen (oder eine Liste in "
+                    + "„Worum geht es?“ geben), oder auf „automatisch“ stellen.");
             return;
         }
         final ChatModel model;
@@ -1671,9 +1946,10 @@ final class AlbumsPanel extends JPanel {
 
     /** The list of titles as a table; a title is changed in its cells until its piece is finished. */
     private final class Tracks extends AbstractTableModel {
-        static final int STATE = 8;
+        static final int GEAR = 8;
+        static final int STATE = 9;
         private final String[] names = {"Nr.", "Titel", "Stimmung", "BPM", "Tonart", "Takt", "Besetzung", "Länge",
-                "Stand"};
+                "⚙", "Stand"};
 
         @Override
         public int getRowCount() {
@@ -1697,7 +1973,7 @@ final class AlbumsPanel extends JPanel {
 
         @Override
         public boolean isCellEditable(int row, int column) {
-            if (column == 0 || column == STATE || busy || preview != null || shownRunning()) {
+            if (column == 0 || column == GEAR || column == STATE || busy || preview != null || shownRunning()) {
                 return false;
             }
             Status at = state.status(album.tracks().get(row).id());
@@ -1738,6 +2014,9 @@ final class AlbumsPanel extends JPanel {
                                 : "  (Ziel " + clock(track.targetSeconds()) + ")");
                     }
                     return clock(track.targetSeconds()) + " (" + track.spec().bars() + " Takte)";
+                case GEAR:
+                    // a mark when the user set some of the advanced settings
+                    return track.fixed().isEmpty() ? "⚙" : "⚙•";
                 default:
                     String notes = templateNames.containsKey(track.id())
                             ? "  · Noten: " + templateNames.get(track.id()) : "";
@@ -1782,19 +2061,19 @@ final class AlbumsPanel extends JPanel {
                         changed = t.withMood(text).withGiven(t.given() || !t.hasPiece());
                         break;
                     case 3:
-                        changed = t.withBpm(Integer.parseInt(text));
+                        changed = t.withBpm(Integer.parseInt(text)).fix(AlbumTrack.BPM);
                         break;
                     case 4:
-                        changed = t.withKey(text);
+                        changed = t.withKey(text).fix(AlbumTrack.KEY);
                         break;
                     case 5:
-                        changed = t.withMeter(text);
+                        changed = t.withMeter(text).fix(AlbumTrack.METER);
                         break;
                     case 6:
-                        changed = t.withInstrumentation(text);
+                        changed = t.withInstrumentation(text).fix(AlbumTrack.PLAYERS);
                         break;
                     case 7:
-                        changed = t.withSeconds(seconds(text));
+                        changed = t.withSeconds(seconds(text)).fix(AlbumTrack.LENGTH);
                         break;
                     default:
                         return;
@@ -1802,6 +2081,7 @@ final class AlbumsPanel extends JPanel {
                 if (!changed.equals(t)) {
                     keep(album.with(changed));
                     fireTableRowsUpdated(row, row);
+                    showRowSettings();
                     say(summary());
                 }
             } catch (NumberFormatException notANumber) {

@@ -21,10 +21,20 @@ import com.aresstack.audio.studio.application.CompositionSpec;
  *                        both and only fills in the rest
  * @param theme           how the main theme of the album appears in this piece, in words, or empty
  *                        if it does not appear
+ * @param fixed           which of the other fields the user set ({@link #BPM}, {@link #KEY}, ...):
+ *                        planning keeps them as they are and fills in only the rest
  */
 public record AlbumTrack(String id, String title, String mood, int bpm, String key, String meter,
                          String instrumentation, String form, int targetSeconds, String piece, boolean given,
-                         String theme) {
+                         String theme, java.util.Set<String> fixed) {
+    /** The names of the fields the user may set for planning to keep. */
+    public static final String BPM = "tempoBpm";
+    public static final String KEY = "key";
+    public static final String METER = "meter";
+    public static final String PLAYERS = "instrumentation";
+    public static final String FORM = "form";
+    public static final String LENGTH = "targetSeconds";
+    public static final java.util.List<String> FIXABLE = java.util.List.of(BPM, KEY, METER, PLAYERS, FORM, LENGTH);
     /** A piece may be this share longer or shorter than asked before the list says so. */
     public static final double LENGTH_TOLERANCE = 0.10;
 
@@ -38,6 +48,15 @@ public record AlbumTrack(String id, String title, String mood, int bpm, String k
         form = form == null ? "" : form.trim();
         piece = piece == null ? "" : piece.trim();
         theme = theme == null ? "" : theme.trim();
+        java.util.TreeSet<String> known = new java.util.TreeSet<String>();
+        if (fixed != null) {
+            for (String name : fixed) {
+                if (FIXABLE.contains(name)) {
+                    known.add(name);
+                }
+            }
+        }
+        fixed = java.util.Collections.unmodifiableSet(known);
         if (!piece.isEmpty() && !isFolderName(piece)) {
             throw new IllegalArgumentException("Kein Ordnername eines Stücks in der Bibliothek: " + piece);
         }
@@ -67,6 +86,39 @@ public record AlbumTrack(String id, String title, String mood, int bpm, String k
         return true;
     }
 
+    /** A title without fields the user set. */
+    public AlbumTrack(String id, String title, String mood, int bpm, String key, String meter,
+                      String instrumentation, String form, int targetSeconds, String piece, boolean given,
+                      String theme) {
+        this(id, title, mood, bpm, key, meter, instrumentation, form, targetSeconds, piece, given, theme,
+                java.util.Set.of());
+    }
+
+    /** Whether the user set this field ({@link #BPM}, {@link #KEY}, ...), so that planning keeps it. */
+    public boolean isFixed(String field) {
+        return fixed.contains(field);
+    }
+
+    /**
+     * The title with this field set by the user: planning keeps it, and the title counts as
+     * given (it keeps its place and its name when the list is planned again).
+     */
+    public AlbumTrack fix(String field) {
+        java.util.Set<String> more = new java.util.TreeSet<String>(fixed);
+        more.add(field);
+        return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, form, targetSeconds, piece, true,
+                theme, more);
+    }
+
+    /**
+     * The title with exactly these fields set by the user; the others are left to planning again.
+     * With any field set the title counts as given.
+     */
+    public AlbumTrack withFixed(java.util.Set<String> changed) {
+        return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, form, targetSeconds, piece,
+                given || !changed.isEmpty(), theme, changed);
+    }
+
     /** A title planned by the AI, without a part of the main theme. */
     public AlbumTrack(String id, String title, String mood, int bpm, String key, String meter,
                       String instrumentation, String form, int targetSeconds, String piece) {
@@ -85,57 +137,59 @@ public record AlbumTrack(String id, String title, String mood, int bpm, String k
 
     public AlbumTrack withPiece(String folderName) {
         return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, form, targetSeconds, folderName,
-                given, theme);
+                given, theme, fixed);
     }
 
     public AlbumTrack withTitle(String changed) {
         return new AlbumTrack(id, changed, mood, bpm, key, meter, instrumentation, form, targetSeconds, piece,
-                given, theme);
+                given, theme, fixed);
     }
 
     public AlbumTrack withMood(String changed) {
         return new AlbumTrack(id, title, changed, bpm, key, meter, instrumentation, form, targetSeconds, piece,
-                given, theme);
+                given, theme, fixed);
     }
 
     public AlbumTrack withBpm(int changed) {
         return new AlbumTrack(id, title, mood, changed, key, meter, instrumentation, form, targetSeconds, piece,
-                given, theme);
+                given, theme, fixed);
     }
 
     public AlbumTrack withKey(String changed) {
         return new AlbumTrack(id, title, mood, bpm, changed, meter, instrumentation, form, targetSeconds, piece,
-                given, theme);
+                given, theme, fixed);
     }
 
     public AlbumTrack withMeter(String changed) {
         return new AlbumTrack(id, title, mood, bpm, key, changed, instrumentation, form, targetSeconds, piece,
-                given, theme);
+                given, theme, fixed);
     }
 
     public AlbumTrack withInstrumentation(String changed) {
-        return new AlbumTrack(id, title, mood, bpm, key, meter, changed, form, targetSeconds, piece, given, theme);
+        return new AlbumTrack(id, title, mood, bpm, key, meter, changed, form, targetSeconds, piece, given, theme,
+                fixed);
     }
 
     public AlbumTrack withForm(String changed) {
         return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, changed, targetSeconds, piece,
-                given, theme);
+                given, theme, fixed);
     }
 
     public AlbumTrack withSeconds(int changed) {
-        return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, form, changed, piece, given, theme);
+        return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, form, changed, piece, given, theme,
+                fixed);
     }
 
     /** The title as given by the user, or no longer: planning keeps a given title and its mood. */
     public AlbumTrack withGiven(boolean changed) {
         return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, form, targetSeconds, piece,
-                changed, theme);
+                changed, theme, fixed);
     }
 
     /** How the main theme of the album appears in this piece; empty if it does not. */
     public AlbumTrack withTheme(String changed) {
         return new AlbumTrack(id, title, mood, bpm, key, meter, instrumentation, form, targetSeconds, piece,
-                given, changed);
+                given, changed, fixed);
     }
 
     /**

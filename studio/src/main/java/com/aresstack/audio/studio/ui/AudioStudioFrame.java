@@ -2405,9 +2405,10 @@ public final class AudioStudioFrame extends JFrame {
         // Both ways plan anew, so length, tempo, key and meter can be chosen anew here.
         PieceSpecFields wanted = new PieceSpecFields();
         final com.aresstack.audio.studio.application.CompositionSpec chosenSpec;
+        java.util.Set<String> chosenFixed = java.util.Set.of();
         int choice;
         try {
-            wanted.choose(specFields.spec());
+            wanted.choose(specFields.spec(), specFields.fixed());
             choice = JOptionPane.showOptionDialog(this, new Object[]{
                     "„" + songs.name(folder) + "“ ist schon komponiert.\n\n"
                             + "Neues Stück: es kommt als eigenes Stück in die Liste, dieses bleibt, wie es ist.\n"
@@ -2416,6 +2417,7 @@ public final class AudioStudioFrame extends JFrame {
                             + "Vorgaben für die neue Komposition:", wanted},
                     "Komponieren", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, choices, choices[0]);
             chosenSpec = choice == 0 || choice == 1 ? wanted.spec() : null;
+            chosenFixed = wanted.fixed();
         } catch (RuntimeException invalid) {
             message(invalid.getMessage());
             return false;
@@ -2434,7 +2436,7 @@ public final class AudioStudioFrame extends JFrame {
                 append("Neues Stück angelegt; seinen Namen bekommt es vom Plan der KI: " + fresh.getFileName());
                 specFields.show(null);
                 updateComposeKey();
-                specFields.choose(chosenSpec);
+                specFields.choose(chosenSpec, chosenFixed);
                 return true;
             }
             if (choice == 1) {
@@ -2442,7 +2444,7 @@ public final class AudioStudioFrame extends JFrame {
                 append("Das Stück wird neu komponiert; " + put + " bisherige Antworten liegen im Ordner „earlier“.");
                 specFields.show(null);
                 updateComposeKey();
-                specFields.choose(chosenSpec);
+                specFields.choose(chosenSpec, chosenFixed);
                 return true;
             }
         } catch (IOException failed) {
@@ -2563,6 +2565,7 @@ public final class AudioStudioFrame extends JFrame {
         final String prompt = wishForAi();
         final Path output = Paths.get(directory.getText().trim());
         final com.aresstack.audio.studio.application.CompositionSpec spec;
+        final java.util.Set<String> fixed = specFields.fixed();
         try {
             spec = specFields.spec();
         } catch (RuntimeException invalid) {
@@ -2590,7 +2593,8 @@ public final class AudioStudioFrame extends JFrame {
                 try {
                     recordModels(output, "Komposition", models);
                     Path arrangement = composeIntoPiece(new GemmaMusicComposer(models, tokens, parallel).sectionBars(sections),
-                            prompt, output, chosen, spec, progress);
+                            prompt, output, chosen, plannedSpec(models, tokens, prompt, spec, fixed, output, progress),
+                            progress);
                     return renderArrangement(arrangement, output, settings, progress);
                 } finally {
                     activeModels = null;
@@ -2626,6 +2630,7 @@ public final class AudioStudioFrame extends JFrame {
         final Path output = Paths.get(directory.getText().trim());
         final String prompt = wishForAi();
         final com.aresstack.audio.studio.application.CompositionSpec spec;
+        final java.util.Set<String> fixed = specFields.fixed();
         try {
             spec = specFields.spec();
         } catch (RuntimeException invalid) {
@@ -2666,7 +2671,8 @@ public final class AudioStudioFrame extends JFrame {
                         // The AI decides everything: the same steps the production of an album runs.
                         PieceAutopilot pilot = new PieceAutopilot(registry, models, tokens, parallel, rendering).sectionBars(sections).growBars(grow)
                                 .voices(fewest, most).templateLines(linesPerRequest);
-                        return composeIntoPiece(pilot, prompt, output, stageBefore, progress);
+                        return composeIntoPiece(pilot, prompt, output,
+                                plannedSpec(models, tokens, prompt, spec, fixed, output, progress), stageBefore, progress);
                     }
                     final InstrumentProposalService.Staged staged = new InstrumentProposalService(
                             models.model(com.aresstack.audio.studio.ai.ModelRoles.INSTRUMENTS), tokens)
@@ -2696,9 +2702,10 @@ public final class AudioStudioFrame extends JFrame {
      * taken but for what is protected, and what was composed becomes part of the model.
      */
     private Path composeIntoPiece(PieceAutopilot pilot, String prompt, Path output,
+                                  com.aresstack.audio.studio.application.CompositionSpec spec,
                                   com.aresstack.audio.studio.stage.SpatialScene stageBefore,
                                   Progress progress) throws Exception {
-        return pilot.run(prompt, output, null, stageBefore, songs, pieceModel, progress,
+        return pilot.run(prompt, output, spec, stageBefore, songs, pieceModel, progress,
                 (selected, staged) -> SwingUtilities.invokeAndWait(() -> {
                     endChoosing(true);
                     trackTable.setArrangement(selected);
@@ -2706,6 +2713,27 @@ public final class AudioStudioFrame extends JFrame {
                     showStage();
                     trackTable.refreshStage();
                 })).rendered();
+    }
+
+    /**
+     * The spec a piece is composed with: the advanced settings the user set, and for those left
+     * automatic what the AI chooses from the description (the planning of an album, for one
+     * title). What it chose is shown in the fields.
+     */
+    private com.aresstack.audio.studio.application.CompositionSpec plannedSpec(
+            com.aresstack.audio.studio.ai.ModelLineup models, int tokens, String prompt,
+            com.aresstack.audio.studio.application.CompositionSpec shown, java.util.Set<String> fixed, Path output,
+            Progress progress) throws IOException {
+        final com.aresstack.audio.studio.application.CompositionSpec used =
+                com.aresstack.audio.studio.album.PieceSpecPlanner.plan(
+                        models.model(com.aresstack.audio.studio.ai.ModelRoles.PLANNING), tokens, prompt, shown, fixed,
+                        output, progress);
+        if (!used.equals(shown)) {
+            progress.update("Gewählt: " + used.bars() + " Takte, " + used.bpm() + " BPM, " + used.key().germanName()
+                    + ", " + used.numerator() + "/" + used.denominator() + ".");
+        }
+        SwingUtilities.invokeLater(() -> specFields.showChosen(used));
+        return used;
     }
 
     private TrackArrangement withPreferredSoundbanks(TrackArrangement original) {
