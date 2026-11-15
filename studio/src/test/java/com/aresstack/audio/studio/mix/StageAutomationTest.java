@@ -81,6 +81,18 @@ public final class StageAutomationTest {
     }
 
     @Test
+    public void aLevelPointOfTheStageStaysAtItsBarWhenTheTempoChanges() {
+        // The level curve the window keeps, in bars: it jumps up at the start of bar 5 (bar 4 counted from 0).
+        SoundSourcePlacement placement = new SoundSourcePlacement("melody", 0, 0.2).withDynamics(Arrays.asList(
+                new SoundSourcePlacement.LevelPoint(4, -12), new SoundSourcePlacement.LevelPoint(4, 0)));
+        AutomationCurve slowing = StageAutomation.of(List.of(placement), slowingDown()).of("melody").level();
+        // Slowing down after two bars, bar 5 begins after 12 s, not after the 8 s of one tempo.
+        assertEquals(-12, slowing.valueAt(8L * RATE + 1), 0);
+        assertEquals(-12, slowing.valueAt(12L * RATE - 1), 0);
+        assertEquals(0, slowing.valueAt(12L * RATE + 1), 0);
+    }
+
+    @Test
     public void betweenTwoPointsTheCurveRunsStraightInBarsAcrossAChangeOfTempo() {
         AutomationLane swell = lane(AutomationLane.LEVEL, new long[] {0, 4 * BAR}, new double[] {-12, 0});
         AutomationCurve level = StageAutomation.of(mix(swell), slowingDown()).of("melody").level();

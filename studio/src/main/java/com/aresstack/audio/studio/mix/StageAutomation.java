@@ -120,6 +120,34 @@ public final class StageAutomation {
     }
 
     /**
+     * The level curves of the stage for a piece whose tempo or meter changes: the points are in
+     * bars, counted from 0, and each lies where the time map has that bar; within a bar the place
+     * is taken in proportion to its ticks.
+     */
+    public static StageAutomation of(List<SoundSourcePlacement> placements, TimeMap time) {
+        Map<String, Lanes> tracks = new LinkedHashMap<>();
+        for (SoundSourcePlacement placement : placements) {
+            List<SoundSourcePlacement.LevelPoint> points = placement.dynamics();
+            if (points.isEmpty() || tracks.containsKey(placement.trackId())) {
+                continue;
+            }
+            double[] seconds = new double[points.size()];
+            double[] db = new double[points.size()];
+            for (int i = 0; i < points.size(); i++) {
+                double bar = Math.max(0, points.get(i).bar());
+                int whole = (int) Math.floor(bar);
+                long from = time.tickOfBar(whole);
+                long tick = from + Math.round((bar - whole) * (time.tickOfBar(whole + 1) - from));
+                seconds[i] = time.seconds(tick);
+                db[i] = points.get(i).db();
+            }
+            tracks.put(placement.trackId(), new Lanes(
+                    AutomationCurve.of(seconds, db, SpatialStemMixer.RATE), null, null, null));
+        }
+        return new StageAutomation(tracks);
+    }
+
+    /**
      * The automation of a mix document, for the tracks named after the owners of their channels
      * ({@link #trackId(MixChannel.Owner)}). A channel level beyond what a placement can hold comes
      * as {@link Lanes#trimDb()}. Lanes of the master, lanes without points and lanes of parameters
