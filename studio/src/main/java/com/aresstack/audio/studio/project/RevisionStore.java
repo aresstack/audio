@@ -15,7 +15,7 @@ import java.util.stream.Stream;
 /**
  * The revisions of a piece in {@code revisions/}, one file each, named by number and id
  * ({@code 0001-abcd2345.json}). Every file holds the full piece in the format of
- * {@code composition.json} together with who made it, when and why, so that each one can be read
+ * {@code composition.json} and its mix in that of {@code mix.json}, together with who made it, when and why, so that each one can be read
  * on its own. Files are only ever added; the first, the original, is never deleted.
  */
 public final class RevisionStore {
@@ -50,6 +50,9 @@ public final class RevisionStore {
             root.addProperty("run", revision.runId());
         }
         root.add("composition", CompositionJson.write(revision.composition()));
+        if (revision.mix() != null) {
+            root.add("mix", MixJson.write(revision.mix()));
+        }
         JsonText.atomically(file, root);
     }
 
@@ -93,7 +96,8 @@ public final class RevisionStore {
             return new Revision(CompositionJson.text(root, "id"), root.get("sequence").getAsInt(),
                     CompositionJson.text(root, "parent"), Revision.Author.valueOf(author.toUpperCase(Locale.ROOT)),
                     root.get("time").getAsLong(), CompositionJson.text(root, "description"),
-                    CompositionJson.text(root, "run"), CompositionJson.read(root.getAsJsonObject("composition")));
+                    CompositionJson.text(root, "run"), CompositionJson.read(root.getAsJsonObject("composition")),
+                    root.has("mix") ? MixJson.read(root.getAsJsonObject("mix")) : null);
         } catch (RuntimeException invalid) {
             throw new IOException("Cannot read " + file + ": " + invalid.getMessage(), invalid);
         }

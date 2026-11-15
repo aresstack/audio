@@ -249,7 +249,12 @@ public final class ProjectSession {
         }
     }
 
-    /** Writes the model and {@code arrangement.tsv} from it, without a revision. */
+    /**
+     * Writes the model and {@code arrangement.tsv} from it, without a revision. A piece that says
+     * more than the TSV can (tempo or meter changes, another meter than 4/4) gets
+     * {@code arrangement.mid}, written from the model, as its exchange file. A TSV lying there is
+     * left as it is (work package F1): {@link #synchronize()} never takes it over such a model.
+     */
     private void persist() throws IOException {
         writeModel();
         Path arrangement = folder.resolve(ProjectFolder.ARRANGEMENT);
@@ -257,7 +262,12 @@ public final class ProjectSession {
         try {
             lines = TsvExport.lines(composition);
         } catch (TsvExport.NotExpressible beyond) {
-            return; // then arrangement.mid is the exchange format
+            MidiExport.write(composition, folder.resolve(ProjectFolder.MIDI));
+            ProjectFile project = ProjectFile.load(folder);
+            if (project != null) {
+                project.withSources(sources(folder)).save(folder);
+            }
+            return;
         }
         boolean same = false;
         if (Files.isRegularFile(arrangement)) {
@@ -437,7 +447,7 @@ public final class ProjectSession {
                 .orElseThrow(() -> new IOException("Keine Revision " + revisionId + " in " + folder));
         dropPending();
         String description = "Revision " + revision.sequence() + " wiederhergestellt";
-        history.push(new State(revision.composition(), mix), description);
+        history.push(new State(revision.composition(), revision.mix() != null ? revision.mix() : mix), description);
         ChangeSet changes = become(history.current());
         record(Revision.Author.USER, description, null);
         return changes;
@@ -499,7 +509,7 @@ public final class ProjectSession {
     private Revision record(Revision.Author author, String description, String runId) throws IOException {
         Revision revision = new Revision(ids.next(), lastRevision == null ? 1 : lastRevision.sequence() + 1,
                 lastRevision == null ? null : lastRevision.id(), author, System.currentTimeMillis(), description, runId,
-                composition);
+                composition, mix);
         RevisionStore.save(folder, revision);
         lastRevision = revision;
         ProjectFile project = ProjectFile.load(folder);
