@@ -32,12 +32,18 @@ public final class PieceRendering {
     }
 
     /**
-     * @param session  the model of the piece; its folder is the folder of the piece
-     * @param programs the General MIDI program the user chose for a track, by track
+     * @param session   the model of the piece; its folder is the folder of the piece. It is only
+     *                  read: rendering never changes the saved piece.
+     * @param libraries the sound bank the user chose for a track in the studio's table, by track
+     *                  ("builtin" is the Java sound); a track that is not named plays the bank its
+     *                  part has in the model. The table's choice is not part of the model until
+     *                  the piece is composed again, but it is what the user asks to hear.
+     * @param programs  the General MIDI program the user chose for a track, by track
      * @param progress hears every step; a {@link TrackProgress} also hears how each track gets on
      */
-    public Outcome render(ProjectSession session, Sf2Engine sf2Engine, String fluidSynthExecutable,
-                          String sfizzExecutable, Map<String, Integer> programs, Progress progress) throws Exception {
+    public Outcome render(ProjectSession session, Map<String, String> libraries, Sf2Engine sf2Engine,
+                          String fluidSynthExecutable, String sfizzExecutable, Map<String, Integer> programs,
+                          Progress progress) throws Exception {
         Path folder = session.folder();
         Set<String> open = new LinkedHashSet<String>();
         for (Part part : session.composition().parts()) {
@@ -46,8 +52,11 @@ public final class PieceRendering {
         }
         RenderService.Result stems;
         try {
-            stems = new RenderService(RenderService.instrumentation(registry, sf2Engine, fluidSynthExecutable,
-                    sfizzExecutable, programs), RenderLimits.STANDARD).render(session, message -> {
+            RenderService.Instrumentation usual = RenderService.instrumentation(registry, sf2Engine,
+                    fluidSynthExecutable, sfizzExecutable, programs);
+            RenderService.Instrumentation chosen = part -> usual.of(withLibrary(part,
+                    libraries == null ? null : libraries.get(part.id())));
+            stems = new RenderService(chosen, RenderLimits.STANDARD).render(session, message -> {
                 String part = partBeingRendered(message, open);
                 if (part != null) {
                     TrackProgress.tell(progress, part, TrackProgress.Stage.RENDER, TrackProgress.State.WORKING, "");
@@ -71,6 +80,15 @@ public final class PieceRendering {
         session.exportMidi(folder.resolve(MIDI_FILE));
         Path mix = new StageMixService().mix(folder.resolve("arrangement.tsv"), folder, progress);
         return new Outcome(mix, stems);
+    }
+
+    /** The part as it sounds with the sound bank chosen for it; the part itself if none is chosen. */
+    private static Part withLibrary(Part part, String libraryId) {
+        if (libraryId == null || libraryId.equals(part.libraryId())) {
+            return part;
+        }
+        return new Part(part.id(), part.name(), part.role(), part.instrument(), part.program(), libraryId,
+                part.staffLayout(), part.voices(), part.legacyChannel());
     }
 
     /**

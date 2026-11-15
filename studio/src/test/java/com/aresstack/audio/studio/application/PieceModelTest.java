@@ -115,6 +115,28 @@ public final class PieceModelTest {
     }
 
     @Test
+    public void lookingAtTheModelNeverTakesAFileThatWasChangedBehindItsBack() throws Exception {
+        Path folder = Files.createTempDirectory("piece-model-");
+        Files.write(folder.resolve("arrangement.tsv"), PIECE, StandardCharsets.UTF_8);
+        PieceModel model = new PieceModel(line -> { });
+        model.open(folder);
+        byte[] saved = Files.readAllBytes(folder.resolve("composition.json"));
+        List<String> stale = new ArrayList<String>(PIECE);
+        stale.set(2, "note\tmelody\t0\t480\t60\t80");
+        Files.write(folder.resolve("arrangement.tsv"), stale, StandardCharsets.UTF_8);
+
+        // What rendering, playing and mixing do with the model: they look at it, again and again.
+        model.open(folder);
+        for (int i = 0; i < 3; i++) {
+            assertEquals(72, model.session().get().composition().notesOf("melody").get(0).note().pitch());
+        }
+
+        assertEquals(new String(saved, StandardCharsets.UTF_8),
+                new String(Files.readAllBytes(folder.resolve("composition.json")), StandardCharsets.UTF_8));
+        assertTrue("the changed file is still known as not taken over", model.session().get().externalChanges());
+    }
+
+    @Test
     public void aFailedFollowingIsTriedAgainFromTheSavedModel() throws Exception {
         Path folder = Files.createTempDirectory("piece-model-");
         Files.write(folder.resolve("arrangement.tsv"), PIECE, StandardCharsets.UTF_8);

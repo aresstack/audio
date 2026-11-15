@@ -425,10 +425,10 @@ public final class AudioStudioFrame extends JFrame {
                 try {
                     com.aresstack.audio.studio.application.StageMixService.rename(
                             Paths.get(directory.getText().trim()), from, to);
+                    pieceModel.synchronize(); // the files were written: the model follows them to the new name
                 } catch (IOException failed) {
                     append("WARN: Die Dateien der Spur ließen sich nicht umbenennen: " + failed.getMessage());
                 }
-                pieceModel.synchronize(); // the model follows the files to the new name
                 if (from.equals(playbackSelection.getSelectedItem())) {
                     playbackSelection.setSelectedItem("Mixed sampled arrangement");
                 }
@@ -1148,8 +1148,8 @@ public final class AudioStudioFrame extends JFrame {
             public Path execute(Progress progress) throws Exception {
                 try {
                     boolean planned = Files.isRegularFile(output.resolve("composition-plan.json"));
-                    Path arrangement = new GemmaMusicComposer(client, tokens, parallel)
-                            .compose(prompt, output, chosen, progress);
+                    Path arrangement = composeIntoPiece(new GemmaMusicComposer(client, tokens, parallel),
+                            prompt, output, chosen, progress);
                     if (!planned) {
                         songs.planned(output, prompt); // the words this plan follows
                     }
@@ -1159,6 +1159,19 @@ public final class AudioStudioFrame extends JFrame {
                 }
             }
         });
+    }
+
+    /**
+     * Composes into the folder of the piece; what the composer wrote becomes part of the model
+     * of the piece. Besides renaming a track this is the only place where the model takes over
+     * the old files: rendering, playing, mixing and proposals never change the saved piece, so
+     * a file that was changed behind the model's back stays out of it.
+     */
+    private Path composeIntoPiece(GemmaMusicComposer composer, String prompt, Path output, TrackArrangement tracks,
+                                  Progress progress) throws Exception {
+        Path arrangement = composer.compose(prompt, output, tracks, progress);
+        pieceModel.synchronize();
+        return arrangement;
     }
 
     /** First ask the AI only for a proposal; optionally continue automatically. */
@@ -1218,8 +1231,8 @@ public final class AudioStudioFrame extends JFrame {
                     }
                     new TrackArrangementStore().save(output, selected);
                     boolean planned = Files.isRegularFile(output.resolve("composition-plan.json"));
-                    Path arrangement = new GemmaMusicComposer(client, tokens, parallel)
-                            .compose(prompt, output, selected, progress);
+                    Path arrangement = composeIntoPiece(new GemmaMusicComposer(client, tokens, parallel),
+                            prompt, output, selected, progress);
                     if (!planned) {
                         songs.planned(output, prompt); // the words this plan follows
                     }
@@ -1523,8 +1536,10 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     /**
-     * Renders the piece and mixes its stage. A piece with a model is rendered from the model:
-     * only the parts that changed, the others come from the stem cache. An arrangement that is
+     * Renders the piece and mixes its stage. A piece with a model is rendered from the model as
+     * it is saved (rendering never brings the model in step with the old files; only composing
+     * and renaming do), with the instruments chosen in the table: only the parts that changed
+     * are rendered, the others come from the stem cache. An arrangement that is
      * not the open piece (a file chosen from elsewhere) or a piece whose model cannot be used is
      * rendered from its file as before.
      */
@@ -1533,10 +1548,15 @@ public final class AudioStudioFrame extends JFrame {
         if (source.toAbsolutePath().normalize()
                 .equals(destination.resolve("arrangement.tsv").toAbsolutePath().normalize())) {
             java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece =
-                    pieceModel.inStep(destination);
+                    pieceModel.of(destination);
             if (piece.isPresent()) {
+                Map<String, String> libraries = new HashMap<String, String>();
+                for (String track : settings.programs.keySet()) {
+                    InstrumentLibrary bank = settings.assignments.get(track);
+                    libraries.put(track, bank == null ? "builtin" : bank.id());
+                }
                 return new com.aresstack.audio.studio.application.PieceRendering(registry).render(piece.get(),
-                        settings.sf2Engine, settings.fluidSynthExecutable, settings.sfizzExecutable,
+                        libraries, settings.sf2Engine, settings.fluidSynthExecutable, settings.sfizzExecutable,
                         settings.programs, progress).mix();
             }
         }
@@ -1833,7 +1853,6 @@ public final class AudioStudioFrame extends JFrame {
                     if (Files.isRegularFile(savedArrangement)) {
                         arrangementFile.setText(savedArrangement.toString());
                     }
-                    pieceModel.synchronize(); // what was composed becomes part of the model of the piece
                     // What was rendered is there to be seen and heard at once.
                     showPlaybackChoice();
                     refreshStems();

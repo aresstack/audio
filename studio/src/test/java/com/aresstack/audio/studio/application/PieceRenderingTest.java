@@ -46,7 +46,7 @@ public final class PieceRenderingTest {
         PieceRendering rendering = new PieceRendering(new InstrumentRegistry(folder.resolve("none.properties")));
 
         Heard heard = new Heard();
-        PieceRendering.Outcome first = rendering.render(model.inStep(folder).get(), Sf2Engine.GERVILL, "fluidsynth",
+        PieceRendering.Outcome first = rendering.render(model.of(folder).get(), null, Sf2Engine.GERVILL, "fluidsynth",
                 "sfizz_render", new HashMap<String, Integer>(), heard);
 
         assertEquals(Arrays.asList("melody", "bass"), first.stems().rendered());
@@ -61,8 +61,9 @@ public final class PieceRenderingTest {
         List<String> composed = new ArrayList<String>(PIECE);
         composed.set(4, "note\tbass\t0\t960\t43\t70");
         Files.write(folder.resolve("arrangement.tsv"), composed, StandardCharsets.UTF_8);
+        model.synchronize(); // as the window does right after composing
         heard.tracks.clear();
-        PieceRendering.Outcome second = rendering.render(model.inStep(folder).get(), Sf2Engine.GERVILL, "fluidsynth",
+        PieceRendering.Outcome second = rendering.render(model.of(folder).get(), null, Sf2Engine.GERVILL, "fluidsynth",
                 "sfizz_render", new HashMap<String, Integer>(), heard);
 
         assertEquals(Arrays.asList("bass"), second.stems().rendered());
@@ -72,16 +73,68 @@ public final class PieceRenderingTest {
     }
 
     @Test
+    public void renderingNeverTakesAFileThatWasChangedBehindTheModelsBack() throws Exception {
+        Path folder = Files.createTempDirectory("piece-rendering-");
+        Files.write(folder.resolve("arrangement.tsv"), PIECE, StandardCharsets.UTF_8);
+        PieceModel model = new PieceModel(line -> { });
+        model.open(folder);
+        PieceRendering rendering = new PieceRendering(new InstrumentRegistry(folder.resolve("none.properties")));
+        rendering.render(model.of(folder).get(), null, Sf2Engine.GERVILL, "fluidsynth", "sfizz_render",
+                new HashMap<String, Integer>(), message -> { });
+        byte[] saved = Files.readAllBytes(folder.resolve("composition.json"));
+
+        // The file is changed outside the studio; the user opens the piece and only clicks "render".
+        List<String> stale = new ArrayList<String>(PIECE);
+        stale.set(4, "note\tbass\t0\t960\t43\t70");
+        Files.write(folder.resolve("arrangement.tsv"), stale, StandardCharsets.UTF_8);
+        model.open(folder);
+        PieceRendering.Outcome again = rendering.render(model.of(folder).get(), null, Sf2Engine.GERVILL,
+                "fluidsynth", "sfizz_render", new HashMap<String, Integer>(), message -> { });
+
+        assertEquals("the saved piece is what was rendered: nothing new to render", Arrays.asList(),
+                again.stems().rendered());
+        assertEquals(new String(saved, StandardCharsets.UTF_8),
+                new String(Files.readAllBytes(folder.resolve("composition.json")), StandardCharsets.UTF_8));
+        assertEquals(48, model.session().get().composition().notesOf("bass").get(0).note().pitch());
+        assertTrue(model.session().get().externalChanges());
+    }
+
+    @Test
+    public void theSoundBankChosenInTheTableCountsWithoutChangingTheModel() throws Exception {
+        Path folder = Files.createTempDirectory("piece-rendering-");
+        Files.write(folder.resolve("arrangement.tsv"), PIECE, StandardCharsets.UTF_8);
+        PieceModel model = new PieceModel(line -> { });
+        model.open(folder);
+        byte[] saved = Files.readAllBytes(folder.resolve("composition.json"));
+        PieceRendering rendering = new PieceRendering(new InstrumentRegistry(folder.resolve("none.properties")));
+        java.util.Map<String, String> libraries = new HashMap<String, String>();
+        libraries.put("melody", "builtin");
+        libraries.put("bass", "a-bank-that-is-not-installed");
+
+        try {
+            rendering.render(model.of(folder).get(), libraries, Sf2Engine.GERVILL, "fluidsynth", "sfizz_render",
+                    new HashMap<String, Integer>(), message -> { });
+            org.junit.Assert.fail("the bass asks for the bank chosen in the table");
+        } catch (IllegalArgumentException missing) {
+            assertTrue(missing.getMessage(), missing.getMessage().contains("a-bank-that-is-not-installed"));
+        }
+        assertEquals(new String(saved, StandardCharsets.UTF_8),
+                new String(Files.readAllBytes(folder.resolve("composition.json")), StandardCharsets.UTF_8));
+    }
+
+    @Test
     public void onlyTheOpenPieceWithAModelIsRenderedFromIt() throws Exception {
         Path folder = Files.createTempDirectory("piece-rendering-");
         Path other = Files.createTempDirectory("piece-rendering-");
         PieceModel model = new PieceModel(line -> { });
         model.open(folder);
 
-        assertFalse("nothing composed yet", model.inStep(folder).isPresent());
+        assertFalse("nothing composed yet", model.of(folder).isPresent());
         Files.write(folder.resolve("arrangement.tsv"), PIECE, StandardCharsets.UTF_8);
-        assertTrue("composed: the model is there with the first rendering", model.inStep(folder).isPresent());
-        assertFalse("another folder is not the open piece", model.inStep(other).isPresent());
-        assertFalse(model.inStep(null).isPresent());
+        assertFalse("looking never takes a file over", model.of(folder).isPresent());
+        model.synchronize(); // composed: the piece gets its model
+        assertTrue(model.of(folder).isPresent());
+        assertFalse("another folder is not the open piece", model.of(other).isPresent());
+        assertFalse(model.of(null).isPresent());
     }
 }
