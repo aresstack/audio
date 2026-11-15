@@ -231,11 +231,27 @@ final class ArrangementView extends JComponent {
         /** Jump to this second of the playback. */
         void seek(double second);
 
+        /** A passage was marked (or the mark was taken away: {@code null}). */
+        default void marked(Range range) {
+        }
+
         /**
          * The editor changed the piece, or tried to: what to tell the user, and whether the piece
          * is different now (then the lanes, the score and the stems follow).
          */
         default void edited(String said, boolean changed) {
+        }
+    }
+
+    /**
+     * A marked passage: the tracks and the bars it covers.
+     *
+     * @param firstBar the first bar, counted from 1
+     * @param lastBar  the last bar, counted from 1
+     */
+    record Range(List<String> trackIds, int firstBar, int lastBar) {
+        Range {
+            trackIds = List.copyOf(trackIds);
         }
     }
 
@@ -248,6 +264,13 @@ final class ArrangementView extends JComponent {
     private double second;
     private double audioSeconds;
     private String hint = "";
+    private Range marked;
+    /** Where a mark began, in pixels; {@code null} while none is drawn. */
+    private java.awt.Point markFrom;
+    /** Whether the mark began in the ruler: then it covers every track. */
+    private boolean markAllTracks;
+    /** The menu of the marked passage, shown where the note editor has none of its own. */
+    private javax.swing.JPopupMenu passageMenu;
     /** The note editor, once the window hands over the way into the piece. */
     private LaneEditor editor;
     /** The pitch windows of the lanes while the editor drags, so that they stay where they were. */
@@ -259,16 +282,43 @@ final class ArrangementView extends JComponent {
         MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent event) {
+                if (javax.swing.SwingUtilities.isRightMouseButton(event) || event.isPopupTrigger()) {
+                    if (!editing(event) && passageMenu != null) {
+                        passageMenu.show(ArrangementView.this, event.getX(), event.getY());
+                    }
+                    return; // in the lanes of a piece that can be edited the note editor shows its menu
+                }
+                if (event.isShiftDown() && !editing(event)) {
+                    // Shift and drag marks a passage. Where notes can be edited, Shift in the lanes is
+                    // the editor's (it adds to the selection): there a passage is marked in the ruler,
+                    // across every track.
+                    markFrom = event.getPoint();
+                    markAllTracks = event.getY() < RULER;
+                    markTo(event);
+                    return;
+                }
+                markFrom = null;
                 if (!editing(event)) {
+                    if (marked != null) {
+                        mark(null);
+                    }
                     jump(event);
                 }
             }
 
             @Override
             public void mouseDragged(MouseEvent event) {
-                if (event.getX() >= GUTTER && !editing(event)) {
+                if (markFrom != null) {
+                    markTo(event);
+                } else if (event.getX() >= GUTTER && !javax.swing.SwingUtilities.isRightMouseButton(event)
+                        && !editing(event)) {
                     jump(event);
                 }
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent event) {
+                markFrom = null;
             }
 
             private void jump(MouseEvent event) {
@@ -281,6 +331,86 @@ final class ArrangementView extends JComponent {
         };
         addMouseListener(mouse);
         addMouseMotionListener(mouse);
+    }
+
+    /** The number of bars the lanes show; 0 without an arrangement. */
+    int bars() {
+        return arrangement == null ? 0 : arrangement.bars();
+    }
+
+    /** The marked passage, or {@code null}. */
+    Range marked() {
+        return marked;
+    }
+
+    /**
+     * Marks the passage between two points of the view: the bars from one to the other, and the
+     * tracks whose lanes lie between them. A point above the lanes, in the ruler, means the first
+     * track; one below them the last.
+     */
+    void mark(int x1, int y1, int x2, int y2) {
+        if (arrangement == null || order.isEmpty()) {
+            mark(null);
+            return;
+        }
+        int bars = arrangement.bars();
+        int firstBar = barAt(Math.min(x1, x2), bars);
+        int lastBar = barAt(Math.max(x1, x2), bars);
+        int firstLane = laneNear(Math.min(y1, y2));
+        int lastLane = laneNear(Math.max(y1, y2));
+        mark(new Range(order.subList(firstLane, lastLane + 1), firstBar, lastBar));
+    }
+
+    /** Draws the mark on to where the pointer is: from the ruler across every track, else across the lanes passed. */
+    private void markTo(MouseEvent event) {
+        if (markAllTracks) {
+            mark(markFrom.x, RULER, event.getX(), RULER + Math.max(1, order.size()) * lane - 1);
+        } else {
+            mark(markFrom.x, markFrom.y, event.getX(), event.getY());
+        }
+    }
+
+    /** The note editor of the lanes, or {@code null} before the window handed over the way into the piece. */
+    LaneEditor editor() {
+        return editor;
+    }
+
+    /** The menu of the marked passage; the view shows it where the note editor shows none. */
+    void setPassageMenu(javax.swing.JPopupMenu menu) {
+        passageMenu = menu;
+    }
+
+    /** Whether Shift and drag at this height marks a passage: not where the note editor takes Shift for its selection. */
+    boolean marksAt(int y) {
+        return editor == null || !editor.owns(y);
+    }
+
+    void mark(Range range) {
+        if (range == null ? marked != null : !range.equals(marked)) {
+            marked = range;
+            listener.marked(range);
+            repaint();
+        }
+    }
+
+    /** The bar under a place across the view, counted from 1. */
+    private int barAt(int x, int bars) {
+        double total = totalSeconds();
+        int span = Math.max(1, getWidth() - GUTTER - 10);
+        double musicSpan = total <= 0 ? span : span * arrangement.seconds() / total;
+        int bar = (int) Math.floor((x - GUTTER) / Math.max(1.0, musicSpan) * bars);
+        return Math.max(0, Math.min(bars - 1, bar)) + 1;
+    }
+
+    /** Where a bar begins across the view, bars counted from 0; the end of the last bar is the end of the music. */
+    float xOfBar(int bar) {
+        return arrangement == null ? GUTTER
+                : GUTTER + musicSpan() * Math.max(0, bar) / Math.max(1, arrangement.bars());
+    }
+
+    /** The lane at a height, or the nearest one for a place above or below the lanes. */
+    private int laneNear(int y) {
+        return Math.max(0, Math.min(order.size() - 1, (y - RULER) / Math.max(1, lane)));
     }
 
     /** Lets the notes of a piece with a model be edited in the lanes. */
@@ -301,6 +431,10 @@ final class ArrangementView extends JComponent {
 
     /** The lanes: the tracks of the mixer in their order, with the notes of the arrangement file if there is one. */
     void setArrangement(Arrangement shown, List<String> trackIds, String emptyHint) {
+        if (marked != null && (shown == null || !new ArrayList<String>(trackIds).containsAll(marked.trackIds())
+                || marked.lastBar() > shown.bars())) {
+            mark(null); // the passage is not there any more
+        }
         arrangement = shown;
         order = new ArrayList<String>(trackIds);
         hint = emptyHint == null ? "" : emptyHint;
@@ -456,6 +590,24 @@ final class ArrangementView extends JComponent {
         } else {
             g.setColor(AudioStudioTheme.TEXT_FAINT);
             g.drawString("TAKTE", left + 8, RULER - 7);
+        }
+
+        // The marked passage: its bars across the lanes of its tracks.
+        if (marked != null && arrangement != null && !marked.trackIds().isEmpty()) {
+            int bars = arrangement.bars();
+            int first = order.indexOf(marked.trackIds().get(0));
+            int last = order.indexOf(marked.trackIds().get(marked.trackIds().size() - 1));
+            if (first >= 0 && last >= first) {
+                float from = left + musicSpan * (marked.firstBar() - 1) / bars;
+                float to = left + musicSpan * marked.lastBar() / bars;
+                Rectangle2D area = new Rectangle2D.Float(from, RULER + first * LANE, to - from, (last - first + 1) * LANE);
+                g.setColor(AudioStudioTheme.withAlpha(AudioStudioTheme.ACCENT, 46));
+                g.fill(area);
+                g.setColor(AudioStudioTheme.ACCENT);
+                g.setStroke(new BasicStroke(1.4f));
+                g.draw(area);
+                g.fill(new Rectangle2D.Float(from, RULER - 4, to - from, 3));
+            }
         }
 
         // Where the playback is.
