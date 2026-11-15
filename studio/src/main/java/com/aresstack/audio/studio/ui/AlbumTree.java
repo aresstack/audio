@@ -215,17 +215,28 @@ final class AlbumTree extends JPanel {
         scroll.getViewport().setBackground(AudioStudioTheme.MODULE);
         scroll.setBackground(AudioStudioTheme.MODULE);
         add(scroll, BorderLayout.CENTER);
-        JButton newAlbum = new JButton("Neues Album");
-        newAlbum.setToolTipText("Ein Album anlegen; ohne Titel heißt es „" + AlbumMembership.UNTITLED + "“");
+        // The two keys stand in the head of the module, beside its name; the tree has the whole height.
+        newAlbum.setToolTipText("Neues Album: ein Album anlegen; ohne Titel heißt es „" + AlbumMembership.UNTITLED + "“");
         newAlbum.addActionListener(event -> host.newAlbum());
-        JButton newPiece = new JButton("Neue Komposition");
-        newPiece.setToolTipText("Ein neues Stück im gewählten Album anlegen");
+        newPiece.setToolTipText("Neue Komposition: ein neues Stück im gewählten Album anlegen");
         newPiece.addActionListener(event -> host.newComposition());
-        JPanel keys = new JPanel(new java.awt.GridLayout(2, 1, 0, 6));
-        keys.setOpaque(false);
-        keys.add(newAlbum);
-        keys.add(newPiece);
-        add(keys, BorderLayout.SOUTH);
+    }
+
+    private final JButton newAlbum = new DeckWidgets.HeadKey("+");
+    private final JButton newPiece = new DeckWidgets.HeadKey("♪ +");
+
+    /** The key that makes a new album, for the head of the module right after its name. */
+    JComponent newAlbumKey() {
+        JPanel left = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        left.setOpaque(false);
+        left.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+        left.add(newAlbum);
+        return left;
+    }
+
+    /** The key that makes a new composition in the chosen album, for the right end of the module's head. */
+    JComponent newPieceKey() {
+        return newPiece;
     }
 
     /**
