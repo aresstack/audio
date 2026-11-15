@@ -387,7 +387,8 @@ public final class AudioStudioFrame extends JFrame {
         JPanel keysOfPages = new JPanel(new java.awt.GridLayout(1, 7, 6, 0));
         keysOfPages.setOpaque(false);
         javax.swing.ButtonGroup onePage = new javax.swing.ButtonGroup();
-        String[][] entries = {{"song", "Komposition"}, {"albums", "Alben"}, {"deck", "Arrangement"},
+        // The album is the frame of its pieces, so it comes first; the studio still opens on the piece.
+        String[][] entries = {{"albums", "Alben"}, {"song", "Komposition"}, {"deck", "Arrangement"},
                 {"stage", "Bühne"},
                 {"library", "Soundbänke"}, {"settings", "Einstellungen"}, {"console", "Protokoll"}};
         for (final String[] entry : entries) {
