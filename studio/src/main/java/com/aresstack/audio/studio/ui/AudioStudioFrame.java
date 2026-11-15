@@ -193,6 +193,8 @@ public final class AudioStudioFrame extends JFrame {
     private final Map<String, javax.swing.JToggleButton> pageKeys = new java.util.LinkedHashMap<String, javax.swing.JToggleButton>();
     /** Beside the choice of the piece under the name of the studio: new, open, and what is seldom needed. */
     private final JButton songMenuKey = new JButton("▾");
+    /** What is done with the piece beside the AI keys: undo, revisions, files, export; on its pages. */
+    private final javax.swing.JPopupMenu pieceMenu = new javax.swing.JPopupMenu();
     private final ArrangementView arrangementView = new ArrangementView(new ArrangementView.Listener() {
         @Override
         public void seek(double second) {
@@ -209,8 +211,11 @@ public final class AudioStudioFrame extends JFrame {
     private final ScoreView scoreView = new ScoreView();
     /** The form of the piece above the lanes: its sections with name, function, intensity and chords. */
     private final SectionBar sectionBar = new SectionBar(arrangementView);
+    /** The projects of the studio; the open one is the library of pieces below. */
+    private final com.aresstack.audio.studio.application.Projects projects =
+            com.aresstack.audio.studio.application.Projects.standard();
     private final com.aresstack.audio.studio.application.SongLibrary songs =
-            com.aresstack.audio.studio.application.SongLibrary.standard();
+            new com.aresstack.audio.studio.application.SongLibrary(projects.current());
     /** Every piece belongs to an album; a piece without one lands in the unnamed album. */
     private final AlbumMembership albumMembers = new AlbumMembership(new AlbumFiles(songs.root()), songs);
     /** The id of the album worked in: the one clicked in the tree, or the album of the open piece. */
@@ -359,14 +364,14 @@ public final class AudioStudioFrame extends JFrame {
         JLabel title = new JLabel("Audio Studio");
         title.setFont(new java.awt.Font(java.awt.Font.SERIF, java.awt.Font.BOLD | java.awt.Font.ITALIC, 27));
         title.setForeground(AudioStudioTheme.TEXT);
-        // Under the name: the project, and beside it a small menu for new, open and the like.
+        // Under the name: the project, and beside it the menu of the projects.
         // Albums and pieces are chosen in the tree at the left.
         projectName.setText(projectTitle());
         projectName.setFont(projectName.getFont().deriveFont(java.awt.Font.BOLD, 14f));
         projectName.setForeground(AudioStudioTheme.TEXT);
         projectName.setToolTipText("Das Projekt: " + songs.root());
-        songMenuKey.setToolTipText("Rückgängig, Versionen, Stück verlängern, Takte einfügen, Stimme hinzukomponieren,"
-                + " neue Komposition, öffnen, Ordner zeigen, Plan ansehen, Demo laden");
+        songMenuKey.setToolTipText("Projekte: wechseln, neu anlegen, umbenennen");
+        songMenuKey.addActionListener(event -> projectMenu().show(songMenuKey, 0, songMenuKey.getHeight()));
         songMenuKey.setMargin(new Insets(2, 4, 2, 4));
         songMenuKey.setFocusable(false);
         songMenuKey.setPreferredSize(new Dimension(30, 28));
@@ -585,10 +590,10 @@ public final class AudioStudioFrame extends JFrame {
         arrangementBody.add(aboveTracks, BorderLayout.NORTH);
         arrangementBody.add(trackTable, BorderLayout.CENTER);
         DeckWidgets.Module output = new DeckWidgets.Module("Arrangement", arrangementBody);
-        output.setHeadEnd(sourceChoice);
+        output.setHeadEnd(withPieceMenu(sourceChoice));
 
         // The piece: which one, and what it shall be. What is seldom needed is in the menu "Mehr".
-        final javax.swing.JPopupMenu moreMenu = new javax.swing.JPopupMenu();
+        final javax.swing.JPopupMenu moreMenu = pieceMenu;
         // Bearbeiten: the changes of the piece that can be taken back, and its revisions.
         final javax.swing.JMenuItem undoItem = new javax.swing.JMenuItem("Rückgängig");
         undoItem.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Z,
@@ -605,28 +610,6 @@ public final class AudioStudioFrame extends JFrame {
         moreMenu.add(redoItem);
         moreMenu.add(revisionsItem);
         moreMenu.addSeparator();
-        // What the AI can add to the piece as it is; every such change comes as a proposal first.
-        javax.swing.JMenuItem addVoiceItem = new javax.swing.JMenuItem("Stimme hinzukomponieren …");
-        addVoiceItem.setToolTipText("Die KI schreibt eine neue Stimme zu den vorhandenen; die anderen bleiben unverändert");
-        addVoiceItem.addActionListener(event -> addVoice());
-        moreMenu.add(addVoiceItem);
-        javax.swing.JMenuItem reworkItem = new javax.swing.JMenuItem("Passage ersetzen oder variieren …");
-        reworkItem.setToolTipText("Die KI schreibt markierte Takte gewählter Spuren neu; im Arrangement mit Umschalt und"
-                + " Ziehen markieren");
-        reworkItem.addActionListener(event -> reworkRegion());
-        moreMenu.add(reworkItem);
-        javax.swing.JMenuItem extendItem = new javax.swing.JMenuItem("Stück verlängern …");
-        extendItem.setToolTipText("Die KI plant und schreibt weitere Takte ans Ende; das bisherige Stück bleibt erhalten");
-        extendItem.addActionListener(event -> extendPiece());
-        moreMenu.add(extendItem);
-        javax.swing.JMenuItem insertItem = new javax.swing.JMenuItem("Takte einfügen …");
-        insertItem.setToolTipText("Die KI schreibt neue Takte vor einem Takt; alles ab dort rückt unverändert nach hinten");
-        insertItem.addActionListener(event -> insertBars());
-        moreMenu.add(insertItem);
-        javax.swing.JMenuItem orchestrateItem = new javax.swing.JMenuItem("Umorchestrieren …");
-        orchestrateItem.setToolTipText("Die KI verteilt das Material markierter Takte neu auf die Stimmen");
-        orchestrateItem.addActionListener(event -> reorchestrate());
-        moreMenu.add(orchestrateItem);
         javax.swing.JMenuItem curveItem = new javax.swing.JMenuItem("Intensitätsverlauf setzen …");
         curveItem.setToolTipText("Legt einen Verlauf über die Abschnitte der markierten Takte (oder des ganzen Stücks);"
                 + " keine Note ändert sich");
@@ -689,11 +672,6 @@ public final class AudioStudioFrame extends JFrame {
         getRootPane().getActionMap().put("piece-undo", undoKey);
         getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(redoItem.getAccelerator(), "piece-redo");
         getRootPane().getActionMap().put("piece-redo", redoKey);
-        javax.swing.JMenuItem newSong = new javax.swing.JMenuItem("Neue Komposition …");
-        newSong.setToolTipText("Ein neues, leeres Stück anlegen");
-        newSong.addActionListener(event -> createNewComposition());
-        moreMenu.add(newSong);
-        moreMenu.addSeparator();
         javax.swing.JMenuItem importFolder = new javax.swing.JMenuItem("Ordner einer Komposition öffnen …");
         importFolder.addActionListener(event -> selectDirectory());
         moreMenu.add(importFolder);
@@ -728,7 +706,6 @@ public final class AudioStudioFrame extends JFrame {
         demo.setToolTipText("Das mitgelieferte Stück laden, ohne die KI zu fragen");
         demo.addActionListener(event -> loadDemo());
         moreMenu.add(demo);
-        songMenuKey.addActionListener(event -> moreMenu.show(songMenuKey, 0, songMenuKey.getHeight()));
         // Composing: one key, and the choice of who decides on the instruments.
         javax.swing.ButtonGroup who = new javax.swing.ButtonGroup();
         who.add(aiChooses);
@@ -807,7 +784,7 @@ public final class AudioStudioFrame extends JFrame {
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
         DeckWidgets.Module module = new DeckWidgets.Module("Komposition", session);
-        module.setHeadEnd(songFacts);
+        module.setHeadEnd(withPieceMenu(songFacts));
         page.add(module, BorderLayout.CENTER);
         return page;
     }
@@ -3387,10 +3364,109 @@ public final class AudioStudioFrame extends JFrame {
         return albumTree;
     }
 
-    /** What the project is called: the folder of its library, the standard one simply "Mein Projekt". */
+    /** What the open project is called. */
     private String projectTitle() {
-        return songs.root().equals(com.aresstack.audio.studio.application.SongLibrary.standard().root())
-                ? "Mein Projekt" : String.valueOf(songs.root().getFileName());
+        return projects.name(songs.root());
+    }
+
+    /** A head of a page with the key of the piece's menu beside what it shows already. */
+    private javax.swing.JComponent withPieceMenu(javax.swing.JComponent shown) {
+        JButton key = new JButton("Stück ▾");
+        key.setFocusable(false);
+        key.setMargin(new Insets(2, 8, 2, 8));
+        key.setToolTipText("Rückgängig, Revisionen, Intensitätsverlauf, Dateien öffnen, Plan der KI, Export, Demo");
+        key.addActionListener(event -> pieceMenu.show(key, 0, key.getHeight()));
+        JPanel line = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        line.setOpaque(false);
+        line.add(shown);
+        line.add(key);
+        return line;
+    }
+
+    /** The menu of the projects: the open one checked, the others to switch to, and new or rename. */
+    private javax.swing.JPopupMenu projectMenu() {
+        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+        Path open = songs.root().toAbsolutePath().normalize();
+        for (com.aresstack.audio.studio.application.Projects.Project project : projects.all()) {
+            javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem(project.name(),
+                    project.root().toAbsolutePath().normalize().equals(open));
+            item.addActionListener(event -> switchProject(project.root()));
+            menu.add(item);
+        }
+        menu.addSeparator();
+        javax.swing.JMenuItem create = new javax.swing.JMenuItem("Neues Projekt …");
+        create.addActionListener(event -> {
+            String name = JOptionPane.showInputDialog(this, "Wie soll das neue Projekt heißen?", "Neues Projekt");
+            if (name == null) {
+                return;
+            }
+            try {
+                switchProject(projects.create(name));
+            } catch (IOException failed) {
+                message("Das Projekt ließ sich nicht anlegen: " + failed.getMessage());
+            }
+        });
+        menu.add(create);
+        javax.swing.JMenuItem rename = new javax.swing.JMenuItem("Projekt umbenennen …");
+        rename.addActionListener(event -> {
+            Object name = JOptionPane.showInputDialog(this, "Neuer Name des Projekts:", "Projekt umbenennen",
+                    JOptionPane.PLAIN_MESSAGE, null, null, projectTitle());
+            if (name == null || name.toString().isBlank()) {
+                return;
+            }
+            try {
+                projects.rename(songs.root(), name.toString());
+                projectName.setText(projectTitle());
+            } catch (IOException failed) {
+                message("Das Projekt ließ sich nicht umbenennen: " + failed.getMessage());
+            }
+        });
+        menu.add(rename);
+        javax.swing.JMenuItem folder = new javax.swing.JMenuItem("Projektordner zeigen");
+        folder.setToolTipText(songs.root().toString());
+        folder.addActionListener(event -> {
+            try {
+                Files.createDirectories(songs.root());
+                java.awt.Desktop.getDesktop().open(songs.root().toFile());
+            } catch (Exception failed) {
+                message("Der Ordner ließ sich nicht öffnen: " + songs.root());
+            }
+        });
+        menu.add(folder);
+        return menu;
+    }
+
+    /**
+     * Opens another project: what is open is kept, and the window starts again on the other
+     * library, with the piece last open there.
+     */
+    private void switchProject(Path root) {
+        if (root.toAbsolutePath().normalize().equals(songs.root().toAbsolutePath().normalize())) {
+            return;
+        }
+        if (busy() || (albumsPanel != null && (albumsPanel.producing() || albumsPanel.busy()))) {
+            message("Erst den laufenden Vorgang beenden oder abbrechen, dann das Projekt wechseln.");
+            return;
+        }
+        try {
+            keepSong();
+            saveSettings(false);
+            stopPlayback();
+            projects.choose(root);
+        } catch (IOException failed) {
+            message("Das Projekt ließ sich nicht öffnen: " + failed.getMessage());
+            return;
+        }
+        clock.stop();
+        remixTimer.stop();
+        preparingClock.stop();
+        java.awt.Rectangle where = getBounds();
+        int state = getExtendedState();
+        dispose();
+        AudioStudioFrame other = new AudioStudioFrame(registry);
+        other.setBounds(where);
+        other.setExtendedState(state);
+        other.setVisible(true);
     }
 
     /**
@@ -3522,6 +3598,28 @@ public final class AudioStudioFrame extends JFrame {
         }
     }
 
+    /**
+     * The piece to open in this project: the one given if it is one of its pieces, else the one
+     * last open in it, else its newest, and in an empty project a new one.
+     */
+    private Path pieceOfThisProject(Path wanted) {
+        Path root = songs.root().toAbsolutePath().normalize();
+        try {
+            if (wanted != null && Files.isDirectory(wanted)
+                    && root.equals(wanted.toAbsolutePath().normalize().getParent())) {
+                return wanted;
+            }
+            Path last = projects.lastPiece(songs.root());
+            if (last != null) {
+                return last;
+            }
+            java.util.List<com.aresstack.audio.studio.application.SongLibrary.Song> all = songs.songs();
+            return all.isEmpty() ? songs.create("Neues Stück") : all.get(0).folder();
+        } catch (IOException | RuntimeException failed) {
+            return wanted == null ? songs.root() : wanted;
+        }
+    }
+
     private void loadSettings() {
         try {
             Properties saved = AiDefaults.withDefaults(settingsStore.load());
@@ -3551,6 +3649,7 @@ public final class AudioStudioFrame extends JFrame {
             }
             append("Proxy: " + new AudioProxyRoutes(networkSettings()).describe());
             directory.setText(saved.getProperty("outputDirectory", directory.getText()));
+            directory.setText(pieceOfThisProject(Paths.get(directory.getText().trim())).toString());
             Path previousArrangement = Paths.get(directory.getText().trim(), "arrangement.tsv");
             if (Files.isRegularFile(previousArrangement)) {
                 arrangementFile.setText(previousArrangement.toString());
@@ -3606,6 +3705,11 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("proxyAuthMode", proxyBasic.isSelected() ? "BASIC" : "");
             saved.setProperty("proxyCredentialRef", proxyCredentialRef.getText().trim());
             saved.setProperty("outputDirectory", directory.getText().trim());
+            try {
+                projects.lastPiece(songs.root(), Paths.get(directory.getText().trim()));
+            } catch (IOException | RuntimeException ignored) {
+                // then the project opens with another of its pieces next time
+            }
             saved.setProperty("sf2Engine", sf2Engine.getSelectedIndex() == 1
                     ? "FLUIDSYNTH" : "GERVILL");
             saved.setProperty("fluidSynth", fluidSynth.getText().trim());
