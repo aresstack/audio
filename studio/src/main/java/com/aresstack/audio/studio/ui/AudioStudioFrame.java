@@ -143,6 +143,9 @@ public final class AudioStudioFrame extends JFrame {
     private final ScoreView scoreView = new ScoreView();
     private final com.aresstack.audio.studio.application.SongLibrary songs =
             com.aresstack.audio.studio.application.SongLibrary.standard();
+    /** The model of the open piece; it follows what the studio still writes the old way. */
+    private final com.aresstack.audio.studio.application.PieceModel pieceModel =
+            new com.aresstack.audio.studio.application.PieceModel(this::append);
     private final JComboBox<com.aresstack.audio.studio.application.SongLibrary.Song> songChoice =
             new JComboBox<com.aresstack.audio.studio.application.SongLibrary.Song>();
     private boolean fillingSongs;
@@ -423,6 +426,7 @@ public final class AudioStudioFrame extends JFrame {
                 } catch (IOException failed) {
                     append("WARN: Die Dateien der Spur ließen sich nicht umbenennen: " + failed.getMessage());
                 }
+                pieceModel.synchronize(); // the model follows the files to the new name
                 if (from.equals(playbackSelection.getSelectedItem())) {
                     playbackSelection.setSelectedItem("Mixed sampled arrangement");
                 }
@@ -1810,6 +1814,7 @@ public final class AudioStudioFrame extends JFrame {
                     if (Files.isRegularFile(savedArrangement)) {
                         arrangementFile.setText(savedArrangement.toString());
                     }
+                    pieceModel.synchronize(); // what was composed becomes part of the model of the piece
                     // What was rendered is there to be seen and heard at once.
                     showPlaybackChoice();
                     refreshStems();
@@ -2270,6 +2275,9 @@ public final class AudioStudioFrame extends JFrame {
         } finally {
             loadingTracks = false;
         }
+        // The piece as a model: an old piece is taken into it here, its old files stay as they are.
+        String chosen = directory.getText().trim();
+        pieceModel.open(chosen.isEmpty() ? null : Paths.get(chosen));
     }
 
     private void tracksChanged() {

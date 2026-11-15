@@ -64,6 +64,7 @@ public final class AudioStudioMain {
             InstrumentRegistry registry = new InstrumentRegistry(sandbox.resolve("libraries.properties"));
             verifyDirectoryImport(registry, sandbox);
             Path tsv = copyBundledComposition(sandbox);
+            verifyPieceModel(sandbox, tsv);
             Map<String, InstrumentLibrary> assignments =
                     new HashMap<String, InstrumentLibrary>();
             if (optionalSoundFont != null) {
@@ -96,7 +97,7 @@ public final class AudioStudioMain {
                     throw new IllegalStateException("The mixed WAV is unexpectedly short.");
                 }
             }
-            System.out.println("Studio smoke test passed: SFZ directory import, "
+            System.out.println("Studio smoke test passed: SFZ directory import, piece model, "
                     + (optionalSoundFont == null ? "Java fallback" : "GeneralUser sampled melody")
                     + ", MIDI export and WAV mix.");
         } finally {
@@ -118,6 +119,29 @@ public final class AudioStudioMain {
         if (reloaded.installedInstruments().size() != 2) {
             throw new IllegalStateException("Imported presets were not persisted.");
         }
+    }
+
+    /**
+     * Opening the bundled piece takes it into the model, as opening any piece from before the
+     * model does: its arrangement stays byte for byte, in place and in the folder "legacy".
+     */
+    private static void verifyPieceModel(Path folder, Path arrangement) throws Exception {
+        byte[] written = Files.readAllBytes(arrangement);
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> session =
+                com.aresstack.audio.studio.application.ProjectSession.open(folder);
+        if (!session.isPresent() || session.get().composition().tracks().isEmpty()
+                || !Files.isRegularFile(folder.resolve("composition.json"))) {
+            throw new IllegalStateException("The bundled piece was not taken into the model.");
+        }
+        if (!java.util.Arrays.equals(written, Files.readAllBytes(arrangement))
+                || !java.util.Arrays.equals(written, Files.readAllBytes(folder.resolve("legacy").resolve("arrangement.tsv")))) {
+            throw new IllegalStateException("Opening the bundled piece changed its arrangement.");
+        }
+        if (com.aresstack.audio.studio.application.ProjectSession.open(folder).get().synchronize()) {
+            throw new IllegalStateException("A piece that was not touched changed when it was opened again.");
+        }
+        System.out.println("Piece model: " + session.get().composition().tracks().size() + " tracks, "
+                + session.get().composition().parts().size() + " parts taken over; old files kept.");
     }
 
     private static Path copyBundledComposition(Path directory) throws Exception {
