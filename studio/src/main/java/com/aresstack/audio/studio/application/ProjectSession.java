@@ -189,12 +189,13 @@ public final class ProjectSession {
         boolean partsChanged = !ids(merged).equals(ids(composition));
         MixScene mixed = stage || partsChanged || mix == null ? result.mix() : mix;
         boolean changed = !merged.equals(composition) || !Objects.equals(mixed, mix);
-        composition = merged;
-        mix = mixed;
         if (changed) {
-            // Stems taken over stay valid only for parts that still sound as they did.
-            StemManifest.save(folder, StemManifest.current(StemManifest.load(folder), composition));
-            writeModel();
+            // First the files, then the session: if writing fails, the session keeps the model on
+            // disk, and the next call finds the same change again and takes it over then.
+            StemManifest.save(folder, StemManifest.current(StemManifest.load(folder), merged));
+            writeModel(merged, mixed);
+            composition = merged;
+            mix = mixed;
         }
         ProjectFile kept = project != null ? project
                 : new ProjectFile(ProjectFile.FORMAT_VERSION, null, null, new ArrayList<>(), null);
@@ -292,6 +293,10 @@ public final class ProjectSession {
     }
 
     private void writeModel() throws IOException {
+        writeModel(composition, mix);
+    }
+
+    private void writeModel(Composition composition, MixScene mix) throws IOException {
         CompositionJson.save(folder, composition);
         if (mix != null) {
             MixJson.save(folder, mix);

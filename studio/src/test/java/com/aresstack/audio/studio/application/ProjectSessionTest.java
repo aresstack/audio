@@ -392,6 +392,38 @@ public final class ProjectSessionTest {
         assertEquals(beyond, CompositionJson.load(piece));
     }
 
+    @Test
+    public void aTakeOverThatCannotBeWrittenIsTakenOverByTheNextCall() throws Exception {
+        ProjectSession session = ProjectSession.open(piece).orElseThrow();
+        Composition before = session.composition();
+        List<String> lines = new ArrayList<>(Files.readAllLines(piece.resolve(ProjectFolder.ARRANGEMENT)));
+        lines.add("note\tdrums\t15240\t120\t42\t60");
+        Files.write(piece.resolve(ProjectFolder.ARRANGEMENT), lines, StandardCharsets.UTF_8);
+        // render/ cannot be written: a file stands where the folder belongs.
+        Path render = piece.resolve(ProjectFolder.RENDER);
+        try (Stream<Path> walk = Files.walk(render)) {
+            for (Path each : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.delete(each);
+            }
+        }
+        Files.write(render, new byte[]{0});
+        try {
+            session.synchronize();
+            fail("writing must fail");
+        } catch (IOException expected) {
+            // as intended
+        }
+        assertEquals("the session keeps what is on disk", before, session.composition());
+        assertEquals(before, CompositionJson.load(piece));
+        assertTrue(session.externalChanges());
+
+        Files.delete(render);
+        assertTrue("the next call takes the change over", session.synchronize());
+        assertEquals(notes(before, "drums").size() + 1, notes(session.composition(), "drums").size());
+        assertEquals(session.composition(), CompositionJson.load(piece));
+        assertFalse(session.externalChanges());
+    }
+
     private static Composition withVelocity(Composition composition, String trackId, int index, int velocity) {
         Track track = composition.track(trackId);
         MidiClip clip = (MidiClip) track.clips().get(0);
