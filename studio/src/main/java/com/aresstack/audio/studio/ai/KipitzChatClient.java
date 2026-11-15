@@ -85,14 +85,32 @@ public final class KipitzChatClient implements ChatModel {
         request.add("messages", messages);
 
         Answer answer = null;
+        int budget = maxTokens;
+        int longer = 0;
         for (int attempt = 1; answer == null; attempt++) {
             // Streamed: the answer arrives piece by piece while the model writes. A proxy or gateway
             // on the way gives up on a connection that stays silent (HTTP 504), and a long answer
             // keeps a connection silent for minutes when it only comes at the end.
             request.addProperty("stream", streaming);
+            request.addProperty("max_tokens", budget);
             try {
                 answer = exchange(gson.toJson(request).getBytes(StandardCharsets.UTF_8), heard);
+                if ("length".equals(answer.finishReason) && longer < LONGER_ANSWERS
+                        && !cancelled && !Thread.currentThread().isInterrupted()) {
+                    // Cut off at the limit: a model that thinks before it answers spends the tokens of
+                    // its answer on that. Asked again with room for twice as much.
+                    longer++;
+                    budget *= 2;
+                    answer = null;
+                    attempt = 0;
+                    continue;
+                }
             } catch (Refused refused) {
+                if (longer > 0) {
+                    throw new IOException("The model output was not complete (finish_reason=length), and the "
+                            + "service refused a longer answer of " + budget + " tokens (HTTP " + refused.status
+                            + "). Choose a shorter piece or a model with a longer answer.");
+                }
                 if (streaming && (refused.status == 400 || refused.status == 404 || refused.status == 415
                         || refused.status == 422 || refused.status == 501)) {
                     streaming = false; // a service that does not stream: asked the old way from now on
@@ -117,7 +135,8 @@ public final class KipitzChatClient implements ChatModel {
         }
         try {
             if (!"stop".equals(answer.finishReason)) {
-                throw new IOException("The model output was not complete (finish_reason=" + answer.finishReason + ").");
+                throw new IOException("The model output was not complete (finish_reason=" + answer.finishReason
+                        + ("length".equals(answer.finishReason) ? ", also with " + budget + " tokens" : "") + ").");
             }
             String content = answer.text.trim();
             int start = content.indexOf('{');
@@ -132,6 +151,9 @@ public final class KipitzChatClient implements ChatModel {
             throw new IOException("Could not parse the KIPITZ model response.", malformed);
         }
     }
+
+    /** How often an answer that was cut off at its limit is asked for again, each time with twice the room. */
+    static final int LONGER_ANSWERS = 2;
 
     /** The sampling of every request; part of the identity of a kept answer. */
     static final double TEMPERATURE = 0.55;

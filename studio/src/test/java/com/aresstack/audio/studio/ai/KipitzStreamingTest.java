@@ -159,4 +159,52 @@ public final class KipitzStreamingTest {
                 });
         Assert.assertEquals("{\"part\":\"melody\",\"notes\":[]}", answer.text);
     }
+
+    @Test
+    public void anAnswerCutOffAtItsLimitIsAskedForAgainWithTwiceTheRoom() throws Exception {
+        final List<String> asked = Collections.synchronizedList(new ArrayList<String>());
+        final String cut = "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n";
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            asked.add(read(exchange.getRequestBody()));
+            if (asked.size() == 1) {
+                send(exchange, 200, "text/event-stream", FIRST, cut);
+            } else {
+                send(exchange, 200, "text/event-stream", FIRST, SECOND, END);
+            }
+        });
+        server.start();
+        try {
+            JsonObject answer = client(server).generate("Return JSON", "Compose", 2048,
+                    folder.getRoot().toPath().resolve("melody.json"));
+            Assert.assertEquals("melody", answer.get("part").getAsString());
+            Assert.assertEquals(2, asked.size());
+            Assert.assertTrue(asked.get(0), asked.get(0).contains("\"max_tokens\":2048"));
+            Assert.assertTrue(asked.get(1), asked.get(1).contains("\"max_tokens\":4096"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void anAnswerThatStaysCutOffIsAnErrorThatSaysHowMuchRoomItHad() throws Exception {
+        final List<String> asked = Collections.synchronizedList(new ArrayList<String>());
+        final String cut = "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n";
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            asked.add(read(exchange.getRequestBody()));
+            send(exchange, 200, "text/event-stream", FIRST, cut);
+        });
+        server.start();
+        try {
+            client(server).generate("Return JSON", "Compose", 2048, folder.getRoot().toPath().resolve("melody.json"));
+            Assert.fail("a cut answer is no answer");
+        } catch (IOException cutOff) {
+            Assert.assertEquals("asked three times: 2048, 4096, 8192", 3, asked.size());
+            Assert.assertTrue(cutOff.getMessage(), cutOff.getMessage().contains("finish_reason=length")
+                    && cutOff.getMessage().contains("8192"));
+        } finally {
+            server.stop(0);
+        }
+    }
 }
