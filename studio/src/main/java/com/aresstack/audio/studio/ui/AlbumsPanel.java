@@ -7,6 +7,7 @@ import com.aresstack.audio.studio.album.Album;
 import com.aresstack.audio.studio.album.AlbumConcept;
 import com.aresstack.audio.studio.album.AlbumExporter;
 import com.aresstack.audio.studio.album.AlbumFiles;
+import com.aresstack.audio.studio.album.AlbumMembership;
 import com.aresstack.audio.studio.album.AlbumProducer;
 import com.aresstack.audio.studio.album.AlbumProductionCoordinator;
 import com.aresstack.audio.studio.album.AlbumProductionState;
@@ -100,6 +101,10 @@ final class AlbumsPanel extends JPanel {
 
         /** The library changed: pieces were made. */
         void piecesChanged();
+
+        /** The user chose this album in the list of the page; the window's choice of the album follows. */
+        default void albumChosen(String id) {
+        }
     }
 
     /** How many pieces of an album are made at the same time. */
@@ -208,6 +213,9 @@ final class AlbumsPanel extends JPanel {
         albumList.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting() && !showing) {
                 show(albumList.getSelectedValue());
+                if (album != null) {
+                    host.albumChosen(album.id());
+                }
             }
         });
         JScrollPane listScroll = new JScrollPane(albumList);
@@ -420,12 +428,29 @@ final class AlbumsPanel extends JPanel {
         tracks.fireTableDataChanged();
         say(chosen == null ? "Noch kein Album. „Neues Album“ legt eines an." : summary());
         keys();
-        if (chosen != null && suggestions.of(Field.STYLE).isEmpty()) {
+        if (chosen != null && suggestions.of(Field.STYLE).isEmpty() && !AlbumMembership.isUntitled(chosen)) {
             // The title stands: first directions for the style, and ideas for the other fields.
             propose(Field.STYLE);
             propose(Field.DESCRIPTION);
             propose(Field.TITLE);
         }
+    }
+
+    /**
+     * Shows this album as the window chose it, read anew from its file, unless the page is in the
+     * middle of something: a plan, a proposal or a production.
+     */
+    void follow(String id) {
+        if (busy || (production != null && production.running())) {
+            return;
+        }
+        if (table.isEditing()) {
+            table.getCellEditor().stopCellEditing();
+        }
+        if (album != null) {
+            keepConcept(); // what was typed into title, description or style is kept, not thrown away
+        }
+        reload(id);
     }
 
     /** The album shown, for a test. */
@@ -482,7 +507,9 @@ final class AlbumsPanel extends JPanel {
         cancel.setEnabled(running);
         again.setEnabled(free && selected != null && selected.hasPiece());
         open.setEnabled(there && selected != null && selected.hasPiece());
-        export.setEnabled(free && state.count(album, Status.DONE) > 0);
+        // A piece put into the album by hand, or an old one in the unnamed album, can be exported as well.
+        export.setEnabled(free && (state.count(album, Status.DONE) > 0
+                || album != null && album.tracks().stream().anyMatch(AlbumTrack::hasPiece)));
     }
 
     // ---- proposals of the AI for the fields ----
@@ -644,7 +671,8 @@ final class AlbumsPanel extends JPanel {
             AlbumConcept concept = new AlbumConcept(description.getText(), style.getText(),
                     (Integer) trackCount.getValue(),
                     (int) Math.round(((Number) minutes.getValue()).doubleValue() * 60));
-            Album changed = album.withTitle(title.getText()).withConcept(concept);
+            // The titles as the file has them: the window may have put a piece into the album meanwhile.
+            Album changed = files.album(album.id()).orElse(album).withTitle(title.getText()).withConcept(concept);
             if (!changed.equals(album)) {
                 keep(changed);
             }
@@ -674,6 +702,7 @@ final class AlbumsPanel extends JPanel {
         try {
             Album made = files.create(name.trim(), new AlbumConcept("", "", 12, 300));
             reload(made.id());
+            host.albumChosen(made.id()); // the album chosen above follows the new one
             description.requestFocusInWindow();
         } catch (IOException failed) {
             say("Das Album ließ sich nicht anlegen: " + failed.getMessage());
@@ -682,12 +711,15 @@ final class AlbumsPanel extends JPanel {
 
     private void deleteAlbum() {
         if (album == null || !host.confirm("Das Album „" + album.title() + "“ löschen?\n\n"
-                + "Seine Stücke bleiben in der Bibliothek.")) {
+                + "Seine Stücke bleiben erhalten und kommen ins unbenannte Album.")) {
             return;
         }
         try {
             files.delete(album.id());
             reload(null);
+            if (album != null) {
+                host.albumChosen(album.id());
+            }
         } catch (IOException failed) {
             say("Das Album ließ sich nicht löschen: " + failed.getMessage());
         }
@@ -775,7 +807,7 @@ final class AlbumsPanel extends JPanel {
         }
         AlbumTrack gone = album.tracks().get(row);
         if (gone.hasPiece() && !host.confirm("„" + gone.title() + "“ aus dem Album nehmen?\n\n"
-                + "Das Stück bleibt in der Bibliothek.")) {
+                + "Das Stück bleibt erhalten und kommt ins unbenannte Album.")) {
             return;
         }
         List<AlbumTrack> changed = new ArrayList<AlbumTrack>(album.tracks());
