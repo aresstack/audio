@@ -24,6 +24,20 @@ public interface ChatModel {
      */
     JsonObject generate(String instruction, String prompt, int maxTokens, Path cache) throws IOException;
 
+    /**
+     * The name of the model, as the service knows it ({@code google/gemma-4-31B-it}); empty when
+     * unknown. Written down with every kept answer, so that an answer of one model is never
+     * given for another.
+     */
+    default String name() {
+        return "";
+    }
+
+    /** Whether {@link #generate} would give a kept answer without asking the model. */
+    default boolean hasAnswer(String instruction, String prompt, int maxTokens, Path cache) {
+        return cache != null && java.nio.file.Files.isRegularFile(cache);
+    }
+
     /** Stops a request that is running, if the model can. */
     default void cancel() {
     }
@@ -34,6 +48,16 @@ public interface ChatModel {
             @Override
             public JsonObject generate(String instruction, String prompt, int maxTokens, Path cache) throws IOException {
                 return client.generate(instruction, prompt, maxTokens, cache);
+            }
+
+            @Override
+            public String name() {
+                return client.name();
+            }
+
+            @Override
+            public boolean hasAnswer(String instruction, String prompt, int maxTokens, Path cache) {
+                return client.hasAnswer(instruction, prompt, maxTokens, cache);
             }
 
             @Override

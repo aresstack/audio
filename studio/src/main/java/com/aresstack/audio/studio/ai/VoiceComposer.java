@@ -37,6 +37,15 @@ public final class VoiceComposer {
         this.generator = generator;
     }
 
+    /**
+     * A composer whose plan comes from the arranging role (follows planning) and whose notes come
+     * from the rework role (follows composition).
+     */
+    public static VoiceComposer with(ModelLineup models) {
+        return new VoiceComposer(new ChatVoicePlanner(models.model(ModelRoles.ARRANGING), 2048),
+                new ChatPartGenerator(models.model(ModelRoles.REWORK), 16384));
+    }
+
     /** A composer that asks a model for plan and notes. */
     public static VoiceComposer with(ChatModel model) {
         return new VoiceComposer(new ChatVoicePlanner(model, 2048), new ChatPartGenerator(model, 16384));
