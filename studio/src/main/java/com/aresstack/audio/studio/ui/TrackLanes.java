@@ -145,6 +145,10 @@ final class TrackLanes extends JPanel {
         scroll.getViewport().setBackground(AudioStudioTheme.WELL);
         scroll.getRowHeader().setBackground(new Color(0x1B1D24));
         scroll.getVerticalScrollBar().setUnitIncrement(30);
+        scroll.setWheelScrollingEnabled(false); // the wheel is handled in wheel(): Shift scrolls sideways
+        scroll.addMouseWheelListener(this::wheel);
+        view.addMouseWheelListener(this::wheel);
+        column.addMouseWheelListener(this::wheel);
         scroll.addComponentListener(new ComponentAdapter() {
             @Override
             public void componentResized(ComponentEvent event) {
@@ -281,14 +285,43 @@ final class TrackLanes extends JPanel {
         view.setFit(fitted);
         scroll.setHorizontalScrollBarPolicy(fitted ? ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
                 : ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-        scroll.getHorizontalScrollBar().setUnitIncrement(ArrangementView.BAR_WIDTH / 2);
+        scroll.getHorizontalScrollBar().setUnitIncrement(Math.max(8, view.barWidth() / 2));
         scroll.revalidate();
         fitHeights();
+    }
+
+    /** How wide a bar is when the piece is not fitted; the wheel moves half a bar. */
+    void setBarWidth(int width) {
+        view.setBarWidth(width);
+        scroll.getHorizontalScrollBar().setUnitIncrement(Math.max(8, view.barWidth() / 2));
+        scroll.revalidate();
+    }
+
+    /**
+     * The wheel over the lanes, their heads and the form above them: with Shift held (or a wheel
+     * that turns sideways) it moves along the piece, else up and down the tracks. Done here, as
+     * Swing's own handling of Shift is not the same on every system and the lanes take the wheel
+     * events before the scroll pane sees them.
+     */
+    private void wheel(java.awt.event.MouseWheelEvent event) {
+        boolean sideways = event.isShiftDown();
+        javax.swing.JScrollBar bar = sideways ? scroll.getHorizontalScrollBar() : scroll.getVerticalScrollBar();
+        if (!bar.isVisible() || bar.getMaximum() - bar.getVisibleAmount() <= bar.getMinimum()) {
+            return;
+        }
+        double turned = event.getPreciseWheelRotation();
+        int step = (int) Math.round(turned * bar.getUnitIncrement() * Math.max(1, event.getScrollAmount()));
+        if (step == 0) {
+            step = turned > 0 ? 1 : -1;
+        }
+        bar.setValue(Math.max(bar.getMinimum(), Math.min(bar.getMaximum() - bar.getVisibleAmount(), bar.getValue() + step)));
+        event.consume();
     }
 
     /** Puts a component above the lanes, over the same width: the form of the piece. */
     void setHeader(javax.swing.JComponent header) {
         scroll.setColumnHeaderView(header);
+        header.addMouseWheelListener(this::wheel);
         scroll.getColumnHeader().setBackground(AudioStudioTheme.WELL);
     }
 

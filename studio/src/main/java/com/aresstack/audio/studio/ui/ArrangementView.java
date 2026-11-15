@@ -95,8 +95,11 @@ final class ArrangementView extends JComponent {
             this.tempo = tempo;
         }
 
-        /** How long the music is in seconds, without what rings on after the last note. */
+        /** How long the music is in seconds, without what rings on after the last note; with its changes of tempo. */
         double seconds() {
+            if (timeMap != null) {
+                return timeMap.seconds(ticks);
+            }
             return ticks / (double) TICKS_PER_BEAT * 60.0 / tempo;
         }
 
@@ -553,8 +556,29 @@ final class ArrangementView extends JComponent {
         return Math.max(audioSeconds, arrangement == null ? 0 : arrangement.seconds());
     }
 
-    /** How wide a bar is when the piece is not fitted into the window. */
+    /** How wide a bar is by default when the piece is not fitted into the window; the settings choose it. */
     static final int BAR_WIDTH = 96;
+    static final int MIN_BAR_WIDTH = 16;
+    static final int MAX_BAR_WIDTH = 480;
+    private int barWidth = BAR_WIDTH;
+
+    /** How wide a bar is when the piece is not fitted into the window, in pixels. */
+    void setBarWidth(int width) {
+        int wanted = Math.max(MIN_BAR_WIDTH, Math.min(MAX_BAR_WIDTH, width));
+        if (wanted != barWidth) {
+            barWidth = wanted;
+            revalidate();
+            repaint();
+            if (companion != null) {
+                companion.revalidate();
+                companion.repaint();
+            }
+        }
+    }
+
+    int barWidth() {
+        return barWidth;
+    }
     /** Whether the whole piece is fitted into the width there is; otherwise every bar has its width and the view scrolls. */
     private boolean fit = true;
 
@@ -581,7 +605,7 @@ final class ArrangementView extends JComponent {
         if (!fit && arrangement != null && arrangement.bars() > 0) {
             // Sound that plays on after the music gets its width too, at the scale of the bars.
             double longer = arrangement.seconds() <= 0 ? 1 : Math.max(1, totalSeconds() / arrangement.seconds());
-            width = Math.max(width, GUTTER + 10 + (int) Math.round(arrangement.bars() * BAR_WIDTH * longer));
+            width = Math.max(width, GUTTER + 10 + (int) Math.round(arrangement.bars() * barWidth * longer));
         }
         return new Dimension(width, RULER + order.size() * lane + MIX);
     }
