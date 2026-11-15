@@ -932,6 +932,14 @@ final class AlbumsPanel extends JPanel {
         if (!keepConcept() || album.tracks().isEmpty()) {
             return;
         }
+        AlbumProducer producer = producer();
+        if (producer != null) {
+            start(producer);
+        }
+    }
+
+    /** A producer with the settings of the window as they are now; {@code null} if one is missing (said). */
+    private AlbumProducer producer() {
         final AlbumProducer producer;
         try {
             // What the window says is read once, here on the event thread; the workers never ask it.
@@ -956,13 +964,18 @@ final class AlbumsPanel extends JPanel {
             }, PIECES_AT_ONCE);
         } catch (RuntimeException invalid) {
             say(invalid.getMessage());
-            return;
+            return null;
         }
-        start(producer);
+        return producer;
     }
 
     /** Starts the production with this producer; a test hands in one that needs no model. */
     void start(AlbumProducer producer) {
+        start(producer, null);
+    }
+
+    /** Starts the production of every unfinished title, or of the one title {@code onlyTrack}. */
+    void start(AlbumProducer producer, String onlyTrack) {
         final String id = album.id();
         try {
             production = producer.start(id, new AlbumProductionCoordinator.Listener() {
@@ -980,12 +993,13 @@ final class AlbumsPanel extends JPanel {
                         }
                     });
                 }
-            });
+            }, onlyTrack);
         } catch (IOException | RuntimeException failed) {
             say("Das Album ließ sich nicht produzieren: " + failed.getMessage());
             return;
         }
-        say("Das Album wird produziert: " + PIECES_AT_ONCE + " Stücke gleichzeitig.");
+        say(onlyTrack != null ? "Der Titel wird neu produziert."
+                : "Das Album wird produziert: " + PIECES_AT_ONCE + " Stücke gleichzeitig.");
         keys();
         final AlbumProductionCoordinator.Production running = production;
         Thread waiter = new Thread(() -> {
@@ -1047,13 +1061,26 @@ final class AlbumsPanel extends JPanel {
                 + "Was du an dem Stück im Editor geändert hast, kann dabei verloren gehen.")) {
             return;
         }
+        if (production != null && production.running()) {
+            say("Erst die laufende Produktion abwarten oder abbrechen, dann diesen Titel neu produzieren.");
+            return;
+        }
+        if (!keepConcept()) {
+            return;
+        }
         try {
             state = state.with(track.id(), Status.QUEUED);
             state.save(files.folder(album.id()));
             tracks.fireTableDataChanged();
-            say("„" + track.title() + "“ wird beim nächsten „Album produzieren“ neu gemacht.");
         } catch (IOException failed) {
             say("Das ließ sich nicht vormerken: " + failed.getMessage());
+            keys();
+            return;
+        }
+        // It starts now, this title alone; the others keep their state.
+        AlbumProducer producer = producer();
+        if (producer != null) {
+            start(producer, track.id());
         }
         keys();
     }
@@ -1184,6 +1211,10 @@ final class AlbumsPanel extends JPanel {
                         case FAILED:
                             return "Fehler: " + entry.reason();
                         case RUNNING:
+                            if (production == null || !production.running()) {
+                                // Left from a run that ended without finishing it: it goes on at the next start.
+                                return "unterbrochen";
+                            }
                             String now = doing.get(track.id());
                             return now == null ? "in Arbeit ..." : now;
                         case QUEUED:

@@ -103,6 +103,14 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
 
     @Override
     public Production start(String albumId, Listener listener) throws IOException {
+        return start(albumId, listener, null);
+    }
+
+    /**
+     * Starts the production of one title alone ({@code onlyTrack}), as "Titel neu produzieren"
+     * asks; the other titles keep their state. {@code null}: every title that is not finished.
+     */
+    public Production start(String albumId, Listener listener, String onlyTrack) throws IOException {
         Album album = albums.album(albumId)
                 .orElseThrow(() -> new IOException("Das Album \"" + albumId + "\" lässt sich nicht lesen."));
         synchronized (running) {
@@ -111,7 +119,7 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
             }
         }
         try {
-            Run run = new Run(album, listener);
+            Run run = new Run(album, listener, onlyTrack);
             run.begin();
             return run;
         } catch (IOException | RuntimeException failed) {
@@ -136,7 +144,11 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
         private final PieceProduction pieces = java.util.Objects.requireNonNull(perRun.get(),
                 "the production of pieces of a run");
 
-        Run(Album album, Listener listener) {
+        /** The one title this run makes, or {@code null} for all that are not finished. */
+        private final String only;
+
+        Run(Album album, Listener listener, String only) {
+            this.only = only;
             this.album = album;
             this.listener = listener;
             this.folder = albums.folder(album.id());
@@ -147,6 +159,9 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
             synchronized (lock) {
                 state = AlbumProductionState.load(folder);
                 for (AlbumTrack track : album.tracks()) {
+                    if (only != null && !only.equals(track.id())) {
+                        continue; // another title of the album: left as it is
+                    }
                     AlbumProductionState.Entry entry = state.of(track.id());
                     boolean there = pieceThere(track);
                     if (entry.status() == Status.DONE && there) {
