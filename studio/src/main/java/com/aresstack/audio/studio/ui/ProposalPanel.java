@@ -87,9 +87,9 @@ final class ProposalPanel extends JPanel {
                 JScrollPane.HORIZONTAL_SCROLLBAR_NEVER) {
             @Override
             public Dimension getPreferredSize() {
-                // As high as the wrapped text, but never more than a part of the page; the width is the page's.
-                Dimension wanted = super.getPreferredSize();
-                return new Dimension(10, Math.min(TEXT_HEIGHT, wanted.height));
+                // A fixed part of the page: the text wraps to the page's width, so its height is only known
+                // once it is laid out; what does not fit scrolls.
+                return new Dimension(10, notes.isEmpty() ? TEXT_HEIGHT / 3 : TEXT_HEIGHT);
             }
         };
         text.setBorder(BorderFactory.createEmptyBorder());
