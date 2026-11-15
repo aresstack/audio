@@ -569,6 +569,37 @@ public final class AudioStudioFrame extends JFrame {
         }, arrangementView);
         trackTable.setHeader(sectionBar);
         sectionBar.setListener((section, intensity) -> sectionIntensity(section, intensity));
+        sectionBar.setEditing(new SectionBar.Editing() {
+            @Override
+            public void deleteBars(int firstBar, int endBar, boolean close) {
+                editForm(piece -> com.aresstack.audio.studio.application.SectionEdits.deleteBars(piece, firstBar,
+                        endBar, close, com.aresstack.audio.composition.Ids.random()));
+            }
+
+            @Override
+            public void moveSection(SectionMark section, int toBar) {
+                editForm(piece -> com.aresstack.audio.studio.application.SectionEdits.moveSection(piece, section.id(),
+                        toBar, com.aresstack.audio.composition.Ids.random()));
+            }
+
+            @Override
+            public void insertEmpty(int beforeBar, int bars) {
+                editForm(piece -> com.aresstack.audio.studio.application.SectionEdits.insertEmpty(piece, beforeBar,
+                        bars, com.aresstack.audio.composition.Ids.random()));
+            }
+
+            @Override
+            public void generate(int firstBar, int endBar) {
+                generateBars(firstBar, endBar);
+            }
+
+            @Override
+            public boolean silent(int firstBar, int endBar) {
+                java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+                return piece.isPresent() && com.aresstack.audio.studio.application.SectionEdits.isSilent(
+                        piece.get().composition(), firstBar, endBar);
+            }
+        });
         arrangementView.setCompanion(sectionBar);
         arrangementView.setEditing(pieceEditing);
         // What the AI can do with the piece as it is stands in sight above the tracks, not only in the menu.
@@ -2699,6 +2730,69 @@ public final class AudioStudioFrame extends JFrame {
             message("Die Intensität ließ sich nicht setzen: " + failed.getMessage());
         }
         showSections();
+    }
+
+    /**
+     * The user changed the form in the section bar: bars deleted, a section dragged, empty bars put
+     * in. One undoable step by the edit core; what sounds different is rendered again. What cannot
+     * be done is said in the status line, without a dialog.
+     */
+    private void editForm(java.util.function.Function<com.aresstack.audio.composition.Composition,
+            com.aresstack.audio.studio.application.SectionEdits.SectionEdit> making) {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent() || busy()) {
+            return;
+        }
+        com.aresstack.audio.studio.application.SectionEdits.SectionEdit edit = making.apply(piece.get().composition());
+        if (edit.refusal() != null) {
+            append("WARN " + edit.refusal());
+            return;
+        }
+        if (edit.isEmpty()) {
+            return;
+        }
+        try {
+            stopPlayback();
+            com.aresstack.audio.composition.edit.ChangeSet changes = piece.get().apply(edit.patch(), edit.scope());
+            arrangementView.mark(null);
+            pieceChanged(edit.patch().description() + ". Zurücknehmen mit „Rückgängig“ (Strg+Z).", changes);
+        } catch (com.aresstack.audio.studio.application.EditRefusedException refused) {
+            append("WARN Nicht möglich: " + refused.violations());
+        } catch (Exception failed) {
+            append("WARN Die Änderung ließ sich nicht speichern: " + failed.getMessage());
+        }
+        showSections();
+    }
+
+    /**
+     * Has the AI write the marked bars of every part: a gap is filled, music is written anew. It
+     * hears what comes before and after them and builds a transition that fits both ends; a gap
+     * becomes a section "Übergang" in the same step. Taken at once, "Rückgängig" takes it back.
+     */
+    private void generateBars(int firstBar, int endBar) {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent() || busy()) {
+            return;
+        }
+        com.aresstack.audio.composition.Composition shown = piece.get().composition();
+        final List<String> parts = com.aresstack.audio.studio.application.SectionEdits.playingParts(shown);
+        if (parts.isEmpty()) {
+            append("WARN Das Stück hat keine Stimme, die die KI hier schreiben könnte.");
+            return;
+        }
+        final com.aresstack.audio.studio.ai.RegionRequest request = com.aresstack.audio.studio.ai.RegionRequest.replace(
+                com.aresstack.audio.composition.edit.Selection.bars(shown, parts, firstBar + 1, endBar),
+                com.aresstack.audio.studio.application.SectionEdits.transitionInstruction(shown, firstBar, endBar));
+        final List<com.aresstack.audio.composition.Section> form =
+                com.aresstack.audio.studio.application.SectionEdits.filledForm(shown, firstBar, endBar,
+                        com.aresstack.audio.composition.Ids.random());
+        boolean silent = com.aresstack.audio.studio.application.SectionEdits.isSilent(shown, firstBar, endBar);
+        String bars = endBar - firstBar == 1 ? "Takt " + (firstBar + 1) : "Takt " + (firstBar + 1) + " bis " + endBar;
+        offerFromAi(piece.get(), bars + (silent ? " wird von der KI gefüllt" : " wird von der KI neu geschrieben")
+                        + ": ein Übergang von dem, was davor klingt, zu dem, was danach kommt.",
+                (session, model, progress) -> com.aresstack.audio.studio.application.RegionOffer.start(session,
+                        com.aresstack.audio.studio.ai.RegionComposer.with(model), request, parts, firstBar + 1, endBar,
+                        form, progress));
     }
 
     /**

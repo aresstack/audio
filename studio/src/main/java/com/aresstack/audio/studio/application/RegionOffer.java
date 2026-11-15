@@ -39,8 +39,19 @@ public final class RegionOffer implements AiOffer {
     public static RegionOffer start(ProjectSession session, RegionComposer composer, RegionRequest request,
                                     List<String> partIds, int firstBar, int lastBar, Progress progress)
             throws IOException, EditRefusedException {
-        return new RegionOffer(session, RegionRework.start(session, composer, request, progress), partIds, firstBar,
-                lastBar);
+        return start(session, composer, request, partIds, firstBar, lastBar, null, progress);
+    }
+
+    /**
+     * As above, and the form of the piece becomes {@code form} in the same step (a gap that is
+     * filled becomes a transition, {@link SectionEdits#filledForm}); {@code null} keeps it.
+     */
+    public static RegionOffer start(ProjectSession session, RegionComposer composer, RegionRequest request,
+                                    List<String> partIds, int firstBar, int lastBar,
+                                    List<com.aresstack.audio.composition.Section> form, Progress progress)
+            throws IOException, EditRefusedException {
+        return new RegionOffer(session, RegionRework.start(session, composer, request, form,
+                com.aresstack.audio.composition.Ids.random(), progress), partIds, firstBar, lastBar);
     }
 
     public RegionRework rework() {
