@@ -243,7 +243,19 @@ public final class AudioStudioFrame extends JFrame {
     private final JLabel songFacts = new JLabel(" ");
     private final javax.swing.JRadioButton aiChooses = new javax.swing.JRadioButton("die KI wählt sie");
     private final javax.swing.JRadioButton ownTracks = new javax.swing.JRadioButton("meine Spuren aus dem Arrangement");
+    /** How many instruments the AI may choose: the fewest and the most; the same twice is an exact number. */
+    private final JSpinner voicesMin = new JSpinner(new SpinnerNumberModel(3, InstrumentProposalService.MIN_VOICES,
+            InstrumentProposalService.MAX_VOICES, 1));
+    private final JSpinner voicesMax = new JSpinner(new SpinnerNumberModel(8, InstrumentProposalService.MIN_VOICES,
+            InstrumentProposalService.MAX_VOICES, 1));
     private final JButton composeButton = new DeckWidgets.HeadKey("Komponieren");
+    /** The two views of the composition page: what is asked of the AI, and the score that came of it. */
+    private final DeckWidgets.SegmentKey draftKey = new DeckWidgets.SegmentKey("Entwurf", true);
+    private final DeckWidgets.SegmentKey scoreKey = new DeckWidgets.SegmentKey("Partitur", false);
+    private final java.awt.CardLayout songViews = new java.awt.CardLayout();
+    private final JPanel songView = new JPanel(songViews);
+    /** Whether the piece shown last was composed already; a change of that chooses the view. */
+    private Boolean composedShown;
     private final DeckDisplays.Meter masterLeft = new DeckDisplays.Meter(false);
     private final DeckDisplays.Meter masterRight = new DeckDisplays.Meter(false);
     private final DeckWidgets.TransportKey playKey = new DeckWidgets.TransportKey(
@@ -808,31 +820,86 @@ public final class AudioStudioFrame extends JFrame {
         scoreHead.add(performance, BorderLayout.EAST);
         notes.add(scoreHead, BorderLayout.NORTH);
         notes.add(sheet, BorderLayout.CENTER);
-        JPanel written = new JPanel(new BorderLayout(0, 14));
-        written.setOpaque(false);
-        written.add(wish, BorderLayout.NORTH);
-        written.add(notes, BorderLayout.CENTER);
 
-        // In the head of the module, beside its name as on the arrangement page: the key that
-        // composes, and the one choice of two it depends on, as radio buttons behind their question.
-        JPanel composing = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        composing.setOpaque(false);
-        composing.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 0));
-        composing.add(composeButton);
+        // One choice of two, shown as what it is: radio buttons behind the question they answer.
+        JPanel whoRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        whoRow.setOpaque(false);
         JLabel whoAsks = new JLabel("Instrumente:");
         whoAsks.setForeground(AudioStudioTheme.TEXT_DIM);
-        composing.add(javax.swing.Box.createHorizontalStrut(6));
-        composing.add(whoAsks);
+        whoRow.add(whoAsks);
         aiChooses.setOpaque(false);
         ownTracks.setOpaque(false);
         aiChooses.addActionListener(event -> updateComposeKey());
         ownTracks.addActionListener(event -> updateComposeKey());
-        composing.add(aiChooses);
-        composing.add(ownTracks);
+        whoRow.add(aiChooses);
+        // How many it may choose: from ... to ...; the same number twice asks for exactly that many.
+        final JLabel fromVoices = new JLabel("mit");
+        final JLabel toVoices = new JLabel("bis");
+        final JLabel voicesWord = new JLabel("Stimmen");
+        for (JLabel word : new JLabel[]{fromVoices, toVoices, voicesWord}) {
+            word.setForeground(AudioStudioTheme.TEXT_DIM);
+        }
+        voicesMin.setPreferredSize(new Dimension(58, 28));
+        voicesMax.setPreferredSize(new Dimension(58, 28));
+        voicesMin.setToolTipText("So viele Instrumente wählt die KI mindestens");
+        voicesMax.setToolTipText("So viele Instrumente wählt die KI höchstens; gleich dem Minimum ergibt genau diese Zahl");
+        // The two never cross: raising the fewest pulls the most along, lowering the most pulls the fewest.
+        voicesMin.addChangeListener(event -> {
+            if ((Integer) voicesMin.getValue() > (Integer) voicesMax.getValue()) {
+                voicesMax.setValue(voicesMin.getValue());
+            }
+        });
+        voicesMax.addChangeListener(event -> {
+            if ((Integer) voicesMax.getValue() < (Integer) voicesMin.getValue()) {
+                voicesMin.setValue(voicesMax.getValue());
+            }
+        });
+        Runnable voicesFollow = () -> {
+            for (java.awt.Component part : new java.awt.Component[]{fromVoices, voicesMin, toVoices, voicesMax, voicesWord}) {
+                part.setEnabled(aiChooses.isSelected());
+            }
+        };
+        aiChooses.addChangeListener(event -> voicesFollow.run());
+        voicesFollow.run();
+        whoRow.add(fromVoices);
+        whoRow.add(voicesMin);
+        whoRow.add(toVoices);
+        whoRow.add(voicesMax);
+        whoRow.add(voicesWord);
+        whoRow.add(ownTracks);
+        // The page shows one of two things, never both: the draft, what the AI is asked for, or the
+        // score that came of it. The switch stands in the head beside the name, then the key that composes.
+        prompt.setPreferredSize(new Dimension(300, 200));
+        whoRow.setBorder(BorderFactory.createEmptyBorder(12, 0, 0, 0));
+        JPanel draft = new JPanel(new BorderLayout());
+        draft.setOpaque(false);
+        JPanel asked = new JPanel(new BorderLayout());
+        asked.setOpaque(false);
+        asked.add(wish, BorderLayout.CENTER);
+        asked.add(whoRow, BorderLayout.SOUTH);
+        draft.add(asked, BorderLayout.NORTH);
+        songView.setOpaque(false);
+        songView.add(draft, "draft");
+        songView.add(notes, "score");
+        javax.swing.ButtonGroup oneView = new javax.swing.ButtonGroup();
+        oneView.add(draftKey);
+        oneView.add(scoreKey);
+        draftKey.setToolTipText("Entwurf: was die KI gesagt bekommt, Takte, Tempo, Tonart, Instrumente, Modelle");
+        scoreKey.setToolTipText("Partitur: was die Instrumente spielen");
+        draftKey.addActionListener(event -> songViews.show(songView, "draft"));
+        scoreKey.addActionListener(event -> songViews.show(songView, "score"));
+        draftKey.setSelected(true);
+        JPanel composing = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        composing.setOpaque(false);
+        composing.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 0));
+        composing.add(draftKey);
+        composing.add(scoreKey);
+        composing.add(javax.swing.Box.createHorizontalStrut(12));
+        composing.add(composeButton);
 
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
-        DeckWidgets.Module module = new DeckWidgets.Module("Komposition", written);
+        DeckWidgets.Module module = new DeckWidgets.Module("Komposition", songView);
         module.setHeadStart(composing);
         module.setHeadEnd(withPieceMenu(songFacts));
         page.add(module, BorderLayout.CENTER);
@@ -1465,6 +1532,12 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
+            public int[] voices() {
+                int fewest = (Integer) voicesMin.getValue();
+                return new int[]{fewest, Math.max(fewest, (Integer) voicesMax.getValue())};
+            }
+
+            @Override
             public PieceAutopilot.Rendering rendering() {
                 return new PieceAutopilot.Rendering(
                         sf2Engine.getSelectedIndex() == 1 ? Sf2Engine.FLUIDSYNTH : Sf2Engine.GERVILL,
@@ -1524,6 +1597,10 @@ public final class AudioStudioFrame extends JFrame {
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
         page.add(new DeckWidgets.Module("Soundbänke · SF2, SF3 und SFZ", libraries), BorderLayout.CENTER);
+        ArticulationSoundsPanel articulations = new ArticulationSoundsPanel(this::append);
+        libraries.whenSelected(articulations::display);
+        page.add(new DeckWidgets.Module("Artikulationen der gewählten Soundbank · Keyswitch oder Programm",
+                articulations), BorderLayout.SOUTH);
         return page;
     }
 
@@ -1749,6 +1826,12 @@ public final class AudioStudioFrame extends JFrame {
      * the tracks composed that have no notes yet.
      */
     private void updateComposeKey() {
+        // A piece that is composed opens on its score, one that is not on its draft; after that the
+        // switch in the head is the user's.
+        if (composedShown == null || composedShown.booleanValue() != specFields.locked()) {
+            composedShown = Boolean.valueOf(specFields.locked());
+            showSongView(specFields.locked());
+        }
         if (!specFields.locked()) {
             composeButton.setText("Komponieren");
             composeButton.setToolTipText("Komponieren und gleich rendern");
@@ -1764,12 +1847,21 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     /** The one key: the AI chooses the instruments first, or the tracks of the mixer are composed as they are. */
+    /** Shows the draft or the score on the composition page. */
+    private void showSongView(boolean score) {
+        (score ? scoreKey : draftKey).setSelected(true);
+        songViews.show(songView, score ? "score" : "draft");
+    }
+
     private void compose() {
+        // The draft is said: the page turns to the score, where the notes appear as they are written.
         if (aiChooses.isSelected()) {
             if (startAfresh()) {
+                showSongView(true);
                 proposeInstruments(true);
             }
         } else if (planStillFits()) {
+            showSongView(true);
             generate();
         }
     }
@@ -2023,6 +2115,8 @@ public final class AudioStudioFrame extends JFrame {
         final int parallel = (Integer) parallelRequests.getValue();
         final int sections = (Integer) sectionBars.getValue();
         final int grow = (Integer) growBars.getValue();
+        final int fewest = (Integer) voicesMin.getValue();
+        final int most = Math.max(fewest, (Integer) voicesMax.getValue());
         if (!saveSettings(false)) {
             return;
         }
@@ -2048,12 +2142,13 @@ public final class AudioStudioFrame extends JFrame {
                     recordModels(output, autopilot ? "Autopilot" : "Instrumentenvorschlag", models);
                     if (autopilot) {
                         // The AI decides everything: the same steps the production of an album runs.
-                        PieceAutopilot pilot = new PieceAutopilot(registry, models, tokens, parallel, rendering).sectionBars(sections).growBars(grow);
+                        PieceAutopilot pilot = new PieceAutopilot(registry, models, tokens, parallel, rendering).sectionBars(sections).growBars(grow)
+                                .voices(fewest, most);
                         return composeIntoPiece(pilot, prompt, output, stageBefore, progress);
                     }
                     final InstrumentProposalService.Staged staged = new InstrumentProposalService(
                             models.model(com.aresstack.audio.studio.ai.ModelRoles.INSTRUMENTS), tokens)
-                            .proposeStaged(prompt, output, progress);
+                            .voices(fewest, most).proposeStaged(prompt, output, progress);
                     final TrackArrangement selected = withPreferredSoundbanks(staged.tracks());
                     SwingUtilities.invokeAndWait(new Runnable() {
                         @Override
@@ -3879,6 +3974,16 @@ public final class AudioStudioFrame extends JFrame {
                 description.setText(keptDescription);
             }
             ownTracks.setSelected("own".equals(saved.getProperty("instrumentMode")));
+            try {
+                int fewestSaved = Integer.parseInt(saved.getProperty("voicesMin", "3").trim());
+                int mostSaved = Integer.parseInt(saved.getProperty("voicesMax", "8").trim());
+                voicesMax.setValue(Math.max(InstrumentProposalService.MIN_VOICES,
+                        Math.min(InstrumentProposalService.MAX_VOICES, Math.max(fewestSaved, mostSaved))));
+                voicesMin.setValue(Math.max(InstrumentProposalService.MIN_VOICES,
+                        Math.min((Integer) voicesMax.getValue(), fewestSaved)));
+            } catch (NumberFormatException unreadable) {
+                // the fields keep 3 to 8
+            }
             updateComposeKey();
             listening = com.aresstack.audio.studio.application.StageListening.from(saved);
             if (stagePanel != null) {
@@ -3931,6 +4036,8 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("description", description.getText());
             saved.setProperty("parallel", parallelRequests.getValue().toString());
             saved.setProperty("instrumentMode", ownTracks.isSelected() ? "own" : "ai");
+            saved.setProperty("voicesMin", voicesMin.getValue().toString());
+            saved.setProperty("voicesMax", voicesMax.getValue().toString());
             listening.into(saved);
             if (stagePanel != null) {
                 com.aresstack.audio.studio.application.MovementDirector.into(saved, stagePanel.movementsWanted());

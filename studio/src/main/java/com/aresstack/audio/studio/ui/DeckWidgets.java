@@ -564,6 +564,67 @@ final class DeckWidgets {
         }
     }
 
+    /**
+     * One half of a switch between two views, in the head of a module: two such keys stand
+     * joined, and the one whose view is shown has the colour of the desk.
+     */
+    static final class SegmentKey extends JToggleButton {
+        private final boolean first;
+
+        SegmentKey(String text, boolean first) {
+            super(text);
+            this.first = first;
+            setFont(AudioStudioTheme.lettering(9.2f));
+            setContentAreaFilled(false);
+            setBorderPainted(false);
+            setFocusPainted(false);
+            setOpaque(false);
+            setFocusable(false);
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            setRolloverEnabled(true);
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            FontMetrics metrics = getFontMetrics(getFont());
+            return new Dimension(metrics.stringWidth(getText().toUpperCase(java.util.Locale.ROOT)) + 26, 24);
+        }
+
+        @Override
+        protected void paintComponent(Graphics graphics) {
+            Graphics2D g = smooth(graphics);
+            boolean chosen = isSelected();
+            float width = getWidth();
+            float height = getHeight();
+            // The two halves are one body: each draws it wider than itself and shows only its own half.
+            float left = first ? 0.5f : -12f;
+            float span = width + 11.5f;
+            g.setColor(new Color(0, 0, 0, 120));
+            g.fill(new RoundRectangle2D.Float(left, 2f, span, height - 2.5f, 7f, 7f));
+            RoundRectangle2D body = new RoundRectangle2D.Float(left, 0.5f, span, height - 3.5f, 6f, 6f);
+            if (chosen) {
+                g.setPaint(new GradientPaint(0, 0, AudioStudioTheme.ACCENT, 0, height,
+                        AudioStudioTheme.withAlpha(AudioStudioTheme.ACCENT, 170)));
+            } else {
+                g.setPaint(new GradientPaint(0, 0, new Color(getModel().isRollover() ? 0x4A4E5C : 0x3F434F),
+                        0, height - 3.5f, new Color(0x23252D)));
+            }
+            g.fill(body);
+            g.setColor(new Color(0x15161B));
+            g.draw(body);
+            if (!first) {
+                g.draw(new java.awt.geom.Line2D.Float(0f, 0.5f, 0f, height - 3f));
+            }
+            g.setFont(getFont());
+            g.setColor(chosen ? Color.WHITE : getModel().isRollover() ? AudioStudioTheme.TEXT : AudioStudioTheme.TEXT_DIM);
+            FontMetrics metrics = g.getFontMetrics();
+            String text = getText().toUpperCase(java.util.Locale.ROOT);
+            g.drawString(text, (width - metrics.stringWidth(text)) / 2f,
+                    0.5f + (height - 3.5f + metrics.getAscent() - metrics.getDescent()) / 2f);
+            g.dispose();
+        }
+    }
+
     /** Gives a key the look of a step of the work: a number in a circle before its name. */
     static void asStep(AbstractButton button, int number) {
         button.putClientProperty("deck.step", Integer.valueOf(number));

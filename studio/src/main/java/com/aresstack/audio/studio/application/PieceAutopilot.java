@@ -93,6 +93,16 @@ public final class PieceAutopilot {
     }
 
     /** How many bars one request for notes covers, see {@link GemmaMusicComposer#sectionBars(int)}. */
+    private int fewestVoices;
+    private int mostVoices;
+
+    /** How many instruments the AI may choose, see {@link InstrumentProposalService#voices(int, int)}. */
+    public PieceAutopilot voices(int fewest, int most) {
+        this.fewestVoices = fewest;
+        this.mostVoices = most;
+        return this;
+    }
+
     public PieceAutopilot sectionBars(int bars) {
         this.sectionBars = bars;
         return this;
@@ -110,8 +120,12 @@ public final class PieceAutopilot {
      */
     public Result run(String description, Path folder, CompositionSpec spec, SpatialScene stage, SongLibrary songs,
                       PieceModel model, Progress progress, Listener listener) throws Exception {
-        InstrumentProposalService.Staged staged = new InstrumentProposalService(
-                models.model(ModelRoles.INSTRUMENTS), maxTokens).proposeStaged(description, folder, progress);
+        InstrumentProposalService proposals = new InstrumentProposalService(
+                models.model(ModelRoles.INSTRUMENTS), maxTokens);
+        if (mostVoices > 0) {
+            proposals.voices(fewestVoices, mostVoices);
+        }
+        InstrumentProposalService.Staged staged = proposals.proposeStaged(description, folder, progress);
         TrackArrangement tracks = withPreferredSoundbanks(staged.tracks(), registry);
         SpatialScene before = stage != null ? stage : scenes.load(folder);
         SpatialScene scene = (before == null ? SpatialScene.standard(tracks.tracks()) : before.fitting(tracks.tracks()))
