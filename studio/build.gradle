@@ -57,6 +57,11 @@ tasks.named('jar') {
             'module-info.class', 'META-INF/versions/*/module-info.class'
 }
 
+tasks.named('test') {
+    // The real download of the optional MIT KEMAR set runs only when asked (CI, hrtf-download.yml).
+    systemProperty 'hrtf.live', System.getProperty('hrtf.live', 'false')
+}
+
 tasks.named('run') {
     workingDir rootProject.projectDir
 }

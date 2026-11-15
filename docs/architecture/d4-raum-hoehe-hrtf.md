@@ -48,10 +48,16 @@ Geprüft am 2026-11-15. **Keiner ist eingebaut**; der Kern bringt das Kugelkopfm
 
 | Satz | Lizenz | Format | Anbindung |
 |---|---|---|---|
-| MIT KEMAR (Gardner & Martin, MIT Media Lab 1994) | „provided without any usage restrictions“; Zitat der Autoren erbeten ([hrtfdoc.txt](https://sound.media.mit.edu/resources/KEMAR/hrtfdoc.txt)) | `.dat`, 16 bit big-endian, 44,1 kHz; kompakt 128 Samples stereo, voll 512 Samples je Ohr | `HrirMeasurements.readMitKemar(ordner, taps)`; getestet gegen nachgebaute Dateien im veröffentlichten Schema, noch nicht gegen die Originaldateien |
+| MIT KEMAR (Gardner & Martin, MIT Media Lab 1994) | „provided free with no restrictions on use, provided the authors are cited when the data is used in any research or commercial application“ ([KEMAR.html](https://sound.media.mit.edu/resources/KEMAR.html)); Datensatz-Freigabe, nicht die MIT-Softwarelizenz | `.dat`, 16 bit big-endian, 44,1 kHz; kompakt 128 Samples stereo, voll 512 Samples je Ohr | `HrirMeasurements.readMitKemar(ordner, taps)`; getestet gegen nachgebaute Dateien im veröffentlichten Schema, noch nicht gegen die Originaldateien |
 | SADIE II (University of York 2018) | Apache License 2.0, Namensnennung ([Datenbank](https://www.york.ac.uk/sadie-project/database.html)) | WAV und SOFA, 44,1/48/96 kHz; Azimut gegen den Uhrzeigersinn | WAV mit `WavFileSource` lesen und `HrirMeasurements.toGrid` übergeben (Azimut umrechnen) |
 
-Empfehlung: MIT KEMAR kompakt als optionaler Download wie die Soundbanks (rund 360 KB), mit Quellenangabe in der Oberfläche (`HrirSet.source()`). Einbauen in `audio-core` wäre lizenzrechtlich möglich, vergrößert aber das Jar für Spiele, die keine HRTF brauchen. Entscheidung beim PO.
+**PO-Entscheidung (PR #33):** MIT KEMAR als optionaler, ausdrücklich vom Benutzer ausgelöster Download; nicht in `audio-core` eingebettet, keine Laufzeitabhängigkeit, kein ungefragter Netzaufruf. Umgesetzt im Studio als `studio.hrtf`:
+
+- `HrtfDataset.MIT_KEMAR`: Originalquelle `https://sound.media.mit.edu/resources/KEMAR/compact.zip`, Version (kompakter Satz 1994), Nutzungsbedingungen im Wortlaut, Zitat (Gardner & Martin, Perceptual Computing Technical Report #280, 1994), festgeschriebene SHA-256 des Archivs.
+- `HrtfLibrary.download(...)` lädt nur auf Aufruf, verwirft jedes Archiv mit anderer Prüfsumme oder Übergröße, entpackt nur die `.dat`-Antworten (flach, ohne Pfade aus dem Archiv) nach `~/.aresstack/audio/hrtf/mit-kemar-compact/` und legt `QUELLE.txt` mit Quelle, Version, Prüfsumme, Bedingungen und Zitat daneben. Danach offline nutzbar (`load`).
+- `HrtfLibrary.onStage(sound, set)` setzt den geladenen Satz als Kopf ein; fehlt er oder ist er unlesbar, bleibt das Kugelkopfmodell.
+- CI `hrtf-download.yml` prüft bei Änderungen, dass die Originalquelle noch genau das festgeschriebene Archiv liefert, und installiert es einmal echt.
+- Drittanbieterhinweis: `THIRD-PARTY-NOTICES.md`.
 
 ## Grenzen und offene Punkte
 
@@ -66,5 +72,5 @@ Empfehlung: MIT KEMAR kompakt als optionaler Download wie die Soundbanks (rund 3
 1. Bühne: Höhe je Spur setzen (`SoundSourcePlacement.atHeight`), z. B. Mausrad oder Schieber im StagePanel, Live über `LiveStage.move`.
 2. Umschalter „Kopfhörer (3D)“ und „Faltungshall“: `StageSound` bauen, an `StageMixService.setSound` und `LiveStage.of(…, sound)` geben; Wahl in den Studio-Einstellungen merken.
 3. Eigene Impulsantwort laden: `ImpulseResponseFile.read(path)` → `StageSound.withImpulseResponse`.
-4. HRTF-Satz laden (MIT KEMAR-Ordner): `HrirMeasurements.readMitKemar(ordner, 128)` → `StageSound.withHrirs`, Quelle anzeigen.
+4. HRTF-Satz laden: Knopf „MIT KEMAR laden“ mit Hinweis auf Quelle, Bedingungen und Zitat vor dem Download → `new HrtfLibrary(HrtfLibrary.standardRoot()).download(HrtfDataset.MIT_KEMAR, routes::proxyFor, progress)` im Hintergrund; beim Start und nach dem Download `library.onStage(sound, HrtfDataset.MIT_KEMAR)`; Quelle (`HrirSet.source()`) im Kopfhörermodus anzeigen. Wahlweise weiterhin eigener Ordner über `HrirMeasurements.readMitKemar(ordner, 128)`.
 5. Automationsspur `height` im Spureditor anbieten (wie x/depth/reverb aus D3).

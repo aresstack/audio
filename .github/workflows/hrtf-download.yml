@@ -1,0 +1,45 @@
+name: Verify HRTF download
+
+# The optional MIT KEMAR download (work package D4): checks that the original source still
+# serves exactly the archive whose SHA-256 is pinned in HrtfDataset, and that it installs.
+on:
+  push:
+    paths:
+      - 'studio/src/main/java/com/aresstack/audio/studio/hrtf/**'
+      - '.github/workflows/hrtf-download.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mit-kemar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Checksum of the original archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --proto '=https' --tlsv1.2 -o compact.zip https://sound.media.mit.edu/resources/KEMAR/compact.zip
+          actual=$(sha256sum compact.zip | cut -d' ' -f1)
+          pinned=$(grep -o '"[0-9a-f]\{64\}"' studio/src/main/java/com/aresstack/audio/studio/hrtf/HrtfDataset.java | tr -d '"')
+          echo "size:   $(stat -c %s compact.zip) bytes"
+          echo "actual: $actual"
+          echo "pinned: $pinned"
+          unzip -l compact.zip | tail -3
+          test "$actual" = "$pinned"
+
+      - name: Download and install through the studio
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ./gradlew :studio:test --tests 'com.aresstack.audio.studio.hrtf.HrtfDownloadIntegrationTest' \
+            -Dhrtf.live=true --no-daemon --stacktrace
