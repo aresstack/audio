@@ -106,11 +106,10 @@ public final class MultiTrackMusicRenderer {
                 throw new IllegalArgumentException("A note ends after the " + bars + " bars of the piece.");
             }
             arrangement.bars = bars;
-        } else if (arrangement.keyFifths == null && arrangement.numerator == 4 && arrangement.denominator == 4) {
-            // Pieces from before F2 (four quarters, C major, no bars line) were always made eight bars long.
-            arrangement.bars = Math.max(ArrangementFile.LEGACY_BARS, covering);
         } else {
-            arrangement.bars = covering;
+            // Pieces from before F2 (four quarters, C major, no bars line) were always made eight bars long.
+            arrangement.bars = ArrangementFile.defaultBars(covering,
+                    arrangement.keyFifths == null && arrangement.numerator == 4 && arrangement.denominator == 4);
         }
         // More tracks than a port has channels share channels; each then goes to a port of its own.
         java.util.Map<Integer, Integer> used = new java.util.HashMap<Integer, Integer>();

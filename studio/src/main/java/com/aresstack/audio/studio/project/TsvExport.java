@@ -72,7 +72,7 @@ public final class TsvExport {
             }
         }
         int bars = time.barsCovering(composition.endTick());
-        if (ArrangementFile.needsBarsLine(bars, time.barsCovering(notesEnd), fourFour)) {
+        if (ArrangementFile.needsBarsLine(bars, time.barsCovering(notesEnd), fourFour && key.equals(Key.C_MAJOR))) {
             lines.add("bars\t" + bars);
         }
         for (Part part : composition.parts()) {
