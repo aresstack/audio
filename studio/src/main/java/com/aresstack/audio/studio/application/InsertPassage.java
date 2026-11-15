@@ -17,9 +17,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -78,15 +80,18 @@ public final class InsertPassage {
         operations.add(new EditOp.SetSections(insertion.form()));
         operations.addAll(AppendContinuation.body(insertion));
         var request = task.request();
+        int shortened = insertion.shortened().size();
         return new Patch(request.bars() + " Takte vor Takt " + request.insertBeforeBar() + " eingefügt ("
-                + request.preset().label() + ", " + request.transition().label() + ")", operations);
+                + request.preset().label() + ", " + request.transition().label() + ")"
+                + (shortened == 0 ? "" : "; " + shortened + " über den Einfügepunkt klingende Note(n) gekürzt,"
+                + " Originaldauer nicht erhaltbar"), operations);
     }
 
     /**
      * What is different about the original between the piece before and after an insertion: a
      * note that begins before {@code keptUntil} (any note before the insertion point for a part
      * that does not play) not as in the original, where a note that sounded across the point may
-     * only end at the end of the room if it was longer; a note after the room not as in the
+     * only end earlier where the insertion lists it as shortened (it sounded beyond the end of the room); a note after the room not as in the
      * original with the approved shift; a note of a part that does not play in the room; a part or
      * track changed; a clip frame changed beyond the shift, except a clip that ended at the point
      * and grew into the room for a held note; a section of the original that is neither kept nor
@@ -98,6 +103,17 @@ public final class InsertPassage {
      */
     public static List<String> originalKept(Composition before, Composition after, ContinuationTask task,
                                             long keptUntil, Set<String> playing, Set<String> newParts) {
+        return originalKept(before, after, task, keptUntil, playing, newParts, Map.of());
+    }
+
+    /**
+     * As {@link #originalKept(Composition, Composition, ContinuationTask, long, Set, Set)}, where
+     * each note named in {@code shortened} (by part and note id, see {@link #key}) may end earlier,
+     * at exactly the given length; every other note before the point keeps its full length.
+     */
+    public static List<String> originalKept(Composition before, Composition after, ContinuationTask task,
+                                            long keptUntil, Set<String> playing, Set<String> newParts,
+                                            Map<String, Long> shortened) {
         Composition reference = task.room(before);
         long point = task.newStart();
         long end = task.newEnd();
@@ -109,14 +125,14 @@ public final class InsertPassage {
             }
             boolean plays = playing.contains(part.id());
             long until = plays ? keptUntil : point;
-            if (!lines(before, part.id(), 0, until, end).equals(lines(after, part.id(), 0, until, end))) {
+            if (!lines(before, part.id(), 0, until, shortened).equals(lines(after, part.id(), 0, until, Map.of()))) {
                 differences.add("notes of part " + part.id() + " before the inserted bars changed");
             }
-            if (!lines(reference, part.id(), end, Long.MAX_VALUE, Long.MAX_VALUE)
-                    .equals(lines(after, part.id(), end, Long.MAX_VALUE, Long.MAX_VALUE))) {
+            if (!lines(reference, part.id(), end, Long.MAX_VALUE, Map.of())
+                    .equals(lines(after, part.id(), end, Long.MAX_VALUE, Map.of()))) {
                 differences.add("notes of part " + part.id() + " after the inserted bars changed");
             }
-            if (!plays && !lines(after, part.id(), point, end, Long.MAX_VALUE).isEmpty()) {
+            if (!plays && !lines(after, part.id(), point, end, Map.of()).isEmpty()) {
                 differences.add("part " + part.id() + " plays in the inserted bars without being asked");
             }
         }
@@ -165,15 +181,28 @@ public final class InsertPassage {
                 && now.endTick() > point && now.endTick() <= end;
     }
 
+    /** The key of a note in the {@code shortened} map of {@link #originalKept}. */
+    public static String key(String partId, String noteId) {
+        return partId + "/" + noteId;
+    }
+
+    /** The approved shortenings of an insertion, for {@link #originalKept}. */
+    public static Map<String, Long> shortened(ComposedContinuation insertion) {
+        Map<String, Long> shortened = new HashMap<>();
+        insertion.shortened().forEach(hold -> shortened.put(key(hold.partId(), hold.noteId()),
+                insertion.keptLength(hold)));
+        return shortened;
+    }
+
     /**
      * The notes of a part that begin from {@code from} to before {@code to}, as lines (part, tick,
-     * length, pitch, velocity, voice, id), each ending at {@code endLimit} at the latest.
+     * length, pitch, velocity, voice, id); a note named in {@code lengths} with the length given there.
      */
-    private static List<String> lines(Composition piece, String partId, long from, long to, long endLimit) {
+    private static List<String> lines(Composition piece, String partId, long from, long to, Map<String, Long> lengths) {
         List<String> lines = new ArrayList<>();
         for (PlacedNote n : piece.notesOf(partId)) {
             if (n.tick() >= from && n.tick() < to) {
-                long length = Math.min(n.note().length(), endLimit - n.tick());
+                long length = lengths.getOrDefault(key(partId, n.note().id()), n.note().length());
                 lines.add(partId + " " + n.tick() + " " + length + " " + n.note().pitch() + " " + n.note().velocity()
                         + " " + n.note().voiceId() + " " + n.note().id());
             }

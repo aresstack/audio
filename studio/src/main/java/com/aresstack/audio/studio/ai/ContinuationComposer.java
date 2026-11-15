@@ -299,7 +299,7 @@ public final class ContinuationComposer {
                         new MidiClip(fresh.next(), frame.startTick(), frame.lengthTicks(), clipPart, notes)));
             }
         }
-        hold(piece, task, holds, tail);
+        hold(piece, task, holds, tail, corrections);
         joinOverhangs(piece, clips, tail, corrections);
         return new ComposedContinuation(task, plan, sections, form, newParts, newTracks, clips, tail, corrections,
                 holds);
@@ -452,12 +452,14 @@ public final class ContinuationComposer {
     /**
      * Lets the held notes of an insertion sound on: in the piece with the room ({@code room}) the
      * first half of their clip ends at the insertion point and the note there; the note gets its
-     * length back, at most to the end of the room, and the clip grows with it. This becomes a
+     * length back, at most to the end of the room, and the clip grows with it. A note that would
+     * sound beyond the end of the room ends there, because the moved original begins there; that
+     * goes into the corrections and {@link ComposedContinuation#shortened()}. This becomes a
      * {@link ComposedContinuation.TailChange} of the clip (merged with one of the revised
      * transition), so that {@link #joinOverhangs} joins the new clips of the part into it.
      */
     static void hold(Composition room, ContinuationTask task, List<ComposedContinuation.Hold> holds,
-                     List<ComposedContinuation.TailChange> tail) {
+                     List<ComposedContinuation.TailChange> tail, List<String> corrections) {
         Map<String, List<ComposedContinuation.Hold>> byClip = new LinkedHashMap<>();
         for (ComposedContinuation.Hold hold : holds) {
             byClip.computeIfAbsent(hold.clipId(), id -> new ArrayList<>()).add(hold);
@@ -478,6 +480,12 @@ public final class ContinuationComposer {
             for (ComposedContinuation.Hold hold : entry.getValue()) {
                 Note cut = half.notes().stream().filter(n -> n.id().equals(hold.noteId())).findFirst().orElseThrow();
                 long length = Math.min(hold.length(), task.newEnd() - hold.tick());
+                if (length < hold.length()) {
+                    corrections.add(hold.partId() + "\t" + SectionGenerator.TRANSITION + "\t" + hold.noteId()
+                            + "\tduration\t" + ContextBuilder.quarters(hold.length()) + "\t"
+                            + ContextBuilder.quarters(length) + "\tklingt über das Ende der eingefügten Takte hinaus;"
+                            + " endet dort, wo das verschobene Original beginnt (Originaldauer nicht erhaltbar)");
+                }
                 removed.add(cut.id());
                 added.add(new Note(cut.id(), cut.tick(), length, cut.pitch(), cut.velocity(), cut.voiceId()));
                 end = Math.max(end, hold.tick() + length);

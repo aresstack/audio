@@ -29,12 +29,18 @@ public record ComposedContinuation(ContinuationTask task, ContinuationPlan plan,
     /**
      * A note of the original that sounds across the insertion point of an {@code INSERT}. The
      * shift cuts it at the point; the insertion lets it sound on (into the room, at most to its
-     * end), as a {@link TailChange} of its clip that restores it and lets the clip grow.
+     * end), as a {@link TailChange} of its clip that restores it and lets the clip grow. A note
+     * that would sound beyond the end of the room cannot keep its length there, because the moved
+     * original begins there; it is listed by {@link #shortened()} and in the corrections, never
+     * cut silently.
      *
      * @param tick   the tick of the piece at which the note begins, before the insertion point
      * @param length its length in the original
      */
     public record Hold(String partId, String clipId, String noteId, long tick, long length) {
+        public long endTick() {
+            return tick + length;
+        }
     }
 
     /** As the canonical constructor, without held notes. */
@@ -94,6 +100,32 @@ public record ComposedContinuation(ContinuationTask task, ContinuationPlan plan,
             from = Math.min(from, hold.tick());
         }
         return from;
+    }
+
+    /**
+     * The length a held note keeps in the result: its own, unless the room end or a foreign clip
+     * cut it; the length of the original when the note is not restored by this continuation.
+     */
+    public long keptLength(Hold hold) {
+        for (TailChange change : tail) {
+            if (change.clipId().equals(hold.clipId())) {
+                for (Note note : change.added()) {
+                    if (note.id().equals(hold.noteId())) {
+                        return note.length();
+                    }
+                }
+            }
+        }
+        return hold.length();
+    }
+
+    /**
+     * The held notes that do not keep their original length (they sound beyond the end of the
+     * inserted bars, or into a foreign clip): the cases that the user has to see and confirm,
+     * because the original cannot be kept in full there. Empty for most insertions.
+     */
+    public List<Hold> shortened() {
+        return holds.stream().filter(hold -> keptLength(hold) < hold.length()).toList();
     }
 
     public int attempt() {
