@@ -163,6 +163,73 @@ public final class AlbumProducerTest {
         assertEquals(List.of("Track 1"), pieces.orders.stream().map(PieceProduction.PieceOrder::name).toList());
     }
 
+    /**
+     * PO finding on PR #41: after "Abbrechen" the same producer goes on in the same studio. The
+     * production of pieces of a run is stopped for good by its cancel (as a model lineup is), so
+     * every start gets one of its own; the limit of pieces at once holds in every run.
+     */
+    @Test
+    public void afterCancelTheSameProducerGoesOnWithAFreshProductionOfPieces() throws Exception {
+        Album album = album(4);
+        List<Pieces> made = Collections.synchronizedList(new ArrayList<Pieces>());
+        AlbumProducer producer = new AlbumProducer(files, songs, () -> {
+            Pieces pieces = new Pieces();
+            pieces.gate = made.isEmpty() ? new CountDownLatch(1) : null;
+            made.add(pieces);
+            return pieces;
+        }, 2);
+        AlbumProductionCoordinator.Production production = producer.start(album.id(), QUIET);
+        Pieces first = made.get(0);
+        for (long until = System.nanoTime() + 10_000_000_000L; first.orders.size() < 2; ) {
+            assertTrue(System.nanoTime() < until);
+            Thread.sleep(5);
+        }
+        production.cancel();
+        AlbumProductionState stopped = production.await();
+        Album begun = files.album(album.id()).orElseThrow();
+        assertEquals(4, stopped.count(begun, Status.QUEUED));
+        assertTrue("the production of the first run is stopped for good", first.cancelled);
+        List<Path> begunFolders = first.orders.stream().map(PieceProduction.PieceOrder::folder).toList();
+
+        // start -> cancel -> await -> start, same producer, no new studio.
+        AlbumProductionState done = producer.start(album.id(), QUIET).await();
+        assertEquals(2, made.size());
+        Pieces second = made.get(1);
+        assertFalse(second.cancelled);
+        assertEquals("nothing failed: " + done.of("t1").reason(), 4, done.count(begun, Status.DONE));
+        assertEquals(4, second.orders.size());
+        assertTrue("the pieces that were begun are finished in their own folders",
+                second.orders.stream().map(PieceProduction.PieceOrder::folder).toList().containsAll(begunFolders));
+        assertEquals(4, songs.songs().size());
+        assertTrue(first.most.get() <= 2 && second.most.get() <= 2);
+
+        // And once more: cancelled and started a third time, nothing is left to do.
+        producer.start(album.id(), QUIET).await();
+        assertEquals(3, made.size());
+        assertEquals(0, made.get(2).orders.size());
+    }
+
+    /** PO finding on PR #39: a piece folder that leads out of the library is never opened or written. */
+    @Test
+    public void aTitleNeverWritesOutsideTheLibrary() throws Exception {
+        Album album = album(1);
+        Path outside = temporary.newFolder("outside").toPath();
+        Path file = files.folder(album.id()).resolve(AlbumFiles.FILE_NAME);
+        com.google.gson.JsonObject json = com.google.gson.JsonParser.parseString(
+                new String(Files.readAllBytes(file), StandardCharsets.UTF_8)).getAsJsonObject();
+        json.getAsJsonArray("tracks").get(0).getAsJsonObject().addProperty("piece", "../outside");
+        Files.write(file, json.toString().getBytes(StandardCharsets.UTF_8));
+        Pieces pieces = new Pieces();
+        AlbumProductionState done = new AlbumProducer(files, songs, pieces, 1).start(album.id(), QUIET).await();
+        assertEquals(Status.DONE, done.status("t1"));
+        Path used = pieces.orders.get(0).folder();
+        assertEquals("the piece got a folder of its own in the library", library.toAbsolutePath().normalize(),
+                used.toAbsolutePath().normalize().getParent());
+        try (Stream<Path> left = Files.list(outside)) {
+            assertEquals("nothing was written outside", 0, left.count());
+        }
+    }
+
     @Test
     public void anInterruptedProductionGoesOnWhereItStood() throws Exception {
         Album album = album(4);

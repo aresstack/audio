@@ -32,11 +32,33 @@ public record AlbumTrack(String id, String title, String mood, int bpm, String k
         instrumentation = instrumentation == null ? "" : instrumentation.trim();
         form = form == null ? "" : form.trim();
         piece = piece == null ? "" : piece.trim();
+        if (!piece.isEmpty() && !isFolderName(piece)) {
+            throw new IllegalArgumentException("Kein Ordnername eines Stücks in der Bibliothek: " + piece);
+        }
         bpm = Math.max(CompositionSpec.MIN_BPM, Math.min(CompositionSpec.MAX_BPM, bpm));
         key = keyOf(key).name();
         int[] beats = meterOf(meter);
         meter = beats[0] + "/" + beats[1];
         targetSeconds = Math.max(10, Math.min(AlbumConcept.MAX_SECONDS, targetSeconds));
+    }
+
+    /**
+     * Whether this names one folder directly in the library of pieces: a single plain name, not
+     * {@code .} or {@code ..}, not hidden, without a separator, a drive or a control character.
+     * The production writes into this folder, so nothing else is ever accepted, also not from a file.
+     */
+    public static boolean isFolderName(String name) {
+        if (name == null || name.isEmpty() || name.length() > 255 || name.startsWith(".")
+                || !name.equals(name.trim()) || name.endsWith(".")) {
+            return false;
+        }
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (c == '/' || c == '\\' || c == ':' || c < 0x20 || c == 0x7f) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Whether the piece of this title exists (it may still be unfinished). */
