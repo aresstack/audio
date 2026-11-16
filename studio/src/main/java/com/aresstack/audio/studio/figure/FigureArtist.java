@@ -22,9 +22,9 @@ import java.util.Map;
  * studio's models.
  */
 public final class FigureArtist {
-    /** The model role of the figures, with its own choice on the settings page; without a model of its own it follows planning. */
+    /** The model role of the figures, chosen in the menu of the player; without a model of its own it follows planning. */
     public static final ModelRole ROLE = ModelRoles.register(new ModelRole("figures", "Bühnenfiguren",
-            "Figuren der Musiker für die Bühne zeichnen (SVG)", ModelRoles.PLANNING.key(), true));
+            "Figuren der Musiker für die Bühne zeichnen (SVG)", ModelRoles.PLANNING.key(), false));
 
     static final int ATTEMPTS = 3;
     /** The most tokens a figure may take; a figure is a few hundred shapes at most. */
