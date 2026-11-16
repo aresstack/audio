@@ -15,8 +15,9 @@ public final class ModelRolesTest {
     private static final String GEMMA = "google/gemma-4-31B-it";
 
     @Test
-    public void thePageShowsPlanningAndCompositionOnly() {
-        assertEquals(List.of(ModelRoles.PLANNING, ModelRoles.COMPOSITION), ModelRoles.visible());
+    public void thePageShowsPlanningAndCompositionFirst() {
+        // Other packages may add roles of their own to the page (the stage figures do), after these two.
+        assertEquals(List.of(ModelRoles.PLANNING, ModelRoles.COMPOSITION), ModelRoles.visible().subList(0, 2));
         assertTrue(ModelRoles.all().size() >= 6);
     }
 
