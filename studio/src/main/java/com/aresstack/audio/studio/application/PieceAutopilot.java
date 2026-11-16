@@ -170,7 +170,10 @@ public final class PieceAutopilot {
         Path arrangement = begun ? folder.resolve("arrangement.tsv") : ComposingIntoPiece.run(
                 () -> first == null ? composer.compose(opening, folder, tracks, progress)
                         // the piece keeps its whole length as its spec; only the notes come in portions
-                        : composer.compose(opening, folder, tracks, first, spec, progress),
+                        : composer.compose(opening, folder, tracks, first, spec, first == spec ? progress
+                                // a long piece: its opening is the first share of the bar under the status line
+                                : com.aresstack.audio.studio.progress.PartOfWhole.of(progress, 0,
+                                first.bars() / (double) spec.bars())),
                 folder, description, songs, model);
         if (begun || first != spec) {
             arrangement = grow(folder, model, description, spec.bars(), progress);

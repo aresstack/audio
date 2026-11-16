@@ -284,6 +284,13 @@ public final class ContinuationComposer {
                     sketch.expect(voice.key(), frame);
                 }
             }
+            // Each voice is told as waiting, working on section i of n, done: the status line shows the
+            // same detail as for the first composition of a piece.
+            for (ContinuationVoice voice : voices) {
+                com.aresstack.audio.studio.progress.TrackProgress.tell(progress, voice.key(),
+                        com.aresstack.audio.studio.progress.TrackProgress.Stage.COMPOSE,
+                        com.aresstack.audio.studio.progress.TrackProgress.State.WAITING, "");
+            }
             for (ContinuationVoice voice : voices) {
                 running.put(voice.key(), pool.submit(() -> writePart(piece, original, task, plan, frames, voice, cache,
                         progress, sketch)));
@@ -311,6 +318,24 @@ public final class ContinuationComposer {
                               List<VoiceFrame> frames,
                               ContinuationVoice voice, Path cache, Progress progress, EditSketch sketch)
             throws IOException {
+        try {
+            Written written = writeFrames(piece, original, task, plan, frames, voice, cache, progress, sketch);
+            com.aresstack.audio.studio.progress.TrackProgress.tell(progress, voice.key(),
+                    com.aresstack.audio.studio.progress.TrackProgress.Stage.COMPOSE,
+                    com.aresstack.audio.studio.progress.TrackProgress.State.DONE, "");
+            return written;
+        } catch (IOException | RuntimeException failed) {
+            com.aresstack.audio.studio.progress.TrackProgress.tell(progress, voice.key(),
+                    com.aresstack.audio.studio.progress.TrackProgress.Stage.COMPOSE,
+                    com.aresstack.audio.studio.progress.TrackProgress.State.FAILED, String.valueOf(failed.getMessage()));
+            throw failed;
+        }
+    }
+
+    private Written writeFrames(Composition piece, Composition original, ContinuationTask task, ContinuationPlan plan,
+                                List<VoiceFrame> frames,
+                                ContinuationVoice voice, Path cache, Progress progress, EditSketch sketch)
+            throws IOException {
         VoiceNormalizer normalizer = new VoiceNormalizer(task.time(), voice.range(), voice.drums());
         List<String> densities = new ArrayList<>();
         Map<String, List<ShapedNote>> notes = new LinkedHashMap<>();
@@ -330,6 +355,10 @@ public final class ContinuationComposer {
                 continue;
             }
             progress.update("Komponiere " + voice.name() + " für " + frame.name() + " ...");
+            com.aresstack.audio.studio.progress.TrackProgress.tell(progress, voice.key(),
+                    com.aresstack.audio.studio.progress.TrackProgress.Stage.COMPOSE,
+                    com.aresstack.audio.studio.progress.TrackProgress.State.WORKING,
+                    "Abschnitt " + (frames.indexOf(frame) + 1) + "/" + frames.size());
             long asked = System.currentTimeMillis();
             GeneratedNotes generated;
             try (Listening.Scope watching = Listening.to(sketch == null ? null
