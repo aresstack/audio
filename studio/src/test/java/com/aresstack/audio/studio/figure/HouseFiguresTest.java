@@ -33,19 +33,23 @@ public final class HouseFiguresTest {
     }
 
     @Test
-    public void clearingTheLibraryMovesItsFiguresAside() throws Exception {
+    public void oneFigureIsTakenOutOfTheLibraryAndMovedAside() throws Exception {
         java.nio.file.Path home = java.nio.file.Files.createTempDirectory("figures-test");
         FigureLibrary library = new FigureLibrary(home.resolve("figures"));
-        String id = library.add("violine", HouseFigures.svg("strings", 0), "test", "Violine");
-        library.add("violine", HouseFigures.svg("strings", 1), "test", "Violine");
-        assertNotNull(library.picture(id));
-        assertEquals(2, library.clear());
-        assertEquals(0, library.figures("violine").size());
-        assertEquals(null, library.picture(id));
+        String first = library.add("violine", HouseFigures.svg("strings", 0), "test", "Violine");
+        String second = library.add("violine", HouseFigures.svg("strings", 1), "test", "Violine");
+        assertNotNull(library.picture(first));
+        assertEquals(java.util.List.of("violine"), library.kinds());
+        assertEquals(true, library.remove(first));
+        assertEquals(java.util.List.of(second), library.figures("violine"));
+        assertEquals(null, library.picture(first));
+        assertNotNull(library.picture(second));
         try (java.util.stream.Stream<java.nio.file.Path> kept = java.nio.file.Files.walk(home.resolve("figures-entfernt"))) {
-            assertEquals(2, kept.filter(file -> file.toString().endsWith(".svg")).count());
+            assertEquals(1, kept.filter(file -> file.toString().endsWith(".svg")).count());
         }
-        assertEquals(0, library.clear());
+        assertEquals(false, library.remove(first));
+        assertEquals("a new figure does not take the number of one that is left", "violine/3",
+                library.add("violine", HouseFigures.svg("strings", 2), "test", "Violine"));
     }
 
     @Test

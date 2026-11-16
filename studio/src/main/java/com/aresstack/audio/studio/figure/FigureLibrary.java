@@ -141,37 +141,47 @@ public final class FigureLibrary {
         return picture;
     }
 
-    /**
-     * Takes every figure out of the library. They are not destroyed but moved into a folder beside
-     * the library ({@code figures-entfernt/<time>}), from where they can be put back by hand.
-     *
-     * @return how many figures were taken out
-     */
-    public synchronized int clear() throws IOException {
-        pictures.clear();
-        if (!Files.isDirectory(directory)) {
-            return 0;
-        }
-        List<Path> kinds = new ArrayList<>();
-        int count = 0;
-        try (Stream<Path> folders = Files.list(directory)) {
-            for (Path folder : (Iterable<Path>) folders::iterator) {
-                if (Files.isDirectory(folder) && !figures(folder.getFileName().toString()).isEmpty()) {
-                    kinds.add(folder);
-                    count += figures(folder.getFileName().toString()).size();
+    /** The kinds the library has figures of, by name. */
+    public synchronized List<String> kinds() {
+        List<String> kinds = new ArrayList<>();
+        if (Files.isDirectory(directory)) {
+            try (Stream<Path> folders = Files.list(directory)) {
+                for (Path folder : (Iterable<Path>) folders::iterator) {
+                    String kind = folder.getFileName().toString();
+                    if (Files.isDirectory(folder) && !figures(kind).isEmpty()) {
+                        kinds.add(kind);
+                    }
                 }
+            } catch (IOException unreadable) {
+                // a library that cannot be read has no figures
             }
         }
-        if (kinds.isEmpty()) {
-            return 0;
+        java.util.Collections.sort(kinds);
+        return kinds;
+    }
+
+    /**
+     * Takes one figure out of the library. It is not destroyed but moved into a folder beside the
+     * library ({@code figures-entfernt/<kind>}), from where it can be put back by hand.
+     *
+     * @return whether the figure was there
+     */
+    public synchronized boolean remove(String id) throws IOException {
+        if (!has(id)) {
+            return false;
         }
+        pictures.remove(id);
+        String kind = kindOf(id);
+        String number = id.substring(id.indexOf('/') + 1);
         String time = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
-        Path away = directory.resolveSibling(directory.getFileName() + "-entfernt").resolve(time);
+        Path away = directory.resolveSibling(directory.getFileName() + "-entfernt").resolve(kind);
         Files.createDirectories(away);
-        for (Path kind : kinds) {
-            Files.move(kind, away.resolve(kind.getFileName()));
+        Files.move(svgFile(id), away.resolve(number + "-" + time + ".svg"));
+        Path note = directory.resolve(kind).resolve(number + ".json");
+        if (Files.isRegularFile(note)) {
+            Files.move(note, away.resolve(number + "-" + time + ".json"));
         }
-        return count;
+        return true;
     }
 
     private Path svgFile(String id) {
