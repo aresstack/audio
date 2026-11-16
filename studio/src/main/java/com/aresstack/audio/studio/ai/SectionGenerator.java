@@ -20,4 +20,12 @@ public interface SectionGenerator {
      */
     GeneratedNotes generate(ContinuationTask task, ContinuationPlan plan, ContinuationVoice voice, VoiceFrame frame,
                             String connection, Path cacheDirectory) throws IOException;
+
+    /**
+     * Forgets the kept answer for this request, so that the next {@link #generate} asks the model
+     * anew; nothing for a generator that keeps none.
+     */
+    default void forget(ContinuationTask task, ContinuationPlan plan, ContinuationVoice voice, VoiceFrame frame,
+                        String connection, Path cacheDirectory) {
+    }
 }

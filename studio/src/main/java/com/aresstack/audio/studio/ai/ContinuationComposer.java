@@ -344,6 +344,11 @@ public final class ContinuationComposer {
         Map<String, List<ShapedNote>> notes = new LinkedHashMap<>();
         int empty = 0;
         int played = 0;
+        // The last section this voice was asked for: if its notes stop a whole bar or more before its
+        // end, the rests after the last note may be an answer that broke off (Angelo, 2026-11-16).
+        VoiceFrame lastAsked = null;
+        String lastConnection = null;
+        GeneratedNotes lastGenerated = null;
         // From the original: a note that sounds across an insertion point is told with its full length.
         String connection = voice.newPart() ? "" : before(original, voice.key(), frames.get(0).startTick());
         for (VoiceFrame frame : frames) {
@@ -365,6 +370,8 @@ public final class ContinuationComposer {
                     com.aresstack.audio.studio.progress.TrackProgress.State.WORKING,
                     "Abschnitt " + (frames.indexOf(frame) + 1) + "/" + frames.size());
             long asked = System.currentTimeMillis();
+            lastAsked = frame;
+            lastConnection = connection;
             GeneratedNotes generated;
             try (Listening.Scope watching = Listening.to(sketch == null ? null
                     : sketch.hearing(voice.key(), voice.program(), voice.role(), frame))) {
@@ -373,6 +380,7 @@ public final class ContinuationComposer {
             if (sketch != null) {
                 sketch.written(voice.key(), voice.program(), voice.role(), frame, generated);
             }
+            lastGenerated = generated;
             progress.detail("Komponiert: " + voice.name() + " für " + frame.name() + " (" + generated.notes().size()
                     + " Noten, " + (System.currentTimeMillis() - asked + 500) / 1000 + " s)");
             List<ShapedNote> shaped = normalizer.shape(frame, generated, transition ? ringOut(task) : 0);
@@ -392,10 +400,56 @@ public final class ContinuationComposer {
             notes.put(frame.sectionId(), shaped);
             connection = VoiceComposer.connection(task.time(), frame, shaped);
         }
+        if (lastAsked != null && endsInRests(task, lastAsked, notes.get(lastAsked.sectionId()))) {
+            // Asked once more, without the kept answer; the answer that reaches further is taken.
+            VoiceFrame frame = lastAsked;
+            progress.update("Komponiere " + voice.name() + " für " + frame.name()
+                    + " noch einmal: nach der letzten Note nur Pausen ...");
+            generator.forget(task, plan, voice, frame, lastConnection, cache);
+            GeneratedNotes again;
+            try (Listening.Scope watching = Listening.to(sketch == null ? null
+                    : sketch.hearing(voice.key(), voice.program(), voice.role(), frame))) {
+                again = generator.generate(task, plan, voice, frame, lastConnection, cache);
+            }
+            boolean transition = SectionGenerator.TRANSITION.equals(frame.sectionId());
+            VoiceNormalizer second = new VoiceNormalizer(task.time(), voice.range(), voice.drums());
+            List<ShapedNote> shaped = second.shape(frame, again, transition ? ringOut(task) : 0);
+            if (frame.intensity() != null) {
+                shaped = Dramaturgy.thin(frame, task.time(), frame.intensity(), voice.role(), shaped, new ArrayList<>());
+            }
+            List<ShapedNote> before = notes.get(frame.sectionId());
+            if (reach(shaped) > reach(before)) {
+                if ((before == null || before.isEmpty()) && empty > 0) {
+                    empty--; // counted as without notes before: it has notes now
+                }
+                notes.put(frame.sectionId(), shaped);
+                if (sketch != null) {
+                    sketch.written(voice.key(), voice.program(), voice.role(), frame, again);
+                }
+            } else if (sketch != null && lastGenerated != null) {
+                sketch.written(voice.key(), voice.program(), voice.role(), frame, lastGenerated);
+            }
+        }
         List<String> corrections = new ArrayList<>();
         normalizer.corrections().forEach(line -> corrections.add(voice.key() + "\t" + line));
         corrections.addAll(densities);
         return new Written(notes, corrections, empty, played);
+    }
+
+    /** Where the last of these notes ends, in ticks from the start of their frame; 0 for none. */
+    private static long reach(List<ShapedNote> notes) {
+        long end = 0;
+        for (ShapedNote note : notes == null ? List.<ShapedNote>of() : notes) {
+            end = Math.max(end, note.tick() + note.length());
+        }
+        return end;
+    }
+
+    /** Whether the notes of a frame end a whole bar or more before the frame does (or there are none). */
+    static boolean endsInRests(ContinuationTask task, VoiceFrame frame, List<ShapedNote> notes) {
+        long length = frame.endTick() - frame.startTick();
+        long bar = task.time().meterAt(frame.startTick()).barTicks();
+        return length - reach(notes) >= bar;
     }
 
     /**
