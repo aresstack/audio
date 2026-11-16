@@ -61,6 +61,11 @@ final class StageView extends JComponent {
     private String hovered;
     private double grabX;
     private double grabDepth;
+    /** The figure of a track as a picture, or {@code null}; none at all while no figures are wanted. */
+    private java.util.function.Function<String, java.awt.image.BufferedImage> figures = track -> null;
+    private com.aresstack.audio.studio.figure.FigureSettings figureLook =
+            com.aresstack.audio.studio.figure.FigureSettings.DEFAULT;
+    private double bob = com.aresstack.audio.studio.figure.FigureSettings.DEFAULT_BOB;
 
     StageView(Listener listener) {
         this.listener = listener;
@@ -163,6 +168,42 @@ final class StageView extends JComponent {
         repaint();
     }
 
+    /**
+     * The figures of the musicians: each stands on the disc of its track, as tall as the settings
+     * say, and grows a little with the level of its track while it sounds.
+     */
+    void setFigures(java.util.function.Function<String, java.awt.image.BufferedImage> pictures,
+                    com.aresstack.audio.studio.figure.FigureSettings look, double bobbing) {
+        figures = pictures == null ? track -> null : pictures;
+        figureLook = look;
+        bob = bobbing;
+        repaint();
+    }
+
+    /** Draws the figures anew, e.g. when one arrived. */
+    void figuresChanged() {
+        repaint();
+    }
+
+    /** Where the figure of a placement stands on the screen, or {@code null} if it has none. */
+    private Rectangle2D figureBox(SoundSourcePlacement placement) {
+        if (!figureLook.shown()) {
+            return null;
+        }
+        java.awt.image.BufferedImage picture = figures.apply(placement.trackId());
+        if (picture == null) {
+            return null;
+        }
+        Float level = levels.get(placement.trackId());
+        float sounding = level == null || placement.muted() ? 0 : Math.min(1, level * 1.6f);
+        double metre = floor().getWidth() / WIDTH_M;
+        double height = figureLook.height() * metre * (1 + bob * sounding);
+        double width = height * picture.getWidth() / picture.getHeight();
+        Point2D place = point(placement.x(), placement.depth());
+        // The feet in the middle of the disc: the figure stands on its place.
+        return new Rectangle2D.Double(place.getX() - width / 2, place.getY() - height, width, height);
+    }
+
     /** A proposal to be shown over the stage, or {@code null} for none. */
     void setProposal(SpatialScene proposed) {
         proposal = proposed;
@@ -233,7 +274,8 @@ final class StageView extends JComponent {
         String hit = null;
         for (SoundSourcePlacement placement : scene.placements()) {
             Point2D place = point(placement.x(), placement.depth());
-            if (place.distance(point) <= radius(placement) + 4) {
+            Rectangle2D figure = figureBox(placement);
+            if (place.distance(point) <= radius(placement) + 4 || figure != null && figure.contains(point)) {
                 hit = placement.trackId();
             }
         }
@@ -331,6 +373,7 @@ final class StageView extends JComponent {
         for (SoundSourcePlacement placement : drawn) {
             paintSource(g, placement, placement == chosen);
         }
+        paintFigures(g, drawn, chosen);
         if (scene.placements().isEmpty()) {
             g.setFont(AudioStudioTheme.lettering(11f));
             g.setColor(AudioStudioTheme.TEXT_FAINT);
@@ -402,6 +445,40 @@ final class StageView extends JComponent {
         g.drawString(name, nameX, nameY);
         if (placement.locked()) {
             paintLock(g, x + radius * 0.75f, y - radius * 0.75f);
+        }
+    }
+
+    /**
+     * The figures over the discs, the ones further back first, so that a figure in front stands
+     * before them. A muted track's figure is faint; the chosen one has a light at its feet.
+     */
+    private void paintFigures(Graphics2D g, List<SoundSourcePlacement> drawn, SoundSourcePlacement chosen) {
+        List<SoundSourcePlacement> back = new ArrayList<SoundSourcePlacement>(drawn);
+        back.sort((a, b) -> Double.compare(b.depth(), a.depth()));
+        for (SoundSourcePlacement placement : back) {
+            Rectangle2D box = figureBox(placement);
+            if (box == null) {
+                continue;
+            }
+            java.awt.image.BufferedImage picture = figures.apply(placement.trackId());
+            Graphics2D figure = (Graphics2D) g.create();
+            figure.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+                    java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            if (placement.muted()) {
+                figure.setComposite(java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, 0.35f));
+            }
+            if (placement == chosen || placement.trackId().equals(hovered)) {
+                float glow = (float) box.getWidth() * 0.6f;
+                float feetX = (float) box.getCenterX();
+                float feetY = (float) box.getMaxY();
+                figure.setPaint(new RadialGradientPaint(feetX, feetY, glow, new float[]{0f, 1f},
+                        new Color[]{AudioStudioTheme.withAlpha(Color.WHITE, placement == chosen ? 90 : 50),
+                                AudioStudioTheme.withAlpha(Color.WHITE, 0)}));
+                figure.fill(new Ellipse2D.Float(feetX - glow, feetY - glow * 0.4f, glow * 2, glow * 0.8f));
+            }
+            figure.drawImage(picture, (int) Math.round(box.getX()), (int) Math.round(box.getY()),
+                    (int) Math.round(box.getWidth()), (int) Math.round(box.getHeight()), null);
+            figure.dispose();
         }
     }
 
