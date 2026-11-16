@@ -155,7 +155,7 @@ public final class AudioStudioFrame extends JFrame {
     /** Sums up the lines about AI requests tried again, see {@link TroubleDigest}. */
     private final TroubleDigest troubleDigest = new TroubleDigest(this::append);
     private final JSpinner parallelRequests = new JSpinner(
-            new SpinnerNumberModel(32, 1, 1024, 1));
+            new SpinnerNumberModel(AiDefaults.PARALLEL, 1, 1024, 1));
     /** The first pause before an AI request is tried again, in seconds. */
     private final JSpinner retryFirst = new JSpinner(new SpinnerNumberModel(
             com.aresstack.audio.studio.ai.Backoff.FIRST_SECONDS, 1, 600, 1));
@@ -4752,7 +4752,7 @@ public final class AudioStudioFrame extends JFrame {
             fluidSynth.setText(saved.getProperty("fluidSynth", fluidSynth.getText()));
             sfizz.setText(saved.getProperty("sfizz", sfizz.getText()));
             description.setText(saved.getProperty("description", description.getText()));
-            parallelRequests.setValue(parseParallel(saved.getProperty("parallel", "32")));
+            parallelRequests.setValue(parseParallel(saved.getProperty("parallel", Integer.toString(AiDefaults.PARALLEL))));
             firstText.setValue(AiDefaults.firstTextSeconds(saved));
             silence.setValue(AiDefaults.silenceSeconds(saved));
             KipitzChatClient.waits((Integer) firstText.getValue(), (Integer) silence.getValue());
@@ -6458,7 +6458,7 @@ public final class AudioStudioFrame extends JFrame {
         try {
             return Math.max(1, Math.min(1024, Integer.parseInt(configured)));
         } catch (NumberFormatException invalid) {
-            return 32;
+            return AiDefaults.PARALLEL;
         }
     }
 
