@@ -2329,6 +2329,11 @@ public final class AudioStudioFrame extends JFrame {
             }
             return;
         }
+        // A long piece that stopped on its way (the program was closed, the work cancelled) goes on
+        // from the bars it has to the length it was planned with; nothing is asked.
+        if (resumePiece(folderBefore)) {
+            return;
+        }
         // The draft is said: the page turns to the score, where the notes appear as they are written.
         if (aiChooses.isSelected()) {
             if (startAfresh()) {
@@ -2401,6 +2406,34 @@ public final class AudioStudioFrame extends JFrame {
             message("Die Notenvorlage ließ sich nicht entfernen: " + failed.getMessage());
         }
         updateComposeKey();
+    }
+
+    /**
+     * Lets an unfinished long piece grow on to the length it was planned with, in the steps of a
+     * long piece; {@code false} if the piece is not one that stopped on its way.
+     */
+    private boolean resumePiece(Path folder) {
+        com.aresstack.audio.studio.application.CompositionSpec whole =
+                com.aresstack.audio.studio.application.GemmaMusicComposer.specOf(folder);
+        int has = modelBars(folder);
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (whole == null || has <= 0 || has >= whole.bars() || !piece.isPresent() || busy()) {
+            return false;
+        }
+        final int target = whole.bars();
+        final int step = (Integer) growBars.getValue();
+        String words = description.getText().strip();
+        final String said = words.length() > 600 ? words.substring(0, 600) : words;
+        showSongView(true);
+        offerFromAi(piece.get(), "„" + songs.name(folder) + "“ hat " + has + " von " + target
+                        + " Takten; es geht dort weiter, in Schritten zu höchstens " + step + " Takten.",
+                (session, model, progress) -> com.aresstack.audio.studio.application.PieceGrowth.growTo(session,
+                        () -> com.aresstack.audio.studio.ai.ContinuationComposer.with(model, partsAtOnce()),
+                        com.aresstack.audio.studio.ai.ContinuationRequest.of(1,
+                                com.aresstack.audio.studio.ai.ContinuationPreset.STANDALONE,
+                                com.aresstack.audio.studio.ai.ContinuationEnding.CLOSED, said),
+                        target, step, progress));
+        return true;
     }
 
     /**
