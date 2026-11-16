@@ -30,10 +30,11 @@ public record ContextTiers(Tier tier, boolean compact, List<Window> windows) {
     /** The same for a long piece. */
     public static final int LONG_WINDOW_BARS = 4;
     /**
-     * In a long piece form and part summaries are told for this many bars before the last window
-     * only: a piece grows step by step, and the request of a step must not grow with it.
+     * In a long piece form and part summaries can be told for so many bars before the end only
+     * (the setting "Rückblick beim Verlängern"): a piece grows step by step, and the request of a
+     * step grows with it. 0, the standard, tells the whole piece (PO 2026-11-16: not cut unasked).
      */
-    public static final int NEAR_BARS = 128;
+    public static final int NEAR_BARS = 0;
     private static volatile int nearBars = NEAR_BARS;
 
     /** Sets how many bars back form and summaries are told in a long piece; 0 tells the whole piece. */

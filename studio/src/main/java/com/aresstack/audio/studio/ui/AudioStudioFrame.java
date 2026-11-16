@@ -2065,7 +2065,7 @@ public final class AudioStudioFrame extends JFrame {
         lookBackBars.setPreferredSize(new Dimension(110, 30));
         lookBackBars.setToolTipText("Beim Verlängern eines langen Stücks: für so viele Takte vor dem Ende bekommt die KI "
                 + "Form, Akkorde und Stimmenübersicht. Anfang und Anschlussstelle bekommt sie immer Note für Note. "
-                + "0 = das ganze Stück (die Anfrage wächst dann mit dem Stück und kann dem Modell zu groß werden)");
+                + "0 = das ganze Stück (Standard; die Anfrage wächst dann mit dem Stück)");
         addRow(ai, row++, "Rückblick beim Verlängern",
                 line(lookBackBars, note("Takte; 0 = ganzes Stück. Mehr Rückblick, größere Anfrage.")));
         lookBackBars.addChangeListener(event -> com.aresstack.audio.studio.ai.ContextTiers.lookBack(
