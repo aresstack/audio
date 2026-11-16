@@ -158,6 +158,22 @@ final class StageDeck {
         }
 
         @Override
+        public String style() {
+            long now = System.nanoTime();
+            if (now - styleReadAt > STYLE_NANOS || styleReadAt == 0) {
+                styleReadAt = now;
+                java.util.function.Supplier<String> from = styleFrom;
+                try {
+                    String read = from == null ? null : from.get();
+                    style = read == null ? "" : read;
+                } catch (RuntimeException unreadable) {
+                    style = "";
+                }
+            }
+            return style;
+        }
+
+        @Override
         public boolean lightsComing() {
             if (live != null) {
                 return false;
@@ -172,6 +188,18 @@ final class StageDeck {
             return known == null || !known.directory.equals(wanted) || !file.ready();
         }
     };
+
+    /** How often the words about the style of the piece are read anew: they change with the piece, not with the picture. */
+    private static final long STYLE_NANOS = 2_000_000_000L;
+    private volatile java.util.function.Supplier<String> styleFrom;
+    private String style = "";
+    private long styleReadAt;
+
+    /** Where the words about the style of the heard piece come from; asked on the event thread, now and then. */
+    void styleFrom(java.util.function.Supplier<String> words) {
+        styleFrom = words;
+        styleReadAt = 0;
+    }
 
     /** The folder of the piece whose lights were asked for last; {@code null} if they could not be read. */
     private volatile Path lightsFolder;

@@ -10,6 +10,7 @@ import java.util.List;
 /**
  * The stage seen from the hall: every track is a light at its place, glowing with its own level
  * and wandering as the track moves on the stage. The front edge is near and wide, the back wall far.
+ * Around the lights stands the atmosphere the music asks for ({@link StageAtmosphere}).
  */
 final class StageLightEffect implements Effect {
     /** How much narrower the back wall is than the front edge, seen from the hall. */
@@ -81,6 +82,27 @@ final class StageLightEffect implements Effect {
         floor.closePath();
         g.setColor(palette.faint());
         g.draw(floor);
+        StageAtmosphere.Floor place = new StageAtmosphere.Floor(cx, front, back, frontHalf, backHalf, width, height);
+        if (sound.sounding) {
+            atmosphere.listen(sound, settings);
+            atmosphere.paintBehind(g, place, sound, settings);
+        }
+        paintLights(g, sound, palette, front, back, frontHalf, backHalf, cx, width, height);
+        if (sound.sounding) {
+            atmosphere.paintFront(g, place, sound, settings);
+        }
+    }
+
+    /** The atmosphere around the lights, by the mood of the music. */
+    private final StageAtmosphere atmosphere = new StageAtmosphere();
+
+    /** The atmosphere shown now, for tests. */
+    StageMood.Mood atmosphere() {
+        return atmosphere.shown();
+    }
+
+    private void paintLights(Graphics2D g, SoundPicture sound, VisualPalette palette, float front, float back,
+                             float frontHalf, float backHalf, float cx, int width, int height) {
         List<TrackLight> lights = sound.lights;
         if (lights.isEmpty()) {
             if (!sound.sounding) {

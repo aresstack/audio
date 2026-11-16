@@ -88,6 +88,12 @@ public final class TapFeed implements SoundFeed {
             public boolean lightsComing() {
                 return first.lightsComing() || second.lightsComing();
             }
+
+            @Override
+            public String style() {
+                String known = first.style();
+                return known == null || known.isBlank() ? second.style() : known;
+            }
         };
     }
 }
