@@ -2293,6 +2293,11 @@ public final class AudioStudioFrame extends JFrame {
             composeButton.setText(specFields.locked() ? "Aus Noten neu machen …" : "Aus Noten übernehmen");
             composeButton.setToolTipText("Die Notenvorlage wird gelesen, die KI wählt die Besetzung und berichtigt nur"
                     + " offensichtliche Fehler; dann wird gerendert.");
+        } else if (unfinishedBars() != null) {
+            int[] bars = unfinishedBars();
+            composeButton.setText("Weiter komponieren");
+            composeButton.setToolTipText("Das Stück hat " + bars[0] + " von " + bars[1] + " geplanten Takten (es wurde"
+                    + " unterbrochen). Es geht dort weiter; was die KI schon geschrieben hatte, kommt aus ihrem Speicher.");
         } else if (!specFields.locked()) {
             composeButton.setText("Komponieren");
             composeButton.setToolTipText("Komponieren und gleich rendern");
@@ -2417,17 +2422,34 @@ public final class AudioStudioFrame extends JFrame {
      * Lets an unfinished long piece grow on to the length it was planned with, in the steps of a
      * long piece; {@code false} if the piece is not one that stopped on its way.
      */
-    private boolean resumePiece(Path folder) {
+    /**
+     * The bars the open piece has and the bars it was planned with, if it stopped on its way (it
+     * has fewer); {@code null} for a piece that is whole or not composed.
+     */
+    private int[] unfinishedBars() {
+        String chosen = directory.getText().trim();
+        if (chosen.isEmpty()) {
+            return null;
+        }
+        Path folder = Paths.get(chosen);
         com.aresstack.audio.studio.application.CompositionSpec whole =
                 com.aresstack.audio.studio.application.GemmaMusicComposer.specOf(folder);
         int has = modelBars(folder);
+        return whole == null || has <= 0 || has >= whole.bars() ? null : new int[]{has, whole.bars()};
+    }
+
+    private boolean resumePiece(Path folder) {
+        int[] bars = unfinishedBars();
         java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
-        if (whole == null || has <= 0 || has >= whole.bars() || !piece.isPresent() || busy()) {
+        if (bars == null || !piece.isPresent() || busy()) {
             return false;
         }
-        final int target = whole.bars();
+        final int has = bars[0];
+        final int target = bars[1];
         final int step = (Integer) growBars.getValue();
-        String words = description.getText().strip();
+        // The words the first run went on with (as PieceAutopilot gives them): the same requests
+        // as before, so what the AI had written before the stop comes from its kept answers.
+        String words = wishForAi().strip();
         final String said = words.length() > 600 ? words.substring(0, 600) : words;
         showSongView(true);
         offerFromAi(piece.get(), "„" + songs.name(folder) + "“ hat " + has + " von " + target
