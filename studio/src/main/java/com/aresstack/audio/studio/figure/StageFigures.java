@@ -101,6 +101,7 @@ public final class StageFigures {
         synchronized (this) {
             FigureCast filled = cast.cast(seats, library, new Random());
             change(filled);
+            keep(); // asked for: the piece keeps its figures from now on, also those the library gave unasked
             wanted = filled.missing(seats);
         }
         if (wanted.isEmpty()) {
@@ -111,11 +112,12 @@ public final class StageFigures {
         if (drawer == null) {
             return;
         }
+        final java.nio.file.Path asked = piece();
         submit(() -> {
             int drawn = 0;
             for (FigureCast.Seat seat : wanted) {
                 listener.said("Die KI zeichnet " + seat.instrument() + " (" + (drawn + 1) + " von " + wanted.size() + ") …");
-                if (!drawFor(drawer, seat)) {
+                if (!drawFor(drawer, seat, asked)) {
                     return;
                 }
                 drawn++;
@@ -134,9 +136,10 @@ public final class StageFigures {
         if (drawer == null) {
             return;
         }
+        final java.nio.file.Path asked = piece();
         submit(() -> {
             listener.said("Die KI zeichnet " + seat.instrument() + " neu …");
-            if (drawFor(drawer, seat)) {
+            if (drawFor(drawer, seat, asked)) {
                 listener.said("Neue Figur für " + trackId + ".");
             }
         });
@@ -180,13 +183,19 @@ public final class StageFigures {
         drawing.shutdownNow();
     }
 
-    private boolean drawFor(FigureArtist drawer, FigureCast.Seat seat) {
+    /** The piece that is open now: what was drawn for another piece does not go to this one. */
+    private synchronized java.nio.file.Path piece() {
+        return directory;
+    }
+
+    private boolean drawFor(FigureArtist drawer, FigureCast.Seat seat, java.nio.file.Path asked) {
         try {
             int variation = library.figures(seat.kind()).size();
             String svg = drawer.draw(seat.instrument(), role(seat), variation, library.directory().resolve("answers"));
             String figure = library.add(seat.kind(), svg, drawer.modelName(), seat.instrument());
             synchronized (this) {
-                if (seat(seat.trackId()) != null) {
+                // Another piece was opened meanwhile: the figure stays in the library, its tracks are not ours.
+                if (Objects.equals(directory, asked) && seat(seat.trackId()) != null) {
                     change(cast.with(seat.trackId(), figure));
                 }
             }

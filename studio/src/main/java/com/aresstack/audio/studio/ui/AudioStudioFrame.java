@@ -4692,6 +4692,14 @@ public final class AudioStudioFrame extends JFrame {
         }
     }
 
+    /** The role of the figures' model, known before the settings are read so that its own model is kept. */
+    private static final com.aresstack.audio.studio.ai.ModelRole FIGURES_ROLE =
+            com.aresstack.audio.studio.figure.FigureArtist.ROLE;
+    /** How the figures stand on the stage, as the settings have it; kept so that saving does not lose it. */
+    private com.aresstack.audio.studio.figure.FigureSettings figureLook =
+            com.aresstack.audio.studio.figure.FigureSettings.DEFAULT;
+    private double figureBob = com.aresstack.audio.studio.figure.FigureSettings.DEFAULT_BOB;
+
     private void loadSettings() {
         try {
             Properties saved = AiDefaults.withDefaults(settingsStore.load());
@@ -4722,8 +4730,9 @@ public final class AudioStudioFrame extends JFrame {
             proxyBasic.setSelected("BASIC".equalsIgnoreCase(saved.getProperty("proxyAuthMode", "")));
             proxyCredentialRef.setText(saved.getProperty("proxyCredentialRef", ""));
             fitArrangement.setSelected(!"false".equalsIgnoreCase(saved.getProperty("arrangementFit", "true")));
-            stagePanel.setFigureLook(com.aresstack.audio.studio.figure.FigureSettings.from(saved),
-                    com.aresstack.audio.studio.figure.FigureSettings.bob(saved));
+            figureLook = com.aresstack.audio.studio.figure.FigureSettings.from(saved);
+            figureBob = com.aresstack.audio.studio.figure.FigureSettings.bob(saved);
+            stagePanel.setFigureLook(figureLook, figureBob);
             // The player of the album page: when a title counts as heard, only new titles, overlap.
             albumHeardPercent = (int) Math.round(number(saved, "albumHeardPercent",
                     com.aresstack.audio.studio.application.HeardTitles.DEFAULT_PERCENT));
@@ -4827,6 +4836,8 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("proxyAuthMode", proxyBasic.isSelected() ? "BASIC" : "");
             saved.setProperty("proxyCredentialRef", proxyCredentialRef.getText().trim());
             saved.setProperty("arrangementFit", String.valueOf(fitArrangement.isSelected()));
+            figureLook.into(saved);
+            saved.setProperty(com.aresstack.audio.studio.figure.FigureSettings.BOB, String.valueOf(figureBob));
             saved.setProperty("albumHeardPercent", Integer.toString(albumHeardPercent));
             saved.setProperty("albumCrossfadeSeconds", Double.toString(albumCrossfadeSeconds));
             saved.setProperty("albumOnlyNew", Boolean.toString(albumOnlyNew));
