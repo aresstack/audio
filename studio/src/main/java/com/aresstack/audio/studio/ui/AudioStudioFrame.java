@@ -2463,6 +2463,7 @@ public final class AudioStudioFrame extends JFrame {
                         + " Takten; es geht dort weiter, in Schritten zu höchstens " + step + " Takten.",
                 (session, model, progress) -> com.aresstack.audio.studio.application.PieceGrowth.growTo(session,
                         () -> com.aresstack.audio.studio.ai.ContinuationComposer.with(model, partsAtOnce()),
+                        () -> com.aresstack.audio.studio.ai.RegionComposer.with(model),
                         com.aresstack.audio.studio.ai.ContinuationRequest.of(1,
                                 com.aresstack.audio.studio.ai.ContinuationPreset.STANDALONE,
                                 com.aresstack.audio.studio.ai.ContinuationEnding.CLOSED, said),
@@ -3414,6 +3415,7 @@ public final class AudioStudioFrame extends JFrame {
                     + " zu höchstens " + step + " Takten (" + request.preset().label() + ").",
                     (session, model, progress) -> com.aresstack.audio.studio.application.PieceGrowth.growTo(session,
                             () -> com.aresstack.audio.studio.ai.ContinuationComposer.with(model, partsAtOnce()),
+                            () -> com.aresstack.audio.studio.ai.RegionComposer.with(model),
                             request, asked.totalBars(), step, progress));
             return;
         }
@@ -5008,6 +5010,10 @@ public final class AudioStudioFrame extends JFrame {
         trackTable.clearWork();
         arrived = 0;
         sketchNotes = 0;
+        // A piece that has notes (a continuation, a resumed piece, an edit) keeps its score on the
+        // page while the AI plans; only an empty page shows what the AI is doing in its middle.
+        String open = directory.getText().trim();
+        paperKeepsPiece = !open.isEmpty() && modelBars(Paths.get(open)) > 0;
         sketchFront.begin();
         scoreView.showBar(-1);
         lastSketch = List.of();
@@ -5846,8 +5852,11 @@ public final class AudioStudioFrame extends JFrame {
     }
 
     /** A line on the paper of the score while it has no notes yet. */
+    /** Whether the piece on the page had notes when the work began: then it stays until new ones come. */
+    private boolean paperKeepsPiece;
+
     private void sayOnPaper(String line) {
-        if (sketchNotes > 0) {
+        if (sketchNotes > 0 || paperKeepsPiece) {
             // Notes are on the page already (the bars written before a continuation, or the piece an
             // edit starts from): they stay while the AI plans the next ones; the status line says it.
             return;
@@ -6013,6 +6022,9 @@ public final class AudioStudioFrame extends JFrame {
         }
         if (working + waiting == 0) {
             return; // the next line of the log takes the display again
+        }
+        if (preparing != null) {
+            return; // the AI plans the next step: that line has the display, not the tracks of the step before
         }
         long seconds = (System.currentTimeMillis() - trackStageBegan) / 1000;
         if (trackStage == TrackProgress.Stage.COMPOSE && sketchNotes == 0 && arrived == 0 && done == 0) {

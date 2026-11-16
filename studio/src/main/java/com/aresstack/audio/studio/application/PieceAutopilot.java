@@ -250,6 +250,7 @@ public final class PieceAutopilot {
             words = words.substring(0, 600);
         }
         PieceGrowth.grow(session, () -> com.aresstack.audio.studio.ai.ContinuationComposer.with(models, maxParallel),
+                () -> com.aresstack.audio.studio.ai.RegionComposer.with(models),
                 com.aresstack.audio.studio.ai.ContinuationRequest.of(1,
                         com.aresstack.audio.studio.ai.ContinuationPreset.STANDALONE,
                         com.aresstack.audio.studio.ai.ContinuationEnding.CLOSED, words),

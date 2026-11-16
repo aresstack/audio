@@ -1,7 +1,11 @@
 package com.aresstack.audio.studio.application;
 
 import com.aresstack.audio.composition.Composition;
+import com.aresstack.audio.composition.Part;
+import com.aresstack.audio.composition.edit.Selection;
 import com.aresstack.audio.studio.ai.ContinuationComposer;
+import com.aresstack.audio.studio.ai.RegionComposer;
+import com.aresstack.audio.studio.ai.RegionRequest;
 import com.aresstack.audio.studio.ai.ContinuationEnding;
 import com.aresstack.audio.studio.ai.ContinuationRequest;
 import com.aresstack.audio.studio.ai.TransitionMode;
@@ -48,7 +52,24 @@ public final class PieceGrowth {
     public static ExtensionOffer growTo(ProjectSession session, Supplier<ContinuationComposer> composer,
                                         ContinuationRequest asked, int target, int step, Progress progress)
             throws Exception {
+        return growTo(session, composer, null, asked, target, step, progress);
+    }
+
+    /**
+     * As {@link #growTo(ProjectSession, Supplier, ContinuationRequest, int, int, Progress)}, and
+     * before each step the end of the piece is looked at: a part whose notes stop a whole bar or
+     * more before the end has those bars written anew by {@code repair} (an answer may have broken
+     * off; if rests are meant, they come again). Nothing goes on over a gap.
+     *
+     * @param repair writes passages anew, or {@code null} to leave the end as it is
+     */
+    public static ExtensionOffer growTo(ProjectSession session, Supplier<ContinuationComposer> composer,
+                                        Supplier<RegionComposer> repair, ContinuationRequest asked, int target,
+                                        int step, Progress progress) throws Exception {
         int size = Math.max(1, Math.min(ContinuationRequest.MAX_BARS, step));
+        if (repair != null) {
+            fillTail(session, repair, size, asked.instruction(), progress);
+        }
         int have = bars(session);
         boolean first = true;
         while (have < target) {
@@ -69,6 +90,9 @@ public final class PieceGrowth {
             }
             offer.confirm(); // nothing of the original is shortened when appending; no one to ask here
             offer.accept();
+            if (repair != null) {
+                fillTail(session, repair, size, asked.instruction(), progress);
+            }
             int now = bars(session);
             if (now <= have) {
                 throw new IOException("Die Verlängerung hat dem Stück keine Takte gegeben (bei Takt " + have + ").");
@@ -79,10 +103,57 @@ public final class PieceGrowth {
         return null;
     }
 
+    /**
+     * The bars at the end of the piece after each part's last note, within the last {@code window}
+     * bars, as {@code {first, last}} (counted from 1) by part id; parts that play to the end are
+     * not listed.
+     */
+    static java.util.Map<String, int[]> silentTails(Composition piece, int window) {
+        java.util.Map<String, int[]> tails = new java.util.LinkedHashMap<>();
+        int total = piece.timeMap().barsCovering(piece.endTick());
+        int from = Math.max(1, total - window + 1);
+        for (Part part : piece.parts()) {
+            long end = 0;
+            for (Composition.PlacedNote note : piece.notesOf(part.id())) {
+                end = Math.max(end, note.endTick());
+            }
+            int sounding = end == 0 ? 0 : piece.timeMap().barsCovering(end);
+            int first = Math.max(from, sounding + 1);
+            if (first <= total) {
+                tails.put(part.id(), new int[]{first, total});
+            }
+        }
+        return tails;
+    }
+
+    /** Writes the silent end of each part anew and takes it into the piece. */
+    static void fillTail(ProjectSession session, Supplier<RegionComposer> repair, int window, String words,
+                         Progress progress) throws Exception {
+        for (java.util.Map.Entry<String, int[]> tail : silentTails(session.composition(), window).entrySet()) {
+            int[] bars = tail.getValue();
+            Composition piece = session.composition();
+            progress.update("„" + piece.part(tail.getKey()).name() + "“ schweigt nach der letzten Note in Takt "
+                    + bars[0] + " bis " + bars[1] + ": diese Takte werden neu angefordert ...");
+            RegionRequest request = RegionRequest.replace(Selection.bars(piece, java.util.List.of(tail.getKey()),
+                    bars[0], bars[1]), "These bars of this part were left silent, likely by an answer that broke off."
+                    + " Write the part on as the music around it goes" + (words == null || words.isBlank() ? ""
+                    : " (" + words + ")") + "; rest only where the music really asks for it.");
+            RegionRework rework = RegionRework.start(session, repair.get(), request, progress);
+            rework.accept();
+        }
+    }
+
     /** Grows the piece to {@code target} bars and takes every step. */
     public static void grow(ProjectSession session, Supplier<ContinuationComposer> composer,
                             ContinuationRequest asked, int target, int step, Progress progress) throws Exception {
-        ExtensionOffer last = growTo(session, composer, asked, target, step, progress);
+        grow(session, composer, null, asked, target, step, progress);
+    }
+
+    /** As {@link #grow(ProjectSession, Supplier, ContinuationRequest, int, int, Progress)}, with silent ends written anew. */
+    public static void grow(ProjectSession session, Supplier<ContinuationComposer> composer,
+                            Supplier<RegionComposer> repair, ContinuationRequest asked, int target, int step,
+                            Progress progress) throws Exception {
+        ExtensionOffer last = growTo(session, composer, repair, asked, target, step, progress);
         if (last != null) {
             last.confirm();
             last.accept();
