@@ -6510,7 +6510,10 @@ public final class AudioStudioFrame extends JFrame {
                 stageFigures.swap(track.id());
             }
         });
-        undoFigures.addActionListener(event -> stageFigures.undo());
+        undoFigures.addActionListener(event -> {
+            openFigures(); // the piece that is open now, not the one the figures were opened for last
+            stageFigures.undo();
+        });
         undoFigures.setEnabled(false);
         visualizer.addStageKeys(drawFigures, otherFigures, undoFigures);
         player.figuresFrom(this::figureOf, figureLook.height());

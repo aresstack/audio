@@ -40,6 +40,8 @@ final class StageAtmosphere {
     private double loudUsual = -1;
     private double wildFor;
     private double lasersLeft;
+    /** Whether the moment itself calls for the lasers now; after it they stay for the time that is left. */
+    private boolean lasersOn;
     private double fireRests;
 
     // The fire: every particle with its place and speed in metres, its age and how long it lives.
@@ -74,7 +76,7 @@ final class StageAtmosphere {
 
     /** Whether the lasers run now. */
     boolean lasers() {
-        return shown == StageMood.Mood.LASER && lasersLeft > 0;
+        return shown == StageMood.Mood.LASER && (lasersOn || lasersLeft > 0);
     }
 
     /** Reads the mood for this picture and moves what moves. Call once per picture, before painting. */
@@ -107,13 +109,17 @@ final class StageAtmosphere {
             }
         }
         if (shown == StageMood.Mood.LASER) {
-            if (byHand || wildFor >= settings.moodSeconds() / 2) {
-                lasersLeft = Math.max(lasersLeft, settings.moodSeconds());
-            }
+            lasersOn = byHand || wild && wildFor >= settings.moodSeconds() / 2;
+            lasersLeft = lasersOn ? settings.moodSeconds() : Math.max(0, lasersLeft - step);
         } else {
+            lasersOn = false;
             lasersLeft = 0;
         }
-        lasersLeft = Math.max(0, lasersLeft - step);
+        if (shown != StageMood.Mood.FIRE) {
+            // One mood at a time: fire that still burns goes out when the mood is another.
+            java.util.Arrays.fill(burning, 0);
+            System.arraycopy(life, 0, age, 0, PARTICLES);
+        }
         burn(step);
     }
 
@@ -171,7 +177,7 @@ final class StageAtmosphere {
         if (!lasers()) {
             return;
         }
-        float strength = (float) (settings.atmosphereStrength() * Math.min(1, lasersLeft / 1.0));
+        float strength = (float) (settings.atmosphereStrength() * (lasersOn ? 1 : Math.min(1, lasersLeft / 1.0)));
         double t = sound.seconds;
         Color haze = LASERS[(turn / 8) % LASERS.length];
         for (int cloud = 0; cloud < 3; cloud++) {

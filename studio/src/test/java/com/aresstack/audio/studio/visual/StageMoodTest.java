@@ -125,6 +125,18 @@ public final class StageMoodTest {
     }
 
     @Test
+    public void fireGoesOutWhenTheMoodIsAnother() {
+        StageAtmosphere stage = new StageAtmosphere();
+        for (int frame = 0; frame < 40; frame++) {
+            stage.listen(styled("", frame, 110, 0.9f, 0.4f), SETTINGS.withAtmosphere("fire"));
+        }
+        stage.listen(styled("", 17, 110, 0.9f, 0.4f), SETTINGS.withAtmosphere("fire")); // on a beat
+        stage.listen(styled("", 41, 110, 0.9f, 0.4f), SETTINGS.withAtmosphere("laser"));
+        assertTrue(stage.lasers());
+        assertEquals(0f, stage.warmth(), 0f);
+    }
+
+    @Test
     public void theStageDrawsFireAndLasersInItsSpace() {
         for (String choice : new String[]{"fire", "laser"}) {
             StageLightEffect stage = new StageLightEffect();
