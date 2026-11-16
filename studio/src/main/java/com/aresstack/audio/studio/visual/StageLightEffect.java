@@ -124,6 +124,15 @@ final class StageLightEffect implements Effect {
     int lightsShown;
     /** How hard the last beat still pushes the curtains, 0 to 1: it falls with the beat. */
     private float kick;
+    /** How fast the waves of the cloth run at full loudness, against their pace in silence. */
+    private static final double FLOW = 2.2;
+    private static final double IDLE_FLOW = 0.55;
+    /** How far a band of the spectrum bulges the cloth at its place, in metres at the hem. */
+    private static final double BULGE = 0.9;
+    private float[] bands;
+    private double flow;
+    private double lastSeconds = Double.NaN;
+    private float flash;
 
     /** The atmosphere shown now, for tests. */
     StageMood.Mood atmosphere() {
@@ -142,6 +151,15 @@ final class StageLightEffect implements Effect {
         float warm = sound.sounding ? atmosphere.warmth() : 0;
 
         kick = sound.sounding ? sound.beat * (0.45f + 0.55f * Math.min(1f, sound.bass)) : 0f;
+        // As in the tunnel: the cloth is shaped by the spectrum, its waves run with the loudness,
+        // and a beat sends a push and a flash through it. In silence it moves on slowly.
+        bands = sound.sounding ? sound.bands : null;
+        double passed = Double.isNaN(lastSeconds) ? 0 : Math.max(0, Math.min(0.2, sound.seconds - lastSeconds));
+        lastSeconds = sound.seconds;
+        float loud = sound.sounding ? sound.loudness() : 0f;
+        flow += passed * (IDLE_FLOW + FLOW * loud * 2 + (sound.sounding ? sound.beat : 0f) * FLOW);
+        flash = sound.sounding ? sound.beat : 0f;
+        t = flow;
         paintFloor(g, camera, warm);
         // The curtain at the back wall.
         paintCloth(g, camera, t, -HALF - 0.6, HIGH, DEPTH, 2 * HALF + 1.2, 0, HIGH, 22, 0, 0.0, 0.62f + 0.3f * warm, 88, 12);
@@ -232,6 +250,14 @@ final class StageLightEffect implements Effect {
                 // runs down through it as a ripple while the beat fades.
                 wave -= free * kick * (0.42 + 0.16 * Math.sin(u * 5 + phase))
                         + kick * 0.14 * v * Math.sin(v * 7 - (1 - kick) * 9 + phase);
+                if (bands != null && bands.length > 0) {
+                    // Mirrored across the cloth, low in the middle and high at the edges, so both sides answer alike.
+                    double band = Math.abs(u * 2 - 1) * (bands.length - 1);
+                    int low = (int) band;
+                    int high = Math.min(bands.length - 1, low + 1);
+                    double level = bands[low] + (bands[high] - bands[low]) * (band - low);
+                    wave -= BULGE * level * (0.25 + 0.75 * free) * (drawn == 0 ? 1 : 0.6);
+                }
                 double sway = free * (0.12 * Math.sin(t * 0.9 + phase + v * 2) + 0.1 * kick * Math.sin(phase * 3));
                 grid[row][column] = new double[]{left + across * wide + sway, top - v * tall, depth + fold + wave};
             }
@@ -259,7 +285,7 @@ final class StageLightEffect implements Effect {
                 double light = Math.pow(facing, 2.2);
                 Color cloth = mix(mix(CURTAIN_DEEP, CURTAIN, Math.min(1, light * 1.5)), CURTAIN_LIGHT,
                         Math.max(0, light * 2.4 - 1.5));
-                cloth = scale(cloth, bright * (float) (0.55 + 0.45 * v));
+                cloth = scale(cloth, bright * (float) (0.55 + 0.45 * v) * (1f + 0.3f * flash));
                 double[] a = camera.at(p[0], p[1], p[2]);
                 double[] b = camera.at(q[0], q[1], q[2]);
                 double[] c = camera.at(r[0], r[1], r[2]);
