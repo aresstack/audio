@@ -16,7 +16,7 @@ public final class ChatSectionGenerator implements SectionGenerator {
     public static final String INSTRUCTION = "You continue an existing piece of original instrumental music, one part "
             + "and one section at a time. Return valid JSON only, no Markdown.";
     /** The room for the answer of one section: this many tokens per bar, at least {@link #LEAST_TOKENS}. */
-    public static final int TOKENS_PER_BAR = 512;
+    public static final int TOKENS_PER_BAR = 0;
     public static final int LEAST_TOKENS = 2048;
     private static volatile int leastTokens = LEAST_TOKENS;
 

@@ -45,9 +45,9 @@ public final class EditSketch {
         this.shown = shown;
         this.time = piece.timeMap();
         // The lines of the piece, written here: the AI knows no project files (architecture rule).
-        if (time.tempos().size() != 1 || time.meters().size() != 1 || time.keys().size() != 1) {
-            throw new IllegalArgumentException("the lines of an arrangement know one tempo, meter and key only");
-        }
+        // The lines of an arrangement know one tempo, meter and key: a piece with changes of them
+        // (a continuation may bring a tempo change) is sketched with those of its start. A picture
+        // of the piece on its way is still far better than none; the piece itself keeps its changes.
         head.add("tempo\t" + Math.round(time.tempoAt(0)));
         TimeMap.Meter meter = time.meterAt(0);
         if (meter.numerator() != 4 || meter.denominator() != 4) {
