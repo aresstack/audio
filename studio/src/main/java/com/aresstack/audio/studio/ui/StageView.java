@@ -21,7 +21,6 @@ import java.awt.geom.Ellipse2D;
 import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
-import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -29,8 +28,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The stage from above: the back wall at the top, the listener in front at the
- * bottom, and every track as a disc in the colour of its channel. A disc is moved
+ * The stage seen from the hall, a little from above: the floor runs back to a curtain at the
+ * back wall and gets narrower there, curtains hang at both sides in front and move as in a
+ * breath of air, the listener sits in front at the bottom, and every track is a disc on the
+ * floor in the colour of its channel, smaller the further back it stands. A disc is moved
  * with the mouse; the wheel over a disc makes the track louder or quieter. The
  * larger a disc, the louder its track; the halo around it shows its share of the
  * room. A proposal of the AI is shown as dashed outlines until it is taken or dropped.
@@ -196,33 +197,74 @@ final class StageView extends JComponent {
         if (placement == null) {
             return;
         }
-        Rectangle2D floor = floor();
-        double x = (event.getX() - grabX - floor.getCenterX()) / (floor.getWidth() / 2);
-        double depth = (floor.getMaxY() - (event.getY() - grabDepth)) / floor.getHeight();
+        double[] place = place(event.getX() - grabX, event.getY() - grabDepth);
+        double x = place[0];
+        double depth = place[1];
         SoundSourcePlacement moved = placement.at(Math.round(x * 100) / 100.0, Math.round(depth * 100) / 100.0);
         scene = scene.with(moved);
         repaint();
         listener.changed(moved, settled);
     }
 
-    /** The floor of the stage on the screen: as large as fits, with room for the listener below it. */
-    private Rectangle2D floor() {
-        double availableWidth = getWidth() - 48;
-        double availableHeight = getHeight() - 40;
-        double scale = Math.max(8, Math.min(availableWidth / WIDTH_M, availableHeight / (DEPTH_M + LISTENER_M + 0.6)));
-        double width = WIDTH_M * scale;
-        double height = DEPTH_M * scale;
-        double total = (DEPTH_M + LISTENER_M + 0.6) * scale;
-        return new Rectangle2D.Double((getWidth() - width) / 2, (getHeight() - total) / 2 + 6, width, height);
+    /** How much narrower the back wall is on the screen than the front edge. */
+    static final double BACK_NARROWING = 0.7;
+    /** How flat a circle on the floor looks from the hall. */
+    private static final float FLAT = 0.5f;
+
+    /** The front edge of the floor on the screen: its half width, its middle, where it lies and where the back wall lies. */
+    private double[] floor() {
+        // Across: the floor and a curtain at each side. Down: the back curtain, the floor, the listener.
+        double half = Math.max(60, Math.min((getWidth() - 40) / 2.5, (getHeight() - 30) / 2.2));
+        double total = half * 2.2;
+        double top = (getHeight() - total) / 2 + 4;
+        double back = top + half * 0.62;
+        double front = back + half * 0.9;
+        return new double[]{half, getWidth() / 2.0, front, back};
     }
 
+    /** How large things are at a depth, 1 at the front edge: the further back, the smaller. */
+    private static double near(double depth) {
+        return 1 / (1 + depth * (1 / BACK_NARROWING - 1));
+    }
+
+    /** Where a place of the stage is on the screen; in front of the edge (the listener) the depth is below 0. */
     private Point2D point(double x, double depth) {
-        Rectangle2D floor = floor();
-        return new Point2D.Double(floor.getCenterX() + x * floor.getWidth() / 2,
-                floor.getMaxY() - depth * floor.getHeight());
+        double[] floor = floor();
+        double near = near(depth);
+        double down = (1 - near) / (1 - BACK_NARROWING);
+        return new Point2D.Double(floor[1] + x * floor[0] * near, floor[2] - (floor[2] - floor[3]) * down);
     }
 
+    /** The place of the stage under a point of the screen: x and depth. */
+    private double[] place(double px, double py) {
+        double[] floor = floor();
+        double down = (floor[2] - py) / (floor[2] - floor[3]);
+        double near = Math.max(0.2, 1 - down * (1 - BACK_NARROWING));
+        double depth = (1 / near - 1) / (1 / BACK_NARROWING - 1);
+        return new double[]{(px - floor[1]) / (floor[0] * near), depth};
+    }
+
+    /** The outline of the floor: wide in front, narrow at the back wall. */
+    private Path2D floorShape() {
+        Path2D shape = new Path2D.Double();
+        Point2D a = point(-1, 0);
+        Point2D b = point(1, 0);
+        Point2D c = point(1, 1);
+        Point2D d = point(-1, 1);
+        shape.moveTo(a.getX(), a.getY());
+        shape.lineTo(b.getX(), b.getY());
+        shape.lineTo(c.getX(), c.getY());
+        shape.lineTo(d.getX(), d.getY());
+        shape.closePath();
+        return shape;
+    }
+
+    /** The radius of a disc on the screen: by its level, and smaller the further back it stands. */
     private float radius(SoundSourcePlacement placement) {
+        return (float) (loudness(placement) * near(placement.depth()) / near(0.4));
+    }
+
+    private static float loudness(SoundSourcePlacement placement) {
         double share = (placement.levelDb() - SoundSourcePlacement.MIN_LEVEL)
                 / (SoundSourcePlacement.MAX_LEVEL - SoundSourcePlacement.MIN_LEVEL);
         return (float) (11 + 15 * Math.pow(Math.max(0, share), 1.6));
@@ -231,9 +273,12 @@ final class StageView extends JComponent {
     /** The track whose disc is under a point; the one drawn last lies on top. */
     private String at(java.awt.Point point) {
         String hit = null;
-        for (SoundSourcePlacement placement : scene.placements()) {
+        for (SoundSourcePlacement placement : drawn()) {
             Point2D place = point(placement.x(), placement.depth());
-            if (place.distance(point) <= radius(placement) + 4) {
+            double reach = radius(placement) + 4;
+            double across = (point.x - place.getX()) / reach;
+            double down = (point.y - place.getY()) / (reach * FLAT + 3);
+            if (across * across + down * down <= 1) {
                 hit = placement.trackId();
             }
         }
@@ -250,53 +295,68 @@ final class StageView extends JComponent {
         g.draw(well);
         g.clip(well);
 
-        Rectangle2D floor = floor();
-        double metre = floor.getWidth() / WIDTH_M;
-        Point2D ear = new Point2D.Double(floor.getCenterX(), floor.getMaxY() + LISTENER_M * metre);
+        double[] floor = floor();
+        Path2D boards = floorShape();
+        Point2D ear = point(0, -LISTENER_M / DEPTH_M);
+        Point2D backLeft = point(-1, 1);
+        Point2D backRight = point(1, 1);
+        Point2D frontLeft = point(-1, 0);
+        Point2D frontRight = point(1, 0);
+        double breath = breath();
 
-        // The floor, lit from the front.
-        g.setPaint(new java.awt.GradientPaint(0, (float) floor.getMinY(), new Color(0x1B1D25),
-                0, (float) floor.getMaxY(), new Color(0x262935)));
-        g.fill(floor);
+        // The curtain at the back wall, then the floor in front of it, lit from the front.
+        double backTop = floor[3] - floor[0] * 0.58;
+        paintCurtain(g, backLeft.getX(), backTop, backRight.getX() - backLeft.getX(), floor[3] - backTop,
+                0, 0, 26, breath, 0.7f);
+        g.setPaint(new java.awt.GradientPaint(0, (float) floor[3], new Color(0x1B1D25),
+                0, (float) floor[2], new Color(0x2B2E3B)));
+        g.fill(boards);
         // Rings of equal distance from the listener, and the lines beyond which a track is all on one side.
         Graphics2D rings = (Graphics2D) g.create();
-        rings.clip(floor);
+        rings.clip(boards);
         rings.setStroke(new BasicStroke(1f));
         rings.setFont(AudioStudioTheme.lettering(9.5f));
         for (int metres = 4; metres <= 14; metres += 2) {
-            double radius = metres * metre;
+            Path2D ring = new Path2D.Double();
+            for (int step = -90; step <= 90; step += 3) {
+                Point2D at = metres(Math.sin(Math.toRadians(step)) * metres, Math.cos(Math.toRadians(step)) * metres);
+                if (step == -90) {
+                    ring.moveTo(at.getX(), at.getY());
+                } else {
+                    ring.lineTo(at.getX(), at.getY());
+                }
+            }
             rings.setColor(AudioStudioTheme.withAlpha(AudioStudioTheme.TEXT_FAINT, 60));
-            rings.draw(new Ellipse2D.Double(ear.getX() - radius, ear.getY() - radius, radius * 2, radius * 2));
+            rings.draw(ring);
+            Point2D word = metres(0, metres);
             rings.setColor(AudioStudioTheme.withAlpha(AudioStudioTheme.TEXT_FAINT, 170));
-            rings.drawString(metres + " m", (float) (ear.getX() + 5), (float) (ear.getY() - radius + 12));
+            rings.drawString(metres + " m", (float) (word.getX() + 5), (float) (word.getY() + 12));
         }
         rings.setColor(AudioStudioTheme.withAlpha(AudioStudioTheme.TEXT_FAINT, 50));
         rings.setStroke(new BasicStroke(1f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 1f, new float[]{4f, 6f}, 0f));
-        rings.draw(new Line2D.Double(ear.getX(), ear.getY(), ear.getX(), floor.getMinY()));
-        double reach = 30 * metre;
+        rings.draw(new Line2D.Double(ear, metres(0, 30)));
         for (int side = -1; side <= 1; side += 2) {
-            rings.draw(new Line2D.Double(ear.getX(), ear.getY(),
-                    ear.getX() + side * Math.sin(Math.toRadians(60)) * reach,
-                    ear.getY() - Math.cos(Math.toRadians(60)) * reach));
+            rings.draw(new Line2D.Double(ear, metres(side * Math.sin(Math.toRadians(60)) * 30,
+                    Math.cos(Math.toRadians(60)) * 30)));
         }
         rings.dispose();
-        // The walls: the back wall thick, the sides thin, the front open to the hall.
-        g.setColor(AudioStudioTheme.withAlpha(AudioStudioTheme.TEXT_DIM, 200));
+        // The edges: the foot of the back curtain, the sides, the front open to the hall.
+        g.setColor(new Color(0, 0, 0, 110));
         g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-        g.draw(new Line2D.Double(floor.getMinX(), floor.getMinY(), floor.getMaxX(), floor.getMinY()));
+        g.draw(new Line2D.Double(backLeft, backRight));
         g.setStroke(new BasicStroke(1.2f));
         g.setColor(AudioStudioTheme.STROKE);
-        g.draw(new Line2D.Double(floor.getMinX(), floor.getMinY(), floor.getMinX(), floor.getMaxY()));
-        g.draw(new Line2D.Double(floor.getMaxX(), floor.getMinY(), floor.getMaxX(), floor.getMaxY()));
+        g.draw(new Line2D.Double(backLeft, frontLeft));
+        g.draw(new Line2D.Double(backRight, frontRight));
         g.setStroke(new BasicStroke(1f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 1f, new float[]{2f, 5f}, 0f));
-        g.draw(new Line2D.Double(floor.getMinX(), floor.getMaxY(), floor.getMaxX(), floor.getMaxY()));
+        g.draw(new Line2D.Double(frontLeft, frontRight));
         g.setFont(AudioStudioTheme.lettering(10f));
         g.setColor(AudioStudioTheme.TEXT_FAINT);
         FontMetrics metrics = g.getFontMetrics();
         String wall = "RÜCKWAND · " + scene.room().name().toUpperCase(java.util.Locale.ROOT);
-        g.drawString(wall, (float) (floor.getCenterX() - metrics.stringWidth(wall) / 2.0), (float) floor.getMinY() - 6);
-        g.drawString("LINKS", (float) floor.getMinX() + 6, (float) floor.getMaxY() + 14);
-        g.drawString("RECHTS", (float) floor.getMaxX() - 6 - metrics.stringWidth("RECHTS"), (float) floor.getMaxY() + 14);
+        g.drawString(wall, (float) (floor[1] - metrics.stringWidth(wall) / 2.0), (float) floor[3] + 14);
+        g.drawString("LINKS", (float) frontLeft.getX() + 6, (float) floor[2] + 14);
+        g.drawString("RECHTS", (float) frontRight.getX() - 6 - metrics.stringWidth("RECHTS"), (float) floor[2] + 14);
 
         paintListener(g, ear);
 
@@ -321,22 +381,23 @@ final class StageView extends JComponent {
             }
         }
 
-        // The tracks; the chosen one last, so that it lies on top.
-        List<SoundSourcePlacement> drawn = new ArrayList<SoundSourcePlacement>(scene.placements());
+        // The tracks, those at the back first, so that the near ones stand in front of them.
         SoundSourcePlacement chosen = selected == null ? null : scene.placement(selected);
-        if (chosen != null) {
-            drawn.remove(chosen);
-            drawn.add(chosen);
-        }
-        for (SoundSourcePlacement placement : drawn) {
+        for (SoundSourcePlacement placement : drawn()) {
             paintSource(g, placement, placement == chosen);
         }
+        // The curtains at both sides in front, drawn back and moving a little in the air.
+        double sideWidth = floor[0] * 0.24;
+        double sideTop = backTop - floor[0] * 0.04;
+        double sideHeight = floor[2] + floor[0] * 0.1 - sideTop;
+        paintCurtain(g, frontLeft.getX() - sideWidth - 2, sideTop, sideWidth, sideHeight, -1, 0.42, 7, breath, 1f);
+        paintCurtain(g, frontRight.getX() + 2, sideTop, sideWidth, sideHeight, 1, 0.42, 7, breath + 1.7, 1f);
         if (scene.placements().isEmpty()) {
             g.setFont(AudioStudioTheme.lettering(11f));
             g.setColor(AudioStudioTheme.TEXT_FAINT);
             String none = "KEINE SPUREN";
-            g.drawString(none, (float) (floor.getCenterX() - g.getFontMetrics().stringWidth(none) / 2.0),
-                    (float) floor.getCenterY());
+            g.drawString(none, (float) (floor[1] - g.getFontMetrics().stringWidth(none) / 2.0),
+                    (float) ((floor[2] + floor[3]) / 2));
         }
         g.dispose();
     }
@@ -356,7 +417,12 @@ final class StageView extends JComponent {
             g.setPaint(new RadialGradientPaint(x, y, halo, new float[]{0f, 1f},
                     new Color[]{AudioStudioTheme.withAlpha(color, Math.round(46 + 110 * sounding)),
                             AudioStudioTheme.withAlpha(color, 0)}));
-            g.fill(new Ellipse2D.Float(x - halo, y - halo, halo * 2, halo * 2));
+            Graphics2D flat = (Graphics2D) g.create();
+            flat.translate(0, y);
+            flat.scale(1, FLAT + 0.15);
+            flat.translate(0, -y);
+            flat.fill(new Ellipse2D.Float(x - halo, y - halo, halo * 2, halo * 2));
+            flat.dispose();
         }
         // The width: an arc to both sides of the disc.
         if (!placement.muted() && placement.width() > 0.05) {
@@ -364,10 +430,16 @@ final class StageView extends JComponent {
             double spread = 20 + 60 * placement.width();
             g.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
             g.setColor(AudioStudioTheme.withAlpha(color, 150));
-            g.draw(new Arc2D.Float(x - reach, y - reach, reach * 2, reach * 2, (float) (-spread / 2), (float) spread, Arc2D.OPEN));
-            g.draw(new Arc2D.Float(x - reach, y - reach, reach * 2, reach * 2, (float) (180 - spread / 2), (float) spread, Arc2D.OPEN));
+            g.draw(new Arc2D.Float(x - reach, y - reach * FLAT, reach * 2, reach * 2 * FLAT, (float) (-spread / 2), (float) spread, Arc2D.OPEN));
+            g.draw(new Arc2D.Float(x - reach, y - reach * FLAT, reach * 2, reach * 2 * FLAT, (float) (180 - spread / 2), (float) spread, Arc2D.OPEN));
         }
-        Ellipse2D disc = new Ellipse2D.Float(x - radius, y - radius, radius * 2, radius * 2);
+        float flat = radius * FLAT;
+        // The disc lies on the floor: seen from the hall it is an ellipse with a rim towards the hall.
+        if (!placement.muted()) {
+            g.setColor(color.darker().darker());
+            g.fill(new Ellipse2D.Float(x - radius, y - flat + 3, radius * 2, flat * 2));
+        }
+        Ellipse2D disc = new Ellipse2D.Float(x - radius, y - flat, radius * 2, flat * 2);
         if (placement.muted()) {
             g.setColor(new Color(0x23252E));
             g.fill(disc);
@@ -375,18 +447,18 @@ final class StageView extends JComponent {
             g.setColor(color);
             g.draw(disc);
         } else {
-            g.setPaint(new java.awt.GradientPaint(x, y - radius, AudioStudioTheme.withAlpha(color, 255),
-                    x, y + radius, color.darker()));
+            g.setPaint(new java.awt.GradientPaint(x, y - flat, AudioStudioTheme.withAlpha(color, 255),
+                    x, y + flat, color.darker()));
             g.fill(disc);
         }
         boolean over = placement.trackId().equals(hovered);
         if (chosen || over) {
             g.setStroke(new BasicStroke(chosen ? 2.2f : 1.4f));
             g.setColor(chosen ? Color.WHITE : AudioStudioTheme.withAlpha(Color.WHITE, 150));
-            g.draw(new Ellipse2D.Float(x - radius - 2.5f, y - radius - 2.5f, radius * 2 + 5, radius * 2 + 5));
+            g.draw(new Ellipse2D.Float(x - radius - 2.5f, y - flat - 2.5f, radius * 2 + 5, flat * 2 + 5));
         }
         // The number of the channel in the disc, the name under it.
-        g.setFont(AudioStudioTheme.lettering(Math.max(9.5f, Math.min(13f, radius * 0.8f))));
+        g.setFont(AudioStudioTheme.lettering(Math.max(8.5f, Math.min(12f, radius * 0.6f))));
         FontMetrics metrics = g.getFontMetrics();
         String number = String.valueOf(index + 1);
         g.setColor(placement.muted() ? AudioStudioTheme.TEXT_DIM : new Color(0x15161B));
@@ -395,14 +467,109 @@ final class StageView extends JComponent {
         metrics = g.getFontMetrics();
         String name = placement.trackId();
         float nameX = x - metrics.stringWidth(name) / 2f;
-        float nameY = y + radius + 15;
+        float nameY = y + flat + 17;
         g.setColor(new Color(0, 0, 0, 120));
         g.fill(new RoundRectangle2D.Float(nameX - 5, nameY - 12, metrics.stringWidth(name) + 10, 16, 8, 8));
         g.setColor(placement.muted() ? AudioStudioTheme.TEXT_FAINT : chosen ? Color.WHITE : AudioStudioTheme.TEXT);
         g.drawString(name, nameX, nameY);
         if (placement.locked()) {
-            paintLock(g, x + radius * 0.75f, y - radius * 0.75f);
+            paintLock(g, x + radius * 0.8f, y - flat * 0.9f);
         }
+    }
+
+    /** The tracks in the order they are drawn: those at the back first, the near ones in front of them. */
+    private List<SoundSourcePlacement> drawn() {
+        List<SoundSourcePlacement> drawn = new ArrayList<SoundSourcePlacement>(scene.placements());
+        drawn.sort((a, b) -> Double.compare(b.depth(), a.depth()));
+        return drawn;
+    }
+
+    /** A place given in metres from the listener: to the right, and towards the back wall. */
+    private Point2D metres(double right, double ahead) {
+        return point(right / (WIDTH_M / 2), (ahead - LISTENER_M) / DEPTH_M);
+    }
+
+    /** The breath of air that moves the curtains, in radians; it stands still while the stage is not shown. */
+    private double breath() {
+        return (System.nanoTime() - born) / 1e9 * 0.9;
+    }
+
+    private final long born = System.nanoTime();
+    /** Moves the curtains; runs only while the stage is on the screen. */
+    private final javax.swing.Timer air = new javax.swing.Timer(60, event -> {
+        if (isShowing()) {
+            repaint();
+        }
+    });
+
+    @Override
+    public void addNotify() {
+        super.addNotify();
+        air.start();
+    }
+
+    @Override
+    public void removeNotify() {
+        air.stop();
+        super.removeNotify();
+    }
+
+    /** The colours of the curtains: dark red running into the pink of the desk. */
+    private static final Color CURTAIN_DEEP = new Color(0x3A0A20);
+    private static final Color CURTAIN = new Color(0x8E1B4A);
+    private static final Color CURTAIN_LIGHT = new Color(0xC93C7A);
+
+    /**
+     * A curtain in folds. Each fold is lit on one flank and dark on the other; the folds shift a
+     * little with the breath of air, and the hem swings with them.
+     *
+     * @param drawn  to which side it is drawn back at the bottom (-1 left, 1 right, 0 hangs straight)
+     * @param waist  how much narrower it is at the bottom when drawn back, as a share of its width
+     * @param folds  how many folds it has
+     * @param bright how bright it is, 1 for a curtain in the light, less for one far back
+     */
+    private static void paintCurtain(Graphics2D g, double x, double y, double width, double height, int drawn,
+                                     double waist, int folds, double breath, float bright) {
+        Graphics2D c = (Graphics2D) g.create();
+        int strips = Math.max(folds * 6, (int) (width / 3));
+        double step = width / strips;
+        for (int strip = 0; strip < strips; strip++) {
+            double across = (strip + 0.5) / strips;
+            // The fold under this strip, pushed a little to and fro by the air.
+            double fold = across * folds * 2 * Math.PI + 0.5 * Math.sin(breath + across * 5.0);
+            double light = 0.5 + 0.5 * Math.sin(fold);
+            Color lit = mix(mix(CURTAIN_DEEP, CURTAIN, Math.min(1, light * 1.6)), CURTAIN_LIGHT,
+                    Math.max(0, light * 1.9 - 1.15));
+            Color top = scale(lit, bright * 0.55f);
+            Color bottom = scale(lit, bright);
+            // Drawn back, the cloth gathers towards its side at the bottom and swings there.
+            double sway = Math.sin(breath * 0.8 + across * 3) * width * 0.03;
+            double gathered = drawn == 0 ? across : drawn < 0 ? across * (1 - waist) : waist + across * (1 - waist);
+            double left = x + (gathered - 0.5 / strips * (drawn == 0 ? 1 : 1 - waist)) * width + (drawn == 0 ? 0 : sway);
+            double bottomWidth = step * (drawn == 0 ? 1 : 1 - waist) + 0.6;
+            double hem = y + height + Math.sin(fold + breath * 0.6) * (drawn == 0 ? 2.5 : 5);
+            Path2D cloth = new Path2D.Double();
+            cloth.moveTo(x + strip * step, y);
+            cloth.lineTo(x + strip * step + step + 0.6, y);
+            cloth.lineTo(left + bottomWidth, hem);
+            cloth.lineTo(left, hem);
+            cloth.closePath();
+            c.setPaint(new java.awt.GradientPaint(0, (float) y, top, 0, (float) (y + height), bottom));
+            c.fill(cloth);
+        }
+        c.dispose();
+    }
+
+    private static Color mix(Color a, Color b, double share) {
+        double s = Math.max(0, Math.min(1, share));
+        return new Color((int) Math.round(a.getRed() + (b.getRed() - a.getRed()) * s),
+                (int) Math.round(a.getGreen() + (b.getGreen() - a.getGreen()) * s),
+                (int) Math.round(a.getBlue() + (b.getBlue() - a.getBlue()) * s));
+    }
+
+    private static Color scale(Color color, float by) {
+        return new Color(Math.min(255, Math.round(color.getRed() * by)), Math.min(255, Math.round(color.getGreen() * by)),
+                Math.min(255, Math.round(color.getBlue() * by)));
     }
 
     /** A small padlock: this track keeps its place when the AI proposes a stage. */
