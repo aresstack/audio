@@ -2053,10 +2053,11 @@ public final class AudioStudioFrame extends JFrame {
         addRow(ai, row++, "Takte je Abschnitt",
                 line(sectionBars, note("Takte je Anfrage und Spur; Stücke bis zur doppelten Länge entstehen in einem Zug.")));
         growBars.setPreferredSize(new Dimension(110, 30));
-        growBars.setToolTipText("So lang ist ein neues Stück, so viel fügt „Verlängern“ an, und in Schritten dieser Größe wächst ein langes Stück, "
-                + PieceAutopilot.MIN_GROW_BARS + " bis " + PieceAutopilot.MAX_GROW_BARS);
-        addRow(ai, row++, "Takte je Stück und Schritt",
-                line(growBars, note("Vorgabe für neue Stücke, für „Verlängern“ und für jeden Schritt, um den lange Stücke wachsen.")));
+        growBars.setToolTipText("Keine Obergrenze für die Länge eines Stücks: ein langes Stück plant und komponiert die KI in "
+                + "Schritten dieser Größe und verlängert es so oft, bis die geplante Länge erreicht ist. So viel schlägt auch "
+                + "„Verlängern“ vor. " + PieceAutopilot.MIN_GROW_BARS + " bis " + PieceAutopilot.MAX_GROW_BARS);
+        addRow(ai, row++, "Takte je Planungsschritt",
+                line(growBars, note("Keine Obergrenze: lange Stücke wachsen in Schritten dieser Größe bis zur geplanten Länge.")));
         growBars.addChangeListener(event -> specFields.suggestBars((Integer) growBars.getValue()));
         templateLines.setPreferredSize(new Dimension(110, 30));
         templateLines.setToolTipText("So viele Zeilen einer Notenvorlage in Textform (ABC, LilyPond …) überträgt die KI je Anfrage, "
