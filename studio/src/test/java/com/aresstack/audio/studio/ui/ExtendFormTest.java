@@ -31,6 +31,23 @@ public final class ExtendFormTest {
     }
 
     @Test
+    public void toAWholeLengthItGivesTheBarsOfThatLengthAndOneStepWithoutIt() {
+        ExtendForm form = new ExtendForm(piece, 12, 0);
+        assertEquals("one step of the bars given", 0, form.totalBars());
+        form.chooseTotal(30);
+        int total = form.totalBars();
+        assertEquals(com.aresstack.audio.studio.application.PieceGrowth.barsLasting(piece, 30 * 60), total);
+        assertTrue(total > piece.timeMap().barsCovering(piece.endTick()));
+        form.chooseTotal(0.5);
+        try {
+            form.totalBars();
+            fail("a piece is not made shorter by extending it");
+        } catch (IllegalArgumentException alreadyLonger) {
+            assertTrue(alreadyLonger.getMessage().contains("schon so lang"));
+        }
+    }
+
+    @Test
     public void itSaysWhatWasChosen() {
         ExtendForm form = new ExtendForm(piece, 12, 0);
         assertFalse("bars of the original are only named when they may change", form.tailBarsEnabled());
