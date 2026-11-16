@@ -62,14 +62,14 @@ public final class OrchestrationComposer {
 
     /** As {@link #with(ModelLineup)}, with as many parts at a time as the user allows requests at once. */
     public static OrchestrationComposer with(ModelLineup models, int partsAtOnce) {
-        return new OrchestrationComposer(new ChatOrchestrationPlanner(models.model(ModelRoles.ARRANGING), 4096),
-                new ChatOrchestrationGenerator(models.model(ModelRoles.REWORK), 16384), Math.max(1, partsAtOnce));
+        return new OrchestrationComposer(new ChatOrchestrationPlanner(models.model(ModelRoles.ARRANGING), AnswerRoom.plan()),
+                new ChatOrchestrationGenerator(models.model(ModelRoles.REWORK), AnswerRoom.notes()), Math.max(1, partsAtOnce));
     }
 
     /** A composer that asks a model for plan and notes, four parts at a time. */
     public static OrchestrationComposer with(ChatModel model) {
-        return new OrchestrationComposer(new ChatOrchestrationPlanner(model, 4096),
-                new ChatOrchestrationGenerator(model, 16384), 4);
+        return new OrchestrationComposer(new ChatOrchestrationPlanner(model, AnswerRoom.plan()),
+                new ChatOrchestrationGenerator(model, AnswerRoom.notes()), 4);
     }
 
     /**

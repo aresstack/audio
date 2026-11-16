@@ -132,7 +132,7 @@ public final class InstrumentProposalService {
                 + STAGE_FORMAT
                 + " Do not include libraryId, channel numbers, notes or commentary. Return only JSON.";
         // A piece made again keeps its instruments: the answer kept with it is used, the AI is not asked.
-        progress.update(client.hasAnswer("Return valid JSON only, no Markdown.", prompt, Math.min(maxTokens, 4096),
+        progress.update(client.hasAnswer("Return valid JSON only, no Markdown.", prompt, Math.min(maxTokens, com.aresstack.audio.studio.ai.AnswerRoom.plan()),
                 directory.resolve("instrument-proposal.json"))
                 ? "Instrumentenbesetzung aus dem Speicher dieses Stücks ..."
                 : "KI entwirft eine Instrumentenbesetzung ...");
@@ -144,7 +144,7 @@ public final class InstrumentProposalService {
             watched.preparing(step, 0);
         }
         JsonObject response = client.generate("Return valid JSON only, no Markdown.",
-                prompt, Math.min(maxTokens, 4096),
+                prompt, Math.min(maxTokens, com.aresstack.audio.studio.ai.AnswerRoom.plan()),
                 directory.resolve("instrument-proposal.json"),
                 watched == null ? null : new java.util.function.Consumer<String>() {
                     private int told;

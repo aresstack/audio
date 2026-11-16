@@ -106,7 +106,7 @@ public final class MixDirector {
         progress.update("KI hört sich die Spuren an und schlägt eine Abmischung vor ...");
         Files.deleteIfExists(directory.resolve(FILE_NAME)); // asked anew each time; the answer is kept to be read
         JsonObject response = client.generate("Return valid JSON only, no Markdown.", prompt,
-                Math.min(maxTokens, 4096), directory.resolve(FILE_NAME),
+                Math.min(maxTokens, com.aresstack.audio.studio.ai.AnswerRoom.plan()), directory.resolve(FILE_NAME),
                 watcher == null || current == null ? null : new java.util.function.Consumer<String>() {
                     private long told;
 

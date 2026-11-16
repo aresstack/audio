@@ -286,4 +286,34 @@ public final class KipitzStreamingTest {
             server.stop(0);
         }
     }
+
+    /** With the context window known, the limit of the answer is what the request leaves of it. */
+    @Test
+    public void withAContextWindowTheAnswerGetsWhatTheRequestLeaves() throws Exception {
+        final List<String> asked = Collections.synchronizedList(new ArrayList<String>());
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            asked.add(read(exchange.getRequestBody()));
+            send(exchange, 200, "text/event-stream", FIRST, SECOND, END);
+        });
+        server.start();
+        KipitzChatClient.contextWindow(5000, 3.0);
+        try {
+            // "Return JSON" + "Compose": 18 characters, 6 tokens at three characters each
+            client(server).generate("Return JSON", "Compose", 16384, folder.getRoot().toPath().resolve("melody.json"));
+            Assert.assertTrue(asked.get(0), asked.get(0).contains("\"max_tokens\":4994"));
+            KipitzChatClient.contextWindow(500, 3.0);
+            try {
+                client(server).generate("Return JSON", "Compose more", 16384,
+                        folder.getRoot().toPath().resolve("bass.json"));
+                Assert.fail("a request that leaves no room is not sent");
+            } catch (IOException tooLarge) {
+                Assert.assertTrue(tooLarge.getMessage(), tooLarge.getMessage().contains("Kontextfenster von 500 Token"));
+            }
+            Assert.assertEquals(1, asked.size());
+        } finally {
+            KipitzChatClient.contextWindow(0, 3.0);
+            server.stop(0);
+        }
+    }
 }
