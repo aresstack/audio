@@ -20,10 +20,12 @@ import javax.sound.sampled.UnsupportedAudioFileException;
 
 /**
  * Puts the finished pieces of an album together: one WAV file for each title, numbered in the
- * order of the album, and if wanted one WAV file of the whole album with a pause between the
- * titles and a cue sheet that says where each begins. Every piece is brought to the same target
- * loudness, which changes only how loud the piece is as a whole: what is quiet and loud within
- * a piece stays. Exporting writes into the chosen folder only and changes no piece.
+ * order of the album, a cue sheet that names these files in their order, so that a player plays
+ * the album from it, and the cover as {@code cover.png}, where players such as VLC look for it.
+ * If wanted, the whole album is written as one WAV file as well, with a pause between the titles.
+ * Every piece is brought to the same target loudness, which changes only how loud the piece is as
+ * a whole: what is quiet and loud within a piece stays. Exporting writes into the chosen folder
+ * only and changes no piece.
  */
 public final class AlbumExporter {
     /** Mixes one piece down to a file. The album does not know how. */
@@ -37,6 +39,15 @@ public final class AlbumExporter {
         void mix(Path pieceFolder, Path target, int bits, double lufs) throws Exception;
     }
 
+    /** Where the cover of an album comes from. The album does not know how it is made. */
+    public interface Cover {
+        /**
+         * The cover as the bytes of a PNG file; {@code null} if the album has none. It may fail:
+         * the export then lays a placeholder beside the titles and goes on.
+         */
+        byte[] png(Album album) throws Exception;
+    }
+
     /**
      * @param lufs         the loudness every title is brought to
      * @param bits         16 or 24
@@ -44,8 +55,8 @@ public final class AlbumExporter {
      * @param pauseSeconds the pause between two titles in that file
      */
     public record Options(double lufs, int bits, boolean continuous, double pauseSeconds) {
-        /** −16 LUFS, 24 bits, with the whole album in one file and two seconds between the titles. */
-        public static final Options STANDARD = new Options(-16, 24, true, 2);
+        /** −16 LUFS, 24 bits, the titles as single files only; two seconds between them if they are joined. */
+        public static final Options STANDARD = new Options(-16, 24, false, 2);
 
         public Options {
             if (!(lufs <= -5 && lufs >= -40)) {
@@ -67,21 +78,31 @@ public final class AlbumExporter {
     /**
      * What was written.
      *
-     * @param titles   the titles in the order of the album
-     * @param whole    the file of the whole album, or {@code null}
-     * @param skipped  why a title is not in the export, one line each
+     * @param titles    the titles in the order of the album
+     * @param whole     the file of the whole album, or {@code null}
+     * @param cueSheet  the cue sheet over the files of the titles
+     * @param cover     the cover beside the titles, {@code cover.png}
+     * @param coverNote why the cover is a placeholder, or {@code null} if it is the album's own
+     * @param skipped   why a title is not in the export, one line each
      */
-    public record Result(Path folder, List<Exported> titles, Path whole, Path cueSheet, Path list,
-                         List<String> skipped) {
+    public record Result(Path folder, List<Exported> titles, Path whole, Path cueSheet, Path list, Path cover,
+                         String coverNote, List<String> skipped) {
     }
 
     private final Path library;
     private final Mixdown mixdown;
+    private final Cover cover;
 
     /** @param library the root of the library of pieces */
     public AlbumExporter(Path library, Mixdown mixdown) {
+        this(library, mixdown, null);
+    }
+
+    /** @param cover where the cover of the album comes from; {@code null}: every album gets the placeholder */
+    public AlbumExporter(Path library, Mixdown mixdown, Cover cover) {
         this.library = library;
         this.mixdown = mixdown;
+        this.cover = cover;
     }
 
     /**
@@ -124,18 +145,41 @@ public final class AlbumExporter {
                     + (skipped.isEmpty() ? "" : " " + String.join(" ", skipped)));
         }
         Path whole = null;
-        Path cue = null;
         if (options.continuous()) {
             progress.update("Füge das Album zu einer Datei zusammen ...");
             whole = folder.resolve(fileName(album.title()) + ".wav");
             join(titles, options.pauseSeconds(), whole);
-            cue = folder.resolve(fileName(album.title()) + ".cue");
-            Files.write(cue, cueSheet(album, titles, whole).getBytes(StandardCharsets.UTF_8));
         }
+        Path cue = folder.resolve(fileName(album.title()) + ".cue");
+        Files.write(cue, cueSheet(album, titles).getBytes(StandardCharsets.UTF_8));
         Path list = folder.resolve("album.txt");
         Files.write(list, list(album, titles, skipped, options).getBytes(StandardCharsets.UTF_8));
+        // The cover comes last and never stops the export: without one of its own the album gets a placeholder.
+        progress.update("Lege das Cover dazu ...");
+        String coverNote = null;
+        byte[] picture = null;
+        try {
+            picture = cover == null ? null : cover.png(album);
+            if (picture == null) {
+                coverNote = "Das Album hat kein Cover: ein Platzhalter liegt als cover.png dabei.";
+            }
+        } catch (Exception | Error failed) {
+            if (failed instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            coverNote = "Das Cover ließ sich nicht erzeugen (" + (failed.getMessage() == null
+                    ? failed.getClass().getSimpleName() : failed.getMessage())
+                    + "): ein Platzhalter liegt als cover.png dabei.";
+        }
+        Path coverFile = folder.resolve(AlbumCover.PNG);
+        try {
+            Files.write(coverFile, picture == null ? AlbumCover.placeholder(album.title()) : picture);
+        } catch (IOException | RuntimeException unwritten) {
+            coverNote = "cover.png ließ sich nicht schreiben: " + unwritten.getMessage();
+            coverFile = null;
+        }
         progress.update("Album exportiert: " + titles.size() + " Titel nach " + folder);
-        return new Result(folder, Collections.unmodifiableList(titles), whole, cue, list,
+        return new Result(folder, Collections.unmodifiableList(titles), whole, cue, list, coverFile, coverNote,
                 Collections.unmodifiableList(skipped));
     }
 
@@ -205,18 +249,27 @@ public final class AlbumExporter {
         }
     }
 
-    /** A cue sheet of the whole album: where each title begins, in minutes, seconds and frames of 1/75 s. */
-    static String cueSheet(Album album, List<Exported> titles, Path whole) {
-        StringBuilder cue = new StringBuilder();
-        cue.append("TITLE \"").append(album.title().replace('"', '\'')).append("\"\n");
-        cue.append("FILE \"").append(whole.getFileName()).append("\" WAVE\n");
+    /**
+     * The cue sheet of the album over the files of its titles: every title is a file of its own
+     * that begins at its start. Written the way players read it best: UTF-8 with its mark at the
+     * start, so that titles with umlauts are read right.
+     */
+    static String cueSheet(Album album, List<Exported> titles) {
+        StringBuilder cue = new StringBuilder("\uFEFF");
+        cue.append("TITLE \"").append(quoted(album.title())).append("\"\n");
         for (int i = 0; i < titles.size(); i++) {
             Exported title = titles.get(i);
-            long frames = Math.round(title.startSeconds() * 75);
-            cue.append(String.format(Locale.ROOT, "  TRACK %02d AUDIO%n    TITLE \"%s\"%n    INDEX 01 %02d:%02d:%02d%n",
-                    i + 1, title.track().title().replace('"', '\''), frames / (75 * 60), frames / 75 % 60, frames % 75));
+            cue.append("FILE \"").append(quoted(title.file().getFileName().toString())).append("\" WAVE\n");
+            cue.append(String.format(Locale.ROOT, "  TRACK %02d AUDIO\n", i + 1));
+            cue.append("    TITLE \"").append(quoted(title.track().title())).append("\"\n");
+            cue.append("    INDEX 01 00:00:00\n");
         }
         return cue.toString();
+    }
+
+    /** A text between the quotation marks of a cue sheet, which knows no way to write one inside. */
+    private static String quoted(String text) {
+        return text.replace('"', '\'').replaceAll("\\s+", " ").trim();
     }
 
     private static String list(Album album, List<Exported> titles, List<String> skipped, Options options) {

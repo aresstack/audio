@@ -6,6 +6,8 @@ import com.aresstack.audio.studio.ai.ModelLineup;
 import com.aresstack.audio.studio.album.Album;
 import com.aresstack.audio.studio.album.AlbumConcept;
 import com.aresstack.audio.studio.album.AlbumExporter;
+import com.aresstack.audio.studio.album.AlbumCover;
+import com.aresstack.audio.studio.album.CoverArtist;
 import com.aresstack.audio.studio.album.AlbumFiles;
 import com.aresstack.audio.studio.album.AlbumMembership;
 import com.aresstack.audio.studio.album.AlbumProducer;
@@ -123,6 +125,11 @@ final class AlbumsPanel extends JPanel {
 
         /** Lets the user choose a folder to export into; {@code null} if they do not. */
         Path chooseFolder(String title);
+
+        /** Lets the user choose a picture (PNG, JPG) of their own, e.g. as the cover of an album; {@code null} if none. */
+        default Path choosePicture(String title) {
+            return null;
+        }
 
         void log(String line);
 
@@ -261,6 +268,14 @@ final class AlbumsPanel extends JPanel {
     private final Timer afterDescription = pause(() -> propose(Field.STYLE));
     private final Timer afterStyle = pause(() -> propose(Field.STYLE));
 
+    /** The cover of the album, at the left of its concept: drawn by the AI or a picture of the user's own. */
+    private final CoverBox cover = new CoverBox();
+    private final JButton drawCover = new DeckWidgets.IconKey(DeckWidgets.IconKey.Sign.SPARKLE,
+            "Cover von der KI zeichnen lassen, aus Titel, Beschreibung, Stil und Titelliste des Albums. "
+                    + "Ein vorhandenes Cover wird ersetzt. Beim Exportieren liegt es als cover.png bei den Titeln.");
+    private final JButton ownCover = new DeckWidgets.HeadKey("Bild …");
+    /** The album whose cover the AI is drawing, by its id; {@code null} while it draws none. */
+    private String drawingCoverOf;
     /** The concept of the album, and beside it what the window adds (the choice of the models). */
     private final JPanel conceptRow = new JPanel(new BorderLayout(16, 0));
     private javax.swing.JComponent beside;
@@ -533,7 +548,34 @@ final class AlbumsPanel extends JPanel {
         JPanel right = new JPanel(new BorderLayout(0, 12));
         right.setOpaque(false);
         conceptRow.setOpaque(false);
-        conceptRow.add(concept, BorderLayout.CENTER);
+        // At the top, level with the cover and the models beside it.
+        JPanel conceptAtTop = new JPanel(new BorderLayout());
+        conceptAtTop.setOpaque(false);
+        conceptAtTop.add(concept, BorderLayout.NORTH);
+        conceptRow.add(conceptAtTop, BorderLayout.CENTER);
+        // At the left of the concept: the place of the cover, with its keys over it.
+        ownCover.setToolTipText("Ein eigenes Bild als Cover wählen (PNG oder JPG)");
+        ownCover.addActionListener(event -> chooseCover());
+        drawCover.addActionListener(event -> drawCover());
+        JPanel coverKeys = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        coverKeys.setOpaque(false);
+        coverKeys.add(ownCover);
+        coverKeys.add(drawCover);
+        JPanel coverHead = new JPanel(new BorderLayout());
+        coverHead.setOpaque(false);
+        JLabel coverName = DeckWidgets.lettering("Cover");
+        coverName.setToolTipText("Das Bild des Albums. Beim Exportieren liegt es als cover.png bei den Titeln; "
+                + "hat das Album keines, zeichnet die KI dann eines, und gelingt das nicht, liegt ein Platzhalter dabei.");
+        coverHead.add(coverName, BorderLayout.WEST);
+        coverHead.add(coverKeys, BorderLayout.EAST);
+        JPanel coverSide = new JPanel(new BorderLayout(0, 6));
+        coverSide.setOpaque(false);
+        coverSide.add(coverHead, BorderLayout.NORTH);
+        coverSide.add(cover, BorderLayout.CENTER);
+        JPanel coverAtTop = new JPanel(new BorderLayout());
+        coverAtTop.setOpaque(false);
+        coverAtTop.add(coverSide, BorderLayout.NORTH);
+        conceptRow.add(coverAtTop, BorderLayout.WEST);
         right.add(conceptRow, BorderLayout.NORTH);
         // The wait circle lies over the list: two components on one place, the circle on top.
         JPanel listed = new JPanel() {
@@ -656,6 +698,7 @@ final class AlbumsPanel extends JPanel {
         state = chosen == null ? AlbumProductionState.EMPTY
                 : AlbumProductionState.load(files.folder(chosen.id()));
         title.setText(chosen == null ? "" : chosen.title());
+        showCover();
         description.setText(chosen == null ? "" : chosen.concept().description());
         style.setText(chosen == null ? "" : chosen.concept().style());
         afterTitle.stop();
@@ -743,6 +786,9 @@ final class AlbumsPanel extends JPanel {
         trackCount.setEnabled(free && countMode.getSelectedIndex() == 0);
         rowSpec.lock(!rowSettingsEditable());
         plan.setEnabled(free);
+        // The cover is the album's own business: it may be drawn or chosen while titles are produced.
+        drawCover.setEnabled(there && drawingCoverOf == null);
+        ownCover.setEnabled(there && drawingCoverOf == null);
         if (beside != null) {
             // Each album has models of its own: those of an album being produced stay as they are.
             beside.setEnabled(there && !running && !busy);
@@ -1930,6 +1976,80 @@ final class AlbumsPanel extends JPanel {
         keys();
     }
 
+    // ---- cover ----
+
+    /** Shows the cover of the album that is open, and whether the AI is drawing it. */
+    private void showCover() {
+        cover.show(album == null ? null : AlbumCover.read(files.folder(album.id())));
+        cover.say(album != null && album.id().equals(drawingCoverOf) ? "Die KI zeichnet …" : "");
+    }
+
+    /** The AI draws the cover of the album that is open; it replaces the one the album has. */
+    private void drawCover() {
+        if (album == null || drawingCoverOf != null || !keepConcept()) {
+            return;
+        }
+        final Album drawn = album;
+        final Path folder = files.folder(drawn.id());
+        final ChatModel model;
+        try {
+            model = host.models().model(CoverArtist.ROLE);
+        } catch (RuntimeException noModel) {
+            say("Das Cover lässt sich nicht zeichnen: " + noModel.getMessage());
+            return;
+        }
+        drawingCoverOf = drawn.id();
+        showCover();
+        keys();
+        say("Die KI zeichnet das Cover von „" + drawn.title() + "“ ...");
+        Thread worker = new Thread(() -> {
+            String said;
+            try {
+                CoverArtist.Drawn made = new CoverArtist(model).draw(drawn, folder.resolve(COVER_ANSWERS));
+                AlbumCover.save(folder, made.svg(), made.image());
+                said = "Das Cover von „" + drawn.title() + "“ ist gezeichnet.";
+            } catch (Exception failed) {
+                said = "Das Cover ließ sich nicht zeichnen: " + (failed.getMessage() == null ? failed : failed.getMessage());
+            }
+            final String line = said;
+            SwingUtilities.invokeLater(() -> {
+                drawingCoverOf = null;
+                showCover();
+                say(line);
+                host.log(line);
+                keys();
+            });
+        }, "album-cover");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /** The folder in the folder of an album where the answers of the AI about its cover are kept. */
+    private static final String COVER_ANSWERS = "cover-answers";
+
+    /** A picture of the user's own becomes the cover of the album that is open. */
+    private void chooseCover() {
+        if (album == null || drawingCoverOf != null) {
+            return;
+        }
+        Path chosen = host.choosePicture("Cover für „" + album.title() + "“ wählen");
+        if (chosen == null) {
+            return;
+        }
+        try {
+            java.awt.image.BufferedImage picture = javax.imageio.ImageIO.read(chosen.toFile());
+            if (picture == null) {
+                say("Das ist kein Bild, das sich lesen lässt: " + chosen.getFileName());
+                return;
+            }
+            AlbumCover.save(files.folder(album.id()), null, picture);
+            showCover();
+            say("„" + chosen.getFileName() + "“ ist das Cover von „" + album.title() + "“.");
+        } catch (IOException | RuntimeException failed) {
+            say("Das Bild ließ sich nicht als Cover nehmen: " + failed.getMessage());
+        }
+    }
+
     // ---- export ----
 
     private void exportAlbum() {
@@ -1938,23 +2058,48 @@ final class AlbumsPanel extends JPanel {
             return;
         }
         final Album exported = album;
+        final Path albumFolder = files.folder(exported.id());
+        // Asked for here, where the choices of the page can be read; used only if the album has no cover.
+        ChatModel artist;
+        try {
+            artist = host.models().model(CoverArtist.ROLE);
+        } catch (RuntimeException noModel) {
+            artist = null;
+        }
+        final ChatModel coverModel = artist;
         busy = true;
         keys();
         say("Das Album wird exportiert ...");
         Thread worker = new Thread(() -> {
             String said;
             try {
-                AlbumExporter.Result result = new AlbumExporter(songs.root(), new StageMixdown()).export(exported,
-                        folder, AlbumExporter.Options.STANDARD,
+                // The album's own cover; an album without one has it drawn now and keeps it.
+                AlbumExporter.Cover source = of -> {
+                    byte[] own = AlbumCover.bytes(albumFolder);
+                    if (own != null) {
+                        return own;
+                    }
+                    if (coverModel == null) {
+                        return null;
+                    }
+                    SwingUtilities.invokeLater(() -> say("Die KI zeichnet das Cover ..."));
+                    CoverArtist.Drawn made = new CoverArtist(coverModel).draw(of, albumFolder.resolve(COVER_ANSWERS));
+                    AlbumCover.save(albumFolder, made.svg(), made.image());
+                    return AlbumCover.png(made.image());
+                };
+                AlbumExporter.Result result = new AlbumExporter(songs.root(), new StageMixdown(), source).export(
+                        exported, folder, AlbumExporter.Options.STANDARD,
                         line -> SwingUtilities.invokeLater(() -> say(line)));
                 said = result.titles().size() + " Titel exportiert nach " + folder
-                        + (result.skipped().isEmpty() ? "" : " · " + result.skipped().size() + " fehlen");
+                        + (result.skipped().isEmpty() ? "" : " · " + result.skipped().size() + " fehlen")
+                        + (result.coverNote() == null ? "" : " · " + result.coverNote());
             } catch (Exception failed) {
                 said = "Der Export ist fehlgeschlagen: " + (failed.getMessage() == null ? failed : failed.getMessage());
             }
             final String line = said;
             SwingUtilities.invokeLater(() -> {
                 busy = false;
+                showCover(); // the export may have had it drawn
                 say(line);
                 host.log(line);
                 keys();

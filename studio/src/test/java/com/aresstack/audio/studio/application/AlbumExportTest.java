@@ -24,8 +24,8 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 /**
- * Albums, export: every title as a WAV file at the same loudness, the whole album as one file
- * with pauses and a cue sheet; a title that is missing does not stop the export, and no piece is
+ * Albums, export: every title as a WAV file at the same loudness, a cue sheet over these files,
+ * the cover beside them, and if wanted the whole album as one file with pauses; a title that is missing does not stop the export, and no piece is
  * changed by it.
  */
 public final class AlbumExportTest {
@@ -108,11 +108,24 @@ public final class AlbumExportTest {
         assertArrayEquals("the second title begins where the cue sheet says",
                 Arrays.copyOfRange(last.left, 0, RATE), Arrays.copyOfRange(whole.left, secondFrom, secondFrom + RATE), 0f);
         assertEquals(first + 2, result.titles().get(1).startSeconds(), 1e-9);
-        String cue = new String(Files.readAllBytes(result.cueSheet()), StandardCharsets.UTF_8);
-        assertTrue(cue, cue.contains("FILE \"Christmas Memories.wav\" WAVE") && cue.contains("TRACK 01 AUDIO")
-                && cue.contains("INDEX 01 00:00:00") && cue.contains("TITLE \"Silent / Night\""));
-        long frames = Math.round((first + 2) * 75);
-        assertTrue(cue, cue.contains(String.format("INDEX 01 %02d:%02d:%02d", frames / 4500, frames / 75 % 60, frames % 75)));
+        // The cue sheet names the files of the titles, each from its start: a player plays the album from it.
+        assertEquals("Christmas Memories.cue", result.cueSheet().getFileName().toString());
+        assertEquals("\uFEFFTITLE \"Christmas: Memories?\"\n"
+                + "FILE \"01 - Overture.wav\" WAVE\n"
+                + "  TRACK 01 AUDIO\n"
+                + "    TITLE \"Overture\"\n"
+                + "    INDEX 01 00:00:00\n"
+                + "FILE \"03 - Silent Night.wav\" WAVE\n"
+                + "  TRACK 02 AUDIO\n"
+                + "    TITLE \"Silent / Night\"\n"
+                + "    INDEX 01 00:00:00\n",
+                new String(Files.readAllBytes(result.cueSheet()), StandardCharsets.UTF_8));
+        // No cover of its own: a placeholder lies beside the titles, a picture a player can read.
+        assertEquals("cover.png", result.cover().getFileName().toString());
+        assertTrue(result.coverNote(), result.coverNote().contains("Platzhalter"));
+        java.awt.image.BufferedImage placeholder = javax.imageio.ImageIO.read(result.cover().toFile());
+        assertEquals(1000, placeholder.getWidth());
+        assertEquals(1000, placeholder.getHeight());
         String list = new String(Files.readAllBytes(result.list()), StandardCharsets.UTF_8);
         assertTrue(list, list.contains("01 - Overture") && list.contains("2 Titel") && list.contains("-18.0 LUFS")
                 && list.contains("Fehlt: 02 Not there yet"));
@@ -124,12 +137,41 @@ public final class AlbumExportTest {
             assertTrue(files.noneMatch(file -> file.getFileName().toString().endsWith(".part")));
         }
 
-        // Without the file of the whole album there is no cue sheet either.
+        // As the studio exports: single files only, and the same cue sheet over them.
+        assertFalse(AlbumExporter.Options.STANDARD.continuous());
+        Path singles = temporary.newFolder("single").toPath();
         AlbumExporter.Result single = new AlbumExporter(library, new StageMixdown()).export(album,
-                temporary.newFolder("single").toPath(), new AlbumExporter.Options(-18, 24, false, 2), line -> { });
+                singles, new AlbumExporter.Options(-18, 24, false, 2), line -> { });
         assertEquals(null, single.whole());
-        assertEquals(null, single.cueSheet());
+        assertFalse(Files.exists(singles.resolve("Christmas Memories.wav")));
+        assertArrayEquals(Files.readAllBytes(result.cueSheet()), Files.readAllBytes(single.cueSheet()));
         assertEquals(-18, lufs(single.titles().get(0).file()), 0.2);
+    }
+
+    @Test
+    public void theCoverOfTheAlbumLiesBesideTheTitlesAndAFailingCoverNeverStopsTheExport() throws Exception {
+        Path library = temporary.newFolder("compositions").toPath();
+        piece(library.resolve("loud"), 440, 0.6f, 4);
+        Album album = new Album("a", "Liebliche Weihnacht", new AlbumConcept("x", "", 1, 10),
+                List.of(track("t1", "Sternenstill", "loud")));
+        final byte[] own = com.aresstack.audio.studio.album.AlbumCover.png(
+                new java.awt.image.BufferedImage(40, 20, java.awt.image.BufferedImage.TYPE_INT_RGB));
+
+        AlbumExporter.Result with = new AlbumExporter(library, new StageMixdown(), of -> own).export(album,
+                temporary.newFolder("with").toPath(), AlbumExporter.Options.STANDARD, line -> { });
+        assertArrayEquals("the album's own cover, as it is", own, Files.readAllBytes(with.cover()));
+        assertEquals(null, with.coverNote());
+
+        AlbumExporter.Result failing = new AlbumExporter(library, new StageMixdown(), of -> {
+            throw new java.io.IOException("Die KI ist nicht erreichbar.");
+        }).export(album, temporary.newFolder("failing").toPath(), AlbumExporter.Options.STANDARD, line -> { });
+        assertEquals("the titles are exported all the same", 1, failing.titles().size());
+        assertTrue(Files.isRegularFile(failing.titles().get(0).file()));
+        assertTrue(failing.coverNote(), failing.coverNote().contains("Die KI ist nicht erreichbar")
+                && failing.coverNote().contains("Platzhalter"));
+        assertEquals(1000, javax.imageio.ImageIO.read(failing.cover().toFile()).getWidth());
+        String cue = new String(Files.readAllBytes(failing.cueSheet()), StandardCharsets.UTF_8);
+        assertTrue(cue, cue.contains("FILE \"01 - Sternenstill.wav\" WAVE"));
     }
 
     @Test
