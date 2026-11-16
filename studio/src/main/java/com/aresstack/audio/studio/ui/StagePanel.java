@@ -199,7 +199,7 @@ final class StagePanel extends JPanel {
         JPanel seen = new JPanel(new BorderLayout(0, 6));
         seen.setOpaque(false);
         seen.add(view, BorderLayout.CENTER);
-        JLabel hint = new JLabel("Von oben gesehen · Scheiben ziehen · Mausrad: lauter und leiser");
+        JLabel hint = new JLabel("Scheiben ziehen · Mausrad: lauter und leiser");
         hint.setForeground(AudioStudioTheme.TEXT_FAINT);
         hint.setFont(hint.getFont().deriveFont(11.5f));
         stageFoot.setOpaque(false);
