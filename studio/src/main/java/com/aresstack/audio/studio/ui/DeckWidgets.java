@@ -197,12 +197,22 @@ final class DeckWidgets {
     }
 
     /** What a transport key shows. */
-    enum Symbol { PLAY, STOP, RECORD, CANCEL }
+    enum Symbol { PLAY, PAUSE, STOP, RECORD, CANCEL }
 
     /** A round key of the transport: play, stop, render, cancel. */
     static final class TransportKey extends JButton {
-        private final Symbol symbol;
+        private Symbol symbol;
         private final Color color;
+
+        /** Shows another symbol on the key, in the same colour (play becomes pause while it plays). */
+        boolean setSymbol(Symbol shown) {
+            if (shown == symbol) {
+                return false;
+            }
+            symbol = shown;
+            repaint();
+            return true;
+        }
 
         TransportKey(Symbol symbol, Color color, String tip) {
             this.symbol = symbol;
@@ -252,6 +262,10 @@ final class DeckWidgets {
                     g.fill(triangle);
                     break;
                 }
+                case PAUSE:
+                    g.fill(new RoundRectangle2D.Float(cx - unit * 0.95f, cy - unit, unit * 0.65f, unit * 2f, 2f, 2f));
+                    g.fill(new RoundRectangle2D.Float(cx + unit * 0.3f, cy - unit, unit * 0.65f, unit * 2f, 2f, 2f));
+                    break;
                 case STOP:
                     g.fill(new RoundRectangle2D.Float(cx - unit * 0.9f, cy - unit * 0.9f, unit * 1.8f, unit * 1.8f, 3f, 3f));
                     break;

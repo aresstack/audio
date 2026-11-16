@@ -420,6 +420,8 @@ public final class AudioStudioFrame extends JFrame {
     private final DeckDisplays.Meter masterRight = new DeckDisplays.Meter(false);
     /** The place in the piece under the transport keys, to move the playback. */
     private final SeekLine seekLine = new SeekLine(share -> seek(share));
+    /** The name under the play key: it says Pause while the key pauses. */
+    private JLabel playKeyName;
     private final DeckWidgets.TransportKey playKey = new DeckWidgets.TransportKey(
             DeckWidgets.Symbol.PLAY, AudioStudioTheme.GREEN, "Abspielen, was unter Wiedergabe gewählt ist (Leertaste)");
     private final DeckWidgets.TransportKey stopKey = new DeckWidgets.TransportKey(
@@ -618,6 +620,9 @@ public final class AudioStudioFrame extends JFrame {
             label.setFont(AudioStudioTheme.lettering(9f));
             label.setHorizontalAlignment(JLabel.CENTER);
             names.add(label);
+            if ("Play".equals(text)) {
+                playKeyName = label;
+            }
         }
         JPanel underKeys = new JPanel(new BorderLayout(0, 3));
         underKeys.setOpaque(false);
@@ -7350,6 +7355,15 @@ public final class AudioStudioFrame extends JFrame {
         followAlbumPlay(playing);
         double second = player.seconds();
         double length = player.length();
+        // The key says what a press does now, read from the player itself every time: it cannot
+        // get out of step, and whenever nothing plays (Stop, the end, a failure) it is Play again.
+        if (playKey.setSymbol(playing ? DeckWidgets.Symbol.PAUSE : DeckWidgets.Symbol.PLAY)) {
+            playKey.setToolTipText(playing ? "Pause: die Wiedergabe anhalten, die Stelle bleibt (Leertaste)"
+                    : "Abspielen, was unter Wiedergabe gewählt ist (Leertaste)");
+            if (playKeyName != null) {
+                playKeyName.setText(DeckWidgets.lettering(playing ? "Pause" : "Play").getText());
+            }
+        }
         lcd.setPlaying(playing);
         lcd.setTime(second, length);
         seekLine.setTime(second, length);
