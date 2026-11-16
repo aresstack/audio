@@ -6181,8 +6181,63 @@ public final class AudioStudioFrame extends JFrame {
         page.setOpaque(false);
         DeckWidgets.Module module = new DeckWidgets.Module("Player", playerPanel);
         module.setHeadStart(playerPanel.headKeys());
+        JButton playerKey = new DeckWidgets.HeadKey("Player ▾");
+        playerKey.setToolTipText("Was zum Player gehört: die Figuren der Bühne und das KI-Modell, das sie zeichnet");
+        playerKey.addActionListener(event -> playerMenu().show(playerKey, 0, playerKey.getHeight()));
+        module.setHeadEnd(playerKey);
         page.add(module, BorderLayout.CENTER);
         return page;
+    }
+
+    /**
+     * The menu of the player: under "Modell für die Figuren" the models the service has, the one
+     * that draws the figures checked; "Wie Planung" lets the figures follow the planning model again.
+     */
+    private javax.swing.JPopupMenu playerMenu() {
+        com.aresstack.audio.studio.ai.ModelRole role = com.aresstack.audio.studio.figure.FigureArtist.ROLE;
+        String own = modelChoices.assignment().ownModel(role);
+        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+        javax.swing.JMenu models = new javax.swing.JMenu("Modell für die Figuren");
+        models.setToolTipText("Welches KI-Modell die Figuren der Bühne zeichnet; jetzt: " + currentAssignment().modelFor(role));
+        javax.swing.JCheckBoxMenuItem follow = new javax.swing.JCheckBoxMenuItem("Wie Planung ("
+                + currentAssignment().modelFor(com.aresstack.audio.studio.ai.ModelRoles.PLANNING) + ")", own == null);
+        follow.addActionListener(event -> figureModel(null));
+        models.add(follow);
+        java.util.List<String> known = new ArrayList<String>(modelChoices.knownModels());
+        if (own != null && !known.contains(own)) {
+            known.add(0, own); // chosen once, not offered by the service now: still shown as the choice
+        }
+        if (!known.isEmpty()) {
+            models.addSeparator();
+        }
+        for (String name : known) {
+            javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem(name, name.equals(own));
+            item.addActionListener(event -> figureModel(name));
+            models.add(item);
+        }
+        models.addSeparator();
+        javax.swing.JMenuItem load = new javax.swing.JMenuItem("Modelle neu laden");
+        load.setToolTipText("Fragt den KI-Dienst nach seinen Modellen; danach stehen sie hier zur Wahl");
+        load.addActionListener(event -> loadModelNames(false));
+        models.add(load);
+        menu.add(models);
+        menu.addSeparator();
+        for (JButton key : new JButton[]{drawFigures, otherFigures, undoFigures}) {
+            javax.swing.JMenuItem item = new javax.swing.JMenuItem(key == drawFigures ? "Figuren zeichnen"
+                    : key == otherFigures ? "Andere Figuren" : "Figuren: letzten Schritt zurück");
+            item.setToolTipText(key.getToolTipText());
+            item.setEnabled(key.isEnabled());
+            item.addActionListener(event -> key.doClick());
+            menu.add(item);
+        }
+        return menu;
+    }
+
+    /** Sets the model that draws the figures ({@code null}: as planning) and keeps it in the settings. */
+    private void figureModel(String name) {
+        modelChoices.setAssignment(modelChoices.assignment().with(com.aresstack.audio.studio.figure.FigureArtist.ROLE, name));
+        saveSettings(false);
+        message(name == null ? "Die Figuren zeichnet das Planungsmodell." : "Die Figuren zeichnet " + name + ".");
     }
 
     /** The album the player plays: the one chosen in the tree, else the album of the open title. */
@@ -6551,7 +6606,7 @@ public final class AudioStudioFrame extends JFrame {
             stageFigures.undo();
         });
         undoFigures.setEnabled(false);
-        visualizer.addStageKeys(drawFigures, otherFigures, undoFigures);
+        // The keys themselves stand in the menu of the player (playerMenu): the head has no room for them.
         player.figuresFrom(this::figureOf, figureLook.height());
     }
 
