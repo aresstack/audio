@@ -5731,7 +5731,11 @@ public final class AudioStudioFrame extends JFrame {
             lastTrouble = null;
             trackTable.clearWork();
             trackStageBegan = System.currentTimeMillis();
-            notesDoneTold = false; // the next step counts for itself
+            if (stage != TrackProgress.Stage.COMPOSE) {
+                // Rendering counts its tracks. Composing keeps what the notes said: the bar of a
+                // piece that grows stands where the piece is and does not fall back to the left edge.
+                notesDoneTold = false;
+            }
         }
         if (stage == TrackProgress.Stage.COMPOSE && preparing != null
                 && (state == TrackProgress.State.WAITING || state == TrackProgress.State.WORKING)) {

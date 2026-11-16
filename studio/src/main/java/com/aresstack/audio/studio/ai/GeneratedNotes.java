@@ -155,7 +155,9 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
                     throw unusable;
                 }
                 problem = unusable.getMessage();
-                Backoff.tell("Unbrauchbare KI-Antwort für " + partId + " (" + sectionId + "): " + problem
+                String from = KipitzChatClient.lastAnswer();
+                Backoff.tell("Unbrauchbare KI-Antwort für " + partId + " (" + sectionId + ")"
+                        + (from.isEmpty() ? "" : " [" + from + "]") + ": " + problem
                         + " · Versuch " + (asked + 1) + " in " + Backoff.words(Backoff.delay(asked)) + ".");
                 Backoff.pause(asked, null);
             }

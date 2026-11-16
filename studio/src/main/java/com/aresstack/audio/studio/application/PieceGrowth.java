@@ -68,7 +68,7 @@ public final class PieceGrowth {
                                         int step, Progress progress) throws Exception {
         int size = Math.max(1, Math.min(ContinuationRequest.MAX_BARS, step));
         if (repair != null) {
-            fillTail(session, repair, size, asked.instruction(), progress);
+            fillTail(session, repair, size, asked.instruction(), standing(progress, bars(session), target));
         }
         int have = bars(session);
         boolean first = true;
@@ -82,6 +82,10 @@ public final class PieceGrowth {
                         .stepping("Takte " + (have + 1) + "–" + (have + bars) + " von " + target);
             }
             // The bar under the status line shows the whole piece: this step is its share from here.
+            // It stands from the start of the step, while the plan is made, at what the piece has.
+            if (progress instanceof com.aresstack.audio.studio.progress.SketchProgress) {
+                ((com.aresstack.audio.studio.progress.SketchProgress) progress).done(have / (double) target);
+            }
             Progress part = com.aresstack.audio.studio.progress.PartOfWhole.of(progress, have / (double) target,
                     (have + bars) / (double) target);
             ExtensionOffer offer = ExtensionOffer.start(session, composer.get(), step(asked, bars, first, last), part);
@@ -91,7 +95,7 @@ public final class PieceGrowth {
             offer.confirm(); // nothing of the original is shortened when appending; no one to ask here
             offer.accept();
             if (repair != null) {
-                fillTail(session, repair, size, asked.instruction(), progress);
+                fillTail(session, repair, size, asked.instruction(), standing(progress, bars(session), target));
             }
             int now = bars(session);
             if (now <= have) {
@@ -101,6 +105,18 @@ public final class PieceGrowth {
             first = false;
         }
         return null;
+    }
+
+    /**
+     * The progress for writing silent ends anew: the bar of the whole piece stays where the piece
+     * is (a passage that is done is not the piece that is done).
+     */
+    private static Progress standing(Progress progress, int have, int target) {
+        double share = target <= 0 ? 0 : Math.min(1, have / (double) target);
+        if (progress instanceof com.aresstack.audio.studio.progress.SketchProgress) {
+            ((com.aresstack.audio.studio.progress.SketchProgress) progress).done(share);
+        }
+        return com.aresstack.audio.studio.progress.PartOfWhole.of(progress, share, share);
     }
 
     /**
