@@ -57,6 +57,8 @@ public final class ComposingIsWatchedTest {
 
     private static final class Watcher implements SketchProgress {
         final List<List<String>> sketches = Collections.synchronizedList(new ArrayList<List<String>>());
+        /** How far the notes were, each time it was told. */
+        final List<Double> shares = Collections.synchronizedList(new ArrayList<Double>());
 
         final List<String> steps = java.util.Collections.synchronizedList(new ArrayList<String>());
         final List<List<String>> plans = java.util.Collections.synchronizedList(new ArrayList<List<String>>());
@@ -71,6 +73,11 @@ public final class ComposingIsWatchedTest {
         public void planned(List<String> chords) {
             sketchesWhenPlanned = sketches.size();
             plans.add(chords);
+        }
+
+        @Override
+        public void done(double share) {
+            shares.add(share);
         }
 
         @Override
@@ -112,6 +119,13 @@ public final class ComposingIsWatchedTest {
         assertTrue("the first picture has only a part of the notes", notes(first).size() < notes(piece).size());
         assertFalse("and it has notes already", notes(first).isEmpty());
         assertEquals("the last picture has the notes of the piece", notes(piece), notes(last));
+        // How far the notes are, for the bar of the status line: it grows and ends full.
+        assertFalse("how far the notes are is told", watcher.shares.isEmpty());
+        assertTrue("it begins with a part of the bars", watcher.shares.get(0) > 0 && watcher.shares.get(0) < 1);
+        for (int i = 1; i < watcher.shares.size(); i++) {
+            assertTrue("it never runs back", watcher.shares.get(i) >= watcher.shares.get(i - 1));
+        }
+        assertEquals("the last answer makes it full", 1.0, watcher.shares.get(watcher.shares.size() - 1), 0);
         for (List<String> sketch : watcher.sketches) {
             Score score = Score.of(sketch);
             assertEquals("the paper has the length of the plan from the start", 24, score.bars());

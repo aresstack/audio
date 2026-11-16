@@ -93,6 +93,9 @@ public final class VoiceComposer {
         List<List<ShapedNote>> playedNotes = new ArrayList<>();
         String connection = "";
         final EditSketch sketch = EditSketch.of(piece, progress);
+        for (VoiceFrame frame : sketch == null ? List.<VoiceFrame>of() : task.frames()) {
+            sketch.expect(ids.partId(), frame);
+        }
         for (VoiceFrame frame : task.frames()) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new IOException("Hinzukomponieren abgebrochen.");
@@ -101,6 +104,9 @@ public final class VoiceComposer {
             if (here != null && !here.plays()) {
                 progress.update(request.name() + " pausiert in " + frame.name() + ".");
                 connection = "";
+                if (sketch != null) {
+                    sketch.rests(ids.partId(), frame);
+                }
                 continue;
             }
             progress.update("Komponiere " + request.name() + " für " + frame.name() + " ...");
