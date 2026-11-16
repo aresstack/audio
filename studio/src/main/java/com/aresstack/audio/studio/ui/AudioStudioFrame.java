@@ -932,6 +932,11 @@ public final class AudioStudioFrame extends JFrame {
         showFolder.addActionListener(event -> openSongFolder());
         moreMenu.add(showFolder);
         moreMenu.addSeparator();
+        javax.swing.JMenuItem afresh = new javax.swing.JMenuItem("Neu komponieren …");
+        afresh.setToolTipText("Das Stück von vorn komponieren, als neues Stück daneben oder an seiner Stelle"
+                + " (wird gleich gefragt); auch bei einem unterbrochenen Stück");
+        afresh.addActionListener(event -> composeAfresh());
+        moreMenu.add(afresh);
         javax.swing.JMenuItem onlyPropose = new javax.swing.JMenuItem("Nur Instrumente vorschlagen lassen");
         onlyPropose.setToolTipText("Die KI schlägt Instrumente vor; komponiert wird noch nicht");
         onlyPropose.addActionListener(event -> proposeInstruments(false));
@@ -2297,7 +2302,8 @@ public final class AudioStudioFrame extends JFrame {
             int[] bars = unfinishedBars();
             composeButton.setText("Weiter komponieren");
             composeButton.setToolTipText("Das Stück hat " + bars[0] + " von " + bars[1] + " geplanten Takten (es wurde"
-                    + " unterbrochen). Es geht dort weiter; was die KI schon geschrieben hatte, kommt aus ihrem Speicher.");
+                    + " unterbrochen). Es geht dort weiter; was die KI schon geschrieben hatte, kommt aus ihrem Speicher."
+                    + " Von vorn: Stück ▾ › Neu komponieren …");
         } else if (!specFields.locked()) {
             composeButton.setText("Komponieren");
             composeButton.setToolTipText("Komponieren und gleich rendern");
@@ -2317,6 +2323,22 @@ public final class AudioStudioFrame extends JFrame {
     private void showSongView(boolean score) {
         (score ? scoreKey : draftKey).setSelected(true);
         songViews.show(songView, score ? "score" : "draft");
+    }
+
+    /** The piece begun anew, also one that stopped on its way (which the key would go on with). */
+    private void composeAfresh() {
+        if (busy()) {
+            return;
+        }
+        if (com.aresstack.audio.studio.application.ScoreTemplates.of(Paths.get(directory.getText().trim())).isPresent()
+                || !aiChooses.isSelected()) {
+            compose();
+            return;
+        }
+        if (startAfresh()) {
+            showSongView(true);
+            proposeInstruments(true);
+        }
     }
 
     private void compose() {
@@ -5218,17 +5240,11 @@ public final class AudioStudioFrame extends JFrame {
             if (!Files.isRegularFile(current)) {
                 continue;
             }
+            document.append("=== ").append(file).append(" ===\n");
             try {
-                byte[] bytes = Files.readAllBytes(current);
-                if (bytes.length > 250000) {
-                    throw new IOException("JSON response too large to display: " + file);
-                }
-                document.append("=== ").append(file).append(" ===\n");
-                document.append(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
-                document.append("\n\n");
+                document.append(previewOf(current)).append("\n\n");
             } catch (IOException error) {
-                message(error.getMessage());
-                return;
+                document.append("(nicht lesbar: ").append(error.getMessage()).append(")\n\n");
             }
         }
         if (document.length() == 0) {
@@ -5243,6 +5259,30 @@ public final class AudioStudioFrame extends JFrame {
         scroll.setPreferredSize(new Dimension(760, 480));
         JOptionPane.showMessageDialog(this, scroll,
                 "Gemma composition plan and tracks", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    /** How much of one saved AI answer the viewer shows; the rest stays in the file. */
+    static final int PREVIEW_CHARS_PER_FILE = 300_000;
+
+    /**
+     * One saved AI answer for the viewer: whole when it is short, else its beginning and a note
+     * where the whole file lies (a long piece's plan is megabytes, more than a text view bears).
+     */
+    static String previewOf(Path file) throws IOException {
+        long size = Files.size(file);
+        char[] head = new char[PREVIEW_CHARS_PER_FILE];
+        int read = 0;
+        try (java.io.Reader reader = Files.newBufferedReader(file, java.nio.charset.StandardCharsets.UTF_8)) {
+            for (int got; read < head.length && (got = reader.read(head, read, head.length - read)) > 0; ) {
+                read += got;
+            }
+            if (reader.read() < 0) {
+                return new String(head, 0, read);
+            }
+        }
+        return new String(head, 0, read) + "\n… (gekürzt: die Datei hat " + (size / 1024)
+                + " KB, hier stehen die ersten " + (PREVIEW_CHARS_PER_FILE / 1000)
+                + " Tausend Zeichen; ganz: " + file.toAbsolutePath() + ")";
     }
 
     /** The WAV file behind a choice of the playback: the sampled mix, the Java mix, or one track. */
