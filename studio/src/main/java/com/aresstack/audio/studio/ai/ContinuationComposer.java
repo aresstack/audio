@@ -74,12 +74,12 @@ public final class ContinuationComposer {
      */
     public static ContinuationComposer with(ModelLineup models, int partsAtOnce) {
         return new ContinuationComposer(new ChatContinuationPlanner(models.model(ModelRoles.ARRANGING), 4096),
-                new ChatSectionGenerator(models.model(ModelRoles.REWORK), 16384), Math.max(1, partsAtOnce));
+                new ChatSectionGenerator(models.model(ModelRoles.REWORK), AnswerRoom.notes()), Math.max(1, partsAtOnce));
     }
 
     /** A composer that asks a model for plan and notes, four parts at a time. */
     public static ContinuationComposer with(ChatModel model) {
-        return new ContinuationComposer(new ChatContinuationPlanner(model, 4096), new ChatSectionGenerator(model, 16384),
+        return new ContinuationComposer(new ChatContinuationPlanner(model, 4096), new ChatSectionGenerator(model, AnswerRoom.notes()),
                 4);
     }
 

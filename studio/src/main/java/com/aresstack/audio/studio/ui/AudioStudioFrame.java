@@ -2048,6 +2048,10 @@ public final class AudioStudioFrame extends JFrame {
             }
         });
         tokenLimit.setPreferredSize(new Dimension(110, 30));
+        // The same limit holds when the AI adds to a piece that is there (continuation, voice, passage).
+        tokenLimit.addChangeListener(event -> com.aresstack.audio.studio.ai.AnswerRoom.notes(
+                (Integer) tokenLimit.getValue()));
+        com.aresstack.audio.studio.ai.AnswerRoom.notes((Integer) tokenLimit.getValue());
         parallelRequests.setPreferredSize(new Dimension(110, 30));
         addRow(ai, row++, "Antwortlänge",
                 line(tokenLimit, note("Tokens je Antwort, höchstens; auch der Plan eines langen Stücks bekommt so viel Platz.")));
@@ -4836,6 +4840,7 @@ public final class AudioStudioFrame extends JFrame {
             modelChoices.setAssignment(com.aresstack.audio.studio.settings.ModelSettings.read(saved));
             albumModelChoices.setAssignment(albumAssignment(albumShown));
             tokenLimit.setValue(AiDefaults.maxTokens(saved));
+            com.aresstack.audio.studio.ai.AnswerRoom.notes((Integer) tokenLimit.getValue());
             sectionBars.setValue(AiDefaults.sectionBars(saved));
             detailedLog.setSelected(Boolean.parseBoolean(saved.getProperty("detailedLog", "false")));
             growBars.setValue(AiDefaults.growBars(saved));
