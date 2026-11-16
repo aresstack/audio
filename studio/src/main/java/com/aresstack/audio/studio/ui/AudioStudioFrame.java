@@ -5016,7 +5016,7 @@ public final class AudioStudioFrame extends JFrame {
                 return action.execute(new com.aresstack.audio.studio.progress.SketchProgress() {
                     @Override
                     public void sketch(final List<String> arrangement) {
-                        SwingUtilities.invokeLater(() -> showSketch(arrangement));
+                        drawSketch(arrangement);
                     }
 
                     @Override
@@ -5546,7 +5546,7 @@ public final class AudioStudioFrame extends JFrame {
 
             @Override
             public void sketch(List<String> arrangement) {
-                onOpen.accept(() -> showSketch(arrangement));
+                onOpen.accept(() -> drawSketch(arrangement));
             }
 
             @Override
@@ -5863,7 +5863,45 @@ public final class AudioStudioFrame extends JFrame {
      * The piece while the AI writes it: the score on the page of the composition grows with every
      * note that arrives. Only shown; the saved piece is shown again when the work is over.
      */
-    private void showSketch(List<String> arrangement) {
+    /** The newest picture of the piece that waits to be drawn; older ones on the way are skipped. */
+    private final java.util.concurrent.atomic.AtomicReference<List<String>> sketchWaiting =
+            new java.util.concurrent.atomic.AtomicReference<List<String>>();
+    /** Draws the pictures of the piece while the AI writes: off the event thread, one after another. */
+    private final java.util.concurrent.ExecutorService sketchDrawer =
+            java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "sketch-drawer");
+                thread.setDaemon(true);
+                return thread;
+            });
+
+    /**
+     * A new picture of the piece while the AI writes it. Score and lanes of a long piece take
+     * seconds to lay out: that happens on a thread of its own, and only the newest picture is laid
+     * out, so the window stays at hand however long the piece and however fast the notes come.
+     */
+    private void drawSketch(List<String> arrangement) {
+        if (sketchWaiting.getAndSet(arrangement) != null) {
+            return; // one is waiting already: it is replaced by this newer one
+        }
+        sketchDrawer.execute(() -> {
+            List<String> newest = sketchWaiting.getAndSet(null);
+            if (newest == null) {
+                return;
+            }
+            com.aresstack.audio.studio.score.Score score;
+            ArrangementView.Arrangement lanes;
+            try {
+                score = com.aresstack.audio.studio.score.Score.of(newest);
+                lanes = ArrangementView.Arrangement.of(newest);
+            } catch (RuntimeException unreadable) {
+                return; // a picture on the way that cannot be drawn is left out; the next one comes
+            }
+            SwingUtilities.invokeLater(() -> showSketch(newest, score, lanes));
+        });
+    }
+
+    private void showSketch(List<String> arrangement, com.aresstack.audio.studio.score.Score score,
+                            ArrangementView.Arrangement lanes) {
         if (!livePicture()) {
             return; // a late picture after the work ended: the score shows the piece itself again
         }
@@ -5891,10 +5929,8 @@ public final class AudioStudioFrame extends JFrame {
             if ("Noch nicht komponiert".equals(songFacts.getText())) {
                 songFacts.setText("Wird komponiert …"); // the facts of the plan are read when the work is over
             }
-            scoreView.setScore(com.aresstack.audio.studio.score.Score.of(arrangement), ids,
-                    "Die KI schreibt · die ersten Noten erscheinen gleich");
+            scoreView.setScore(score, ids, "Die KI schreibt · die ersten Noten erscheinen gleich");
             // The lanes of the arrangement grow as well: there the user asked for most of it.
-            ArrangementView.Arrangement lanes = ArrangementView.Arrangement.of(arrangement);
             if (lanes != null) {
                 arrangementView.setArrangement(lanes, withAudioLanes(ids), "");
                 // The score runs along: the bars that arise come into view, also far from the start.
