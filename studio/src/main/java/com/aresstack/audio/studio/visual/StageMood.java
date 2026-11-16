@@ -125,44 +125,53 @@ public final class StageMood {
         return null;
     }
 
-    /** How many beats the tempo is read from. */
-    private static final int BEATS = 8;
-    private final double[] gaps = new double[BEATS];
-    private int gapCount;
-    private long seenBeats = -1;
-    private double lastBeat = Double.NaN;
-    private double bass = -1;
-    private double loudness = -1;
+    private final SoundCharacter character;
+    private SoundCharacter.Heard heard = SoundCharacter.Heard.NOTHING;
     private Mood shown;
     private String readStyle = "";
     private Mood named;
     private Mood wanted;
     private double wantedSince;
-    private double lastSeconds = Double.NaN;
 
-    /** The beats per minute heard lately, 0 while too few beats were heard. */
-    public double beatsPerMinute() {
-        if (gapCount < 3) {
-            return 0;
-        }
-        double[] sorted = java.util.Arrays.copyOf(gaps, Math.min(gapCount, BEATS));
-        java.util.Arrays.sort(sorted);
-        double middle = sorted[sorted.length / 2];
-        return middle <= 0 ? 0 : 60 / middle;
+    public StageMood() {
+        this(new SimpleCharacter());
+    }
+
+    /** @param character who reads the music where the piece does not say what it is */
+    public StageMood(SoundCharacter character) {
+        this.character = character;
+    }
+
+    /** What was heard in the music at the last picture, whatever the piece says of itself. */
+    public SoundCharacter.Heard heard() {
+        return heard;
+    }
+
+    /** The style the words about the piece name, as a word for the player; empty if they name none. */
+    public String named() {
+        return named == null ? "" : switch (named) {
+            case FIRE -> "Rock";
+            case LASER -> "Techno";
+            case CANDLE -> "Klassik";
+            case CLUB -> "Jazz";
+            case LANTERN -> "Country";
+            case SPOTS -> "Pop";
+            default -> "";
+        };
     }
 
     /** The mood of the stage for this picture. */
     public Mood at(SoundPicture sound, VisualSettings settings) {
         Mood fixed = fixed(settings.atmosphere());
-        listen(sound);
+        heard = character.hear(sound, settings);
+        if (!sound.style.equals(readStyle)) {
+            readStyle = sound.style;
+            named = fromWords(readStyle);
+        }
         if (fixed != null) {
             shown = fixed;
             wanted = fixed;
             return fixed;
-        }
-        if (!sound.style.equals(readStyle)) {
-            readStyle = sound.style;
-            named = fromWords(readStyle);
         }
         if (named != null) {
             // The piece says what it is: that is surer than anything heard in its sound.
@@ -170,7 +179,7 @@ public final class StageMood {
             wanted = named;
             return named;
         }
-        Mood heard = heard(sound, settings);
+        Mood heard = this.heard.mood() == null ? (shown == null ? Mood.CANDLE : shown) : this.heard.mood();
         if (shown == null) {
             shown = heard;
             wanted = heard;
@@ -182,50 +191,5 @@ public final class StageMood {
             shown = wanted;
         }
         return shown;
-    }
-
-    /** What the music asks for right now, before it has to hold. */
-    private Mood heard(SoundPicture sound, VisualSettings settings) {
-        if (!sound.sounding) {
-            return shown == null ? Mood.CANDLE : shown; // silence changes nothing
-        }
-        if (beatsPerMinute() >= settings.laserBpm()) {
-            return Mood.LASER;
-        }
-        if (bass >= settings.fireBass() && gapCount >= 3) {
-            return Mood.FIRE;
-        }
-        return Mood.CANDLE;
-    }
-
-    private void listen(SoundPicture sound) {
-        double seconds = sound.seconds;
-        double step = Double.isNaN(lastSeconds) ? 0 : Math.max(0, Math.min(1, seconds - lastSeconds));
-        lastSeconds = seconds;
-        if (sound.sounding) {
-            // A running average over about three seconds: the character of the passage, not of one note.
-            double share = bass < 0 ? 1 : Math.min(1, step / 3);
-            bass += bass < 0 ? sound.bass + 1 : (sound.bass - bass) * share;
-            loudness += loudness < 0 ? sound.loudness() + 1 : (sound.loudness() - loudness) * share;
-        }
-        if (seenBeats < 0) {
-            seenBeats = sound.beats;
-            return;
-        }
-        if (sound.beats != seenBeats) {
-            seenBeats = sound.beats;
-            if (!Double.isNaN(lastBeat)) {
-                double gap = seconds - lastBeat;
-                if (gap > 0 && gap < 2) {
-                    gaps[gapCount % BEATS] = gap;
-                    gapCount++;
-                } else {
-                    gapCount = 0; // a long pause: the tempo is read anew
-                }
-            }
-            lastBeat = seconds;
-        } else if (!Double.isNaN(lastBeat) && seconds - lastBeat > 4) {
-            gapCount = 0; // no beat for a long time: there is no tempo to speak of
-        }
     }
 }

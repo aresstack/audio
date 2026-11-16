@@ -55,6 +55,18 @@ public final class StageMoodTest {
     }
 
     @Test
+    public void anotherReaderOfTheMusicCanTakeThePlaceOfTheSimpleOne() {
+        SoundCharacter knowsBetter = (sound, settings) -> new SoundCharacter.Heard(100, StageMood.Mood.CLUB, "Jazz");
+        StageMood mood = new StageMood(knowsBetter);
+        StageMood.Mood shown = null;
+        for (int frame = 0; frame < 300; frame++) {
+            shown = mood.at(beating(frame, 140, 0.8f), SETTINGS);
+        }
+        assertEquals(StageMood.Mood.CLUB, shown);
+        assertEquals("Jazz", mood.heard().words());
+    }
+
+    @Test
     public void aFixedSettingIsKept() {
         VisualSettings fixed = SETTINGS.withAtmosphere("spots");
         assertEquals(StageMood.Mood.SPOTS, heard(140, 0.8f, fixed));
