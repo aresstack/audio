@@ -128,6 +128,8 @@ final class ScoreView extends JComponent implements Scrollable {
     private String hint = "";
     private double second = -1;
     private int shownSystem = -1;
+    /** The line of the sheet the AI was last seen writing on, see {@link #showBar}. */
+    private int writtenSystem = -1;
 
     ScoreView() {
         setOpaque(true);
@@ -231,6 +233,30 @@ final class ScoreView extends JComponent implements Scrollable {
             g.dispose();
             return java.awt.print.Printable.PAGE_EXISTS;
         };
+    }
+
+    /**
+     * Brings the line of the sheet with this bar into view: the bars the AI is writing. Only when
+     * the bar lies on another line than the last one asked for, so that the user can look around
+     * meanwhile. A negative bar forgets the last one.
+     */
+    void showBar(int bar) {
+        for (ScoreView follower : followers) {
+            follower.showBar(bar);
+        }
+        if (bar < 0) {
+            writtenSystem = -1;
+            return;
+        }
+        if (score == null || !isShowing()) {
+            return;
+        }
+        int system = Math.min(score.bars() - 1, bar) / barsPerSystem();
+        if (system != writtenSystem) {
+            writtenSystem = system;
+            scrollRectToVisible(new Rectangle(0, TOP + band() - 30 + system * systemHeight(), 10,
+                    Math.min(systemHeight() + 30, getVisibleRect().height)));
+        }
     }
 
     /** Where the playback is, in seconds; negative when nothing plays. */

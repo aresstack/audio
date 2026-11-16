@@ -299,6 +299,8 @@ public final class AudioStudioFrame extends JFrame {
     /** How many characters of the answers of the AI have arrived while composing, and how many notes are shown. */
     private long arrived;
     private int sketchNotes;
+    /** Where the AI is writing, so that the score follows it. */
+    private final SketchFront sketchFront = new SketchFront();
     private final Map<String, javax.swing.JToggleButton> pageKeys = new java.util.LinkedHashMap<String, javax.swing.JToggleButton>();
     /** Beside the choice of the piece under the name of the studio: new, open, and what is seldom needed. */
     private final JButton songMenuKey = new JButton("▾");
@@ -4920,6 +4922,8 @@ public final class AudioStudioFrame extends JFrame {
         trackTable.clearWork();
         arrived = 0;
         sketchNotes = 0;
+        sketchFront.begin();
+        scoreView.showBar(-1);
         notesDoneTold = false;
         statusLine.clearProgress();
         worker = new SwingWorker<Path, String>() {
@@ -5409,6 +5413,10 @@ public final class AudioStudioFrame extends JFrame {
                     || (worker != null && !worker.isDone())) {
                 return; // another piece is open, or the window works on its own
             }
+            if (!piece.equals(albumLive)) {
+                sketchFront.begin(); // the album begins this piece: its first picture is what is there
+                scoreView.showBar(-1);
+            }
             albumLive = piece;
             shown.run();
         });
@@ -5763,6 +5771,11 @@ public final class AudioStudioFrame extends JFrame {
             ArrangementView.Arrangement lanes = ArrangementView.Arrangement.of(arrangement);
             if (lanes != null) {
                 arrangementView.setArrangement(lanes, withAudioLanes(ids), "");
+                // The score runs along: the bars that arise come into view, also far from the start.
+                final int written = sketchFront.next(arrangement, lanes.barTicks);
+                if (written >= 0) {
+                    SwingUtilities.invokeLater(() -> scoreView.showBar(written)); // once the paper has its new size
+                }
             }
         } catch (RuntimeException unreadable) {
             // a picture on the way that cannot be drawn is left out; the next one comes at once
