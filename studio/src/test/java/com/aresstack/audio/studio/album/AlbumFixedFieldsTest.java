@@ -78,4 +78,15 @@ public class AlbumFixedFieldsTest {
         assertTrue(model.prompts().get(0).contains("ein ruhiger Walzer"));
         assertFalse("one title has no main theme", model.prompts().get(0).contains("mainTheme"));
     }
+
+    @Test
+    public void aPieceWithoutALengthInTheAnswerIsNotHalfAnHourLong() throws Exception {
+        FakeChatModel model = new FakeChatModel((instruction, prompt) -> "{\"tracks\":[{\"title\":\"Techno\","
+                + "\"tempoBpm\":123,\"key\":\"A minor\",\"meter\":\"4/4\"}]}");
+        CompositionSpec planned = PieceSpecPlanner.plan(model, 4096, "Melodic Techno, 122-124 BPM",
+                CompositionSpec.of(32, 108, Key.C_MAJOR, 4, 4), Set.of(), null, line -> { });
+        assertEquals(123, planned.bpm());
+        assertTrue("was 925 bars (half an hour): " + planned.bars(),
+                planned.seconds() <= AlbumConcept.DEFAULT_MAX_SECONDS);
+    }
 }
