@@ -1,6 +1,7 @@
 package com.aresstack.audio.studio.album;
 
 import com.aresstack.audio.studio.album.AlbumProductionState.Status;
+import com.aresstack.audio.studio.application.PieceVersions;
 import com.aresstack.audio.studio.application.SongLibrary;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -90,14 +91,27 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
 
     /**
      * The user wants the piece of a title made again, also if it is finished: it waits for the
-     * next start. Its folder stays; what is in it is used as far as it still fits.
+     * next start. A piece that has notes is not written over: all of it is set aside as an
+     * earlier version ({@link PieceVersions}), from where it comes back whenever the user wants,
+     * and the new one begins in the empty folder. If the piece cannot be set aside (a file of it
+     * is in use), nothing is changed and this throws.
+     *
+     * @return the version the piece became, or {@code null} if it had no notes to keep
      */
-    public void again(String albumId, String trackId) throws IOException {
+    public PieceVersions.Version again(String albumId, String trackId) throws IOException {
         synchronized (running) {
             if (running.contains(albumId)) {
                 throw new IllegalStateException("Dieses Album wird gerade produziert.");
             }
+            Album album = albums.album(albumId)
+                    .orElseThrow(() -> new IOException("Das Album \"" + albumId + "\" lässt sich nicht lesen."));
+            AlbumTrack track = album.track(trackId);
+            PieceVersions.Version kept = null;
+            if (track != null && pieceThere(track) && PieceVersions.hasNotes(pieceFolder(track))) {
+                kept = PieceVersions.setAside(pieceFolder(track));
+            }
             state(albumId).with(trackId, Status.QUEUED).save(albums.folder(albumId));
+            return kept;
         }
     }
 
@@ -213,6 +227,7 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
             }
             AlbumTrack track;
             Path piece;
+            byte[] wordsBefore; // the name and description the piece had, in case it is not this album's to make
             try {
                 synchronized (lock) {
                     track = album.track(trackId);
@@ -225,6 +240,8 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
                         albums.save(album); // first the album knows its piece, then the piece is filled
                     }
                     piece = pieceFolder(track);
+                    wordsBefore = Files.isRegularFile(piece.resolve(SongLibrary.FILE_NAME))
+                            ? Files.readAllBytes(piece.resolve(SongLibrary.FILE_NAME)) : null;
                     // Notes given for the title bind the piece: it is made from them, not composed freely.
                     new AlbumTemplates(albums).intoPiece(album.id(), trackId, piece);
                     // The piece keeps its own words; what it is told about its album is added for the AI only.
@@ -248,6 +265,10 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
                 synchronized (lock) {
                     set(trackId, Status.DONE, "", produced.seconds());
                 }
+            } catch (com.aresstack.audio.studio.application.OtherPieceException own) {
+                // The folder holds a piece of the user's that was planned otherwise. Nothing of it was
+                // touched but its words, which go back; it stays the user's own piece in the album.
+                leaveOwnPiece(told, piece, wordsBefore, own);
             } catch (Exception failed) {
                 if (cancelled) {
                     synchronized (lock) {
@@ -262,6 +283,36 @@ public final class AlbumProducer implements AlbumProductionCoordinator {
                     }
                 } else {
                     fail(trackId, failed);
+                }
+            }
+        }
+
+        private void leaveOwnPiece(AlbumTrack track, Path piece, byte[] wordsBefore, Exception why) {
+            try {
+                Path words = piece.resolve(SongLibrary.FILE_NAME);
+                if (wordsBefore != null) {
+                    if (!java.util.Arrays.equals(wordsBefore, Files.readAllBytes(words))) {
+                        Files.write(words, wordsBefore);
+                    }
+                } else {
+                    Files.deleteIfExists(words);
+                }
+            } catch (IOException unwritten) {
+                // told below with the rest
+            }
+            try {
+                listener.progress(track, "„" + track.title() + "“ bleibt, wie es ist: " + why.getMessage()
+                        + " Mit „Neue Fassung“ entsteht es nach den Vorgaben des Albums neu; die jetzige Fassung"
+                        + " bleibt dabei erhalten.");
+            } catch (RuntimeException unheard) {
+                // telling it must not keep the title from getting its state
+            }
+            synchronized (lock) {
+                try {
+                    set(track.id(), Status.PLANNED, "", 0);
+                } catch (IOException unwritten) {
+                    state = state.with(track.id(), Status.PLANNED, "", 0);
+                    listener.changed(album, state);
                 }
             }
         }

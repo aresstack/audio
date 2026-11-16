@@ -79,6 +79,14 @@ final class AlbumTree extends JPanel {
         default void deleteTitle(String albumId, String trackId) {
         }
 
+        /** An earlier version of the piece of a title is the piece again; the one until now becomes a version. */
+        default void restoreVersion(String albumId, String trackId, String versionId) {
+        }
+
+        /** A new album whose concept starts from the piece of this title; the piece stays where it is. */
+        default void newAlbumFrom(String albumId, String trackId) {
+        }
+
         /** Produces this one title now, with its album as context, as the album page does. */
         default void produceTitle(String albumId, String trackId) {
             albumClicked(albumId);
@@ -410,8 +418,28 @@ final class AlbumTree extends JPanel {
                     host.plannedClicked(album, track);
                 }
             }));
-            menu.add(item(title.folder() == null ? "Im Album produzieren" : "Im Album neu produzieren",
-                    () -> host.produceTitle(album, track)));
+            JMenuItem produce = item(title.folder() == null ? "Im Album produzieren" : "Neue Fassung produzieren",
+                    () -> host.produceTitle(album, track));
+            produce.setToolTipText(title.folder() == null ? "Lässt die KI diesen Titel nach den Vorgaben des Albums machen"
+                    : "Macht diesen Titel nach den Vorgaben des Albums neu. Die bisherige Fassung wird nicht"
+                    + " überschrieben: sie bleibt erhalten und lässt sich zurückholen");
+            menu.add(produce);
+            if (title.folder() != null) {
+                java.util.List<com.aresstack.audio.studio.application.PieceVersions.Version> earlier =
+                        com.aresstack.audio.studio.application.PieceVersions.list(title.folder());
+                if (!earlier.isEmpty()) {
+                    javax.swing.JMenu back = new javax.swing.JMenu("Frühere Fassung zurückholen");
+                    for (com.aresstack.audio.studio.application.PieceVersions.Version version : earlier) {
+                        back.add(item("Fassung vom " + version.label(),
+                                () -> host.restoreVersion(album, track, version.id())));
+                    }
+                    menu.add(back);
+                }
+                JMenuItem from = item("Neues Album daraus", () -> host.newAlbumFrom(album, track));
+                from.setToolTipText("Legt ein neues Album an, dessen Beschreibung und Stil von diesem Stück ausgehen;"
+                        + " das Stück selbst bleibt, wo und wie es ist");
+                menu.add(from);
+            }
             menu.add(item("Umbenennen …   (F2)", () -> host.renameTitle(album, track)));
             javax.swing.JMenu into = new javax.swing.JMenu("In Album verschieben");
             for (int i = 0; i < root.getChildCount(); i++) {

@@ -68,6 +68,7 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
                 new java.util.TreeSet<String>(List.of("addVoice", "composeAgain", "editForm", "extendPiece",
                         "generateBars", "insertBars", "intensityOverBars", "performance", "pieceChanged", "reorchestrate", "resumePiece" /* Komponieren goes on with an unfinished piece */, "reworkRegion", "sectionIntensity",
                         "showRevisions", "showSections", "silent" /* only reads whether bars hold notes */,
+                        "tracksFromNotes" /* only reads the notes; the tracks beside them become theirs again */,
                         "undoPiece",
                         "popupMenuWillBecomeVisible", "savedPiece" /* its own header */)),
                 new java.util.TreeSet<String>(callers(source, "savedPiece\\(\\)")));

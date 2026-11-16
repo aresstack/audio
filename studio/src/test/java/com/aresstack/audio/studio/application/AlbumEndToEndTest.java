@@ -1,6 +1,8 @@
 package com.aresstack.audio.studio.application;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import com.aresstack.audio.instruments.InstrumentRegistry;
@@ -24,6 +26,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Rule;
@@ -41,7 +44,16 @@ public final class AlbumEndToEndTest {
 
     /** Answers the album plan and the proposal of the players itself, plan and notes of a piece as the fake model does. */
     private static final class Model implements ChatModel {
-        final FakeChatModel piece = new FakeChatModel("C", "G", "Am", "F");
+        final FakeChatModel piece;
+
+        Model() {
+            this("C", "G", "Am", "F");
+        }
+
+        Model(String... chords) {
+            piece = new FakeChatModel(chords);
+        }
+
         final AtomicInteger atOnce = new AtomicInteger();
         final AtomicInteger most = new AtomicInteger();
         final AtomicInteger proposals = new AtomicInteger();
@@ -144,6 +156,136 @@ public final class AlbumEndToEndTest {
         assertTrue("the stems come from the stem cache: " + said,
                 said.stream().anyMatch(line -> line.contains("unverändert übernommen")));
         assertEquals("and the model is not asked again", asked, model.piece.prompts.size());
+    }
+
+    /**
+     * The user pressed "Im Album produzieren" on a favourite piece of the unnamed album: the
+     * production chose new instruments, wrote them, the stage and other words into the piece, and
+     * only then the composer refused it (the piece was planned with the old defaults). The score
+     * was empty afterwards. Now a piece planned otherwise is left exactly as it is, the AI is not
+     * even asked, and it stays the user's own piece. Making it anew sets all of it aside as a
+     * version first, from where it comes back byte for byte.
+     */
+    @Test
+    public void aPieceOfTheUsersIsNeverWrittenOverByTheAlbum() throws Exception {
+        Path library = temporary.newFolder("own").toPath();
+        SongLibrary songs = new SongLibrary(library);
+        AlbumFiles files = new AlbumFiles(library);
+        Model model = new Model(CompositionSpec.LEGACY_CHORDS.toArray(new String[0]));
+        ModelLineup lineup = ModelLineup.of(new LimitedChatModel(model, new Semaphore(2, true)));
+        PieceAutopilot autopilot = new PieceAutopilot(new InstrumentRegistry(library.resolve("none.properties")),
+                lineup, 4096, 8, PieceAutopilot.Rendering.BUILT_IN);
+
+        // The user's own piece, composed alone with the old defaults.
+        Path own = songs.create("Pastel Bloom City");
+        songs.save(own, null, "a cozy city tune");
+        PieceModel window = new PieceModel(line -> { });
+        window.open(own);
+        autopilot.run("a cozy city tune", own, null, null, songs, window, line -> { }, null);
+        assertTrue(GemmaMusicComposer.specOf(own).isLegacy());
+        List<String> kept = List.of("arrangement.tsv", "tracks.json", "composition.json", "composition-plan.json",
+                "instrument-proposal.json", SongLibrary.FILE_NAME, SpatialSceneStore.FILE_NAME, StageMixService.MIX_FILE);
+        java.util.Map<String, byte[]> before = new java.util.LinkedHashMap<String, byte[]>();
+        for (String name : kept) {
+            before.put(name, Files.readAllBytes(own.resolve(name)));
+        }
+
+        // What the fault left behind before this was mended: other instruments, their stage and
+        // other words beside the notes, which were never touched. The tracks and the stage of the
+        // notes come back from the model ("Besetzung aus den Noten zurückholen").
+        TrackArrangement lineUp = new TrackArrangementStore().load(own);
+        SpatialSceneStore stages = new SpatialSceneStore();
+        com.aresstack.audio.studio.stage.SpatialScene stage = stages.load(own);
+        List<MusicTrack> others = List.of(new MusicTrack("pad", "harmony", "Warm Pad", 89, "builtin"),
+                new MusicTrack("kit", "drums", "Drums", 0, "builtin"));
+        new TrackArrangementStore().save(own, new TrackArrangement(others));
+        stages.save(own, stage.fitting(others));
+        PieceModel damaged = new PieceModel(line -> { });
+        damaged.open(own);
+        LineUpOfNotes.LineUp back = LineUpOfNotes.of(damaged.session().orElseThrow(), stages.load(own));
+        assertEquals(lineUp.tracks().stream().map(MusicTrack::id).toList(),
+                back.tracks().stream().map(MusicTrack::id).toList());
+        for (int i = 0; i < lineUp.tracks().size(); i++) {
+            MusicTrack was = lineUp.tracks().get(i);
+            MusicTrack now = back.tracks().get(i);
+            assertEquals(was.role(), now.role());
+            assertEquals(was.instrument(), now.instrument());
+            assertEquals(was.program(), now.program());
+            assertEquals(was.libraryId(), now.libraryId());
+            assertEquals("where " + was.id() + " stands", stage.placement(was.id()).x(),
+                    back.stage().placement(was.id()).x(), 1e-9);
+            assertEquals(stage.placement(was.id()).depth(), back.stage().placement(was.id()).depth(), 1e-9);
+            assertEquals(stage.placement(was.id()).levelDb(), back.stage().placement(was.id()).levelDb(), 1e-9);
+        }
+        assertEquals(lineUp.tracks().size(), back.stage().placements().size());
+        new TrackArrangementStore().save(own, new TrackArrangement(back.tracks()));
+        stages.save(own, back.stage());
+        for (String name : kept) {
+            before.put(name, Files.readAllBytes(own.resolve(name)));
+        }
+
+        // It is a title of an album, with what its plan says about it (as in the unnamed album),
+        // and the fault left it as failed: "Fehlende Titel produzieren" takes it up.
+        Album album = files.create("Unbenanntes Album", new AlbumConcept("", "", 1, 18));
+        AlbumTrack title = new AlbumTrack("t1", "Pastel Bloom City", "playful", 108, "C major", "4/4", "", "", 18,
+                own.getFileName().toString());
+        files.save(album.withTracks(List.of(title)));
+        assertFalse("the same bars, tempo and key, but not bound to the old harmonies",
+                title.spec().equals(GemmaMusicComposer.specOf(own)));
+        AlbumProducer producer = new AlbumProducer(files, songs, new AutopilotPieceProduction(autopilot, songs), 1);
+        producer.state(album.id()).with("t1", Status.FAILED, "Dieses Stück ist als ... geplant", 0)
+                .save(files.folder(album.id()));
+        int proposals = model.proposals.get();
+        int asked = model.piece.prompts.size();
+        List<String> told = java.util.Collections.synchronizedList(new java.util.ArrayList<String>());
+
+        AlbumProductionState state = producer.start(album.id(), new com.aresstack.audio.studio.album
+                .AlbumProductionCoordinator.Listener() {
+            @Override
+            public void changed(Album now, AlbumProductionState at) {
+            }
+
+            @Override
+            public void progress(AlbumTrack track, String message) {
+                told.add(message);
+            }
+        }).await();
+
+        assertEquals("it stays the user's own piece, not a failed title", Status.PLANNED, state.status("t1"));
+        for (String name : kept) {
+            assertTrue(name + " is as it was", java.util.Arrays.equals(before.get(name),
+                    Files.readAllBytes(own.resolve(name))));
+        }
+        assertEquals("the AI is not asked for new instruments", proposals, model.proposals.get());
+        assertEquals(asked, model.piece.prompts.size());
+        assertTrue(told.toString(), told.stream().anyMatch(line -> line.contains("bleibt, wie es ist")
+                && line.contains("Neue Fassung")));
+        // A whole album production leaves it alone as well.
+        producer.start(album.id(), (now, at) -> { }).await();
+        assertTrue(java.util.Arrays.equals(before.get("tracks.json"), Files.readAllBytes(own.resolve("tracks.json"))));
+
+        // "Neue Fassung": all the piece is goes aside, then it is made as the album asks.
+        PieceVersions.Version first = producer.again(album.id(), "t1");
+        assertNotNull(first);
+        for (String name : kept) {
+            assertTrue(name + " lies in the version", java.util.Arrays.equals(before.get(name),
+                    Files.readAllBytes(first.folder().resolve(name))));
+        }
+        state = producer.start(album.id(), (now, at) -> { }).await();
+        assertEquals(state.of("t1").reason(), Status.DONE, state.status("t1"));
+        assertEquals(title.spec(), GemmaMusicComposer.specOf(own));
+        assertEquals("the version is untouched by the new production", List.of(first), PieceVersions.list(own));
+
+        // The favourite comes back, byte for byte, and the new one is a version now.
+        PieceVersions.Version made = PieceVersions.restore(own, first.id());
+        assertNotNull(made);
+        for (String name : kept) {
+            assertTrue(name + " is back", java.util.Arrays.equals(before.get(name), Files.readAllBytes(own.resolve(name))));
+        }
+        assertEquals(title.spec(), GemmaMusicComposer.specOf(made.folder()));
+        PieceModel again = new PieceModel(line -> { });
+        again.open(own);
+        assertTrue("and it opens as the piece it was", again.session().isPresent());
     }
 
     /**
