@@ -34,6 +34,17 @@ public record ContextTiers(Tier tier, boolean compact, List<Window> windows) {
      * only: a piece grows step by step, and the request of a step must not grow with it.
      */
     public static final int NEAR_BARS = 128;
+    private static volatile int nearBars = NEAR_BARS;
+
+    /** Sets how many bars back form and summaries are told in a long piece; 0 tells the whole piece. */
+    public static void lookBack(int bars) {
+        nearBars = Math.max(0, bars);
+    }
+
+    /** How many bars back form and summaries are told in a long piece; 0: the whole piece. */
+    public static int lookBack() {
+        return nearBars;
+    }
 
     public enum Tier { FULL, WINDOWED, LONG }
 

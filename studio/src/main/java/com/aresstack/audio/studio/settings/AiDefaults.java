@@ -84,6 +84,17 @@ public final class AiDefaults {
     }
 
 
+    /** How many bars back a long piece is told to the AI that continues it ({@code lookBackBars}; 0: the whole piece). */
+    public static int lookBackBars(Properties settings) {
+        return number(settings, "lookBackBars", com.aresstack.audio.studio.ai.ContextTiers.NEAR_BARS, 0, 100000);
+    }
+
+    /** The room for the answer of one section of a continuation in tokens per bar ({@code answerTokensPerBar}; 0: always the most). */
+    public static int answerTokensPerBar(Properties settings) {
+        return number(settings, "answerTokensPerBar", com.aresstack.audio.studio.ai.ChatSectionGenerator.TOKENS_PER_BAR,
+                0, 8192);
+    }
+
     /** How often an answer cut off at its limit is asked for again ({@code longerAnswers}, 0 to 6). */
     public static int longerAnswers(Properties settings) {
         return number(settings, "longerAnswers", com.aresstack.audio.studio.ai.KipitzChatClient.LONGER_ANSWERS, 0, 6);
