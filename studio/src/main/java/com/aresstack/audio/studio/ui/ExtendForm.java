@@ -56,6 +56,14 @@ final class ExtendForm extends JPanel {
     private final JSpinner newParts = new JSpinner(new SpinnerNumberModel(0, 0, ContinuationRequest.MAX_NEW_PARTS, 1));
     private final JComboBox<String> curve = new JComboBox<String>(CURVE_NAMES);
     private final JLabel problem = new JLabel(" ");
+    /** "um … Takte" (one step) or "auf insgesamt … Minuten" (as many steps as that takes). */
+    private final javax.swing.JRadioButton byBars = new javax.swing.JRadioButton("um", true);
+    private final javax.swing.JRadioButton toTotal = new javax.swing.JRadioButton("auf insgesamt");
+    private final JSpinner totalMinutes = new JSpinner(new javax.swing.SpinnerNumberModel(30.0, 0.5,
+            com.aresstack.audio.studio.album.AlbumConcept.MAX_SECONDS / 60.0, 0.5));
+    private final Composition piece;
+    /** What the user asked for once the form is closed with the key; {@code null} if they gave up. */
+    private Extension asked;
     /** Whether the number of new instruments still follows the preset; a number the user set stays. */
     private boolean newPartsFollow = true;
     private boolean settingNewParts;
@@ -67,6 +75,7 @@ final class ExtendForm extends JPanel {
     ExtendForm(Composition piece, int pieceBars, int insertAt) {
         super(new GridBagLayout());
         inserting = insertAt > 0;
+        this.piece = piece;
         parts = piece.parts();
         int last = Math.max(1, pieceBars);
         before = new JSpinner(new SpinnerNumberModel(Math.max(1, Math.min(last, insertAt)), 1, last, 1));
@@ -120,7 +129,28 @@ final class ExtendForm extends JPanel {
         if (inserting) {
             row = line(this, row, "Vor Takt", before);
         }
-        row = line(this, row, inserting ? "Neue Takte" : "Takte", bars);
+        if (inserting) {
+            row = line(this, row, "Neue Takte", bars);
+        } else {
+            // One step of the given bars, or as many steps as it takes to a whole length, like the
+            // first composition of a long piece.
+            javax.swing.ButtonGroup how = new javax.swing.ButtonGroup();
+            how.add(byBars);
+            how.add(toTotal);
+            double now = piece.timeMap().seconds(piece.endTick()) / 60.0;
+            totalMinutes.setValue(Math.max(30.0, Math.ceil(now * 2 + 1) / 2));
+            toTotal.setToolTipText("Verlängert in so vielen Schritten (je „Takte je Schritt“ aus den Einstellungen),"
+                    + " bis das Stück so lang ist; nur der letzte Schritt bekommt das gewählte Ende");
+            JPanel length = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+            length.setOpaque(false);
+            length.add(byBars);
+            length.add(bars);
+            length.add(new JLabel("Takte   oder"));
+            length.add(toTotal);
+            length.add(totalMinutes);
+            length.add(new JLabel("Minuten"));
+            row = line(this, row, "Verlängern", length);
+        }
         row = line(this, row, "Art", preset);
         JScrollPane words = new JScrollPane(instruction);
         words.setPreferredSize(new Dimension(360, 70));
@@ -166,31 +196,34 @@ final class ExtendForm extends JPanel {
     }
 
     /** Shows the form for a longer piece in a dialog and waits; the request, or {@code null} if the user gave up. */
-    static ContinuationRequest ask(Window owner, Composition piece, int pieceBars, int newBars) {
+    static Extension ask(Window owner, Composition piece, int pieceBars, int newBars) {
         ExtendForm form = new ExtendForm(piece, pieceBars, 0);
         form.bars.setValue(Math.max(1, Math.min(ContinuationRequest.MAX_BARS, newBars)));
-        return ask(owner, form, "Stück verlängern",
+        ask(owner, form, "Stück verlängern",
                 "<html>Die KI plant die neuen Takte (Abschnitte, Akkorde, Besetzung) und schreibt sie dann. Die neuen"
                         + " Takte<br>kommen direkt ans Ende des Stücks; „Rückgängig“ nimmt sie wieder weg.</html>",
                 "Verlängern lassen");
+        return form.asked;
     }
 
     /** Shows the form for new bars within the piece (C4); the request, or {@code null} if the user gave up. */
     static ContinuationRequest askInsert(Window owner, Composition piece, int pieceBars, int beforeBar) {
-        return ask(owner, new ExtendForm(piece, pieceBars, Math.max(1, beforeBar)), "Takte einfügen",
+        ExtendForm form = new ExtendForm(piece, pieceBars, Math.max(1, beforeBar));
+        ask(owner, form, "Takte einfügen",
                 "<html>Die KI schreibt neue Takte vor dem gewählten Takt; alles ab dort rückt unverändert nach"
                         + " hinten.<br>Die Takte kommen direkt ins Stück; „Rückgängig“ nimmt sie wieder heraus.</html>",
                 "Einfügen lassen");
+        return form.asked == null ? null : form.asked.request();
     }
 
-    private static ContinuationRequest ask(Window owner, final ExtendForm form, String title, String said, String go) {
+    private static void ask(Window owner, final ExtendForm form, String title, String said, String go) {
         final JDialog dialog = new JDialog(owner, title, java.awt.Dialog.ModalityType.APPLICATION_MODAL);
-        final ContinuationRequest[] request = new ContinuationRequest[1];
         JButton compose = new JButton(go);
         JButton cancel = new JButton("Abbrechen");
         compose.addActionListener(event -> {
             try {
-                request[0] = form.read();
+                ContinuationRequest request = form.read();
+                form.asked = new Extension(request, form.totalBars());
                 dialog.dispose();
             } catch (RuntimeException invalid) {
                 form.problem.setText(invalid.getMessage());
@@ -211,7 +244,32 @@ final class ExtendForm extends JPanel {
         dialog.pack();
         dialog.setLocationRelativeTo(owner);
         dialog.setVisible(true);
-        return request[0];
+    }
+
+    /**
+     * What the user asked for: one step ({@code totalBars} 0), or steps until the piece has
+     * {@code totalBars} bars, each like {@code request} but for its bars.
+     */
+    record Extension(ContinuationRequest request, int totalBars) {
+    }
+
+    /** The bars the piece shall have in the end with "auf insgesamt"; 0 for one step of the bars given. */
+    int totalBars() {
+        if (inserting || !toTotal.isSelected()) {
+            return 0;
+        }
+        double seconds = ((Number) totalMinutes.getValue()).doubleValue() * 60;
+        int total = com.aresstack.audio.studio.application.PieceGrowth.barsLasting(piece, seconds);
+        if (total <= piece.timeMap().barsCovering(piece.endTick())) {
+            throw new IllegalArgumentException("Das Stück ist schon so lang; eine längere Gesamtlänge wählen.");
+        }
+        return total;
+    }
+
+    /** Chooses "auf insgesamt … Minuten"; for tests. */
+    void chooseTotal(double minutes) {
+        toTotal.setSelected(true);
+        totalMinutes.setValue(minutes);
     }
 
     private static int line(JPanel form, int row, String label, JComponent field) {

@@ -246,34 +246,16 @@ public final class PieceAutopilot {
         if (words.length() > 600) {
             words = words.substring(0, 600);
         }
-        int have = bars(session);
-        while (have < target) {
-            int step = Math.min(growBars, target - have);
-            boolean last = have + step >= target;
-            progress.update("Verlängere das Stück von " + have + " auf " + (have + step) + " von " + target
-                    + " Takten ...");
-            com.aresstack.audio.studio.ai.ContinuationRequest request =
-                    com.aresstack.audio.studio.ai.ContinuationRequest.of(step,
-                            com.aresstack.audio.studio.ai.ContinuationPreset.STANDALONE,
-                            last ? com.aresstack.audio.studio.ai.ContinuationEnding.CLOSED
-                                    : com.aresstack.audio.studio.ai.ContinuationEnding.OPEN, words);
-            ExtensionOffer offer = ExtensionOffer.start(session,
-                    com.aresstack.audio.studio.ai.ContinuationComposer.with(models, maxParallel), request, progress);
-            offer.confirm(); // nothing of the original is shortened when appending; no one to ask here
-            offer.accept();
-            int now = bars(session);
-            if (now <= have) {
-                throw new java.io.IOException("Die Verlängerung hat dem Stück keine Takte gegeben (bei Takt "
-                        + have + ").");
-            }
-            have = now;
-        }
+        PieceGrowth.grow(session, () -> com.aresstack.audio.studio.ai.ContinuationComposer.with(models, maxParallel),
+                com.aresstack.audio.studio.ai.ContinuationRequest.of(1,
+                        com.aresstack.audio.studio.ai.ContinuationPreset.STANDALONE,
+                        com.aresstack.audio.studio.ai.ContinuationEnding.CLOSED, words),
+                target, growBars, progress);
         return folder.resolve("arrangement.tsv");
     }
 
     private static int bars(ProjectSession session) {
-        com.aresstack.audio.composition.Composition piece = session.composition();
-        return piece.timeMap().barsCovering(piece.endTick());
+        return PieceGrowth.bars(session);
     }
 
     /** Stops the requests to the models that are running. */

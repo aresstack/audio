@@ -3333,9 +3333,21 @@ public final class AudioStudioFrame extends JFrame {
         if (busy()) {
             return;
         }
-        final com.aresstack.audio.studio.ai.ContinuationRequest request =
-                ExtendForm.ask(this, piece.get().composition(), arrangementView.bars(), (Integer) growBars.getValue());
-        if (request == null) {
+        final int step = (Integer) growBars.getValue();
+        final ExtendForm.Extension asked =
+                ExtendForm.ask(this, piece.get().composition(), arrangementView.bars(), step);
+        if (asked == null) {
+            return;
+        }
+        final com.aresstack.audio.studio.ai.ContinuationRequest request = asked.request();
+        if (asked.totalBars() > 0) {
+            // As many steps as it takes, like the first composition of a long piece: each is taken
+            // at once, the last as the result ("Rückgängig" takes back one step at a time).
+            offerFromAi(piece.get(), "Das Stück wird auf " + asked.totalBars() + " Takte verlängert, in Schritten"
+                    + " zu höchstens " + step + " Takten (" + request.preset().label() + ").",
+                    (session, model, progress) -> com.aresstack.audio.studio.application.PieceGrowth.growTo(session,
+                            () -> com.aresstack.audio.studio.ai.ContinuationComposer.with(model, partsAtOnce()),
+                            request, asked.totalBars(), step, progress));
             return;
         }
         offerFromAi(piece.get(), "Das Stück wird um " + request.bars()
