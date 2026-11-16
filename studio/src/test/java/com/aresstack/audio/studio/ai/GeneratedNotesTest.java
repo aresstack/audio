@@ -33,6 +33,25 @@ public final class GeneratedNotesTest {
     }
 
     @Test
+    public void notesInTheShortFormOfThePromptAreRead() throws IOException {
+        // Test Techno, 2026-11-16: answers of thousands of characters counted as "list is empty".
+        GeneratedNotes named = GeneratedNotes.read(json("{\"part\":\"tp\",\"section\":\"a\",\"notes\":["
+                + "{\"bar\":2,\"beat\":1,\"dur\":0.5,\"pitch\":40,\"vel\":70}]}"), "tp", "a");
+        org.junit.Assert.assertEquals(1, named.notes().size());
+        org.junit.Assert.assertEquals(0.5, named.notes().get(0).duration(), 0);
+        org.junit.Assert.assertEquals(70, named.notes().get(0).velocity());
+        GeneratedNotes rows = GeneratedNotes.read(json("{\"part\":\"tp\",\"section\":\"a\",\"notes\":["
+                + "[1,0,0.5,36,90],\"2 1.5 0.25 38 80\"]}"), "tp", "a");
+        org.junit.Assert.assertEquals(2, rows.notes().size());
+        org.junit.Assert.assertEquals(38, rows.notes().get(1).pitch());
+        org.junit.Assert.assertEquals(2, rows.notes().get(1).bar(), 0);
+        GeneratedNotes grouped = GeneratedNotes.read(json("{\"part\":\"tp\",\"section\":\"a\",\"notes\":["
+                + "{\"bar\":3,\"notes\":[{\"beat\":0,\"duration\":1,\"pitch\":60}]}]}"), "tp", "a");
+        org.junit.Assert.assertEquals(1, grouped.notes().size());
+        org.junit.Assert.assertEquals(3, grouped.notes().get(0).bar(), 0);
+    }
+
+    @Test
     public void anAnswerWithoutPartIsTheAnswerForThePartAskedFor() throws IOException {
         // Flockentanz, 2026-11-15: the model left out "part"; the answer is to this request.
         GeneratedNotes read = GeneratedNotes.read(json(
