@@ -51,6 +51,20 @@ public final class StageFigures {
         this.listener = listener;
     }
 
+    /**
+     * Whether only the figures the studio brings along are shown. What the AI drew stays in the
+     * library and in the cast of the piece and is shown again when this is switched off.
+     */
+    public synchronized void houseOnly(boolean only) {
+        houseOnly = only;
+    }
+
+    public synchronized boolean houseOnly() {
+        return houseOnly;
+    }
+
+    private volatile boolean houseOnly;
+
     public FigureLibrary library() {
         return library;
     }
@@ -88,7 +102,7 @@ public final class StageFigures {
             FigureCast.Seat seat = seat(trackId);
             instrument = seat == null ? "" : seat.instrument();
         }
-        BufferedImage drawn = library.picture(figure);
+        BufferedImage drawn = houseOnly ? null : library.picture(figure);
         return drawn != null ? drawn : HouseFigures.picture(instrument + " " + trackId, trackId);
     }
 

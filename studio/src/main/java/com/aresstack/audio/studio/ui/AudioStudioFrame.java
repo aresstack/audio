@@ -4810,6 +4810,7 @@ public final class AudioStudioFrame extends JFrame {
             progressLinger.setValue(lingerSeconds(saved));
             statusLine.setLingerSeconds((Integer) progressLinger.getValue());
             figureLook = com.aresstack.audio.studio.figure.FigureSettings.from(saved);
+            stageFigures.houseOnly(Boolean.parseBoolean(saved.getProperty("stageFiguresHouse", "false")));
             figureBob = com.aresstack.audio.studio.figure.FigureSettings.bob(saved);
             player.figuresFrom(this::figureOf, figureLook.height());
             // The player of the album page: when a title counts as heard, only new titles, overlap.
@@ -4917,6 +4918,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("arrangementFit", String.valueOf(fitArrangement.isSelected()));
             saved.setProperty("progressLingerSeconds", progressLinger.getValue().toString());
             figureLook.into(saved);
+            saved.setProperty("stageFiguresHouse", String.valueOf(stageFigures.houseOnly()));
             saved.setProperty(com.aresstack.audio.studio.figure.FigureSettings.BOB, String.valueOf(figureBob));
             saved.setProperty("albumHeardPercent", Integer.toString(albumHeardPercent));
             saved.setProperty("albumCrossfadeSeconds", Double.toString(albumCrossfadeSeconds));
@@ -6221,6 +6223,16 @@ public final class AudioStudioFrame extends JFrame {
         load.addActionListener(event -> loadModelNames(false));
         models.add(load);
         menu.add(models);
+        javax.swing.JCheckBoxMenuItem house = new javax.swing.JCheckBoxMenuItem("Standardfiguren verwenden",
+                stageFigures.houseOnly());
+        house.setToolTipText("Zeigt die mitgelieferten Figuren statt der von der KI gezeichneten; "
+                + "die gezeichneten bleiben erhalten und kommen wieder, wenn der Haken weg ist");
+        house.addActionListener(event -> {
+            stageFigures.houseOnly(house.isSelected());
+            saveSettings(false);
+            message(house.isSelected() ? "Die Bühne zeigt die Standardfiguren." : "Die Bühne zeigt wieder die gezeichneten Figuren.");
+        });
+        menu.add(house);
         menu.addSeparator();
         for (JButton key : new JButton[]{drawFigures, otherFigures, undoFigures}) {
             javax.swing.JMenuItem item = new javax.swing.JMenuItem(key == drawFigures ? "Figuren zeichnen"
