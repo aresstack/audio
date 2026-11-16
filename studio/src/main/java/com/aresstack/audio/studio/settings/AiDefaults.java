@@ -11,7 +11,10 @@ import java.util.Properties;
  */
 public final class AiDefaults {
     public static final String MODEL = "google/gemma-4-31B-it";
-    public static final int MAX_TOKENS = 32768;
+    /** Tokens of one answer at most, as in the setup that is known to work; a cut-off answer is asked again with more. */
+    public static final int MAX_TOKENS = 16384;
+    /** Requests at the same time, as in the setup that is known to work. */
+    public static final int PARALLEL = 8;
 
     private AiDefaults() {
     }
