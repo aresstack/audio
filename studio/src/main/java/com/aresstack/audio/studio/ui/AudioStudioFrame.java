@@ -124,6 +124,9 @@ public final class AudioStudioFrame extends JFrame {
             com.aresstack.audio.studio.ai.ChatSectionGenerator.LEAST_TOKENS, 256, 65536, 256));
     private final JSpinner answerTokensSmallest = new JSpinner(new SpinnerNumberModel(
             com.aresstack.audio.studio.ai.KipitzChatClient.SMALLEST_ANSWER, 128, 65536, 128));
+    private final JSpinner contextWindow = new JSpinner(new SpinnerNumberModel(0, 0, 100000000, 1024));
+    private final JSpinner charsPerToken = new JSpinner(new SpinnerNumberModel(
+            com.aresstack.audio.studio.ai.KipitzChatClient.CHARS_PER_TOKEN, 0.5, 10.0, 0.1));
     private final JSpinner planTokens = new JSpinner(new SpinnerNumberModel(
             com.aresstack.audio.studio.ai.AnswerRoom.PLAN, 256, 1000000, 256));
     private final javax.swing.JCheckBox detailedLog = new javax.swing.JCheckBox("Erweitertes Protokoll");
@@ -2068,6 +2071,19 @@ public final class AudioStudioFrame extends JFrame {
         addRow(ai, row++, "Takte je Planungsschritt",
                 line(growBars, note("Keine Obergrenze: lange Stücke wachsen in Schritten dieser Größe bis zur geplanten Länge.")));
         growBars.addChangeListener(event -> specFields.suggestBars((Integer) growBars.getValue()));
+        contextWindow.setPreferredSize(new Dimension(110, 30));
+        contextWindow.setToolTipText("Das Kontextfenster des Modells in Token: Anfrage und Antwort müssen gemeinsam "
+                + "hineinpassen. Ist es gesetzt, senkt das Studio die Antwortgrenze einer Anfrage auf das, was die Anfrage "
+                + "übrig lässt, und meldet, wenn die Anfrage allein nicht hineinpasst. 0 = unbekannt, nichts wird angepasst");
+        charsPerToken.setPreferredSize(new Dimension(80, 30));
+        charsPerToken.setToolTipText("Für die Schätzung der Anfrage: so viele Zeichen ergeben ein Token. Noten und Zahlen "
+                + "brauchen eher wenige Zeichen je Token");
+        addRow(ai, row++, "Kontextfenster", line(contextWindow, note("Token; 0 = unbekannt."), charsPerToken,
+                note("Zeichen je Token (Schätzung der Anfrage).")));
+        javax.swing.event.ChangeListener windowChanged = event -> com.aresstack.audio.studio.ai.KipitzChatClient
+                .contextWindow((Integer) contextWindow.getValue(), ((Number) charsPerToken.getValue()).doubleValue());
+        contextWindow.addChangeListener(windowChanged);
+        charsPerToken.addChangeListener(windowChanged);
         planTokens.setPreferredSize(new Dimension(110, 30));
         planTokens.setToolTipText("So viele Token bekommt ein Plan oder Vorschlag der KI höchstens: der Plan einer "
                 + "Verlängerung, eines Arrangements, einer neuen Stimme, Instrumente, Abmischung, Bewegungen. "
@@ -4853,6 +4869,10 @@ public final class AudioStudioFrame extends JFrame {
             sectionBars.setValue(AiDefaults.sectionBars(saved));
             detailedLog.setSelected(Boolean.parseBoolean(saved.getProperty("detailedLog", "false")));
             growBars.setValue(AiDefaults.growBars(saved));
+            contextWindow.setValue(AiDefaults.contextWindow(saved));
+            charsPerToken.setValue(AiDefaults.charsPerToken(saved));
+            com.aresstack.audio.studio.ai.KipitzChatClient.contextWindow((Integer) contextWindow.getValue(),
+                    ((Number) charsPerToken.getValue()).doubleValue());
             planTokens.setValue(AiDefaults.planTokens(saved));
             com.aresstack.audio.studio.ai.AnswerRoom.plan((Integer) planTokens.getValue());
             lookBackBars.setValue(AiDefaults.lookBackBars(saved));
@@ -4976,6 +4996,8 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("sectionBars", sectionBars.getValue().toString());
             saved.setProperty("detailedLog", Boolean.toString(detailedLog.isSelected()));
             saved.setProperty("portionBars", growBars.getValue().toString());
+            saved.setProperty("contextWindow", contextWindow.getValue().toString());
+            saved.setProperty("charsPerToken", charsPerToken.getValue().toString());
             saved.setProperty("planTokens", planTokens.getValue().toString());
             saved.setProperty("lookBackBars", lookBackBars.getValue().toString());
             saved.setProperty("answerTokensPerBar", answerTokensPerBar.getValue().toString());

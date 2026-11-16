@@ -121,6 +121,20 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
         request.add("messages", messages);
 
         int budget = maxTokens;
+        // The context window of the model, if the user gave it: request and answer share it, so the
+        // limit of the answer is what the request leaves of it.
+        int window = contextWindow;
+        int left = Integer.MAX_VALUE;
+        if (window > 0) {
+            int asked = (int) Math.ceil((instruction.length() + prompt.length()) / charsPerToken);
+            left = window - asked;
+            if (left < smallestAnswer) {
+                throw new IOException("Die Anfrage allein hat etwa " + asked + " Token und lässt im Kontextfenster von "
+                        + window + " Token keinen Platz für eine Antwort (Einstellungen: „Kontextfenster“, „Zeichen je "
+                        + "Token“, „Rückblick beim Verlängern“; Modell " + name() + ").");
+            }
+            budget = Math.min(budget, left);
+        }
         int longer = 0;
         int troubled = 0;
         for (int attempt = 1; ; attempt++) {
@@ -132,12 +146,12 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
             String trouble;
             try {
                 Answer answer = gated(gson.toJson(request).getBytes(StandardCharsets.UTF_8), heard);
-                if ("length".equals(answer.finishReason) && longer < longerAnswers
+                if ("length".equals(answer.finishReason) && longer < longerAnswers && budget < left
                         && !cancelled && !Thread.currentThread().isInterrupted()) {
                     // Cut off at the limit: a model that thinks before it answers spends the tokens of
                     // its answer on that. Asked again with more room (studio.properties: longerAnswerFactor).
                     longer++;
-                    budget *= longerFactor;
+                    budget = (int) Math.min((long) budget * longerFactor, left);
                     continue;
                 }
                 if (!"stop".equals(answer.finishReason)) {
@@ -536,6 +550,22 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
     }
 
     /** The least room for an answer that is still asked for when the service finds a request too large. */
+    /** The context window of the models in tokens as the user gave it; 0: not known, nothing is fitted to it. */
+    private static volatile int contextWindow;
+    /** How many characters of a request make one token, for the estimate against the context window. */
+    public static final double CHARS_PER_TOKEN = 3.0;
+    private static volatile double charsPerToken = CHARS_PER_TOKEN;
+
+    /**
+     * Sets the context window of the model (tokens; 0: not known) and how many characters make a
+     * token in the estimate of a request. With a window, the limit of an answer is lowered to what
+     * the request leaves of it.
+     */
+    public static void contextWindow(int tokens, double charactersPerToken) {
+        contextWindow = Math.max(0, tokens);
+        charsPerToken = charactersPerToken > 0 ? charactersPerToken : CHARS_PER_TOKEN;
+    }
+
     public static final int SMALLEST_ANSWER = 1024;
     private static volatile int smallestAnswer = SMALLEST_ANSWER;
 
