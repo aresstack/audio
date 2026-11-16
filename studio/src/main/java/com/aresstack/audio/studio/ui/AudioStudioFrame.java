@@ -1151,6 +1151,23 @@ public final class AudioStudioFrame extends JFrame {
         remixTimer.setRepeats(false);
         stagePanel = new StagePanel(new StagePanel.Host() {
             @Override
+            public Path pieceDirectory() {
+                String folder = directory.getText().trim();
+                return folder.isEmpty() ? null : Paths.get(folder);
+            }
+
+            @Override
+            public com.aresstack.audio.studio.figure.FigureArtist figureArtist() {
+                try {
+                    return new com.aresstack.audio.studio.figure.FigureArtist(
+                            startModels().model(com.aresstack.audio.studio.figure.FigureArtist.ROLE));
+                } catch (RuntimeException failed) {
+                    message("Die KI kann keine Figuren zeichnen: " + failed.getMessage());
+                    return null;
+                }
+            }
+
+            @Override
             public void sceneChanged(com.aresstack.audio.studio.stage.SpatialScene changed, boolean settled) {
                 AudioStudioFrame.this.sceneChanged(changed, settled, false);
             }
@@ -4704,6 +4721,8 @@ public final class AudioStudioFrame extends JFrame {
             proxyBasic.setSelected("BASIC".equalsIgnoreCase(saved.getProperty("proxyAuthMode", "")));
             proxyCredentialRef.setText(saved.getProperty("proxyCredentialRef", ""));
             fitArrangement.setSelected(!"false".equalsIgnoreCase(saved.getProperty("arrangementFit", "true")));
+            stagePanel.setFigureLook(com.aresstack.audio.studio.figure.FigureSettings.from(saved),
+                    com.aresstack.audio.studio.figure.FigureSettings.bob(saved));
             // The player of the album page: when a title counts as heard, only new titles, overlap.
             albumHeardPercent = (int) Math.round(number(saved, "albumHeardPercent",
                     com.aresstack.audio.studio.application.HeardTitles.DEFAULT_PERCENT));

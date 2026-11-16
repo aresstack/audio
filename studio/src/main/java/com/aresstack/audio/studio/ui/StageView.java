@@ -278,7 +278,8 @@ final class StageView extends JComponent {
             double reach = radius(placement) + 4;
             double across = (point.x - place.getX()) / reach;
             double down = (point.y - place.getY()) / (reach * FLAT + 3);
-            if (across * across + down * down <= 1) {
+            java.awt.geom.Rectangle2D figure = figureBox(placement);
+            if (across * across + down * down <= 1 || figure != null && figure.contains(point)) {
                 hit = placement.trackId();
             }
         }
@@ -411,8 +412,10 @@ final class StageView extends JComponent {
         float y = (float) place.getY();
         Float level = levels.get(placement.trackId());
         float sounding = level == null || placement.muted() ? 0 : Math.min(1, level * 1.6f);
-        // The halo: the share of the room, and brighter while the track sounds.
-        if (!placement.muted()) {
+        boolean figured = figureBox(placement) != null;
+        // The halo: the share of the room, and brighter while the track sounds. A track with a
+        // figure has that light around the outline of its figure instead.
+        if (!placement.muted() && !figured) {
             float halo = radius + 10 + (float) placement.reverb() * 46;
             g.setPaint(new RadialGradientPaint(x, y, halo, new float[]{0f, 1f},
                     new Color[]{AudioStudioTheme.withAlpha(color, Math.round(46 + 110 * sounding)),
@@ -475,6 +478,120 @@ final class StageView extends JComponent {
         if (placement.locked()) {
             paintLock(g, x + radius * 0.8f, y - flat * 0.9f);
         }
+        paintFigure(g, placement, color, chosen);
+    }
+
+    /** The figure of a track as a picture, or {@code null}; none at all while no figures are wanted. */
+    private java.util.function.Function<String, java.awt.image.BufferedImage> figures = track -> null;
+    private com.aresstack.audio.studio.figure.FigureSettings figureLook =
+            com.aresstack.audio.studio.figure.FigureSettings.DEFAULT;
+    private double bob = com.aresstack.audio.studio.figure.FigureSettings.DEFAULT_BOB;
+    /** The glow of a figure: its outline, soft and in the colour of its track; kept per picture and colour. */
+    private final Map<java.awt.image.BufferedImage, Map<Integer, java.awt.image.BufferedImage>> glows =
+            new java.util.WeakHashMap<java.awt.image.BufferedImage, Map<Integer, java.awt.image.BufferedImage>>();
+    /** How far the glow reaches beyond the picture it is made of, in the picture's pixels. */
+    private static final int GLOW_MARGIN = 28;
+
+    /**
+     * The figures of the musicians: each stands upright on the disc of its track, as tall as the
+     * settings say and smaller the further back, and grows a little with the level of its track.
+     */
+    void setFigures(java.util.function.Function<String, java.awt.image.BufferedImage> pictures,
+                    com.aresstack.audio.studio.figure.FigureSettings look, double bobbing) {
+        figures = pictures == null ? track -> null : pictures;
+        figureLook = look;
+        bob = bobbing;
+        repaint();
+    }
+
+    /** Where the figure of a placement stands on the screen, or {@code null} if it has none. */
+    private java.awt.geom.Rectangle2D figureBox(SoundSourcePlacement placement) {
+        if (!figureLook.shown()) {
+            return null;
+        }
+        java.awt.image.BufferedImage picture = figures.apply(placement.trackId());
+        if (picture == null) {
+            return null;
+        }
+        double metre = floor()[0] * 2 / WIDTH_M * near(placement.depth());
+        double height = figureLook.height() * metre * (1 + bob * sounding(placement));
+        double width = height * picture.getWidth() / picture.getHeight();
+        Point2D place = point(placement.x(), placement.depth());
+        // The feet in the middle of the disc: the figure stands on its place.
+        return new java.awt.geom.Rectangle2D.Double(place.getX() - width / 2, place.getY() - height, width, height);
+    }
+
+    /** How much a track sounds right now, 0 to 1. */
+    private float sounding(SoundSourcePlacement placement) {
+        Float level = levels.get(placement.trackId());
+        return level == null || placement.muted() ? 0 : Math.min(1, level * 1.6f);
+    }
+
+    /** The outline of a picture as a soft light in a colour, larger than the picture by {@link #GLOW_MARGIN} all around. */
+    private java.awt.image.BufferedImage glow(java.awt.image.BufferedImage picture, Color color) {
+        Map<Integer, java.awt.image.BufferedImage> byColour = glows.computeIfAbsent(picture,
+                made -> new HashMap<Integer, java.awt.image.BufferedImage>());
+        return byColour.computeIfAbsent(color.getRGB(), rgb -> {
+            int width = picture.getWidth() + 2 * GLOW_MARGIN;
+            int height = picture.getHeight() + 2 * GLOW_MARGIN;
+            java.awt.image.BufferedImage shape = new java.awt.image.BufferedImage(width, height,
+                    java.awt.image.BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = shape.createGraphics();
+            g.drawImage(picture, GLOW_MARGIN, GLOW_MARGIN, null);
+            g.setComposite(java.awt.AlphaComposite.SrcIn); // the shape of the figure, all in the colour
+            g.setColor(color);
+            g.fillRect(0, 0, width, height);
+            g.dispose();
+            // Blurred three times with a small box: close to a soft bell, and done once per figure.
+            float[] box = new float[81];
+            java.util.Arrays.fill(box, 1f / 81);
+            java.awt.image.ConvolveOp blur = new java.awt.image.ConvolveOp(new java.awt.image.Kernel(9, 9, box),
+                    java.awt.image.ConvolveOp.EDGE_ZERO_FILL, null);
+            java.awt.image.BufferedImage soft = shape;
+            for (int pass = 0; pass < 3; pass++) {
+                soft = blur.filter(soft, null);
+            }
+            return soft;
+        });
+    }
+
+    /**
+     * The figure of a track, upright on its disc. While the track sounds its outline glows in the
+     * colour of the track and grows with the level, as the round light of a disc does.
+     */
+    private void paintFigure(Graphics2D g, SoundSourcePlacement placement, Color color, boolean chosen) {
+        java.awt.geom.Rectangle2D box = figureBox(placement);
+        if (box == null) {
+            return;
+        }
+        java.awt.image.BufferedImage picture = figures.apply(placement.trackId());
+        Graphics2D figure = (Graphics2D) g.create();
+        figure.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+                java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        if (!placement.muted()) {
+            float sounding = sounding(placement);
+            // The light around the outline: faint at rest, bright and wider while the track sounds.
+            double scale = box.getHeight() / picture.getHeight();
+            double grow = 1 + 0.22 * sounding + (float) placement.reverb() * 0.12;
+            double width = (picture.getWidth() + 2 * GLOW_MARGIN) * scale * grow;
+            double height = (picture.getHeight() + 2 * GLOW_MARGIN) * scale * grow;
+            Graphics2D light = (Graphics2D) figure.create();
+            light.setComposite(java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER,
+                    Math.min(1f, 0.3f + 0.7f * sounding + (chosen ? 0.2f : 0f))));
+            java.awt.image.BufferedImage outline = glow(picture, chosen ? color.brighter() : color);
+            int left = (int) Math.round(box.getCenterX() - width / 2);
+            int top = (int) Math.round(box.getCenterY() - height / 2);
+            light.drawImage(outline, left, top, (int) Math.round(width), (int) Math.round(height), null);
+            if (sounding > 0.05f) {
+                light.drawImage(outline, left, top, (int) Math.round(width), (int) Math.round(height), null);
+            }
+            light.dispose();
+        } else {
+            figure.setComposite(java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, 0.35f));
+        }
+        figure.drawImage(picture, (int) Math.round(box.getX()), (int) Math.round(box.getY()),
+                (int) Math.round(box.getWidth()), (int) Math.round(box.getHeight()), null);
+        figure.dispose();
     }
 
     /** The tracks in the order they are drawn: those at the back first, the near ones in front of them. */

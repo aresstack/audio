@@ -26,6 +26,7 @@ import java.awt.GridLayout;
 import java.awt.Insets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -70,6 +71,16 @@ final class StagePanel extends JPanel {
          */
         default boolean takeWithMovements(SpatialScene before, SpatialScene taken, MovementDirector.Proposal moves) {
             return false;
+        }
+
+        /** The folder of the piece, where it keeps which figure stands at which track; {@code null} without a piece. */
+        default java.nio.file.Path pieceDirectory() {
+            return null;
+        }
+
+        /** The AI that draws figures, with the model of the settings; {@code null} (and a word why) if there is none. */
+        default com.aresstack.audio.studio.figure.FigureArtist figureArtist() {
+            return null;
         }
     }
 
@@ -167,6 +178,51 @@ final class StagePanel extends JPanel {
     private final JLabel status = new JLabel(" ");
 
     private DeckWidgets.Module stageModule;
+    private final JButton drawFigures = new DeckWidgets.HeadKey("Figuren");
+    private final JButton otherFigure = new DeckWidgets.HeadKey("Andere Figur");
+    private final JButton newFigure = new DeckWidgets.HeadKey("Neu zeichnen");
+    private final JButton undoFigure = new DeckWidgets.HeadKey("↶");
+    /** The figures of the musicians of the piece; what they tell comes on their own thread and is shown on this one. */
+    private final com.aresstack.audio.studio.figure.StageFigures figures =
+            new com.aresstack.audio.studio.figure.StageFigures(
+                    com.aresstack.audio.studio.figure.FigureLibrary.standard(),
+                    new com.aresstack.audio.studio.figure.StageFigures.Listener() {
+                        @Override
+                        public void cast(com.aresstack.audio.studio.figure.FigureCast cast) {
+                            javax.swing.SwingUtilities.invokeLater(() -> {
+                                undoFigure.setEnabled(figures.canUndo());
+                                view.repaint();
+                            });
+                        }
+
+                        @Override
+                        public void said(String text) {
+                            javax.swing.SwingUtilities.invokeLater(() -> figureWord.setText(text));
+                        }
+
+                        @Override
+                        public void busy(boolean busy) {
+                            javax.swing.SwingUtilities.invokeLater(() -> {
+                                drawFigures.setEnabled(!busy);
+                                newFigure.setEnabled(!busy);
+                            });
+                        }
+                    });
+    /** What the figures say: which one the AI draws, what went wrong. */
+    private final JLabel figureWord = new JLabel(" ");
+
+    /** How the figures stand on the stage, from the settings of the studio. */
+    void setFigureLook(com.aresstack.audio.studio.figure.FigureSettings look, double bob) {
+        view.setFigures(figures::picture, look, bob);
+        for (JButton key : new JButton[]{drawFigures, otherFigure, newFigure, undoFigure}) {
+            key.setVisible(look.shown());
+        }
+    }
+
+    /** The figures of the stage, for tests. */
+    com.aresstack.audio.studio.figure.StageFigures figures() {
+        return figures;
+    }
     /** Under the stage: what is heard, and how the discs are moved. */
     private final JPanel stageFoot = new JPanel(new BorderLayout(14, 0));
 
@@ -176,7 +232,14 @@ final class StagePanel extends JPanel {
      */
     void setListening(javax.swing.JComponent keys, javax.swing.JComponent heard) {
         stageModule.setHeadStart(keys);
-        stageFoot.add(heard, BorderLayout.CENTER);
+        JPanel words = new JPanel(new BorderLayout(14, 0));
+        words.setOpaque(false);
+        words.add(heard, BorderLayout.WEST);
+        figureWord.setForeground(AudioStudioTheme.TEXT_DIM);
+        figureWord.setFont(figureWord.getFont().deriveFont(11.5f));
+        figureWord.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
+        words.add(figureWord, BorderLayout.CENTER);
+        stageFoot.add(words, BorderLayout.CENTER);
     }
 
     StagePanel(Host host) {
@@ -199,11 +262,35 @@ final class StagePanel extends JPanel {
         JPanel seen = new JPanel(new BorderLayout(0, 6));
         seen.setOpaque(false);
         seen.add(view, BorderLayout.CENTER);
-        JLabel hint = new JLabel("Scheiben ziehen · Mausrad: lauter und leiser");
-        hint.setForeground(AudioStudioTheme.TEXT_FAINT);
-        hint.setFont(hint.getFont().deriveFont(11.5f));
+        view.setToolTipText("Scheiben ziehen · Mausrad: lauter und leiser");
         stageFoot.setOpaque(false);
-        stageFoot.add(hint, BorderLayout.EAST);
+        // At the edge under the stage: the keys of the figures the AI draws for the musicians.
+        JPanel figureKeys = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 0));
+        figureKeys.setOpaque(false);
+        drawFigures.setToolTipText("Figuren: jede Spur bekommt eine Figur ihres Instruments; "
+                + "aus der Bibliothek, und was fehlt, zeichnet die KI");
+        otherFigure.setToolTipText("Andere Figur: der gewählten Spur eine andere Figur aus der Bibliothek geben");
+        newFigure.setToolTipText("Neu zeichnen: die KI zeichnet für die gewählte Spur eine neue Figur");
+        undoFigure.setToolTipText("Den letzten Schritt an den Figuren zurücknehmen");
+        drawFigures.addActionListener(event -> figures.drawMissing(this.host::figureArtist));
+        otherFigure.addActionListener(event -> {
+            if (view.selected() != null) {
+                figures.swap(view.selected());
+            }
+        });
+        newFigure.addActionListener(event -> {
+            if (view.selected() != null) {
+                figures.redraw(view.selected(), this.host::figureArtist);
+            }
+        });
+        undoFigure.addActionListener(event -> figures.undo());
+        undoFigure.setEnabled(false);
+        for (JButton key : new JButton[]{drawFigures, otherFigure, newFigure, undoFigure}) {
+            figureKeys.add(key);
+        }
+        stageFoot.add(figureKeys, BorderLayout.EAST);
+        view.setFigures(figures::picture, com.aresstack.audio.studio.figure.FigureSettings.DEFAULT,
+                com.aresstack.audio.studio.figure.FigureSettings.DEFAULT_BOB);
         seen.add(stageFoot, BorderLayout.SOUTH);
         stageModule = new DeckWidgets.Module("Bühne", seen);
         DeckWidgets.Module stage = stageModule;
@@ -852,6 +939,16 @@ final class StagePanel extends JPanel {
             order.add(track.id());
         }
         view.setScene(shown, order);
+        // The figures of this piece: those it keeps, the others from the library; nothing is drawn by this.
+        List<com.aresstack.audio.studio.figure.FigureCast.Seat> seats =
+                new ArrayList<com.aresstack.audio.studio.figure.FigureCast.Seat>();
+        Map<String, String> playing = new HashMap<String, String>();
+        for (MusicTrack track : tracks) {
+            seats.add(new com.aresstack.audio.studio.figure.FigureCast.Seat(track.id(), track.instrument()));
+            playing.put(track.id(), track.role());
+        }
+        figures.roles(playing);
+        figures.open(host.pieceDirectory(), seats);
         if (view.selected() == null && !order.isEmpty()) {
             view.select(order.get(0));
         }
