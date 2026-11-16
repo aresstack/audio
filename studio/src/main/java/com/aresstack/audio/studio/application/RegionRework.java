@@ -98,6 +98,22 @@ public final class RegionRework {
         return rework;
     }
 
+    /**
+     * Proposes a passage that is written already (several passages may be written at the same time
+     * on the same state of the piece and then be taken one after another). The passage must lie in
+     * parts and bars that nothing taken in between has changed.
+     */
+    public static RegionRework take(ProjectSession session, RegionComposer composer, RegionRequest request,
+                                    RewrittenRegion written) throws IOException, EditRefusedException {
+        RegionRework rework = new RegionRework(session, composer, request, Ids.random(), null);
+        rework.given = written;
+        rework.generate(message -> { });
+        return rework;
+    }
+
+    /** A passage written before this proposal was begun; used once instead of asking the composer. */
+    private RewrittenRegion given;
+
     /** Writes the passage anew, differently: a new attempt. An open proposal is replaced. */
     public Proposal regenerate(Progress progress) throws IOException, EditRefusedException {
         if (accepted) {
@@ -181,7 +197,9 @@ public final class RegionRework {
     private Proposal generate(Progress progress) throws IOException, EditRefusedException {
         Composition base = session.composition();
         int next = attempt + 1;
-        RewrittenRegion written = composer.compose(base, request, next, session.folder().resolve(CACHE), progress);
+        RewrittenRegion written = given != null ? given
+                : composer.compose(base, request, next, session.folder().resolve(CACHE), progress);
+        given = null;
         List<String> log = new ArrayList<>(written.corrections());
         Patch patch = RegionEdit.patch(base, written, ids, log);
         EditScope scope = RegionEdit.scope(request.selection());
