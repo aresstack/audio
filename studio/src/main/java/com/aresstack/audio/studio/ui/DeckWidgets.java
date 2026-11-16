@@ -565,6 +565,132 @@ final class DeckWidgets {
     }
 
     /**
+     * A square key that shows a sign instead of words, drawn here so that it looks the same with
+     * every font: the sparkle of the AI help, the arrows that open a field to a large box. What it
+     * does is said by its tooltip.
+     */
+    static final class IconKey extends javax.swing.JButton {
+        /** The signs a key can show. */
+        enum Sign {
+            SPARKLE, EXPAND, COLLAPSE, SEND
+        }
+
+        private Sign sign;
+
+        IconKey(Sign sign, String tooltip) {
+            this.sign = sign;
+            setToolTipText(tooltip);
+            setContentAreaFilled(false);
+            setBorderPainted(false);
+            setFocusPainted(false);
+            setOpaque(false);
+            setFocusable(false);
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            setRolloverEnabled(true);
+        }
+
+        void setSign(Sign shown) {
+            sign = shown;
+            repaint();
+        }
+
+        Sign sign() {
+            return sign;
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            return new Dimension(28, 26);
+        }
+
+        @Override
+        public Dimension getMinimumSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public Dimension getMaximumSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        protected void paintComponent(Graphics graphics) {
+            Graphics2D g = smooth(graphics);
+            boolean down = isEnabled() && getModel().isPressed();
+            float width = getWidth();
+            float height = getHeight();
+            g.setColor(new Color(0, 0, 0, 120));
+            g.fill(new RoundRectangle2D.Float(0.5f, 2f, width - 1f, height - 2.5f, 7f, 7f));
+            float top = down ? 2f : 0.5f;
+            RoundRectangle2D body = new RoundRectangle2D.Float(0.5f, top, width - 1f, height - 3.5f, 6f, 6f);
+            Color light = new Color(isEnabled() && getModel().isRollover() ? 0x4A4E5C : 0x3F434F);
+            g.setPaint(new GradientPaint(0, top, light, 0, top + height - 3.5f, new Color(0x23252D)));
+            g.fill(body);
+            g.setColor(new Color(0x15161B));
+            g.draw(body);
+            if (!down) {
+                g.setColor(new Color(255, 255, 255, 46));
+                g.draw(new java.awt.geom.Line2D.Float(4f, top + 1.2f, width - 4f, top + 1.2f));
+            }
+            float cx = width / 2f;
+            float cy = top + (height - 3.5f) / 2f;
+            boolean lit = isEnabled() && getModel().isRollover();
+            Color ink = !isEnabled() ? AudioStudioTheme.withAlpha(AudioStudioTheme.TEXT_DIM, 110)
+                    : lit ? AudioStudioTheme.TEXT : AudioStudioTheme.TEXT_DIM;
+            switch (sign) {
+                case SPARKLE:
+                    g.setColor(!isEnabled() ? ink : lit ? AudioStudioTheme.ACCENT_SOFT : AudioStudioTheme.ACCENT);
+                    g.fill(star(cx - 1.5f, cy + 1f, 6f));
+                    g.fill(star(cx + 5f, cy - 4.5f, 2.8f));
+                    break;
+                case SEND:
+                    g.setColor(!isEnabled() ? ink : lit ? AudioStudioTheme.ACCENT_SOFT : AudioStudioTheme.ACCENT);
+                    java.awt.geom.Path2D.Float plane = new java.awt.geom.Path2D.Float();
+                    plane.moveTo(cx - 6.5f, cy - 5.5f);
+                    plane.lineTo(cx + 7f, cy);
+                    plane.lineTo(cx - 6.5f, cy + 5.5f);
+                    plane.lineTo(cx - 4f, cy);
+                    plane.closePath();
+                    g.fill(plane);
+                    break;
+                default:
+                    g.setColor(ink);
+                    g.setStroke(new java.awt.BasicStroke(1.5f, java.awt.BasicStroke.CAP_ROUND,
+                            java.awt.BasicStroke.JOIN_ROUND));
+                    boolean out = sign == Sign.EXPAND;
+                    // Two arrows on the diagonal: apart to open the field, towards each other to fold it.
+                    for (int side = -1; side <= 1; side += 2) {
+                        float nearX = cx + side * 1.6f;
+                        float nearY = cy - side * 1.6f;
+                        float farX = cx + side * 5.6f;
+                        float farY = cy - side * 5.6f;
+                        g.draw(new java.awt.geom.Line2D.Float(nearX, nearY, farX, farY));
+                        float tipX = out ? farX : nearX;
+                        float tipY = out ? farY : nearY;
+                        float back = out ? -side * 3.4f : side * 3.4f;
+                        g.draw(new java.awt.geom.Line2D.Float(tipX, tipY, tipX + back, tipY));
+                        g.draw(new java.awt.geom.Line2D.Float(tipX, tipY, tipX, tipY - back));
+                    }
+                    break;
+            }
+            g.dispose();
+        }
+
+        /** A star with four points, as a sparkle has them. */
+        private static java.awt.Shape star(float x, float y, float r) {
+            java.awt.geom.Path2D.Float star = new java.awt.geom.Path2D.Float();
+            float in = r * 0.16f;
+            star.moveTo(x, y - r);
+            star.quadTo(x + in, y - in, x + r, y);
+            star.quadTo(x + in, y + in, x, y + r);
+            star.quadTo(x - in, y + in, x - r, y);
+            star.quadTo(x - in, y - in, x, y - r);
+            star.closePath();
+            return star;
+        }
+    }
+
+    /**
      * One half of a switch between two views, in the head of a module: two such keys stand
      * joined, and the one whose view is shown has the colour of the desk.
      */

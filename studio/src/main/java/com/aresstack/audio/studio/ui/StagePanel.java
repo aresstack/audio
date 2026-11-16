@@ -262,7 +262,13 @@ final class StagePanel extends JPanel {
         JPanel seen = new JPanel(new BorderLayout(0, 6));
         seen.setOpaque(false);
         seen.add(view, BorderLayout.CENTER);
+<<<<<<< HEAD
         view.setToolTipText("Scheiben ziehen · Mausrad: lauter und leiser");
+=======
+        JLabel hint = new JLabel("Scheiben ziehen · Mausrad: lauter und leiser");
+        hint.setForeground(AudioStudioTheme.TEXT_FAINT);
+        hint.setFont(hint.getFont().deriveFont(11.5f));
+>>>>>>> origin/main
         stageFoot.setOpaque(false);
         // At the edge under the stage: the keys of the figures the AI draws for the musicians.
         JPanel figureKeys = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 0));
