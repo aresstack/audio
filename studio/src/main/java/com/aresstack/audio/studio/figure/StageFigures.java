@@ -75,13 +75,21 @@ public final class StageFigures {
         }
     }
 
-    /** The figure of a track as a picture, or {@code null} if it has none. */
+    /**
+     * The figure of a track as a picture: the one the piece or the library gives it, and where
+     * they have none, the one the studio brings along for its instrument ({@link HouseFigures}).
+     * So every track has a figure from the first moment, without a key and without the AI.
+     */
     public BufferedImage picture(String trackId) {
         String figure;
+        String instrument;
         synchronized (this) {
             figure = cast.figure(trackId);
+            FigureCast.Seat seat = seat(trackId);
+            instrument = seat == null ? "" : seat.instrument();
         }
-        return library.picture(figure);
+        BufferedImage drawn = library.picture(figure);
+        return drawn != null ? drawn : HouseFigures.picture(instrument + " " + trackId, trackId);
     }
 
     public synchronized FigureCast cast() {

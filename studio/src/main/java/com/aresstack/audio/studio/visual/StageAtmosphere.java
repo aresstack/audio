@@ -25,7 +25,8 @@ final class StageAtmosphere {
     private static final int PARTICLES = 2600;
     /** How long a jet burns after the beat that set it off, in seconds. */
     private static final double BURN = 0.8;
-    private static final Color[] LASERS = {new Color(0x35FF6B), new Color(0x2FE6FF), new Color(0xFF3DD4)};
+    private static final Color[] LASERS = {new Color(0x35FF6B), new Color(0x2FE6FF), new Color(0xFF3DD4),
+            new Color(0xFFE23D)};
 
     private final StageMood mood = new StageMood();
     private StageMood.Mood shown = StageMood.Mood.OFF;
@@ -180,25 +181,30 @@ final class StageAtmosphere {
                     new Color[]{alpha(haze, strength * 0.10f), alpha(haze, 0)}));
             g.fill(new Ellipse2D.Double(at[0] - wide, at[1] - wide, wide * 2, wide * 2));
         }
-        // Three heads under the border at the back, each throwing a fan that opens, closes and swings.
-        for (int head = -1; head <= 1; head++) {
-            Color colour = LASERS[(turn / 8 + head + 1) % LASERS.length];
-            double[] from = camera.at(head * 4.2, StageLightEffect.HIGH - 0.4, StageLightEffect.DEPTH - 0.6);
-            int beams = 6;
-            for (int beam = 0; beam < beams; beam++) {
-                double spread = 1.2 + 0.9 * Math.sin(t * 0.9 + head);
-                double aim = head * 2.0 + Math.sin(t * (0.6 + 0.15 * head) + head * 2) * 4.5
-                        + (beam - (beams - 1) / 2.0) * spread;
-                // Through the hall towards the camera: far beyond the front edge.
-                double[] to = camera.at(aim * 2.2, 0.4 + 2.2 * Math.sin(t * 0.5 + beam), -8);
-                float bright = strength * (0.4f + 0.6f * sound.beat);
-                g.setStroke(new BasicStroke((float) Math.max(3, camera.scale(from[2]) * 0.16), BasicStroke.CAP_ROUND,
+        // Three heads under the border at the back, each throwing a fan down into the hall that
+        // opens, closes and swings as a whole, every head at its own pace.
+        float reach = (float) Math.hypot(g.getClipBounds() == null ? 4000 : g.getClipBounds().width,
+                g.getClipBounds() == null ? 4000 : g.getClipBounds().height) * 1.2f;
+        for (int side = -1; side <= 1; side++) {
+            double[] from = camera.at(side * 4.6, StageLightEffect.HIGH - 0.3, StageLightEffect.DEPTH - 0.6);
+            float x = (float) from[0];
+            float y = (float) from[1];
+            Color colour = LASERS[(turn / 8 + side + 1) % LASERS.length];
+            int beams = 5;
+            for (int i = 0; i < beams; i++) {
+                double spread = 0.18 + 0.14 * Math.sin(t * 0.9 + side);
+                double angle = Math.PI / 2 - side * 0.35 + Math.sin(t * (0.6 + 0.15 * side) + side * 2) * 0.5
+                        + (i - (beams - 1) / 2.0) * spread;
+                float ex = x + (float) Math.cos(angle) * reach;
+                float ey = y + (float) Math.sin(angle) * reach;
+                float bright = strength * (0.35f + 0.65f * sound.beat);
+                g.setStroke(new BasicStroke((float) Math.max(3, camera.scale(from[2]) * 0.3), BasicStroke.CAP_ROUND,
                         BasicStroke.JOIN_ROUND));
-                g.setColor(alpha(colour, bright * 0.2f));
-                g.draw(new Line2D.Double(from[0], from[1], to[0], to[1]));
-                g.setStroke(new BasicStroke(1.4f));
-                g.setColor(alpha(colour.brighter(), bright * 0.95f));
-                g.draw(new Line2D.Double(from[0], from[1], to[0], to[1]));
+                g.setColor(alpha(colour, bright * 0.22f));
+                g.draw(new Line2D.Float(x, y, ex, ey));
+                g.setStroke(new BasicStroke(1.2f));
+                g.setColor(alpha(colour.brighter(), bright * 0.9f));
+                g.draw(new Line2D.Float(x, y, ex, ey));
             }
         }
         g.setStroke(new BasicStroke(1f));
