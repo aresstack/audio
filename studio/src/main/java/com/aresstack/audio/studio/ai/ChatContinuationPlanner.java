@@ -113,7 +113,18 @@ public final class ChatContinuationPlanner implements ContinuationPlanner {
     public ContinuationPlan plan(ContinuationTask task, Composition piece, Path cacheDirectory) throws IOException {
         String prompt = prompt(task);
         Path cache = cacheDirectory.resolve("plan-" + ContextBuilder.sha256(prompt).substring(0, 12) + ".json");
-        return read(model.generate(INSTRUCTION, prompt, maxTokens, cache, Listening.current()), task, piece);
+        try {
+            return read(model.generate(INSTRUCTION, prompt, maxTokens, cache, Listening.current()), task, piece);
+        } catch (RuntimeException unusable) {
+            // A kept plan that does not fit (cut off, broken): put aside and planned once more.
+            AnswerCache.discard(cache);
+            try {
+                return read(model.generate(INSTRUCTION, prompt, maxTokens, cache, Listening.current()), task, piece);
+            } catch (RuntimeException again) {
+                AnswerCache.discard(cache);
+                throw new IOException("Der Plan der Fortsetzung ist unbrauchbar: " + again.getMessage(), again);
+            }
+        }
     }
 
     /** Reads and completes a planning answer; see the class comment. */
