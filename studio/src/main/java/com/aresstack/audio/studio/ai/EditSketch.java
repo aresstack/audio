@@ -181,7 +181,25 @@ public final class EditSketch {
      * @param role    its role, or {@code null}
      */
     public Consumer<String> hearing(String partId, int program, String role, VoiceFrame frame) {
-        return text -> put(partId, program, role, frame, PartialNotes.read(text), false);
+        return text -> {
+            heard(partId + "\t" + frame.sectionId(), text.length());
+            put(partId, program, role, frame, PartialNotes.read(text), false);
+        };
+    }
+
+    /** How long each answer is by now, by part and frame: their sum is the sign of life on the display. */
+    private final Map<String, Integer> lengths = new java.util.HashMap<>();
+
+    private void heard(String answer, int characters) {
+        long sum;
+        synchronized (lengths) {
+            lengths.put(answer, characters);
+            sum = 0;
+            for (int length : lengths.values()) {
+                sum += length;
+            }
+        }
+        shown.arriving(sum);
     }
 
     /** The whole answer for a part in a frame. */

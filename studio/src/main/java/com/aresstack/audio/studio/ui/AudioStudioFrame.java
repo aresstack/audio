@@ -2096,7 +2096,7 @@ public final class AudioStudioFrame extends JFrame {
                 (Integer) silence.getValue());
         firstText.addChangeListener(waits);
         silence.addChangeListener(waits);
-        com.aresstack.audio.studio.ai.Backoff.tellTo(line -> SwingUtilities.invokeLater(() -> troubleDigest.add(line)));
+        com.aresstack.audio.studio.ai.Backoff.tellTo(line -> SwingUtilities.invokeLater(() -> troubled(line)));
         // Many requests that break off together are said in one line per model and cause.
         new javax.swing.Timer(TroubleDigest.EVERY_MILLIS, event -> troubleDigest.flush()).start();
         // As many requests at once per model as the connections hold, up to "Parallel".
@@ -2874,7 +2874,7 @@ public final class AudioStudioFrame extends JFrame {
                             showAiLamp();
                         }))
                         // A connection that breaks off or is tried again is said at once, in the protocol and below.
-                        .troubles(line -> SwingUtilities.invokeLater(() -> troubleDigest.add(line))));
+                        .troubles(line -> SwingUtilities.invokeLater(() -> troubled(line))));
     }
 
     /** The assignment as chosen now: the roles as set, the base model from the settings page. */
@@ -5047,6 +5047,9 @@ public final class AudioStudioFrame extends JFrame {
                             if (worker == null || worker.isDone()) {
                                 return; // a late word after the work ended
                             }
+                            if (characters > arrived) {
+                                lastTrouble = null; // the text flows again
+                            }
                             arrived = characters;
                             showTrackWork();
                         });
@@ -5489,6 +5492,10 @@ public final class AudioStudioFrame extends JFrame {
             new java.util.LinkedHashMap<String, TrackProgress.State>();
     private TrackProgress.Stage trackStage;
     private long trackStageBegan;
+    /** What each track works on now (the section of so many), by track id. */
+    private final Map<String, String> trackDetails = new java.util.HashMap<String, String>();
+    /** The last trouble of the connection while no new text came after it; {@code null} when the text flows. */
+    private String lastTrouble;
 
     /**
      * The open piece is made by the production of its album: what the AI streams for it is shown
@@ -5542,6 +5549,9 @@ public final class AudioStudioFrame extends JFrame {
             @Override
             public void arriving(long characters) {
                 onOpen.accept(() -> {
+                    if (characters > arrived) {
+                        lastTrouble = null; // the text flows again
+                    }
                     arrived = characters;
                     showTrackWork();
                 });
@@ -5607,11 +5617,14 @@ public final class AudioStudioFrame extends JFrame {
         if (stage != trackStage) {
             trackStage = stage;
             trackStates.clear();
+            trackDetails.clear();
+            lastTrouble = null;
             trackTable.clearWork();
             trackStageBegan = System.currentTimeMillis();
             notesDoneTold = false; // the next step counts for itself
         }
         trackStates.put(trackId, state);
+        trackDetails.put(trackId, detail == null ? "" : detail);
         TrackLanes.Work work = state == TrackProgress.State.WAITING ? TrackLanes.Work.WAITING
                 : state == TrackProgress.State.WORKING ? TrackLanes.Work.WORKING
                 : state == TrackProgress.State.DONE ? TrackLanes.Work.DONE : TrackLanes.Work.FAILED;
@@ -5916,6 +5929,18 @@ public final class AudioStudioFrame extends JFrame {
     /** One line for many tracks: how many are being worked on at the same time, and how many are done. */
     private String saidWaiting;
 
+    /** Up to how many tracks at work the status line names with what they work on. */
+    private static final int SHOWN_AT_WORK = 2;
+
+    /** A trouble of the connection: into the log, and on the status line until text comes again. */
+    private void troubled(String line) {
+        troubleDigest.add(line);
+        lastTrouble = line;
+        if (!trackStates.isEmpty()) {
+            showTrackWork();
+        }
+    }
+
     private void showTrackWork() {
         int working = 0;
         int waiting = 0;
@@ -5946,14 +5971,25 @@ public final class AudioStudioFrame extends JFrame {
                 sayOnPaper(waitingFor);
             }
         }
+        // Which tracks work on what: with few left, the line names them, so a long last voice is seen at work.
+        StringBuilder atWork = new StringBuilder();
+        if (working <= SHOWN_AT_WORK) {
+            for (Map.Entry<String, TrackProgress.State> entry : trackStates.entrySet()) {
+                String detail = trackDetails.get(entry.getKey());
+                if (entry.getValue() == TrackProgress.State.WORKING && detail != null && !detail.isEmpty()) {
+                    atWork.append(" · ").append(entry.getKey()).append(": ").append(detail);
+                }
+            }
+        }
         setStatus((trackStage == TrackProgress.Stage.COMPOSE ? "KI komponiert" : "Rendern") + ": "
-                + working + " gleichzeitig · " + done + " von " + trackStates.size() + " fertig"
+                + working + " gleichzeitig · " + done + " von " + trackStates.size() + " fertig" + atWork
                 + (waiting > 0 ? " · " + waiting + " warten" : "") + (failed > 0 ? " · " + failed + " Fehler" : "")
                 + " · " + seconds + " s"
                 // Whether the service answers at all: nothing arrives while it lets the requests wait.
                 + (trackStage != TrackProgress.Stage.COMPOSE ? ""
                 : arrived == 0 ? (done == 0 ? " · noch kein Text von der KI angekommen" : "")
-                : " · " + arrived + " Zeichen von der KI" + (sketchNotes > 0 ? ", " + sketchNotes + " Noten" : "")));
+                : " · " + arrived + " Zeichen von der KI" + (sketchNotes > 0 ? ", " + sketchNotes + " Noten" : ""))
+                + (lastTrouble == null ? "" : " · " + lastTrouble));
     }
 
     private void listenAlone(String trackId) {
