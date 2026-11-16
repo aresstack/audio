@@ -18,10 +18,6 @@ import javax.swing.SwingUtilities;
  * its own, so that it is still known when the chat is opened again, until the user clears it.
  */
 final class Assistant {
-    /** The sign of AI help on the keys; a plainer star where the font has no sparkle. */
-    static final String SPARKLE = "✨";
-    static final String STAR = "✦";
-
     /** What the help needs from the window. */
     interface Connection {
         /** A chat model of this name that may call tools; throws with words for the user if it cannot. */
@@ -69,11 +65,7 @@ final class Assistant {
 
     /** The sparkle key of a field, without text, with a tooltip. */
     JButton key(String tooltip, Supplier<Field> field) {
-        JButton key = new DeckWidgets.HeadKey(SPARKLE);
-        if (key.getFont().canDisplayUpTo(SPARKLE) >= 0) {
-            key.setText(STAR);
-        }
-        key.setToolTipText(tooltip);
+        JButton key = new DeckWidgets.IconKey(DeckWidgets.IconKey.Sign.SPARKLE, tooltip);
         key.addActionListener(event -> {
             Field chosen = field.get();
             if (chosen != null) {
