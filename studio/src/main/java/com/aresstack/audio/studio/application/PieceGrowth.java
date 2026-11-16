@@ -126,20 +126,60 @@ public final class PieceGrowth {
         return tails;
     }
 
-    /** Writes the silent end of each part anew and takes it into the piece. */
+    /**
+     * Writes the silent end of each part anew and takes it into the piece. The parts are written
+     * at the same time, each on the piece as it is now (how many requests really go out at once is
+     * the setting "Parallel", kept by the gate of the model), and taken one after another.
+     */
     static void fillTail(ProjectSession session, Supplier<RegionComposer> repair, int window, String words,
                          Progress progress) throws Exception {
-        for (java.util.Map.Entry<String, int[]> tail : silentTails(session.composition(), window).entrySet()) {
+        final Composition piece = session.composition();
+        java.util.Map<String, int[]> tails = silentTails(piece, window);
+        if (tails.isEmpty()) {
+            return;
+        }
+        final RegionComposer composer = repair.get();
+        final java.nio.file.Path cache = session.folder().resolve(RegionRework.CACHE);
+        java.util.Map<String, RegionRequest> requests = new java.util.LinkedHashMap<>();
+        for (java.util.Map.Entry<String, int[]> tail : tails.entrySet()) {
             int[] bars = tail.getValue();
-            Composition piece = session.composition();
             progress.update("„" + piece.part(tail.getKey()).name() + "“ schweigt nach der letzten Note in Takt "
                     + bars[0] + " bis " + bars[1] + ": diese Takte werden neu angefordert ...");
-            RegionRequest request = RegionRequest.replace(Selection.bars(piece, java.util.List.of(tail.getKey()),
+            requests.put(tail.getKey(), RegionRequest.replace(Selection.bars(piece, java.util.List.of(tail.getKey()),
                     bars[0], bars[1]), "These bars of this part were left silent, likely by an answer that broke off."
                     + " Write the part on as the music around it goes" + (words == null || words.isBlank() ? ""
-                    : " (" + words + ")") + "; rest only where the music really asks for it.");
-            RegionRework rework = RegionRework.start(session, repair.get(), request, progress);
-            rework.accept();
+                    : " (" + words + ")") + "; rest only where the music really asks for it."));
+        }
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(requests.size(),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "silent-end");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+        java.util.Map<String, java.util.concurrent.Future<com.aresstack.audio.studio.ai.RewrittenRegion>> writing =
+                new java.util.LinkedHashMap<>();
+        try {
+            for (java.util.Map.Entry<String, RegionRequest> asked : requests.entrySet()) {
+                final RegionRequest request = asked.getValue();
+                writing.put(asked.getKey(), pool.submit(() -> composer.compose(piece, request, 1, cache, progress)));
+            }
+            for (java.util.Map.Entry<String, java.util.concurrent.Future<com.aresstack.audio.studio.ai.RewrittenRegion>>
+                    written : writing.entrySet()) {
+                com.aresstack.audio.studio.ai.RewrittenRegion region;
+                try {
+                    region = written.getValue().get();
+                } catch (java.util.concurrent.ExecutionException failed) {
+                    Throwable cause = failed.getCause();
+                    if (cause instanceof Exception known) {
+                        throw known;
+                    }
+                    throw new IOException("Das Ende von „" + written.getKey() + "“ ließ sich nicht neu schreiben: "
+                            + cause, cause);
+                }
+                RegionRework.take(session, composer, requests.get(written.getKey()), region).accept();
+            }
+        } finally {
+            pool.shutdownNow();
         }
     }
 
@@ -157,6 +197,11 @@ public final class PieceGrowth {
         if (last != null) {
             last.confirm();
             last.accept();
+        }
+        if (repair != null) {
+            // the last step as well: no part of the finished piece ends in bars an answer left silent
+            fillTail(session, repair, Math.max(1, Math.min(ContinuationRequest.MAX_BARS, step)), asked.instruction(),
+                    progress);
         }
     }
 
