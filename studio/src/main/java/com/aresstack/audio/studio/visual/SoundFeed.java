@@ -36,4 +36,12 @@ public interface SoundFeed {
     default List<TrackLight> lights() {
         return List.of();
     }
+
+    /**
+     * Whether the tracks of what plays are known but still being read: the stage then waits for
+     * them instead of showing the sound itself at places the tracks do not have.
+     */
+    default boolean lightsComing() {
+        return false;
+    }
 }

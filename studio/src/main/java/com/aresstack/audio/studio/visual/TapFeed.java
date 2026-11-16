@@ -83,6 +83,11 @@ public final class TapFeed implements SoundFeed {
                 List<TrackLight> seen = first.lights();
                 return seen.isEmpty() ? second.lights() : seen;
             }
+
+            @Override
+            public boolean lightsComing() {
+                return first.lightsComing() || second.lightsComing();
+            }
         };
     }
 }

@@ -87,6 +87,11 @@ final class StageLightEffect implements Effect {
                 Labels.quiet(g, width, height, palette);
                 return;
             }
+            if (sound.lightsComing) {
+                // The tracks are being read: lights at made-up places at the front would jump to
+                // their real places a moment later, so the stage stays empty until they are there.
+                return;
+            }
             lights = fromSpectrum(sound); // the tracks are not known: the sound itself stands on the stage
         }
         // Far ones first, so that near lights stand in front.
