@@ -29,6 +29,11 @@ public record ContextTiers(Tier tier, boolean compact, List<Window> windows) {
     public static final int WINDOW_BARS = 8;
     /** The same for a long piece. */
     public static final int LONG_WINDOW_BARS = 4;
+    /**
+     * In a long piece form and part summaries are told for this many bars before the last window
+     * only: a piece grows step by step, and the request of a step must not grow with it.
+     */
+    public static final int NEAR_BARS = 128;
 
     public enum Tier { FULL, WINDOWED, LONG }
 

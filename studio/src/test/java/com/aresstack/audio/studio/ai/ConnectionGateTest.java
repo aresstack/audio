@@ -59,4 +59,33 @@ public final class ConnectionGateTest {
         second.join(5000);
         Assert.assertFalse(second.isAlive());
     }
+
+    /** A request that waits at the gate has not reached the service: the status line says so. */
+    @org.junit.Test
+    public void requestsHeldBackAreSaid() throws Exception {
+        ConnectionGate.reset();
+        ConnectionGate.configure(1);
+        ConnectionGate gate = ConnectionGate.of("held-model");
+        long first = gate.enter(null);
+        org.junit.Assert.assertEquals("", ConnectionGate.heldBack());
+        Thread second = new Thread(() -> {
+            try {
+                gate.leave(gate.enter(null), false);
+            } catch (java.io.IOException cancelled) {
+                // the test ends
+            }
+        });
+        second.start();
+        String said = "";
+        for (int i = 0; i < 200 && said.isEmpty(); i++) {
+            Thread.sleep(10);
+            said = ConnectionGate.heldBack();
+        }
+        org.junit.Assert.assertEquals("1 Anfrage wartet auf eine freie Verbindung zu held-model (unterwegs 1, höchstens 1 "
+                + "gleichzeitig)", said);
+        gate.leave(first, false);
+        second.join(5000);
+        org.junit.Assert.assertEquals("", ConnectionGate.heldBack());
+        ConnectionGate.reset();
+    }
 }

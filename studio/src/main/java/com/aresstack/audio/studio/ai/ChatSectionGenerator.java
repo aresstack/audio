@@ -15,6 +15,9 @@ public final class ChatSectionGenerator implements SectionGenerator {
     /** The standing instruction of the call. */
     public static final String INSTRUCTION = "You continue an existing piece of original instrumental music, one part "
             + "and one section at a time. Return valid JSON only, no Markdown.";
+    /** The room for the answer of one section: this many tokens per bar, at least {@link #LEAST_TOKENS}. */
+    static final int TOKENS_PER_BAR = 512;
+    static final int LEAST_TOKENS = 2048;
     private final ChatModel model;
     private final int maxTokens;
 
@@ -144,8 +147,12 @@ public final class ChatSectionGenerator implements SectionGenerator {
                 ? null : "No note of the answer lies in bars 1-" + frame.bars() + " of THESE bars ("
                 + (notes.notes().isEmpty() ? "the list is empty" : notes.notes().size() + " notes, all outside")
                 + "). This part plays here: write its notes, bar counted from 1 at the start of these bars.";
+        // Room for the answer by the bars asked for, not always the most: request and room together
+        // must fit the model, and the request of a long piece is long. An answer cut off at this
+        // room is asked for again with more (the client does that).
+        int room = Math.min(maxTokens, Math.max(LEAST_TOKENS, frame.bars() * TOKENS_PER_BAR));
         return GeneratedNotes.ask(problem -> model.generate(INSTRUCTION, prompt + GeneratedNotes.again(problem),
-                maxTokens, cache, Listening.current()), cache,
+                room, cache, Listening.current()), cache,
                 voice.key(), frame.sectionId(), check).inFrame(frame.firstBar(), frame.bars());
     }
 }
