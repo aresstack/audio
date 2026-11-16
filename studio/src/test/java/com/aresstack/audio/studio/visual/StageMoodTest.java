@@ -56,14 +56,15 @@ public final class StageMoodTest {
 
     @Test
     public void anotherReaderOfTheMusicCanTakeThePlaceOfTheSimpleOne() {
-        SoundCharacter knowsBetter = (sound, settings) -> new SoundCharacter.Heard(100, StageMood.Mood.CLUB, "Jazz");
+        GenreRecognizer knowsBetter = (sound, settings) -> new GenreRecognizer.Heard(GenreRecognizer.Genre.JAZZ, 0.9, 100, null, "Jazz");
         StageMood mood = new StageMood(knowsBetter);
         StageMood.Mood shown = null;
         for (int frame = 0; frame < 300; frame++) {
             shown = mood.at(beating(frame, 140, 0.8f), SETTINGS);
         }
         assertEquals(StageMood.Mood.CLUB, shown);
-        assertEquals("Jazz", mood.heard().words());
+        assertEquals(GenreRecognizer.Genre.JAZZ, mood.heard().genre());
+        assertEquals(GenreRecognizer.Genre.UNKNOWN, new SimpleRecognizer().hear(beating(0, 140, 0.8f), SETTINGS).genre());
     }
 
     @Test

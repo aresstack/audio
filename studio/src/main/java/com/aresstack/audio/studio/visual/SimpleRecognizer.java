@@ -8,7 +8,7 @@ import java.util.Locale;
  * Fast beats call for lasers, a heavy low end with a beat for fire, everything else for candle
  * light. It names no genre: jazz, country and pop cannot be told apart this way.
  */
-public final class SimpleCharacter implements SoundCharacter {
+public final class SimpleRecognizer implements GenreRecognizer {
     /** How many beats the tempo is read from. */
     private static final int BEATS = 8;
     private final double[] gaps = new double[BEATS];
@@ -50,7 +50,7 @@ public final class SimpleCharacter implements SoundCharacter {
             character = "ruhig";
         }
         String words = tempo > 0 ? String.format(Locale.ROOT, "%.0f BPM · %s", tempo, character) : character;
-        last = new Heard(tempo, mood, words);
+        last = new Heard(Genre.UNKNOWN, 0, tempo, mood, words);
         return last;
     }
 

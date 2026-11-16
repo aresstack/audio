@@ -125,8 +125,8 @@ public final class StageMood {
         return null;
     }
 
-    private final SoundCharacter character;
-    private SoundCharacter.Heard heard = SoundCharacter.Heard.NOTHING;
+    private final GenreRecognizer recognizer;
+    private GenreRecognizer.Heard heard = GenreRecognizer.Heard.NOTHING;
     private Mood shown;
     private String readStyle = "";
     private Mood named;
@@ -134,36 +134,28 @@ public final class StageMood {
     private double wantedSince;
 
     public StageMood() {
-        this(new SimpleCharacter());
+        this(new SimpleRecognizer());
     }
 
-    /** @param character who reads the music where the piece does not say what it is */
-    public StageMood(SoundCharacter character) {
-        this.character = character;
+    /** @param recognizer who reads the music where the piece does not say what it is */
+    public StageMood(GenreRecognizer recognizer) {
+        this.recognizer = recognizer;
     }
 
     /** What was heard in the music at the last picture, whatever the piece says of itself. */
-    public SoundCharacter.Heard heard() {
+    public GenreRecognizer.Heard heard() {
         return heard;
     }
 
     /** The style the words about the piece name, as a word for the player; empty if they name none. */
     public String named() {
-        return named == null ? "" : switch (named) {
-            case FIRE -> "Rock";
-            case LASER -> "Techno";
-            case CANDLE -> "Klassik";
-            case CLUB -> "Jazz";
-            case LANTERN -> "Country";
-            case SPOTS -> "Pop";
-            default -> "";
-        };
+        return GenreRecognizer.Genre.of(named).label();
     }
 
     /** The mood of the stage for this picture. */
     public Mood at(SoundPicture sound, VisualSettings settings) {
         Mood fixed = fixed(settings.atmosphere());
-        heard = character.hear(sound, settings);
+        heard = recognizer.hear(sound, settings);
         if (!sound.style.equals(readStyle)) {
             readStyle = sound.style;
             named = fromWords(readStyle);
@@ -179,7 +171,8 @@ public final class StageMood {
             wanted = named;
             return named;
         }
-        Mood heard = this.heard.mood() == null ? (shown == null ? Mood.CANDLE : shown) : this.heard.mood();
+        Mood asked = this.heard.atmosphere();
+        Mood heard = asked == null ? (shown == null ? Mood.CANDLE : shown) : asked;
         if (shown == null) {
             shown = heard;
             wanted = heard;
