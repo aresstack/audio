@@ -122,12 +122,22 @@ public final class ChatSectionGenerator implements SectionGenerator {
         return prompt.toString();
     }
 
+    private static Path cacheOf(String prompt, ContinuationVoice voice, VoiceFrame frame, Path cacheDirectory) {
+        return cacheDirectory.resolve(voice.key() + "-" + frame.sectionId() + "-"
+                + ContextBuilder.sha256(prompt).substring(0, 12) + ".json");
+    }
+
+    @Override
+    public void forget(ContinuationTask task, ContinuationPlan plan, ContinuationVoice voice, VoiceFrame frame,
+                       String connection, Path cacheDirectory) {
+        AnswerCache.discard(cacheOf(prompt(task, plan, voice, frame, connection), voice, frame, cacheDirectory));
+    }
+
     @Override
     public GeneratedNotes generate(ContinuationTask task, ContinuationPlan plan, ContinuationVoice voice,
                                    VoiceFrame frame, String connection, Path cacheDirectory) throws IOException {
         String prompt = prompt(task, plan, voice, frame, connection);
-        Path cache = cacheDirectory.resolve(voice.key() + "-" + frame.sectionId() + "-"
-                + ContextBuilder.sha256(prompt).substring(0, 12) + ".json");
+        Path cache = cacheOf(prompt, voice, frame, cacheDirectory);
         // The part plays in this section (the plan says so): an answer with no note in its bars is
         // asked for again, never taken as rests.
         GeneratedNotes.Check check = notes -> notes.inFrame(frame.firstBar(), frame.bars()).inBars(frame.bars()) > 0
