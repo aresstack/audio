@@ -36,6 +36,8 @@ public final class SoundPicture {
     public List<TrackLight> lights = List.of();
     /** Whether the tracks are still being read: no lights yet, and none made up from the sound. */
     public boolean lightsComing;
+    /** What is known in words about the style of what plays; empty if nothing is. */
+    public String style = "";
 
     public SoundPicture(int windowFrames, int bandCount) {
         left = new float[windowFrames];

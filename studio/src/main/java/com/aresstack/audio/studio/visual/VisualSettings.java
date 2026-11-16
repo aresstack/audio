@@ -30,16 +30,23 @@ import java.util.Properties;
  * @param gpuVsync        whether the full screen waits for the refresh of the screen
  * @param gpuOpenSeconds  how long the graphics card may take to open the full screen
  * @param doubleClickMs   the longest time between the two clicks of a double-click on the full screen
+ * @param atmosphere      what the stage shows around its lights: auto (the music chooses), fire, laser, candle or off
+ * @param laserBpm        from how many beats per minute on the music calls for lasers
+ * @param fireBass        from which average low end on (0 to 1) slower music calls for fire
+ * @param moodSeconds     how long the music must ask for another atmosphere before the stage changes
+ * @param atmosphereStrength how bright the atmosphere is drawn, 0 (not at all) to 1
  */
 public record VisualSettings(int framesPerSecond, int windowFrames, int bands, double lowestHz, double highestHz,
                              double floorDb, double attack, double release, double beatRatio, double beatAverage,
                              double beatDecay, double beatGap, double bassHz, double trebleHz, int particles, int tunnelRings, double trail, String effect,
                              boolean gpu, String gpuBackend, boolean gpuVsync, double gpuOpenSeconds,
-                             int doubleClickMs) {
+                             int doubleClickMs, String atmosphere, double laserBpm, double fireBass,
+                             double moodSeconds, double atmosphereStrength) {
     public static final String PREFIX = "visualizer.";
 
     public static final VisualSettings DEFAULTS = new VisualSettings(30, 2048, 48, 30, 16000, -72, 0.6, 0.12,
-            1.45, 0.05, 0.86, 0.18, 250, 4000, 700, 22, 0.82, "spectrum", true, "auto", true, 6, 450);
+            1.45, 0.05, 0.86, 0.18, 250, 4000, 700, 22, 0.82, "spectrum", true, "auto", true, 6, 450,
+            StageMood.AUTO, 124, 0.55, 4, 0.8);
 
     public VisualSettings {
         framesPerSecond = clamp(framesPerSecond, 5, 120);
@@ -63,6 +70,11 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
         gpuBackend = gpuBackend == null || !gpuBackend.trim().matches("auto|d3d11|opengl") ? "auto" : gpuBackend.trim();
         gpuOpenSeconds = clamp(gpuOpenSeconds, 1, 60);
         doubleClickMs = clamp(doubleClickMs, 100, 2000);
+        atmosphere = StageMood.normal(atmosphere);
+        laserBpm = clamp(laserBpm, 40, 400);
+        fireBass = clamp(fireBass, 0, 1);
+        moodSeconds = clamp(moodSeconds, 0, 60);
+        atmosphereStrength = clamp(atmosphereStrength, 0, 1);
     }
 
     /** The settings kept in these properties, defaults where none are. */
@@ -94,7 +106,12 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
                 saved.getProperty(PREFIX + "gpuBackend", d.gpuBackend),
                 !"false".equalsIgnoreCase(saved.getProperty(PREFIX + "gpuVsync", String.valueOf(d.gpuVsync))),
                 number(saved, "gpuOpenSeconds", d.gpuOpenSeconds),
-                integer(saved, "doubleClickMs", d.doubleClickMs));
+                integer(saved, "doubleClickMs", d.doubleClickMs),
+                saved.getProperty(PREFIX + "atmosphere", d.atmosphere),
+                number(saved, "laserBpm", d.laserBpm),
+                number(saved, "fireBass", d.fireBass),
+                number(saved, "moodSeconds", d.moodSeconds),
+                number(saved, "atmosphereStrength", d.atmosphereStrength));
     }
 
     /** Writes every value into the properties, so that a user finds them all in the file. */
@@ -122,13 +139,27 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
         saved.setProperty(PREFIX + "gpuVsync", String.valueOf(gpuVsync));
         saved.setProperty(PREFIX + "gpuOpenSeconds", text(gpuOpenSeconds));
         saved.setProperty(PREFIX + "doubleClickMs", String.valueOf(doubleClickMs));
+        saved.setProperty(PREFIX + "atmosphere", atmosphere);
+        saved.setProperty(PREFIX + "laserBpm", text(laserBpm));
+        saved.setProperty(PREFIX + "fireBass", text(fireBass));
+        saved.setProperty(PREFIX + "moodSeconds", text(moodSeconds));
+        saved.setProperty(PREFIX + "atmosphereStrength", text(atmosphereStrength));
     }
 
     /** The same settings showing another effect. */
     public VisualSettings showing(String key) {
         return new VisualSettings(framesPerSecond, windowFrames, bands, lowestHz, highestHz, floorDb, attack,
                 release, beatRatio, beatAverage, beatDecay, beatGap, bassHz, trebleHz, particles, tunnelRings, trail, key, gpu, gpuBackend,
-                gpuVsync, gpuOpenSeconds, doubleClickMs);
+                gpuVsync, gpuOpenSeconds, doubleClickMs, atmosphere, laserBpm, fireBass, moodSeconds,
+                atmosphereStrength);
+    }
+
+    /** The same settings with another atmosphere of the stage. */
+    public VisualSettings withAtmosphere(String choice) {
+        return new VisualSettings(framesPerSecond, windowFrames, bands, lowestHz, highestHz, floorDb, attack,
+                release, beatRatio, beatAverage, beatDecay, beatGap, bassHz, trebleHz, particles, tunnelRings, trail, effect, gpu,
+                gpuBackend, gpuVsync, gpuOpenSeconds, doubleClickMs, choice, laserBpm, fireBass, moodSeconds,
+                atmosphereStrength);
     }
 
     private static int integer(Properties saved, String key, int fallback) {

@@ -6043,6 +6043,7 @@ public final class AudioStudioFrame extends JFrame {
         visualizer = new VisualizerPanel(player.feed(), scoreView, settingsStore);
         playerPanel.setVisualizer(visualizer);
         playerPanel.addHeadKeys(visualizer.headKeys());
+        player.styleFrom(this::pieceStyle);
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
         DeckWidgets.Module module = new DeckWidgets.Module("Player", playerPanel);
@@ -6321,6 +6322,26 @@ public final class AudioStudioFrame extends JFrame {
      * While the mix of the open piece plays as one file, the stage lights of the visualizer still
      * know its tracks: places and movements from its stage, levels from its rendered tracks or notes.
      */
+    /**
+     * What the studio knows in words about the style of the open piece: its description and the
+     * style and description of its album. The stage of the player reads its atmosphere from it.
+     */
+    private String pieceStyle() {
+        StringBuilder words = new StringBuilder(description.getText());
+        String folder = directory.getText().trim();
+        if (!folder.isEmpty()) {
+            Album album = albumMembers.albumOf(Paths.get(folder)).orElse(null);
+            if (album != null && album.concept() != null) {
+                words.append('\n').append(album.concept().style()).append('\n').append(album.concept().description());
+            }
+        }
+        // The instruments tell too: a banjo or a saxophone gives a style away.
+        for (MusicTrack track : trackTable.tracks()) {
+            words.append('\n').append(track.instrument());
+        }
+        return words.toString();
+    }
+
     private void lightsOfFile(String only) {
         player.lightsOf(pieceToMix(), modelToMix(), Paths.get(directory.getText().trim()), scene, only);
     }

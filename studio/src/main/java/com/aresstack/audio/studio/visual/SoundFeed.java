@@ -44,4 +44,12 @@ public interface SoundFeed {
     default boolean lightsComing() {
         return false;
     }
+
+    /**
+     * What is known in words about the style of what plays (the description of the piece, the
+     * style of its album); empty where nothing is known. The stage reads its atmosphere from it.
+     */
+    default String style() {
+        return "";
+    }
 }

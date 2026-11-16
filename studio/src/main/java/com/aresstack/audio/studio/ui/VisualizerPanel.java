@@ -6,6 +6,7 @@ import com.aresstack.audio.studio.visual.Effects;
 import com.aresstack.audio.studio.visual.SoundAnalyzer;
 import com.aresstack.audio.studio.visual.SoundFeed;
 import com.aresstack.audio.studio.visual.SoundPicture;
+import com.aresstack.audio.studio.visual.StageMood;
 import com.aresstack.audio.studio.visual.VisualPalette;
 import com.aresstack.audio.studio.visual.VisualSettings;
 
@@ -129,11 +130,28 @@ final class VisualizerPanel extends JPanel {
         gap.setOpaque(false);
         gap.setPreferredSize(new Dimension(8, 1));
         head.add(gap);
+        mood.setToolTipText("Atmosphäre der Bühne: Auto liest sie aus der Beschreibung des Stücks und aus der Musik; "
+                + "ein Klick stellt weiter auf Feuer, Laser, Kerzen, Jazzclub, Laternen, Scheinwerfer, Aus");
+        mood.addActionListener(event -> {
+            settings = settings.withAtmosphere(StageMood.next(settings.atmosphere()));
+            showMood();
+            save();
+        });
+        head.add(mood);
         head.add(wide);
+        showMood();
 
         timer = new Timer(Math.max(1, 1000 / settings.framesPerSecond()), event -> tick());
         timer.setCoalesce(true);
         show(settings.effect());
+    }
+
+    /** The key of the stage's atmosphere: it says what is set, and is there only while the stage is shown. */
+    private final DeckWidgets.HeadKey mood = new DeckWidgets.HeadKey("Atmosphäre");
+
+    private void showMood() {
+        mood.setText("Atmosphäre: " + StageMood.label(settings.atmosphere()));
+        mood.setVisible("stage".equals(shown));
     }
 
     private void addKey(ButtonGroup group, String key, String label, String tip, boolean first) {
@@ -184,6 +202,7 @@ final class VisualizerPanel extends JPanel {
             button.setSelected(true);
         }
         cards.show(views, SCORE.equals(shown) ? SCORE : PICTURE);
+        showMood();
     }
 
     /** Whether the visualizer fills the screen now. */

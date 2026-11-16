@@ -81,6 +81,8 @@ public final class SoundAnalyzer {
         picture.sounding = heard;
         picture.lights = feed == null ? java.util.List.of() : feed.lights();
         picture.lightsComing = feed != null && feed.lightsComing();
+        String style = feed == null ? null : feed.style();
+        picture.style = style == null ? "" : style;
         analyzeWindow((System.nanoTime() - started) / 1e9);
         return picture;
     }
