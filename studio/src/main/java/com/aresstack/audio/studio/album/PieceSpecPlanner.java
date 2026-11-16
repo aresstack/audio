@@ -43,8 +43,11 @@ public final class PieceSpecPlanner {
         AlbumTrack piece = new AlbumTrack("t1", TITLE, "", shown.bpm(), shown.key().name(),
                 shown.numerator() + "/" + shown.denominator(), "", "", (int) Math.round(shown.seconds()), "", true, "",
                 kept);
-        // A piece is as long as its description wants: the album range of four to six minutes does not apply.
-        Album album = new Album("piece", TITLE, new AlbumConcept(description, "", 1, AlbumConcept.MIN_SECONDS, AlbumConcept.MAX_SECONDS), List.of(piece));
+        // A piece chosen automatically is short to as long as an album piece at most (10 s to 6 min); a
+        // longer one is set by the user. With the whole range up to an hour, an answer without a length
+        // fell back to its middle: half an hour, 925 bars of techno at 123 BPM.
+        Album album = new Album("piece", TITLE, new AlbumConcept(description, "", 1, AlbumConcept.MIN_SECONDS,
+                AlbumConcept.DEFAULT_MAX_SECONDS), List.of(piece));
         progress.update("KI wählt aus der Beschreibung, was automatisch ist (Länge, Tempo, Tonart, Taktart) ...");
         AlbumTrack planned = new ChatAlbumPlanner(model, maxTokens).plan(album, cache, progress).tracks().get(0);
         return of(planned, shown, kept);
