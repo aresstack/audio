@@ -145,7 +145,7 @@ public final class AudioStudioFrame extends JFrame {
     private final JTextField fluidSynth = new JTextField("fluidsynth", 17);
     private final JTextField sfizz = new JTextField("sfizz_render", 17);
     /** Length, tempo, key and meter of a new piece. */
-    private final PieceSpecFields specFields = new PieceSpecFields();
+    private final PieceSpecFields specFields = new PieceSpecFields(true);
     private final JTextArea description = new JTextArea(
             "A charming pastel city slowly grows; compose a playful, cozy, uplifting orchestral theme.", 3, 54);
     private final JTextArea log = new JTextArea(10, 70);
@@ -973,30 +973,17 @@ public final class AudioStudioFrame extends JFrame {
         JScrollPane prompt = new JScrollPane(description);
         prompt.setBorder(BorderFactory.createLineBorder(AudioStudioTheme.STROKE, 1, true));
         description.setFont(description.getFont().deriveFont(15f));
-        // The draft is a form like the one of an album: short names at the left (what they mean is
-        // their tooltip), the fields in one column, the square keys of the AI help at the right.
-        JPanel wish = new JPanel(new BorderLayout(0, 0));
-        wish.setOpaque(false);
-        JPanel form = new JPanel(new java.awt.GridBagLayout());
-        form.setOpaque(false);
+        // The draft has two sides (see DraftForm): at the left the words for the AI, over the whole
+        // height; at the right, in named groups, what else is said about the piece.
         JButton describeHelp = assistant().key("KI-Hilfe für die Beschreibung des Stücks", () -> Assistant.textField(
                 "Beschreibung", "piece-" + pieceKey(), description,
                 "the description of a piece of music for the AI that composes it: what it is about, mood, style, "
                         + "players, form, how it develops. It may be long.",
                 () -> "Stück: " + pieceKey() + "\n" + songFacts.getText() + "\nLänge, Tempo, Tonart, Takt: "
                         + specSaid(), null));
-        AlbumsPanel.formRow(form, 0, "Beschreibung", "Was für Musik soll es sein? Das bekommt die KI gesagt: worum es "
-                + "geht, Stimmung, Stil, Besetzung, Form, wie es sich entwickelt. Darf lang sein.", prompt, null,
-                describeHelp);
-        AlbumsPanel.formRow(form, 1, "Vorgaben", "Länge, Tempo, Tonart und Taktart: automatisch wählt die KI sie aus der "
-                + "Beschreibung; was du wählst oder eintippst, gilt.", specFields, null, null);
+        JPanel words = DraftForm.words("Beschreibung", "Was für Musik soll es sein? Das bekommt die KI gesagt: worum es "
+                + "geht, Stimmung, Stil, Besetzung, Form, wie es sich entwickelt. Darf lang sein.", describeHelp, prompt);
         prompt.setPreferredSize(new Dimension(300, 190));
-        modelChoices.setBorder(BorderFactory.createEmptyBorder(0, 16, 0, 0));
-        wish.add(form, BorderLayout.CENTER);
-        JPanel modelsAtTop = new JPanel(new BorderLayout());
-        modelsAtTop.setOpaque(false);
-        modelsAtTop.add(modelChoices, BorderLayout.NORTH);
-        wish.add(modelsAtTop, BorderLayout.EAST);
 
         // Under the words for the AI: what came of them, as the score a conductor reads.
         JScrollPane sheet = new JScrollPane(scoreView, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
@@ -1017,7 +1004,8 @@ public final class AudioStudioFrame extends JFrame {
         notes.add(scoreHead, BorderLayout.NORTH);
         notes.add(sheet, BorderLayout.CENTER);
 
-        // One choice of two, shown as what it is: radio buttons behind the question they answer.
+        // One choice of two, shown as what it is: two radio buttons under one another, the first
+        // with how many voices the AI may choose.
         JPanel whoRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         whoRow.setOpaque(false);
         aiChooses.setOpaque(false);
@@ -1033,7 +1021,6 @@ public final class AudioStudioFrame extends JFrame {
             word.setForeground(AudioStudioTheme.TEXT_DIM);
             word.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8));
         }
-        ownTracks.setBorder(BorderFactory.createEmptyBorder(0, 22, 0, 0));
         voicesMin.setPreferredSize(new Dimension(58, 28));
         voicesMax.setPreferredSize(new Dimension(58, 28));
         voicesMin.setToolTipText("So viele Instrumente wählt die KI mindestens");
@@ -1061,26 +1048,20 @@ public final class AudioStudioFrame extends JFrame {
         whoRow.add(toVoices);
         whoRow.add(voicesMax);
         whoRow.add(voicesWord);
-        whoRow.add(ownTracks);
         // The page shows one of two things, never both: the draft, what the AI is asked for, or the
         // score that came of it. The switch stands in the head beside the name, then the key that composes.
-        JPanel draft = new JPanel(new BorderLayout());
+        JPanel draft = new JPanel(new BorderLayout(18, 0));
         draft.setOpaque(false);
-        JPanel asked = new JPanel(new BorderLayout());
-        asked.setOpaque(false);
-        asked.add(wish, BorderLayout.CENTER);
         // Or no free composing at all: notes the user gives, which the AI only brings into shape.
         JPanel templateRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         templateRow.setOpaque(false);
         templateShown.setForeground(AudioStudioTheme.TEXT_DIM);
-        templateShown.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 14));
         chooseTemplate.setToolTipText("Eigene Noten geben (MIDI, MusicXML, ABC …), z. B. ein gemeinfreies Werk aus einer"
                 + " Notensammlung. Die KI komponiert dann nicht frei: sie übernimmt die Noten, wählt die Besetzung und"
                 + " berichtigt nur Format und offensichtliche Fehler. Es geht gleich los.");
         dropTemplate.setToolTipText("Das Stück folgt keiner Notenvorlage mehr; „Komponieren“ komponiert wieder frei");
         chooseTemplate.addActionListener(event -> chooseTemplate());
         dropTemplate.addActionListener(event -> dropTemplate());
-        templateRow.add(templateShown);
         templateRow.add(chooseTemplate);
         JButton scoreHelp = assistant().key("KI-Hilfe für die Notenvorlage: aus einer Beschreibung, Akkorden, einer "
                 + "Melodie in Worten oder ABC schreibt die KI mit dir die Noten dieses Stücks", () -> {
@@ -1105,14 +1086,17 @@ public final class AudioStudioFrame extends JFrame {
                 + " Tonart, Takt, Tempo und seinen bekannten Themen so getreu wie möglich wieder, statt etwas Neues"
                 + " darüber zu erfinden. Genau wird es mit „Noten vorgeben …“.");
         originalWork.addActionListener(event -> saveSettings(false));
-        originalWork.setBorder(BorderFactory.createEmptyBorder(0, 22, 0, 0));
-        templateRow.add(originalWork);
-        AlbumsPanel.formRow(form, 2, "Instrumente", "Wer spielt: die KI wählt die Instrumente zur Beschreibung, mit so "
-                + "vielen Stimmen, wie hier steht, oder sie komponiert für genau die Spuren im Arrangement.", whoRow,
-                null, null);
-        AlbumsPanel.formRow(form, 3, "Noten", "Eine Notenvorlage: ohne sie komponiert die KI frei; mit ihr übernimmt sie "
-                + "die Noten und bringt sie nur in Form.", templateRow, null, scoreHelp);
-        draft.add(asked, BorderLayout.NORTH);
+        draft.add(words, BorderLayout.CENTER);
+        draft.add(DraftForm.side(
+                DraftForm.group(DraftForm.head("Vorgaben", "Länge, Tempo, Tonart und Taktart: automatisch wählt die KI "
+                        + "sie aus der Beschreibung; was du wählst oder eintippst, gilt.", null), specFields),
+                DraftForm.group(DraftForm.head("Besetzung", "Wer spielt: die KI wählt die Instrumente zur Beschreibung, "
+                        + "mit so vielen Stimmen, wie hier steht, oder sie komponiert für genau die Spuren im "
+                        + "Arrangement.", null), whoRow, ownTracks),
+                DraftForm.group(DraftForm.head("Notenvorlage", "Ohne Notenvorlage komponiert die KI frei; mit ihr "
+                        + "übernimmt sie die Noten und bringt sie nur in Form.", scoreHelp), templateShown, templateRow,
+                        originalWork),
+                DraftForm.group(null, modelChoices)), BorderLayout.EAST);
         songView.setOpaque(false);
         songView.add(draft, "draft");
         songView.add(notes, "score");

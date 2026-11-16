@@ -46,6 +46,8 @@ final class SpecChoice extends JPanel {
     }
 
     private final Length unit;
+    /** How many fields stand side by side: all four in one row, or two over two in a narrow column. */
+    private final int columns;
     private final Map<String, JComboBox<Object>> boxes = new LinkedHashMap<String, JComboBox<Object>>();
     private final Map<String, Auto> autos = new LinkedHashMap<String, Auto>();
     private final List<Runnable> listeners = new ArrayList<Runnable>();
@@ -54,9 +56,19 @@ final class SpecChoice extends JPanel {
     private boolean locked;
     private boolean quiet;
 
+    /** The four fields in one row. */
     SpecChoice(Length unit) {
-        super(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        this(unit, FIELDS.size());
+    }
+
+    /**
+     * @param columns how many fields stand side by side; fewer than four wraps them into a grid whose
+     *                fields are as wide as the room they are given
+     */
+    SpecChoice(Length unit, int columns) {
+        super(new java.awt.GridBagLayout());
         this.unit = unit;
+        this.columns = Math.max(1, Math.min(FIELDS.size(), columns));
         setOpaque(false);
         held = new Values(unit == Length.BARS ? 8 : 4, 108, Key.C_MAJOR, 4, 4);
         boolean bars = unit == Length.BARS;
@@ -99,9 +111,22 @@ final class SpecChoice extends JPanel {
         javax.swing.JLabel label = new javax.swing.JLabel(name);
         label.setForeground(AudioStudioTheme.TEXT_DIM);
         label.setToolTipText(meaning);
-        label.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, boxes.isEmpty() ? 0 : 18, 0, 8));
-        add(label);
-        add(box);
+        // Names and fields each stand in columns of their own, so the fields begin under one another.
+        boolean wrapped = columns < FIELDS.size();
+        int column = boxes.size() % columns;
+        java.awt.GridBagConstraints at = new java.awt.GridBagConstraints();
+        at.gridy = boxes.size() / columns;
+        at.gridx = 2 * column;
+        at.anchor = java.awt.GridBagConstraints.WEST;
+        at.insets = new java.awt.Insets(at.gridy == 0 ? 0 : 8, column == 0 ? 0 : 18, 0, 8);
+        add(label, at);
+        at.gridx++;
+        at.insets = new java.awt.Insets(at.gridy == 0 ? 0 : 8, 0, 0, 0);
+        if (wrapped) {
+            at.fill = java.awt.GridBagConstraints.HORIZONTAL;
+            at.weightx = 1;
+        }
+        add(box, at);
         autos.put(field, auto);
         boxes.put(field, box);
     }

@@ -16,24 +16,51 @@ import javax.swing.JPanel;
  * changed here: other values are a new piece.
  */
 final class PieceSpecFields extends JPanel {
-    private final SpecChoice choice = new SpecChoice(SpecChoice.Length.BARS);
+    private final SpecChoice choice;
     private final JCheckBox snap = new JCheckBox("auf Harmonie ziehen", true);
     private static final String SNAP_HINT = "An: Töne außerhalb von Tonart und Akkord des Takts werden auf die Harmonie"
             + " gezogen. Aus: Sie bleiben stehen und werden nur gemeldet.";
     private final JLabel planned = new JLabel(" ");
     private boolean locked;
 
+    /** Everything in one row. */
     PieceSpecFields() {
-        super(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        this(false);
+    }
+
+    /**
+     * @param stacked for a narrow column: the four settings two over two, the switch and the word
+     *                about a planned piece under them; otherwise everything in one row
+     */
+    PieceSpecFields(boolean stacked) {
+        super(stacked ? new java.awt.GridBagLayout() : new FlowLayout(FlowLayout.LEFT, 0, 0));
+        choice = stacked ? new SpecChoice(SpecChoice.Length.BARS, 2) : new SpecChoice(SpecChoice.Length.BARS);
         setOpaque(false);
         snap.setOpaque(false);
         snap.setToolTipText(SNAP_HINT);
-        snap.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 22, 0, 0));
         planned.setForeground(AudioStudioTheme.TEXT_DIM);
-        planned.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 16, 0, 0));
-        add(choice);
-        add(snap);
-        add(planned);
+        if (stacked) {
+            java.awt.GridBagConstraints at = new java.awt.GridBagConstraints();
+            at.gridx = 0;
+            at.gridy = 0;
+            at.weightx = 1;
+            at.anchor = java.awt.GridBagConstraints.WEST;
+            at.fill = java.awt.GridBagConstraints.HORIZONTAL;
+            add(choice, at);
+            at.gridy++;
+            at.fill = java.awt.GridBagConstraints.NONE;
+            at.insets = new java.awt.Insets(8, 0, 0, 0);
+            add(snap, at);
+            at.gridy++;
+            at.insets = new java.awt.Insets(2, 0, 0, 0);
+            add(planned, at);
+        } else {
+            snap.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 22, 0, 0));
+            planned.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 16, 0, 0));
+            add(choice);
+            add(snap);
+            add(planned);
+        }
         show(null);
         choose(CompositionSpec.legacy());
     }
@@ -99,6 +126,8 @@ final class PieceSpecFields extends JPanel {
         choice.lock(locked);
         snap.setEnabled(!locked);
         planned.setText(locked ? "Gesperrt: mit diesen Vorgaben geplant" : " ");
+        // In a column the word takes a line of its own, and none while there is nothing to say.
+        planned.setVisible(locked || !(getLayout() instanceof java.awt.GridBagLayout));
         String why = locked ? "Dieses Stück ist mit diesen Vorgaben geplant. Für andere Vorgaben ein neues Stück beginnen"
                 + " oder beim Komponieren „Neues Stück“ oder „Dieses ersetzen“ wählen." : null;
         planned.setToolTipText(why);
