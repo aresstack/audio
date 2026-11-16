@@ -156,7 +156,25 @@ final class StageDeck {
             }
             return known.lights.at(file.seconds());
         }
+
+        @Override
+        public boolean lightsComing() {
+            if (live != null) {
+                return false;
+            }
+            Path wanted = lightsFolder;
+            Path playing = file.file();
+            if (wanted == null || playing == null || !playing.toAbsolutePath().normalize().startsWith(wanted)) {
+                return false;
+            }
+            FileLights known = fileLights;
+            // Read for this piece but the file not ready yet, or still being read.
+            return known == null || !known.directory.equals(wanted) || !file.ready();
+        }
     };
+
+    /** The folder of the piece whose lights were asked for last; {@code null} if they could not be read. */
+    private volatile Path lightsFolder;
 
     /** The tracks of the piece whose file plays, for the stage lights; {@code null} until they are read. */
     private volatile FileLights fileLights;
@@ -179,11 +197,15 @@ final class StageDeck {
         }
         final Path folder = directory.toAbsolutePath().normalize();
         final int ticket = ++lightsAsked;
+        lightsFolder = folder;
         loader.submit(() -> {
             com.aresstack.audio.studio.application.StageLights read;
             try {
                 read = com.aresstack.audio.studio.application.StageLights.read(piece, model, folder, scene, only);
             } catch (RuntimeException unreadable) {
+                if (ticket == lightsAsked) {
+                    lightsFolder = null;
+                }
                 return; // the stage picture then shows the sound itself
             }
             if (ticket == lightsAsked) {

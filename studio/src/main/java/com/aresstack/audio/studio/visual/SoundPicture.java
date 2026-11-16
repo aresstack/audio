@@ -34,6 +34,8 @@ public final class SoundPicture {
     public double seconds;
     /** The tracks of the stage at the heard moment. */
     public List<TrackLight> lights = List.of();
+    /** Whether the tracks are still being read: no lights yet, and none made up from the sound. */
+    public boolean lightsComing;
 
     public SoundPicture(int windowFrames, int bandCount) {
         left = new float[windowFrames];

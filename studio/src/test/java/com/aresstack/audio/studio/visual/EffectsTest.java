@@ -79,6 +79,19 @@ public final class EffectsTest {
     }
 
     @Test
+    public void theStageWaitsForTracksThatAreStillBeingRead() {
+        Effect stage = Effects.find(Effects.all(), "stage");
+        SoundPicture picture = loud();
+        picture.lightsComing = true; // the piece is known, its tracks are on their way
+        BufferedImage image = new BufferedImage(400, 240, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        Effect.clear(g, 400, 240, GROUND);
+        stage.paint(g, 400, 240, picture, PALETTE, VisualSettings.DEFAULTS);
+        g.dispose();
+        assertTrue("no lights at made-up places", litPixels(image) < 2000);
+    }
+
+    @Test
     public void anUnknownKeyFindsTheFirstEffect() {
         List<Effect> all = Effects.all();
         assertEquals(all.get(0).key(), Effects.find(all, "gibt-es-nicht").key());
