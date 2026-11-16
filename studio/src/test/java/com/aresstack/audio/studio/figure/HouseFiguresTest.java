@@ -33,6 +33,26 @@ public final class HouseFiguresTest {
     }
 
     @Test
+    public void oneFigureIsTakenOutOfTheLibraryAndMovedAside() throws Exception {
+        java.nio.file.Path home = java.nio.file.Files.createTempDirectory("figures-test");
+        FigureLibrary library = new FigureLibrary(home.resolve("figures"));
+        String first = library.add("violine", HouseFigures.svg("strings", 0), "test", "Violine");
+        String second = library.add("violine", HouseFigures.svg("strings", 1), "test", "Violine");
+        assertNotNull(library.picture(first));
+        assertEquals(java.util.List.of("violine"), library.kinds());
+        assertEquals(true, library.remove(first));
+        assertEquals(java.util.List.of(second), library.figures("violine"));
+        assertEquals(null, library.picture(first));
+        assertNotNull(library.picture(second));
+        try (java.util.stream.Stream<java.nio.file.Path> kept = java.nio.file.Files.walk(home.resolve("figures-entfernt"))) {
+            assertEquals(1, kept.filter(file -> file.toString().endsWith(".svg")).count());
+        }
+        assertEquals(false, library.remove(first));
+        assertEquals("a new figure does not take the number of one that is left", "violine/3",
+                library.add("violine", HouseFigures.svg("strings", 2), "test", "Violine"));
+    }
+
+    @Test
     public void aTrackKeepsItsFigureAndTwoTracksDiffer() {
         assertSame(HouseFigures.picture("violin", "v1"), HouseFigures.picture("violin", "v1"));
         assertNotSame(HouseFigures.picture("violin", "v1"), HouseFigures.picture("violin", "v2"));

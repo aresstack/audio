@@ -6233,6 +6233,33 @@ public final class AudioStudioFrame extends JFrame {
             message(house.isSelected() ? "Die Bühne zeigt die Standardfiguren." : "Die Bühne zeigt wieder die gezeichneten Figuren.");
         });
         menu.add(house);
+        // One figure at a time: every figure of the library with its picture, by kind of instrument.
+        javax.swing.JMenu remove = new javax.swing.JMenu("Figur aus der Bibliothek entfernen");
+        remove.setToolTipText("Nimmt eine einzelne gezeichnete Figur aus der Bibliothek; sie wird in den Ordner "
+                + "figures-entfernt daneben verschoben, nicht vernichtet");
+        com.aresstack.audio.studio.figure.FigureLibrary library = stageFigures.library();
+        for (String kind : library.kinds()) {
+            javax.swing.JMenu ofKind = new javax.swing.JMenu(kind);
+            for (String id : library.figures(kind)) {
+                javax.swing.JMenuItem item = new javax.swing.JMenuItem(id.substring(id.indexOf('/') + 1));
+                java.awt.image.BufferedImage picture = library.picture(id);
+                if (picture != null) {
+                    item.setIcon(new javax.swing.ImageIcon(picture.getScaledInstance(40, 80, java.awt.Image.SCALE_SMOOTH)));
+                }
+                item.addActionListener(event -> {
+                    try {
+                        message(library.remove(id) ? "Figur " + id + " aus der Bibliothek entfernt (verschoben nach figures-entfernt)."
+                                : "Figur " + id + " ist nicht mehr in der Bibliothek.");
+                    } catch (IOException failed) {
+                        message("Die Figur ließ sich nicht entfernen: " + failed.getMessage());
+                    }
+                });
+                ofKind.add(item);
+            }
+            remove.add(ofKind);
+        }
+        remove.setEnabled(remove.getItemCount() > 0);
+        menu.add(remove);
         menu.addSeparator();
         for (JButton key : new JButton[]{drawFigures, otherFigures, undoFigures}) {
             javax.swing.JMenuItem item = new javax.swing.JMenuItem(key == drawFigures ? "Figuren zeichnen"

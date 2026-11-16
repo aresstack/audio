@@ -141,6 +141,49 @@ public final class FigureLibrary {
         return picture;
     }
 
+    /** The kinds the library has figures of, by name. */
+    public synchronized List<String> kinds() {
+        List<String> kinds = new ArrayList<>();
+        if (Files.isDirectory(directory)) {
+            try (Stream<Path> folders = Files.list(directory)) {
+                for (Path folder : (Iterable<Path>) folders::iterator) {
+                    String kind = folder.getFileName().toString();
+                    if (Files.isDirectory(folder) && !figures(kind).isEmpty()) {
+                        kinds.add(kind);
+                    }
+                }
+            } catch (IOException unreadable) {
+                // a library that cannot be read has no figures
+            }
+        }
+        java.util.Collections.sort(kinds);
+        return kinds;
+    }
+
+    /**
+     * Takes one figure out of the library. It is not destroyed but moved into a folder beside the
+     * library ({@code figures-entfernt/<kind>}), from where it can be put back by hand.
+     *
+     * @return whether the figure was there
+     */
+    public synchronized boolean remove(String id) throws IOException {
+        if (!has(id)) {
+            return false;
+        }
+        pictures.remove(id);
+        String kind = kindOf(id);
+        String number = id.substring(id.indexOf('/') + 1);
+        String time = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+        Path away = directory.resolveSibling(directory.getFileName() + "-entfernt").resolve(kind);
+        Files.createDirectories(away);
+        Files.move(svgFile(id), away.resolve(number + "-" + time + ".svg"));
+        Path note = directory.resolve(kind).resolve(number + ".json");
+        if (Files.isRegularFile(note)) {
+            Files.move(note, away.resolve(number + "-" + time + ".json"));
+        }
+        return true;
+    }
+
     private Path svgFile(String id) {
         return directory.resolve(kindOf(id)).resolve(id.substring(id.indexOf('/') + 1) + ".svg");
     }
