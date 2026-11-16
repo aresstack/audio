@@ -9,6 +9,7 @@ import com.aresstack.audio.studio.album.AlbumExporter;
 import com.aresstack.audio.studio.album.AlbumCover;
 import com.aresstack.audio.studio.album.CoverArtist;
 import com.aresstack.audio.studio.album.AlbumFiles;
+import com.aresstack.audio.studio.album.AlbumFromPiece;
 import com.aresstack.audio.studio.album.AlbumMembership;
 import com.aresstack.audio.studio.album.AlbumProducer;
 import com.aresstack.audio.studio.album.AlbumProductionCoordinator;
@@ -26,6 +27,7 @@ import com.aresstack.audio.studio.album.ChatAlbumPlanner;
 import com.aresstack.audio.studio.album.ChatAlbumSuggester;
 import com.aresstack.audio.studio.album.LimitedChatModel;
 import com.aresstack.audio.studio.application.PieceAutopilot;
+import com.aresstack.audio.studio.application.PieceVersions;
 import com.aresstack.audio.studio.application.SongLibrary;
 import com.aresstack.audio.studio.application.StageMixdown;
 import java.awt.BorderLayout;
@@ -153,6 +155,17 @@ final class AlbumsPanel extends JPanel {
         default void pieceProduced(Path piece) {
         }
 
+        /**
+         * The folder of this piece is about to be moved as a whole (it becomes an earlier version,
+         * or one comes back): the window lets go of its files, so that nothing of it is in use.
+         */
+        default void pieceLeaves(Path piece) {
+        }
+
+        /** The folder of this piece holds another version now (or the same, if moving failed): the window shows it. */
+        default void pieceMoved(Path piece) {
+        }
+
         /** The user chose this album in the list of the page; the window's choice of the album follows. */
         /** The page shows this album now ({@code null}: none): its own models are shown beside it. */
         default void albumShown(String id) {
@@ -218,7 +231,9 @@ final class AlbumsPanel extends JPanel {
     private final JButton down = new DeckWidgets.HeadKey("▼");
     private final JButton produce = new DeckWidgets.HeadKey("Album produzieren");
     private final JButton cancel = new DeckWidgets.HeadKey("Abbrechen");
-    private final JButton again = new DeckWidgets.HeadKey("Titel neu");
+    private final JButton again = new DeckWidgets.HeadKey("Neue Fassung");
+    /** The earlier versions of the piece of the chosen title: one of them can be brought back. */
+    private final JButton versions = new DeckWidgets.HeadKey("Fassungen ▾");
     private final JButton open = new DeckWidgets.HeadKey("Öffnen");
     private final JButton export = new DeckWidgets.HeadKey("Exportieren");
     private final JButton scores = new DeckWidgets.HeadKey("Noten vorgeben …");
@@ -494,7 +509,9 @@ final class AlbumsPanel extends JPanel {
         hint(up, "Den gewählten Titel nach oben schieben");
         hint(down, "Den gewählten Titel nach unten schieben");
         hint(open, "Den gewählten Titel im Editor öffnen");
-        hint(again, "Den gewählten Titel neu produzieren");
+        hint(again, "Produziert den gewählten Titel neu nach den Vorgaben des Albums. Die bisherige Fassung wird"
+                + " nicht überschrieben: sie bleibt vollständig erhalten und lässt sich unter „Fassungen“ zurückholen");
+        hint(versions, "Frühere Fassungen dieses Titels: eine zurückholen. Die jetzige bleibt dabei als Fassung erhalten");
         hint(export, "Das Album in einen Ordner exportieren");
         hint(cancel, "Die laufende Produktion abbrechen");
         hint(scores, "Eigene Noten (MIDI, MusicXML, ABC …) als Vorlage geben: eine Datei für den gewählten Titel,"
@@ -521,7 +538,7 @@ final class AlbumsPanel extends JPanel {
         JLabel titleName = DeckWidgets.lettering("Gewählter Titel");
         titleName.setBorder(BorderFactory.createEmptyBorder(0, 22, 0, 6));
         listKeysRow.add(titleName);
-        for (java.awt.Component key : new java.awt.Component[]{open, again, scores, noScore}) {
+        for (java.awt.Component key : new java.awt.Component[]{open, again, versions, scores, noScore}) {
             listKeysRow.add(key);
         }
         if (assistant != null) {
@@ -611,6 +628,7 @@ final class AlbumsPanel extends JPanel {
         produce.addActionListener(event -> produceAlbum());
         cancel.addActionListener(event -> cancelProduction());
         again.addActionListener(event -> produceAgain());
+        versions.addActionListener(event -> showVersions());
         open.addActionListener(event -> openPiece());
         export.addActionListener(event -> exportAlbum());
         scores.addActionListener(event -> giveScores());
@@ -807,6 +825,8 @@ final class AlbumsPanel extends JPanel {
                 : null);
         cancel.setEnabled(running);
         again.setEnabled(free && !other && selected != null && selected.hasPiece());
+        versions.setEnabled(free && selected != null && selected.hasPiece()
+                && !PieceVersions.list(songs.root().resolve(selected.piece())).isEmpty());
         open.setEnabled(there && selected != null && selected.hasPiece());
         // A piece put into the album by hand, or an old one in the unnamed album, can be exported as well.
         scores.setEnabled(free);
@@ -1179,6 +1199,25 @@ final class AlbumsPanel extends JPanel {
             description.requestFocusInWindow();
         } catch (IOException failed) {
             say("Das Album ließ sich nicht anlegen: " + failed.getMessage());
+        }
+    }
+
+    /**
+     * Makes a new album that starts from a piece ({@link AlbumFromPiece}) and shows it; nothing is
+     * asked, its name can be changed like every album's.
+     *
+     * @return the id of the new album, or {@code null} if it could not be made
+     */
+    String createAlbumFrom(AlbumTrack track, String words, List<String> players) {
+        try {
+            Album made = AlbumFromPiece.create(files, track, words, players);
+            reload(made.id());
+            host.albumChosen(made.id());
+            say("Neues Album aus „" + track.title() + "“. „Trackliste planen“ lässt die KI die Titel dazu vorschlagen.");
+            return made.id();
+        } catch (IOException failed) {
+            say("Das Album ließ sich nicht anlegen: " + failed.getMessage());
+            return null;
         }
     }
 
@@ -1948,16 +1987,28 @@ final class AlbumsPanel extends JPanel {
             return;
         }
         AlbumTrack track = album.tracks().get(row);
-        if (state.status(track.id()) == Status.DONE && !host.confirm("„" + track.title() + "“ neu produzieren?\n\n"
-                + "Was du an dem Stück im Editor geändert hast, kann dabei verloren gehen.")) {
-            return;
-        }
         if (producing()) {
             say("Erst die laufende Produktion abwarten oder abbrechen, dann diesen Titel neu produzieren.");
             return;
         }
         if (!keepConcept()) {
             return;
+        }
+        // Nothing is written over and so nothing is asked: the piece as it is becomes an earlier
+        // version, with everything it has, and comes back from "Fassungen" whenever it is wanted.
+        Path piece = track.hasPiece() ? songs.root().resolve(track.piece()) : null;
+        if (piece != null && PieceVersions.hasNotes(piece)) {
+            host.pieceLeaves(piece);
+            try {
+                PieceVersions.Version kept = PieceVersions.setAside(piece);
+                host.log("„" + track.title() + "“: die bisherige Fassung liegt unter „Fassungen“ (" + kept.label()
+                        + ") und lässt sich dort zurückholen.");
+            } catch (IOException inUse) {
+                host.pieceMoved(piece);
+                say(inUse.getMessage());
+                return;
+            }
+            host.pieceMoved(piece);
         }
         try {
             state = state.with(track.id(), Status.QUEUED);
@@ -1973,6 +2024,57 @@ final class AlbumsPanel extends JPanel {
         if (producer != null) {
             start(producer, track.id());
         }
+        keys();
+    }
+
+    /** The earlier versions of the piece of the chosen title, as a menu under the key: one click brings one back. */
+    private void showVersions() {
+        int row = table.getSelectedRow();
+        if (album == null || row < 0 || !album.tracks().get(row).hasPiece()) {
+            return;
+        }
+        AlbumTrack track = album.tracks().get(row);
+        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+        for (PieceVersions.Version version : PieceVersions.list(songs.root().resolve(track.piece()))) {
+            javax.swing.JMenuItem item = new javax.swing.JMenuItem("Fassung vom " + version.label() + " zurückholen");
+            item.setToolTipText("Diese Fassung ist dann wieder das Stück; die jetzige wird selbst zur Fassung");
+            item.addActionListener(event -> restoreVersion(track.id(), version.id()));
+            menu.add(item);
+        }
+        if (menu.getComponentCount() > 0) {
+            menu.show(versions, 0, versions.getHeight());
+        }
+    }
+
+    /**
+     * Brings an earlier version of the piece of a title back. The piece as it is until now becomes
+     * a version itself, so the choice can be taken back the same way.
+     */
+    void restoreVersion(String trackId, String versionId) {
+        AlbumTrack track = album == null ? null : album.track(trackId);
+        if (track == null || !track.hasPiece()) {
+            return;
+        }
+        if (producing()) {
+            say("Erst die laufende Produktion abwarten oder abbrechen, dann eine Fassung zurückholen.");
+            return;
+        }
+        Path piece = songs.root().resolve(track.piece());
+        host.pieceLeaves(piece);
+        try {
+            PieceVersions.Version before = PieceVersions.restore(piece, versionId);
+            // The piece is the user's choice now, not something the production still has to make.
+            state = state.with(track.id(), Status.PLANNED);
+            state.save(files.folder(album.id()));
+            tracks.fireTableDataChanged();
+            say("„" + track.title() + "“ ist wieder die Fassung vom "
+                    + new PieceVersions.Version(versionId, piece).label() + "."
+                    + (before == null ? "" : " Die bisherige liegt unter „Fassungen“ (" + before.label() + ")."));
+        } catch (IOException failed) {
+            say("Die Fassung ließ sich nicht zurückholen: " + failed.getMessage());
+        }
+        host.pieceMoved(piece);
+        host.piecesChanged();
         keys();
     }
 

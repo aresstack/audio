@@ -55,14 +55,23 @@ public final class StageFollowsMix {
         return Optional.of(taking(shown, before, after, piece.composition()));
     }
 
-    /** The stage with what differs between two mixes taken from the later one. */
+    /**
+     * The stage as a mix has it, for every channel of a part: used when the stage of the window
+     * was written for other tracks and has to become that of the saved piece again. Tracks the
+     * mix does not know keep the usual seat of their role.
+     */
+    public static SpatialScene whole(SpatialScene shown, MixScene mix, Composition piece) {
+        return taking(shown, null, mix, piece);
+    }
+
+    /** The stage with what differs between two mixes taken from the later one ({@code before} null: all of it). */
     static SpatialScene taking(SpatialScene shown, MixScene before, MixScene after, Composition piece) {
         SpatialScene stage = shown.fitting(StageMixService.Piece.of(piece).tracks());
-        if (!after.room().equals(before.room())) {
+        if (before == null || !after.room().equals(before.room())) {
             stage = stage.inRoom(AcousticRoom.of(after.room().kind())
                     .withReverbSeconds(after.room().reverbSeconds()).withAmount(after.room().amount()));
         }
-        if (after.masterDb() != before.masterDb()) {
+        if (before == null || after.masterDb() != before.masterDb()) {
             stage = stage.withMaster(after.masterDb());
         }
         long barTicks = piece.timeMap().meters().get(0).barTicks();
@@ -70,9 +79,10 @@ public final class StageFollowsMix {
             if (channel.owner().kind() != MixChannel.Owner.Kind.PART || stage.placement(channel.owner().id()) == null) {
                 continue;
             }
-            MixChannel was = before.channelOf(channel.owner());
+            MixChannel was = before == null ? null : before.channelOf(channel.owner());
             AutomationLane level = after.lane(channel.id(), AutomationLane.LEVEL);
-            if (channel.equals(was) && Objects.equals(level, before.lane(channel.id(), AutomationLane.LEVEL))) {
+            if (before != null && channel.equals(was)
+                    && Objects.equals(level, before.lane(channel.id(), AutomationLane.LEVEL))) {
                 continue;
             }
             // The level curve of the stage is in bars, as the model took it from there.

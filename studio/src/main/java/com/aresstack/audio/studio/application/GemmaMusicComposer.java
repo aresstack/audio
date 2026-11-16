@@ -154,11 +154,7 @@ public final class GemmaMusicComposer {
     public Path compose(String description, Path directory, TrackArrangement tracks, CompositionSpec spec,
                         CompositionSpec piece, Progress progress) throws IOException {
         Files.createDirectories(directory);
-        CompositionSpec planned = specOf(directory);
-        if (planned != null && !planned.equals(piece) && !planned.equals(spec)) {
-            throw new IOException("Dieses Stück ist als " + planned.label() + " geplant, verlangt ist "
-                    + piece.label() + ". Für andere Vorgaben ein neues Stück beginnen.");
-        }
+        requirePlannedAs(directory, spec, piece);
         if (!piece.isLegacy()) {
             Files.write(directory.resolve(SPEC_FILE), new GsonBuilder().setPrettyPrinting().create()
                     .toJson(toJson(piece)).getBytes(StandardCharsets.UTF_8));
@@ -166,6 +162,24 @@ public final class GemmaMusicComposer {
         JsonObject plan = plan(description, tracks, spec, directory, progress);
         Map<String, List<JsonObject>> responses = generateTracks(tracks, plan, spec, directory, progress);
         return assemble(tracks, responses, spec, chords(plan, spec), directory, progress);
+    }
+
+    /**
+     * Refuses a folder that is planned as another piece than the one asked for. Nothing is written:
+     * whoever makes a piece in a folder asks this before the first file of it is touched.
+     *
+     * @param spec  what is composed now (for a long piece its first bars)
+     * @param piece the whole piece
+     */
+    public static void requirePlannedAs(Path directory, CompositionSpec spec, CompositionSpec piece)
+            throws OtherPieceException {
+        CompositionSpec planned = specOf(directory);
+        if (planned != null && !planned.equals(piece) && !planned.equals(spec)) {
+            boolean alike = planned.label().equals(piece.label());
+            throw new OtherPieceException("Dieses Stück ist als " + planned.label() + " geplant"
+                    + (alike ? " und an seine alten Harmonien gebunden" : "") + ", verlangt ist " + piece.label()
+                    + (alike ? " ohne diese Bindung" : "") + ". Für andere Vorgaben ein neues Stück beginnen.");
+        }
     }
 
     /**

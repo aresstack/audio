@@ -132,6 +132,18 @@ public final class PieceAutopilot {
         if (template.isPresent()) {
             return fromTemplate(template.get(), description, folder, stage, songs, model, progress, listener);
         }
+        // A piece that was interrupted on its way goes on from the bars it has, in portions of the
+        // size set now: no portion size is kept with the piece, only its whole length (its spec)
+        // and the bars it has. Composing its opening again would write over what it has.
+        java.util.Optional<ProjectSession> saved = spec == null || model == null ? java.util.Optional.empty()
+                : model.of(folder);
+        int has = saved.isPresent() ? bars(saved.get()) : 0;
+        boolean begun = has > 0 && has < spec.bars();
+        if (spec != null && !begun) {
+            // Before the first file is touched: a folder that holds another piece stays as it is.
+            // (Once the instruments, the stage and the tracks were written before the composer refused.)
+            GemmaMusicComposer.requirePlannedAs(folder, firstOf(spec), spec);
+        }
         InstrumentProposalService proposals = new InstrumentProposalService(
                 models.model(ModelRoles.INSTRUMENTS), maxTokens);
         if (mostVoices > 0) {
@@ -153,20 +165,11 @@ public final class PieceAutopilot {
         }
         new TrackArrangementStore().save(folder, tracks);
         GemmaMusicComposer composer = new GemmaMusicComposer(models, maxTokens, maxParallel).sectionBars(sectionBars);
-        CompositionSpec first = spec == null || spec.bars() <= growBars ? spec
-                : new CompositionSpec(growBars, spec.bpm(), spec.key(), spec.numerator(), spec.denominator(),
-                spec.snapToHarmony());
+        CompositionSpec first = firstOf(spec);
         // The beginning of a long piece is told that it goes on: it must not end yet.
         String opening = first == spec ? description : description + "\nCompose only the opening " + growBars
                 + " bars of a piece of " + spec.bars() + " bars: introduce the themes and do not end;"
                 + " the piece is continued afterwards.";
-        // A piece that was interrupted on its way goes on from the bars it has, in portions of the
-        // size set now: no portion size is kept with the piece, only its whole length (its spec)
-        // and the bars it has. Composing its opening again would write over what it has.
-        java.util.Optional<ProjectSession> saved = spec == null || model == null ? java.util.Optional.empty()
-                : model.of(folder);
-        int has = saved.isPresent() ? bars(saved.get()) : 0;
-        boolean begun = has > 0 && has < spec.bars();
         Path arrangement = begun ? folder.resolve("arrangement.tsv") : ComposingIntoPiece.run(
                 () -> first == null ? composer.compose(opening, folder, tracks, progress)
                         // the piece keeps its whole length as its spec; only the notes come in portions
@@ -180,6 +183,13 @@ public final class PieceAutopilot {
         }
         return new Result(arrangement, render(arrangement, folder, model, assignments, programs, progress), tracks,
                 scene);
+    }
+
+    /** What is composed first: the whole piece, or of a long one its opening bars. */
+    private CompositionSpec firstOf(CompositionSpec spec) {
+        return spec == null || spec.bars() <= growBars ? spec
+                : new CompositionSpec(growBars, spec.bpm(), spec.key(), spec.numerator(), spec.denominator(),
+                spec.snapToHarmony());
     }
 
     /**

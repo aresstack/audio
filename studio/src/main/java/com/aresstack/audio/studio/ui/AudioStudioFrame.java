@@ -883,9 +883,14 @@ public final class AudioStudioFrame extends JFrame {
         final javax.swing.JMenuItem revisionsItem = new javax.swing.JMenuItem("Revisionen …");
         revisionsItem.setToolTipText("Frühere Stände des Stücks ansehen, einen zurückholen oder den jetzigen festhalten");
         revisionsItem.addActionListener(event -> showRevisions());
+        final javax.swing.JMenuItem fromNotesItem = new javax.swing.JMenuItem("Besetzung aus den Noten zurückholen");
+        fromNotesItem.setToolTipText("Stellt die Spuren, die Bühne und die Beschreibung so her, wie die gespeicherten"
+                + " Noten des Stücks sie haben, wenn etwas andere Spuren daneben geschrieben hat; keine Note ändert sich");
+        fromNotesItem.addActionListener(event -> tracksFromNotes());
         moreMenu.add(undoItem);
         moreMenu.add(redoItem);
         moreMenu.add(revisionsItem);
+        moreMenu.add(fromNotesItem);
         moreMenu.addSeparator();
         javax.swing.JMenuItem curveItem = new javax.swing.JMenuItem("Intensitätsverlauf setzen …");
         curveItem.setToolTipText("Legt einen Verlauf über die Abschnitte der markierten Takte (oder des ganzen Stücks);"
@@ -916,6 +921,7 @@ public final class AudioStudioFrame extends JFrame {
                 redoItem.setText(labels.redo());
                 redoItem.setEnabled(labels.canRedo());
                 revisionsItem.setEnabled(piece.isPresent());
+                fromNotesItem.setEnabled(piece.isPresent());
             }
 
             @Override
@@ -1158,12 +1164,6 @@ public final class AudioStudioFrame extends JFrame {
         composing.add(scoreKey);
         composing.add(javax.swing.Box.createHorizontalStrut(12));
         composing.add(composeButton);
-        JButton inAlbum = new DeckWidgets.HeadKey("Im Album produzieren");
-        inAlbum.setToolTipText("Macht dieses Stück neu als Titel seines Albums, mit dem, was das Album ihm sagt;"
-                + " die Albumseite zeigt, wie es vorangeht.");
-        inAlbum.addActionListener(event -> produceOpenPieceInAlbum());
-        composing.add(javax.swing.Box.createHorizontalStrut(8));
-        composing.add(inAlbum);
 
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
@@ -1982,6 +1982,16 @@ public final class AudioStudioFrame extends JFrame {
             public void pieceProduced(Path piece) {
                 albumPieceProduced(piece);
             }
+
+            @Override
+            public void pieceLeaves(Path piece) {
+                albumPieceLeaves(piece);
+            }
+
+            @Override
+            public void pieceMoved(Path piece) {
+                albumPieceMoved(piece);
+            }
         }, songs, registry);
         albumsPanel = albums;
         albums.listInTree(); // the albums are chosen in the tree at the left
@@ -2593,8 +2603,8 @@ public final class AudioStudioFrame extends JFrame {
             choice = JOptionPane.showOptionDialog(this, new Object[]{
                     "„" + songs.name(folder) + "“ ist schon komponiert.\n\n"
                             + "Neues Stück: es kommt als eigenes Stück in die Liste, dieses bleibt, wie es ist.\n"
-                            + "Dieses ersetzen: Instrumente und Noten werden neu erfunden; "
-                            + "die bisherige Fassung liegt danach im Ordner „earlier“.\n\n"
+                            + "Dieses ersetzen: Instrumente und Noten werden neu erfunden; die bisherige Fassung\n"
+                            + "bleibt vollständig erhalten (Rechtsklick auf den Titel › Frühere Fassung zurückholen).\n\n"
                             + "Vorgaben für die neue Komposition:", wanted},
                     "Komponieren", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, choices, choices[0]);
             chosenSpec = choice == 0 || choice == 1 ? wanted.spec() : null;
@@ -2621,8 +2631,23 @@ public final class AudioStudioFrame extends JFrame {
                 return true;
             }
             if (choice == 1) {
-                int put = putAnswersAside(folder, null);
-                append("Das Stück wird neu komponiert; " + put + " bisherige Antworten liegen im Ordner „earlier“.");
+                // Nothing is written over: all the piece is becomes an earlier version, and the new
+                // one begins in the empty folder (PieceVersions).
+                keepSong();
+                albumPieceLeaves(folder);
+                com.aresstack.audio.studio.application.PieceVersions.Version before =
+                        com.aresstack.audio.studio.application.PieceVersions.hasNotes(folder)
+                                ? com.aresstack.audio.studio.application.PieceVersions.setAside(folder) : null;
+                if (before == null) {
+                    putAnswersAside(folder, null); // no notes yet, only answers: the AI is asked anew
+                } else {
+                    arrangementFile.setText("");
+                    loadArrangementForCurrentDirectory(new Properties());
+                    refreshSongs();
+                }
+                append("Das Stück wird neu komponiert; die bisherige Fassung bleibt vollständig erhalten"
+                        + (before == null ? "." : " (Fassung vom " + before.label()
+                        + "; Rechtsklick auf den Titel › Frühere Fassung zurückholen)."));
                 specFields.show(null);
                 updateComposeKey();
                 specFields.choose(chosenSpec, chosenFixed);
@@ -4079,6 +4104,49 @@ public final class AudioStudioFrame extends JFrame {
         }
     }
 
+    /**
+     * The tracks, the stage and the words of the piece as its saved notes have them. For a piece
+     * beside whose notes another line-up was written (an album production that was refused after
+     * it had chosen new instruments): the notes were never touched, so nothing is composed or
+     * rendered, the tracks only become those of the notes again.
+     */
+    private void tracksFromNotes() {
+        java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
+        if (!piece.isPresent()) {
+            message("Dieses Stück hat keine gespeicherten Noten.");
+            return;
+        }
+        if (busy() || (worker != null && !worker.isDone())) {
+            return;
+        }
+        stopPlayback();
+        Path folder = piece.get().folder();
+        final com.aresstack.audio.studio.application.LineUpOfNotes.LineUp lineUp;
+        try {
+            lineUp = com.aresstack.audio.studio.application.LineUpOfNotes.of(piece.get(), scene);
+            trackTable.setArrangement(new TrackArrangement(lineUp.tracks()));
+            scene = lineUp.stage();
+            tracksChanged(); // the tracks and the stage are saved with the piece
+        } catch (RuntimeException invalid) {
+            message("Die Besetzung ließ sich nicht aus den Noten lesen: " + invalid.getMessage());
+            return;
+        }
+        // The words the notes were planned from, if something wrote others over them.
+        String planned = songs.plannedFrom(folder);
+        if (planned != null && !planned.trim().isEmpty()) {
+            description.setText(Album.withoutBrief(planned));
+            description.setCaretPosition(0);
+            keepSong();
+        }
+        arrangementFile.setText(folder.resolve("arrangement.tsv").toString());
+        showPlaybackChoice();
+        refreshSongs();
+        String said = "Besetzung, Bühne und Beschreibung sind wieder die der gespeicherten Noten ("
+                + lineUp.tracks().size() + " Spuren).";
+        append(said);
+        setStatus(said);
+    }
+
     /** The list of revisions: one can be brought back, the piece as it is can be kept as a new one. */
     private void showRevisions() {
         final java.util.Optional<com.aresstack.audio.studio.application.ProjectSession> piece = savedPiece();
@@ -4212,18 +4280,37 @@ public final class AudioStudioFrame extends JFrame {
         }
     }
 
-    /** The key in the head of the composition: the open piece made anew as the title of its album. */
-    private void produceOpenPieceInAlbum() {
-        Path open = Paths.get(directory.getText().trim());
-        Album album = albumMembers.albumOf(open).orElse(null);
-        String name = open.getFileName() == null ? "" : open.getFileName().toString();
-        AlbumTrack track = album == null ? null : album.tracks().stream()
-                .filter(each -> name.equals(each.piece())).findFirst().orElse(null);
-        if (track == null) {
-            message("Dieses Stück steht in keinem Album; im Album produzieren geht nur mit einem Titel eines Albums.");
+    /**
+     * A new album that starts from a piece: its description and style say what the piece is like.
+     * The piece stays where it is; the titles of the new album are planned on its page.
+     */
+    private void albumFromPiece(String albumId, String trackId) {
+        Album album = albumMembers.albums().album(albumId).orElse(null);
+        AlbumTrack track = album == null ? null : album.track(trackId);
+        if (track == null || albumsPanel == null) {
             return;
         }
-        produceInAlbum(album.id(), track.id());
+        keepSong();
+        String words = "";
+        List<String> players = new ArrayList<String>();
+        if (track.hasPiece()) {
+            Path folder = songs.root().resolve(track.piece());
+            String kept = Album.withoutBrief(songs.description(folder));
+            words = kept == null ? "" : kept;
+            try {
+                if (Files.isRegularFile(folder.resolve(TrackArrangementStore.FILE_NAME))) {
+                    for (MusicTrack each : trackStore.load(folder).tracks()) {
+                        players.add(each.instrument());
+                    }
+                }
+            } catch (IOException unreadable) {
+                // then the style names no players
+            }
+        }
+        String made = albumsPanel.createAlbumFrom(track, words, players);
+        if (made != null) {
+            showAlbum(made);
+        }
     }
 
     /** Shows the page of an album: its settings, its titles and its production. */
@@ -4297,6 +4384,20 @@ public final class AudioStudioFrame extends JFrame {
             @Override
             public void produceTitle(String albumId, String trackId) {
                 produceInAlbum(albumId, trackId);
+            }
+
+            @Override
+            public void restoreVersion(String albumId, String trackId, String versionId) {
+                keepSong();
+                showAlbum(albumId);
+                if (albumsPanel != null && albumsPanel.album() != null && albumsPanel.album().id().equals(albumId)) {
+                    albumsPanel.restoreVersion(trackId, versionId);
+                }
+            }
+
+            @Override
+            public void newAlbumFrom(String albumId, String trackId) {
+                albumFromPiece(albumId, trackId);
             }
 
             @Override
@@ -4724,10 +4825,10 @@ public final class AudioStudioFrame extends JFrame {
         Path song = folder.resolve("arrangement.tsv");
         arrangementFile.setText(Files.isRegularFile(song) ? song.toString() : "");
         String kept = Album.withoutBrief(songs.description(folder)); // the album is told to the AI beside it
-        if (kept != null) {
-            description.setText(kept);
-            description.setCaretPosition(0);
-        }
+        // A piece without words shows none: the words of the piece opened before are not its own,
+        // and would be saved with it the next time another piece is opened.
+        description.setText(kept == null ? "" : kept);
+        description.setCaretPosition(0);
         loadArrangementForCurrentDirectory(new Properties());
         saveSettings(false);
         followPiece(folder);
@@ -5494,8 +5595,7 @@ public final class AudioStudioFrame extends JFrame {
             stagePanel.setBars(written == null ? 8 : written.bars());
             showMovements(); // after composing, the model of the piece may be new
         }
-        scoreView.setScore(written, ids,
-                "Noch keine Noten: erst komponieren, dann steht hier die Partitur");
+        scoreView.setScore(written, ids, noNotesHint(written, ids));
         showSections();
         lcd.setSource(selected == null ? "—" : playbackName(selected), there);
         lcd.setTime(0, player.length());
@@ -5585,8 +5685,20 @@ public final class AudioStudioFrame extends JFrame {
             ids.add(track.id());
         }
         arrangementView.setArrangement(shownArrangement(folder), withAudioLanes(ids), "");
-        scoreView.setScore(scoreOf(folder), ids,
-                "Noch keine Noten: erst komponieren, dann steht hier die Partitur");
+        com.aresstack.audio.studio.score.Score shownScore = scoreOf(folder);
+        scoreView.setScore(shownScore, ids, noNotesHint(shownScore, ids));
+    }
+
+    /**
+     * What the empty score says. A piece whose notes are there but belong to none of the tracks
+     * shown (something wrote another line-up beside the notes) says how the notes come back.
+     */
+    private static String noNotesHint(com.aresstack.audio.studio.score.Score written, List<String> ids) {
+        if (written != null && !written.staves().isEmpty()
+                && written.staves().stream().noneMatch(staff -> ids.contains(staff.trackId()))) {
+            return "Die Noten sind da, passen aber nicht zu den Spuren: Stück ▾ · „Besetzung aus den Noten zurückholen“";
+        }
+        return "Noch keine Noten: erst komponieren, dann steht hier die Partitur";
     }
 
     /** What a choice of the playback is called in the list. */
@@ -5732,6 +5844,31 @@ public final class AudioStudioFrame extends JFrame {
                 onOpen.accept(() -> showChosenInstruments(chosen));
             }
         };
+    }
+
+    /** The folder of a piece is about to be moved as a whole: nothing of it may be in use by the window. */
+    private void albumPieceLeaves(Path piece) {
+        Path file = player.file();
+        if (file != null && file.toAbsolutePath().normalize().startsWith(piece.toAbsolutePath().normalize())) {
+            stopPlayback();
+            player.close();
+        }
+        if (piece.equals(Paths.get(directory.getText().trim()))) {
+            keepSong(); // its words go along with it
+        }
+    }
+
+    /** The folder of a piece holds another version now: if it is open, it is shown from its files. */
+    private void albumPieceMoved(Path piece) {
+        if (piece.equals(Paths.get(directory.getText().trim())) && (worker == null || worker.isDone())) {
+            Path song = piece.resolve("arrangement.tsv");
+            arrangementFile.setText(Files.isRegularFile(song) ? song.toString() : "");
+            String kept = Album.withoutBrief(songs.description(piece));
+            description.setText(kept == null ? "" : kept);
+            description.setCaretPosition(0);
+            loadArrangementForCurrentDirectory(new Properties());
+        }
+        refreshSongs();
     }
 
     /** The album production of a piece ended: if it is open, it is shown as it is now, from its files. */
