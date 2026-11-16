@@ -80,13 +80,20 @@ public class AlbumFixedFieldsTest {
     }
 
     @Test
-    public void aPieceWithoutALengthInTheAnswerIsNotHalfAnHourLong() throws Exception {
-        FakeChatModel model = new FakeChatModel((instruction, prompt) -> "{\"tracks\":[{\"title\":\"Techno\","
-                + "\"tempoBpm\":123,\"key\":\"A minor\",\"meter\":\"4/4\"}]}");
-        CompositionSpec planned = PieceSpecPlanner.plan(model, 4096, "Melodic Techno, 122-124 BPM",
-                CompositionSpec.of(32, 108, Key.C_MAJOR, 4, 4), Set.of(), null, line -> { });
-        assertEquals(123, planned.bpm());
-        assertTrue("was 925 bars (half an hour): " + planned.bars(),
-                planned.seconds() <= AlbumConcept.DEFAULT_MAX_SECONDS);
+    public void aPieceWithoutALengthInTheAnswerHasTheUsualOneAndAChosenLengthStays() throws Exception {
+        CompositionSpec shown = CompositionSpec.of(32, 108, Key.C_MAJOR, 4, 4);
+        FakeChatModel none = new FakeChatModel((instruction, prompt) -> "{\"tracks\":[{\"title\":\"Techno\","
+                + "\"tempoBpm\":120,\"key\":\"A minor\",\"meter\":\"4/4\"}]}");
+        CompositionSpec usual = PieceSpecPlanner.plan(none, 4096, "Melodic Techno", shown, Set.of(), null,
+                line -> { });
+        assertEquals("360 s at 120 BPM in 4/4, not 925 bars of half an hour", 180, usual.bars());
+        assertTrue(none.prompts().get(0).contains("usually about 360 seconds")
+                && none.prompts().get(0).contains("\"secondsPerTrack\":360"));
+
+        FakeChatModel longer = new FakeChatModel((instruction, prompt) -> "{\"tracks\":[{\"title\":\"Mix\","
+                + "\"tempoBpm\":120,\"key\":\"A minor\",\"meter\":\"4/4\",\"targetSeconds\":1200}]}");
+        CompositionSpec mix = PieceSpecPlanner.plan(longer, 4096, "an extended DJ mix", shown, Set.of(), null,
+                line -> { });
+        assertEquals("a long piece the plan chose: 1200 s", 600, mix.bars());
     }
 }

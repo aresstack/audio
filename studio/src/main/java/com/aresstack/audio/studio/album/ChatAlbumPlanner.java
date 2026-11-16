@@ -220,6 +220,15 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         return String.join(", ", said);
     }
 
+    /**
+     * Whether the plan named no length for a given title whose own length fits the range: then its
+     * own length stays, instead of the middle of the range.
+     */
+    private static boolean withoutLength(AlbumTrack given, JsonObject entry, AlbumConcept concept) {
+        return !entry.has("targetSeconds") && !concept.original() && given.targetSeconds() >= concept.minSeconds()
+                && given.targetSeconds() <= concept.maxSeconds();
+    }
+
     /** A given title with what the plan says about the rest: its name stays, and its mood if the user said one. */
     private static AlbumTrack filled(AlbumTrack given, JsonObject entry, int number, AlbumConcept concept) {
         AlbumTrack planned = track(given.id(), entry, number, concept);
@@ -229,7 +238,8 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
                 given.isFixed(AlbumTrack.METER) ? given.meter() : planned.meter(),
                 given.isFixed(AlbumTrack.PLAYERS) ? given.instrumentation() : planned.instrumentation(),
                 given.isFixed(AlbumTrack.FORM) ? given.form() : planned.form(),
-                given.isFixed(AlbumTrack.LENGTH) ? given.targetSeconds() : planned.targetSeconds(), "", true,
+                given.isFixed(AlbumTrack.LENGTH) || withoutLength(given, entry, concept) ? given.targetSeconds()
+                        : planned.targetSeconds(), "", true,
                 planned.theme(), given.fixed());
     }
 
@@ -444,6 +454,25 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
         return prompt(album, kept, List.of(), wanted);
     }
 
+    /**
+     * About how long a track is, told to the plan: the middle of the range, or, when every track
+     * planned is given with a length in the range (a single piece planned as an album of one), the
+     * lengths given. A piece that may be ten seconds to an hour is not half an hour by default.
+     */
+    static int usualSeconds(AlbumConcept concept, List<AlbumTrack> given, int wanted) {
+        if (given.isEmpty() || given.size() != wanted) {
+            return concept.secondsPerTrack();
+        }
+        long sum = 0;
+        for (AlbumTrack track : given) {
+            if (!concept.fits(track.targetSeconds())) {
+                return concept.secondsPerTrack();
+            }
+            sum += track.targetSeconds();
+        }
+        return (int) (sum / given.size());
+    }
+
     static String prompt(Album album, List<AlbumTrack> kept, List<AlbumTrack> given, int wanted) {
         AlbumConcept concept = album.concept();
         StringBuilder prompt = new StringBuilder();
@@ -454,7 +483,7 @@ public final class ChatAlbumPlanner implements AlbumPlanner {
                 .append("\",\"tracksWanted\":").append(wanted);
         if (!concept.original()) {
             // A work that is rebuilt has the lengths of its movements: no range of the album is named to it.
-            prompt.append(",\"secondsPerTrack\":").append(concept.secondsPerTrack()).append(",\"secondsMin\":")
+            prompt.append(",\"secondsPerTrack\":").append(usualSeconds(concept, given, wanted)).append(",\"secondsMin\":")
                     .append(concept.minSeconds()).append(",\"secondsMax\":").append(concept.maxSeconds());
         }
         prompt.append("}\n");
