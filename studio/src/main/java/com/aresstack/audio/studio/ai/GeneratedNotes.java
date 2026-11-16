@@ -140,8 +140,10 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
                                      Check check) throws IOException {
         String problem = null;
         for (int asked = 1; ; asked++) {
+            String seen = "";
             try {
                 GeneratedNotes notes = read(asking.ask(problem), partId, sectionId);
+                seen = glimpse(notes.answer());
                 // A check is a wish, not a must: after so many tries the answer is taken as it is
                 // (and the composer reports what is missing) instead of asking for ever.
                 String wrong = check == null || asked > CHECKED_TRIES ? null : check.problem(notes);
@@ -158,6 +160,7 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
                 String from = KipitzChatClient.lastAnswer();
                 Backoff.tell("Unbrauchbare KI-Antwort für " + partId + " (" + sectionId + ")"
                         + (from.isEmpty() ? "" : " [" + from + "]") + ": " + problem
+                        + (seen.isEmpty() ? "" : " · Die Antwort beginnt mit: " + seen)
                         + " · Versuch " + (asked + 1) + " in " + Backoff.words(Backoff.delay(asked)) + ".");
                 Backoff.pause(asked, null);
             }
@@ -236,6 +239,7 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
         if (array == null) {
             throw new UnreadableAnswerException("Die Antwort für " + partId + " enthält keine Notenliste.");
         }
+        array = flat(array);
         if (array.size() > MAX_NOTES) {
             throw new UnreadableAnswerException("Zu viele Noten für " + partId + " in " + sectionId + ": "
                     + array.size());
@@ -243,12 +247,12 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
         List<RawNote> notes = new ArrayList<>();
         List<String> skipped = new ArrayList<>();
         for (int i = 0; i < array.size(); i++) {
-            JsonElement element = array.get(i);
+            JsonElement element = row(array.get(i));
             if (!element.isJsonObject()) {
                 skipped.add(sectionId + "\t" + (i + 1) + "\tnote\tpresent\tskipped\tkein Objekt");
                 continue;
             }
-            JsonObject note = element.getAsJsonObject();
+            JsonObject note = named(element.getAsJsonObject());
             String notePart = text(note, "part");
             if (notePart != null && !notePart.equals(partId)) {
                 throw new ForeignPartException("Note " + (i + 1) + " der Antwort gehört zu fremdem Part \"" + notePart
@@ -264,6 +268,115 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
             }
         }
         return new GeneratedNotes(partId, sectionId, notes, skipped, answer);
+    }
+
+    /** The short names a model takes from the lists of notes in its prompt ("bar beat dur pitch vel"). */
+    private static final String[][] OTHER_NAMES = {
+            {"beat", "start", "offset", "pos", "position"},
+            {"duration", "dur", "length", "len"},
+            {"pitch", "note", "midi", "key"},
+            {"velocity", "vel"}};
+
+    /** A note with its fields under the names the studio reads: other usual names are taken for them. */
+    private static JsonObject named(JsonObject note) {
+        JsonObject read = note;
+        for (String[] names : OTHER_NAMES) {
+            if (read.has(names[0])) {
+                continue;
+            }
+            for (int i = 1; i < names.length; i++) {
+                JsonElement value = read.get(names[i]);
+                if (value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()) {
+                    if (read == note) {
+                        read = note.deepCopy();
+                    }
+                    read.add(names[0], value);
+                    break;
+                }
+            }
+        }
+        return read;
+    }
+
+    /**
+     * A note written as a row like the lists of the prompt, {@code [bar, beat, dur, pitch, vel]} or
+     * {@code "1 0 0.5 36 90"}, as an object; anything else as it is.
+     */
+    private static JsonElement row(JsonElement element) {
+        List<Double> numbers = new ArrayList<>();
+        try {
+            if (element.isJsonArray()) {
+                for (JsonElement value : element.getAsJsonArray()) {
+                    numbers.add(value.getAsDouble());
+                }
+            } else if (element.isJsonPrimitive() && element.getAsJsonPrimitive().isString()) {
+                for (String value : element.getAsString().trim().split("[\\s,;|]+")) {
+                    numbers.add(Double.parseDouble(value));
+                }
+            } else {
+                return element;
+            }
+        } catch (RuntimeException noRow) {
+            return element;
+        }
+        if (numbers.size() < 4 || numbers.size() > 5) {
+            return element;
+        }
+        JsonObject note = new JsonObject();
+        note.addProperty("bar", numbers.get(0));
+        note.addProperty("beat", numbers.get(1));
+        note.addProperty("duration", numbers.get(2));
+        note.addProperty("pitch", (int) Math.round(numbers.get(3)));
+        if (numbers.size() > 4) {
+            note.addProperty("velocity", (int) Math.round(numbers.get(4)));
+        }
+        return note;
+    }
+
+    /**
+     * The notes of a list grouped by bar, {@code [{"bar":1,"notes":[...]}]}, as one list in which
+     * every note carries its bar; any other list as it is.
+     */
+    private static JsonArray flat(JsonArray list) {
+        boolean grouped = false;
+        for (JsonElement element : list) {
+            if (element.isJsonObject() && !element.getAsJsonObject().has("pitch")
+                    && element.getAsJsonObject().has("notes") && element.getAsJsonObject().get("notes").isJsonArray()) {
+                grouped = true;
+                break;
+            }
+        }
+        if (!grouped) {
+            return list;
+        }
+        JsonArray notes = new JsonArray();
+        for (JsonElement element : list) {
+            if (!element.isJsonObject() || !element.getAsJsonObject().has("notes")
+                    || !element.getAsJsonObject().get("notes").isJsonArray()) {
+                notes.add(element);
+                continue;
+            }
+            JsonElement bar = element.getAsJsonObject().get("bar");
+            for (JsonElement inner : element.getAsJsonObject().getAsJsonArray("notes")) {
+                JsonElement note = row(inner);
+                if (note.isJsonObject() && bar != null && !note.getAsJsonObject().has("bar")) {
+                    note = note.deepCopy();
+                    note.getAsJsonObject().add("bar", bar);
+                }
+                notes.add(note);
+            }
+        }
+        return notes;
+    }
+
+    /** The first characters of the list of notes of an answer, for the log when it cannot be used. */
+    static String glimpse(JsonObject answer) {
+        if (answer == null) {
+            return "";
+        }
+        JsonArray list = notesIn(answer, 2);
+        String said = list == null ? answer.toString() : list.toString();
+        return said.length() <= 240 ? said : said.substring(0, 240) + " …";
     }
 
     private static String text(JsonObject object, String name) {

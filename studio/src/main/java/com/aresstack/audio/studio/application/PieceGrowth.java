@@ -151,11 +151,28 @@ public final class PieceGrowth {
                          Progress progress) throws Exception {
         final Composition piece = session.composition();
         java.util.Map<String, int[]> tails = silentTails(piece, window);
+        final java.nio.file.Path cache = session.folder().resolve(RegionRework.CACHE);
+        // An end that was asked for anew once is not asked for again at the same length of the
+        // piece: what is silent then is meant so. Asking on every start would change the piece
+        // each time, and with it the plan of the step that was under way and all it had written.
+        final java.nio.file.Path askedFile = cache.resolve("silent-ends.txt");
+        final java.util.Set<String> askedBefore = new java.util.LinkedHashSet<>();
+        try {
+            if (java.nio.file.Files.isRegularFile(askedFile)) {
+                askedBefore.addAll(java.nio.file.Files.readAllLines(askedFile, java.nio.charset.StandardCharsets.UTF_8));
+            }
+        } catch (IOException unread) {
+            // as if nothing had been asked yet
+        }
+        final int total = piece.timeMap().barsCovering(piece.endTick());
+        tails.keySet().removeIf(part -> askedBefore.contains(part + "\t" + total));
         if (tails.isEmpty()) {
             return;
         }
+        for (String part : tails.keySet()) {
+            askedBefore.add(part + "\t" + total);
+        }
         final RegionComposer composer = repair.get();
-        final java.nio.file.Path cache = session.folder().resolve(RegionRework.CACHE);
         java.util.Map<String, RegionRequest> requests = new java.util.LinkedHashMap<>();
         for (java.util.Map.Entry<String, int[]> tail : tails.entrySet()) {
             int[] bars = tail.getValue();
@@ -193,6 +210,12 @@ public final class PieceGrowth {
                             + cause, cause);
                 }
                 RegionRework.take(session, composer, requests.get(written.getKey()), region).accept();
+            }
+            try {
+                java.nio.file.Files.createDirectories(cache);
+                java.nio.file.Files.write(askedFile, askedBefore, java.nio.charset.StandardCharsets.UTF_8);
+            } catch (IOException unwritten) {
+                // then the ends are asked for once more on the next start
             }
         } finally {
             pool.shutdownNow();

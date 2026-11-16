@@ -157,7 +157,9 @@ public final class ChatSectionGenerator implements SectionGenerator {
         // asked for again, never taken as rests.
         GeneratedNotes.Check check = notes -> notes.inFrame(frame.firstBar(), frame.bars()).inBars(frame.bars()) > 0
                 ? null : "No note of the answer lies in bars 1-" + frame.bars() + " of THESE bars ("
-                + (notes.notes().isEmpty() ? "the list is empty" : notes.notes().size() + " notes, all outside")
+                + (!notes.notes().isEmpty() ? notes.notes().size() + " notes, all outside"
+                : notes.skipped().isEmpty() ? "the list is empty" : "none of the " + notes.skipped().size()
+                + " notes could be read: each note must be an object with the fields bar, beat, duration, pitch, velocity")
                 + "). This part plays here: write its notes, bar counted from 1 at the start of these bars.";
         // Room for the answer by the bars asked for, not always the most: request and room together
         // must fit the model, and the request of a long piece is long. An answer cut off at this
