@@ -26,6 +26,16 @@ final class SeekLine extends JComponent {
     /** The share under the pointer while it is dragged; below 0 otherwise. */
     private double dragged = -1;
     private boolean hot;
+    /** How long the piece is, in seconds; not positive when nothing can be played. */
+    private double length;
+    /** How far one notch of the mouse wheel moves the playback, in seconds. */
+    static final int WHEEL_SECONDS = 5;
+    private double wheelSeconds = WHEEL_SECONDS;
+
+    /** Sets how far one notch of the mouse wheel moves the playback, in seconds. */
+    void setWheelSeconds(double seconds) {
+        wheelSeconds = Math.max(0.1, seconds);
+    }
     private final DoubleConsumer seek;
 
     /** @param seek moves the playback to a share of the piece, from 0 to 1 */
@@ -34,7 +44,7 @@ final class SeekLine extends JComponent {
         setOpaque(false);
         setPreferredSize(new Dimension(120, 12));
         setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        setToolTipText("Position im Stück: klicken oder ziehen");
+        setToolTipText("Position im Stück: klicken, ziehen oder mit dem Mausrad verstellen");
         MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mouseEntered(MouseEvent event) {
@@ -75,6 +85,16 @@ final class SeekLine extends JComponent {
         };
         addMouseListener(mouse);
         addMouseMotionListener(mouse);
+        addMouseWheelListener(event -> {
+            if (share < 0 || length <= 0) {
+                return;
+            }
+            // Wheel up goes on in the piece, wheel down goes back, one step of the setting per notch.
+            double to = Math.max(0, Math.min(1, share - event.getPreciseWheelRotation() * wheelSeconds / length));
+            share = to;
+            seek.accept(to);
+            repaint();
+        });
     }
 
     private static final int INSET = 6;
@@ -86,6 +106,7 @@ final class SeekLine extends JComponent {
 
     /** Where the playback is: the second of so many; nothing to play when the length is not positive. */
     void setTime(double second, double length) {
+        this.length = length;
         double next = length <= 0 ? -1 : Math.max(0, Math.min(1, second / length));
         if (Math.abs(next - share) > 0.0005) {
             share = next;
