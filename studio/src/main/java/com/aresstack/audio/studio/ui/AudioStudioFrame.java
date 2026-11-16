@@ -301,6 +301,9 @@ public final class AudioStudioFrame extends JFrame {
     private int sketchNotes;
     /** Where the AI is writing, so that the score follows it. */
     private final SketchFront sketchFront = new SketchFront();
+    /** The arrangement as the AI has written it so far in the work going on; for "Vorhören" with Play. */
+    private List<String> lastSketch = List.of();
+    private volatile boolean previewing;
     private final Map<String, javax.swing.JToggleButton> pageKeys = new java.util.LinkedHashMap<String, javax.swing.JToggleButton>();
     /** Beside the choice of the piece under the name of the studio: new, open, and what is seldom needed. */
     private final JButton songMenuKey = new JButton("▾");
@@ -4957,6 +4960,7 @@ public final class AudioStudioFrame extends JFrame {
         sketchNotes = 0;
         sketchFront.begin();
         scoreView.showBar(-1);
+        lastSketch = List.of();
         notesDoneTold = false;
         statusLine.clearProgress();
         worker = new SwingWorker<Path, String>() {
@@ -5795,6 +5799,7 @@ public final class AudioStudioFrame extends JFrame {
                 }
             }
             sketchNotes = notes;
+            lastSketch = new ArrayList<String>(arrangement);
             if ("Noch nicht komponiert".equals(songFacts.getText())) {
                 songFacts.setText("Wird komponiert …"); // the facts of the plan are read when the work is over
             }
@@ -5915,6 +5920,8 @@ public final class AudioStudioFrame extends JFrame {
                 return; // could not be opened (said)
             }
             play();
+        } else if (worker != null && !worker.isDone() && sketchNotes > 0 && !"albums".equals(shownPage)) {
+            play(); // the AI is still writing: "Vorhören" of what it has written so far
         } else if (player.ready() && !("albums".equals(shownPage) && player.live())) {
             player.play();
         } else {
@@ -6401,6 +6408,11 @@ public final class AudioStudioFrame extends JFrame {
             playAlbumTitle(0); // a title is listened to: its finished mix, at once
             return;
         }
+        if (worker != null && !worker.isDone() && sketchNotes > 0) {
+            // The AI is still writing: what it has written so far is rendered and played.
+            previewSketch();
+            return;
+        }
         String selected = (String) playbackSelection.getSelectedItem();
         Path output = playbackFile(selected);
         if (output == null || !Files.isRegularFile(output)) {
@@ -6420,6 +6432,59 @@ public final class AudioStudioFrame extends JFrame {
             return;
         }
         playFile(selected, 0, true);
+    }
+
+    /**
+     * "Vorhören" while the AI composes: the notes written so far are rendered on their own (beside
+     * the work, into a folder of their own, the piece is not touched) and played up to where they go.
+     * Play again later renders what has come since.
+     */
+    private void previewSketch() {
+        if (previewing) {
+            setStatus("Die bisher geschriebenen Takte werden schon zum Vorhören gerendert …");
+            return;
+        }
+        final List<String> notes = new ArrayList<String>(lastSketch);
+        final int count = sketchNotes;
+        final RenderSettings settings;
+        try {
+            settings = captureRenderSettings();
+        } catch (RuntimeException invalid) {
+            append("Vorhören geht gerade nicht: " + invalid.getMessage());
+            return;
+        }
+        previewing = true;
+        setStatus("Die bisher geschriebenen " + count + " Noten werden zum Vorhören gerendert …");
+        Thread rendering = new Thread(() -> {
+            try {
+                Path folder = Paths.get(System.getProperty("java.io.tmpdir"), "aresstack-vorhoeren");
+                Files.createDirectories(folder);
+                Path source = folder.resolve("arrangement.tsv");
+                Files.write(source, notes, java.nio.charset.StandardCharsets.UTF_8);
+                Path mix = new StudioMusicRenderer(registry).render(source, folder, settings.assignments,
+                        settings.programs, settings.sf2Engine, settings.fluidSynthExecutable, settings.sfizzExecutable,
+                        line -> { });
+                SwingUtilities.invokeLater(() -> {
+                    previewing = false;
+                    try {
+                        player.open(mix);
+                        lcd.setSource("Vorhören", true);
+                        player.play();
+                        setStatus("Vorhören: die " + count + " Noten, die bis eben geschrieben waren. Play später "
+                                + "noch einmal spielt auch, was seither dazukam.");
+                    } catch (Exception failed) {
+                        append("Vorhören ließ sich nicht abspielen: " + failed.getMessage());
+                    }
+                });
+            } catch (Exception failed) {
+                SwingUtilities.invokeLater(() -> {
+                    previewing = false;
+                    append("Vorhören ließ sich nicht rendern: " + failed.getMessage());
+                });
+            }
+        }, "vorhoeren");
+        rendering.setDaemon(true);
+        rendering.start();
     }
 
     /** Plays the file behind a choice of the playback, as before the stage could be played live. */
