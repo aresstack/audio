@@ -95,6 +95,18 @@ public final class AiDefaults {
                 0, 8192);
     }
 
+    /** The least room for the answer of one section of a continuation, in tokens ({@code answerTokensLeast}). */
+    public static int answerTokensLeast(Properties settings) {
+        return number(settings, "answerTokensLeast", com.aresstack.audio.studio.ai.ChatSectionGenerator.LEAST_TOKENS,
+                256, 65536);
+    }
+
+    /** Down to this room an answer is asked for again when the service finds the request too large ({@code answerTokensSmallest}). */
+    public static int answerTokensSmallest(Properties settings) {
+        return number(settings, "answerTokensSmallest", com.aresstack.audio.studio.ai.KipitzChatClient.SMALLEST_ANSWER,
+                128, 65536);
+    }
+
     /** How often an answer cut off at its limit is asked for again ({@code longerAnswers}, 0 to 6). */
     public static int longerAnswers(Properties settings) {
         return number(settings, "longerAnswers", com.aresstack.audio.studio.ai.KipitzChatClient.LONGER_ANSWERS, 0, 6);

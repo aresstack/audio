@@ -159,11 +159,11 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
                 // An answer without a JSON object is not kept; the model is asked again.
                 trouble = "Antwort ohne JSON-Objekt (\"" + glimpse(content) + "\")";
             } catch (Refused refused) {
-                if (tooLarge(refused.said) && longer == 0 && budget > SMALLEST_ANSWER
+                if (tooLarge(refused.said) && longer == 0 && budget > smallestAnswer
                         && (refused.status == 400 || refused.status == 413 || refused.status == 422)) {
                     // The request and the room for its answer together are more than the model takes
                     // (a long piece makes a long request): asked again with half the room for the answer.
-                    budget = Math.max(SMALLEST_ANSWER, budget / 2);
+                    budget = Math.max(smallestAnswer, budget / 2);
                     tell("Verbindung zur KI: die Anfrage samt Antwortraum ist dem Modell zu groß (HTTP "
                             + refused.status + ": " + glimpse(refused.said) + ") · noch einmal mit " + budget
                             + " Token für die Antwort (" + name() + ").");
@@ -188,8 +188,8 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
             } catch (Unusable unusable) {
                 trouble = unusable.getMessage(); // an answer that cannot be read is not kept
                 if (trouble != null && trouble.startsWith("KIPITZ reported") && tooLarge(trouble) && longer == 0
-                        && budget > SMALLEST_ANSWER) {
-                    budget = Math.max(SMALLEST_ANSWER, budget / 2); // as for a refusal: half the room for the answer
+                        && budget > smallestAnswer) {
+                    budget = Math.max(smallestAnswer, budget / 2); // as for a refusal: half the room for the answer
                     trouble += " · weiter mit " + budget + " Token für die Antwort";
                 }
             } catch (IOException broken) {
@@ -536,7 +536,13 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
     }
 
     /** The least room for an answer that is still asked for when the service finds a request too large. */
-    static final int SMALLEST_ANSWER = 1024;
+    public static final int SMALLEST_ANSWER = 1024;
+    private static volatile int smallestAnswer = SMALLEST_ANSWER;
+
+    /** Sets the least room for an answer that is still asked for when the service finds a request too large. */
+    public static void smallestAnswer(int tokens) {
+        smallestAnswer = Math.max(1, tokens);
+    }
 
     /** Whether the words of the service say that request and answer together exceed what the model takes. */
     static boolean tooLarge(String said) {
