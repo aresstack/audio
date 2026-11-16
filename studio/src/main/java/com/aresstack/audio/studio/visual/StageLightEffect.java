@@ -122,6 +122,8 @@ final class StageLightEffect implements Effect {
     private final FigurePainter figures = new FigurePainter();
     /** How many tracks stood on the stage in the last picture, for tests. */
     int lightsShown;
+    /** How hard the last beat still pushes the curtains, 0 to 1: it falls with the beat. */
+    private float kick;
 
     /** The atmosphere shown now, for tests. */
     StageMood.Mood atmosphere() {
@@ -139,6 +141,7 @@ final class StageLightEffect implements Effect {
         }
         float warm = sound.sounding ? atmosphere.warmth() : 0;
 
+        kick = sound.sounding ? sound.beat * (0.45f + 0.55f * Math.min(1f, sound.bass)) : 0f;
         paintFloor(g, camera, warm);
         // The curtain at the back wall.
         paintCloth(g, camera, t, -HALF - 0.6, HIGH, DEPTH, 2 * HALF + 1.2, 0, HIGH, 22, 0, 0.0, 0.62f + 0.3f * warm, 88, 12);
@@ -225,7 +228,11 @@ final class StageLightEffect implements Effect {
                 double wave = free * (0.26 * Math.sin(t * 1.25 + u * 4.2 + phase)
                         + 0.12 * Math.sin(t * 2.6 - u * 9.5 + v * 3.1 + phase * 2))
                         + free * free * 0.3 * Math.sin(t * 0.55 + phase) * Math.max(0, Math.sin(t * 0.21 + u * 2.4 + phase));
-                double sway = free * 0.12 * Math.sin(t * 0.9 + phase + v * 2);
+                // The beat: every beat pushes the cloth towards the hall, most at the hem, and the push
+                // runs down through it as a ripple while the beat fades.
+                wave -= free * kick * (0.42 + 0.16 * Math.sin(u * 5 + phase))
+                        + kick * 0.14 * v * Math.sin(v * 7 - (1 - kick) * 9 + phase);
+                double sway = free * (0.12 * Math.sin(t * 0.9 + phase + v * 2) + 0.1 * kick * Math.sin(phase * 3));
                 grid[row][column] = new double[]{left + across * wide + sway, top - v * tall, depth + fold + wave};
             }
         }
