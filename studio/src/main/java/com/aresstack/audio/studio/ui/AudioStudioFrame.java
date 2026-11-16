@@ -417,6 +417,8 @@ public final class AudioStudioFrame extends JFrame {
     private Boolean composedShown;
     private final DeckDisplays.Meter masterLeft = new DeckDisplays.Meter(false);
     private final DeckDisplays.Meter masterRight = new DeckDisplays.Meter(false);
+    /** The place in the piece under the transport keys, to move the playback. */
+    private final SeekLine seekLine = new SeekLine(share -> seek(share));
     private final DeckWidgets.TransportKey playKey = new DeckWidgets.TransportKey(
             DeckWidgets.Symbol.PLAY, AudioStudioTheme.GREEN, "Abspielen, was unter Wiedergabe gewählt ist (Leertaste)");
     private final DeckWidgets.TransportKey stopKey = new DeckWidgets.TransportKey(
@@ -616,7 +618,11 @@ public final class AudioStudioFrame extends JFrame {
             label.setHorizontalAlignment(JLabel.CENTER);
             names.add(label);
         }
-        keysWithNames.add(names, BorderLayout.SOUTH);
+        JPanel underKeys = new JPanel(new BorderLayout(0, 3));
+        underKeys.setOpaque(false);
+        underKeys.add(names, BorderLayout.NORTH);
+        underKeys.add(seekLine, BorderLayout.SOUTH);
+        keysWithNames.add(underKeys, BorderLayout.SOUTH);
 
         JPanel master = new JPanel(new GridBagLayout());
         master.setOpaque(false);
@@ -7332,6 +7338,7 @@ public final class AudioStudioFrame extends JFrame {
         double length = player.length();
         lcd.setPlaying(playing);
         lcd.setTime(second, length);
+        seekLine.setTime(second, length);
         lcd.tick();
         arrangementView.setSecond(second);
         scoreView.setSecond(playing || second > 0 ? second : -1);
