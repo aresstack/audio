@@ -130,8 +130,8 @@ final class VisualizerPanel extends JPanel {
         gap.setOpaque(false);
         gap.setPreferredSize(new Dimension(8, 1));
         head.add(gap);
-        mood.setToolTipText("Atmosphäre der Bühne: Auto liest sie aus der Beschreibung des Stücks und aus der Musik; "
-                + "ein Klick stellt weiter auf Feuer, Laser, Kerzen, Jazzclub, Laternen, Scheinwerfer, Aus");
+        mood.setToolTipText("Überraschung der Bühne: Auto zeigt Feuer nur bei Rock und Laser nur bei Techno, "
+                + "und nur in den wildesten Momenten; ein Klick stellt weiter auf Feuer, Laser, Aus");
         mood.addActionListener(event -> {
             settings = settings.withAtmosphere(StageMood.next(settings.atmosphere()));
             showMood();
@@ -152,6 +152,22 @@ final class VisualizerPanel extends JPanel {
     private void showMood() {
         mood.setText("Atmosphäre: " + StageMood.label(settings.atmosphere()));
         mood.setVisible("stage".equals(shown));
+        for (JComponent key : stageKeys) {
+            key.setVisible("stage".equals(shown));
+        }
+    }
+
+    /** Keys that belong to the stage picture: in the head before the full screen key, there only while the stage is shown. */
+    private final java.util.List<JComponent> stageKeys = new java.util.ArrayList<JComponent>();
+
+    void addStageKeys(JComponent... more) {
+        int at = java.util.Arrays.asList(head.getComponents()).indexOf(mood) + 1 + stageKeys.size();
+        for (JComponent key : more) {
+            stageKeys.add(key);
+            head.add(key, at++);
+        }
+        showMood();
+        head.revalidate();
     }
 
     private void addKey(ButtonGroup group, String key, String label, String tip, boolean first) {

@@ -12,10 +12,10 @@ public interface GenreRecognizer {
     enum Genre {
         ROCK("Rock", StageMood.Mood.FIRE),
         ELECTRONIC("Techno", StageMood.Mood.LASER),
-        CLASSICAL("Klassik", StageMood.Mood.CANDLE),
-        JAZZ("Jazz", StageMood.Mood.CLUB),
-        COUNTRY("Country", StageMood.Mood.LANTERN),
-        POP("Pop", StageMood.Mood.SPOTS),
+        CLASSICAL("Klassik", null),
+        JAZZ("Jazz", null),
+        COUNTRY("Country", null),
+        POP("Pop", null),
         /** Not recognized: the recognizer names no genre. */
         UNKNOWN("", null);
 
@@ -32,7 +32,7 @@ public interface GenreRecognizer {
             return label;
         }
 
-        /** The atmosphere it asks for; {@code null} for {@link #UNKNOWN}. */
+        /** The atmosphere it asks for; {@code null} where the stage has none for it. */
         public StageMood.Mood mood() {
             return mood;
         }

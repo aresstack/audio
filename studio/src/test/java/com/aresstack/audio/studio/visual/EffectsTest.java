@@ -88,7 +88,7 @@ public final class EffectsTest {
         Effect.clear(g, 400, 240, GROUND);
         stage.paint(g, 400, 240, picture, PALETTE, VisualSettings.DEFAULTS);
         g.dispose();
-        assertTrue("no lights at made-up places", litPixels(image) < 2000);
+        assertEquals("no lights at made-up places", 0, ((StageLightEffect) stage).lightsShown);
     }
 
     @Test

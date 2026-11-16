@@ -52,4 +52,14 @@ public interface SoundFeed {
     default String style() {
         return "";
     }
+
+    /** The figure of the musician of a track as a picture standing on its bottom edge, or {@code null} if it has none. */
+    default java.awt.image.BufferedImage figure(String trackId) {
+        return null;
+    }
+
+    /** How tall a figure stands on the stage, in metres. */
+    default double figureHeight() {
+        return 3.0;
+    }
 }

@@ -83,6 +83,9 @@ public final class SoundAnalyzer {
         picture.lightsComing = feed != null && feed.lightsComing();
         String style = feed == null ? null : feed.style();
         picture.style = style == null ? "" : style;
+        final SoundFeed from = feed;
+        picture.figures = from == null ? track -> null : from::figure;
+        picture.figureHeight = from == null ? 3.0 : from.figureHeight();
         analyzeWindow((System.nanoTime() - started) / 1e9);
         return picture;
     }

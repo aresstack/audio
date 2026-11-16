@@ -38,6 +38,10 @@ public final class SoundPicture {
     public boolean lightsComing;
     /** What is known in words about the style of what plays; empty if nothing is. */
     public String style = "";
+    /** The figure of the musician of a track, or {@code null}; asked while the picture is drawn. */
+    public java.util.function.Function<String, java.awt.image.BufferedImage> figures = track -> null;
+    /** How tall a figure stands on the stage, in metres. */
+    public double figureHeight = 3.0;
 
     public SoundPicture(int windowFrames, int bandCount) {
         left = new float[windowFrames];

@@ -1,6 +1,7 @@
 package com.aresstack.audio.studio.visual;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -9,100 +10,153 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import org.junit.Test;
 
-/** The atmosphere of the stage: named by the words about the piece, else heard in its beat and low end. */
+/** The surprise of the stage: fire for rock, lasers for techno, never both, and only in the wildest moments. */
 public final class StageMoodTest {
     private static final VisualSettings SETTINGS = VisualSettings.DEFAULTS;
 
     @Test
-    public void theWordsAboutAPieceNameItsAtmosphere() {
+    public void onlyRockAndTechnoAreNamedByTheWordsAboutAPiece() {
         assertEquals(StageMood.Mood.FIRE, StageMood.fromWords("Ein rockiges Stück mit harten Gitarren, Hard Rock"));
         assertEquals(StageMood.Mood.LASER, StageMood.fromWords("Treibender Techno, 138 BPM"));
-        assertEquals(StageMood.Mood.CLUB, StageMood.fromWords("Ruhiger Jazz für die späte Stunde"));
-        assertEquals(StageMood.Mood.LANTERN, StageMood.fromWords("Country-Ballade"));
-        assertEquals(StageMood.Mood.SPOTS, StageMood.fromWords("Klassische Popmusik der Achtziger"));
-        assertEquals(StageMood.Mood.CANDLE, StageMood.fromWords("Menuett für Streichquartett"));
-        assertEquals("a baroque piece is not rock", StageMood.Mood.CANDLE, StageMood.fromWords("Barock, Cembalo"));
-        assertEquals("an instrument gives the style away", StageMood.Mood.LANTERN, StageMood.fromWords("Lied\nBanjo\nBass"));
-        assertNull(StageMood.fromWords("Ein Stück über den Morgen im Viertel"));
+        assertNull(StageMood.fromWords("Ruhiger Jazz für die späte Stunde"));
+        assertNull(StageMood.fromWords("Country-Ballade"));
+        assertNull(StageMood.fromWords("Menuett für Streichquartett"));
+        assertNull("a baroque piece is not rock", StageMood.fromWords("Barock, Cembalo"));
         assertNull(StageMood.fromWords(""));
     }
 
     @Test
-    public void namedStyleWinsOverWhatIsHeard() {
-        StageMood mood = new StageMood();
-        StageMood.Mood shown = null;
-        for (int frame = 0; frame < 300; frame++) {
-            SoundPicture picture = beating(frame, 140, 0.8f); // sounds like techno
-            picture.style = "Jazz-Trio";
-            shown = mood.at(picture, SETTINGS);
-        }
-        assertEquals(StageMood.Mood.CLUB, shown);
+    public void aPieceThatSaysNothingGetsNothingHoweverItSounds() {
+        assertEquals(StageMood.Mood.OFF, heard(140, 0.9f, SETTINGS));
+        assertEquals(StageMood.Mood.OFF, heard(96, 0.9f, SETTINGS));
+        assertEquals(StageMood.Mood.OFF, heard(70, 0.2f, SETTINGS));
     }
 
     @Test
-    public void fastBeatsCallForLasers() {
-        assertEquals(StageMood.Mood.LASER, heard(140, 0.6f, SETTINGS));
-    }
-
-    @Test
-    public void aHeavyLowEndWithASlowerBeatCallsForFire() {
-        assertEquals(StageMood.Mood.FIRE, heard(96, 0.8f, SETTINGS));
-    }
-
-    @Test
-    public void quietMusicGetsCandleLight() {
-        assertEquals(StageMood.Mood.CANDLE, heard(70, 0.2f, SETTINGS));
-    }
-
-    @Test
-    public void anotherReaderOfTheMusicCanTakeThePlaceOfTheSimpleOne() {
-        GenreRecognizer knowsBetter = (sound, settings) -> new GenreRecognizer.Heard(GenreRecognizer.Genre.JAZZ, 0.9, 100, null, "Jazz");
-        StageMood mood = new StageMood(knowsBetter);
-        StageMood.Mood shown = null;
-        for (int frame = 0; frame < 300; frame++) {
-            shown = mood.at(beating(frame, 140, 0.8f), SETTINGS);
-        }
-        assertEquals(StageMood.Mood.CLUB, shown);
-        assertEquals(GenreRecognizer.Genre.JAZZ, mood.heard().genre());
+    public void aRecognizerIsFollowedOnlyWhenItIsSure() {
+        GenreRecognizer sure = (sound, settings) -> new GenreRecognizer.Heard(GenreRecognizer.Genre.ROCK, 0.9, 100, null, "Rock");
+        GenreRecognizer unsure = (sound, settings) -> new GenreRecognizer.Heard(GenreRecognizer.Genre.ROCK, 0.5, 100, null, "Rock");
+        GenreRecognizer jazz = (sound, settings) -> new GenreRecognizer.Heard(GenreRecognizer.Genre.JAZZ, 1.0, 100, null, "Jazz");
+        assertEquals(StageMood.Mood.FIRE, new StageMood(sure).at(beating(0, 100, 0.8f), SETTINGS));
+        assertEquals(StageMood.Mood.OFF, new StageMood(unsure).at(beating(0, 100, 0.8f), SETTINGS));
+        assertEquals(StageMood.Mood.OFF, new StageMood(jazz).at(beating(0, 100, 0.8f), SETTINGS));
         assertEquals(GenreRecognizer.Genre.UNKNOWN, new SimpleRecognizer().hear(beating(0, 140, 0.8f), SETTINGS).genre());
     }
 
     @Test
     public void aFixedSettingIsKept() {
-        VisualSettings fixed = SETTINGS.withAtmosphere("spots");
-        assertEquals(StageMood.Mood.SPOTS, heard(140, 0.8f, fixed));
+        assertEquals(StageMood.Mood.LASER, heard(90, 0.2f, SETTINGS.withAtmosphere("laser")));
         assertEquals(StageMood.Mood.OFF, heard(140, 0.8f, SETTINGS.withAtmosphere("off")));
         assertEquals("auto", SETTINGS.withAtmosphere("nonsense").atmosphere());
+        assertEquals("auto", SETTINGS.withAtmosphere("spots").atmosphere());
         assertEquals("fire", StageMood.next("auto"));
         assertEquals("auto", StageMood.next("off"));
     }
 
     @Test
-    public void everyAtmosphereDrawsAroundTheLights() {
-        for (String choice : StageMood.CHOICES) {
-            if (choice.equals("auto") || choice.equals("off")) {
-                continue;
+    public void aRockPieceGetsNoFireWhileItPlaysAsLoudAsEver() {
+        StageAtmosphere stage = new StageAtmosphere();
+        float most = 0;
+        for (int frame = 0; frame < 1800; frame++) { // a minute, heavy and even
+            stage.listen(styled("Rock", frame, 110, 0.9f, 0.4f), SETTINGS);
+            most = Math.max(most, stage.warmth());
+        }
+        assertEquals(StageMood.Mood.FIRE, stage.shown());
+        assertEquals("no fire without a wild moment", 0f, most, 0f);
+    }
+
+    @Test
+    public void fireComesWhenARockPieceBreaksLooseAndThenRests() {
+        StageAtmosphere stage = new StageAtmosphere();
+        for (int frame = 0; frame < 900; frame++) {
+            stage.listen(styled("Rock", frame, 110, 0.5f, 0.25f), SETTINGS);
+        }
+        assertEquals(0f, stage.warmth(), 0f);
+        int volleys = 0;
+        boolean burning = false;
+        for (int frame = 900; frame < 1200; frame++) { // ten seconds, twice as loud
+            stage.listen(styled("Rock", frame, 110, 0.95f, 0.5f), SETTINGS);
+            assertFalse("never lasers with the fire", stage.lasers());
+            if (stage.warmth() > 0 && !burning) {
+                volleys++;
             }
+            burning = stage.warmth() > 0;
+        }
+        assertTrue("fire in the wild moment: " + volleys, volleys >= 1);
+        assertTrue("rare, not on every beat: " + volleys, volleys <= 3);
+    }
+
+    @Test
+    public void lasersBelongToTechnoAndFireStaysAway() {
+        StageAtmosphere stage = new StageAtmosphere();
+        for (int frame = 0; frame < 900; frame++) {
+            stage.listen(styled("Techno", frame, 138, 0.5f, 0.25f), SETTINGS);
+            assertFalse("no lasers while it plays as ever", stage.lasers());
+        }
+        boolean lasers = false;
+        for (int frame = 900; frame < 1200; frame++) {
+            stage.listen(styled("Techno", frame, 138, 0.95f, 0.5f), SETTINGS);
+            lasers |= stage.lasers();
+            assertEquals("never fire with the lasers", 0f, stage.warmth(), 0f);
+        }
+        assertTrue(lasers);
+    }
+
+    @Test
+    public void otherMusicGetsNeitherHoweverWildItIs() {
+        StageAtmosphere stage = new StageAtmosphere();
+        for (int frame = 0; frame < 1200; frame++) {
+            float loud = frame < 900 ? 0.25f : 0.5f;
+            stage.listen(styled("Jazz-Trio", frame, 138, 0.95f, loud), SETTINGS);
+            assertFalse(stage.lasers());
+            assertEquals(0f, stage.warmth(), 0f);
+        }
+    }
+
+    @Test
+    public void setByHandTheFireComesOnEveryHeavyBeat() {
+        StageAtmosphere stage = new StageAtmosphere();
+        float most = 0;
+        for (int frame = 0; frame < 90; frame++) {
+            stage.listen(styled("", frame, 110, 0.9f, 0.4f), SETTINGS.withAtmosphere("fire"));
+            most = Math.max(most, stage.warmth());
+        }
+        assertTrue(most > 0);
+    }
+
+    @Test
+    public void fireGoesOutWhenTheMoodIsAnother() {
+        StageAtmosphere stage = new StageAtmosphere();
+        for (int frame = 0; frame < 40; frame++) {
+            stage.listen(styled("", frame, 110, 0.9f, 0.4f), SETTINGS.withAtmosphere("fire"));
+        }
+        stage.listen(styled("", 17, 110, 0.9f, 0.4f), SETTINGS.withAtmosphere("fire")); // on a beat
+        stage.listen(styled("", 41, 110, 0.9f, 0.4f), SETTINGS.withAtmosphere("laser"));
+        assertTrue(stage.lasers());
+        assertEquals(0f, stage.warmth(), 0f);
+    }
+
+    @Test
+    public void theStageDrawsFireAndLasersInItsSpace() {
+        for (String choice : new String[]{"fire", "laser"}) {
             StageLightEffect stage = new StageLightEffect();
             VisualSettings settings = SETTINGS.withAtmosphere(choice);
             BufferedImage image = new BufferedImage(480, 300, BufferedImage.TYPE_INT_RGB);
             for (int frame = 0; frame < 90; frame++) {
                 Graphics2D g = image.createGraphics();
-                stage.paint(g, 480, 300, beating(frame, 120, 0.8f), palette(), settings);
+                stage.paint(g, 480, 300, beating(frame, 120, 0.9f), palette(), settings);
                 g.dispose();
             }
             assertEquals(choice, stage.atmosphere().key());
-            int lit = 0;
-            for (int y = 0; y < 300; y++) {
-                for (int x = 0; x < 480; x++) {
-                    int rgb = image.getRGB(x, y);
-                    if (((rgb >> 16) & 255) + ((rgb >> 8) & 255) + (rgb & 255) > 90) {
-                        lit++;
-                    }
-                }
-            }
-            assertTrue(choice + " lights the stage: " + lit, lit > 300);
         }
+    }
+
+    private static SoundPicture styled(String style, int frame, double bpm, float bass, float loud) {
+        SoundPicture picture = beating(frame, bpm, bass);
+        picture.style = style;
+        picture.rmsLeft = loud;
+        picture.rmsRight = loud;
+        return picture;
     }
 
     private static StageMood.Mood heard(double bpm, float bass, VisualSettings settings) {

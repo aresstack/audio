@@ -3,29 +3,19 @@ package com.aresstack.audio.studio.visual;
 import java.util.Locale;
 
 /**
- * The atmosphere of the stage. Where the piece says in words what it is (its description, the style
- * of its album), those words choose: rock, techno, jazz, country, pop, classical. Where it does not,
- * the music itself is read, and only for what can be heard in it: fast beats call for lasers, a
- * heavy low end with a beat for fire, everything else for candle light; jazz, country and pop
- * cannot be told apart from the spectrum and are never guessed. A heard mood must hold for a while
- * before the stage changes, so that one loud bar does not turn a quiet piece into a rock concert. One
- * instance belongs to one view and is asked once per picture.
+ * The atmosphere of the stage: a surprise for the wildest moments, not a decoration. Fire belongs
+ * to rock and lasers to techno, and to nothing else. Whether a piece is one of them is taken from
+ * what it says of itself (its description, the style of its album) or from a
+ * {@link GenreRecognizer} that names the genre and is sure; the studio's own recognizer names
+ * none, so a piece that says nothing gets nothing. One instance belongs to one view.
  */
 public final class StageMood {
     /** What the stage shows around its lights. */
     public enum Mood {
-        /** Jets of fire on the beats of a heavy low end. */
+        /** Jets of fire on the hard beats of a rock piece. */
         FIRE("fire", "Feuer"),
-        /** Beams sweeping through the haze, for fast music. */
+        /** Beams sweeping through the haze, for techno. */
         LASER("laser", "Laser"),
-        /** Warm light from above, candles at the edge and drifting haze, for quiet music. */
-        CANDLE("candle", "Kerzen"),
-        /** A smoky club: blue haze and one amber light, for jazz and blues. */
-        CLUB("club", "Jazzclub"),
-        /** A string of warm lanterns before an evening sky, for country and folk. */
-        LANTERN("lantern", "Laternen"),
-        /** Coloured spotlights that wander and change with the beat, for pop. */
-        SPOTS("spots", "Scheinwerfer"),
         /** Nothing but the lights of the tracks. */
         OFF("off", "Aus");
 
@@ -50,7 +40,7 @@ public final class StageMood {
     public static final String AUTO = "auto";
     /** The settings in the order a key steps through them. */
     public static final java.util.List<String> CHOICES = java.util.List.of(AUTO, Mood.FIRE.key(), Mood.LASER.key(),
-            Mood.CANDLE.key(), Mood.CLUB.key(), Mood.LANTERN.key(), Mood.SPOTS.key(), Mood.OFF.key());
+            Mood.OFF.key());
 
     /**
      * The words that name a style, in German and English, in the order they are looked for: a
@@ -62,20 +52,7 @@ public final class StageMood {
         java.util.Map<Mood, java.util.regex.Pattern> words = new java.util.LinkedHashMap<Mood, java.util.regex.Pattern>();
         words.put(Mood.LASER, word("techno|trance|house|edm|electro\\w*|elektro\\w*|dance|rave|dubstep|drum ?(and|&|'?n'?) ?bass|eurodance|hardstyle"));
         words.put(Mood.FIRE, word("rock\\w*|hardrock|metal\\w*|punk\\w*|grunge"));
-        words.put(Mood.CLUB, word("jazz\\w*|swing|bebop|blues|bossa( nova)?|lounge|soul"));
-        words.put(Mood.LANTERN, word("country|folk\\w*|bluegrass|western|americana"));
-        // "Klassische Popmusik" is pop: the noun before the adjective.
-        words.put(Mood.SPOTS, word("pop|popmusik|popsong|pop-?ballade|poppig|disco|funk\\w*|schlager|synthpop|r ?& ?b"));
-        words.put(Mood.CANDLE, word("klassik|klassisch\\w*|classical|barock\\w*|baroque|romantik|romantisch\\w*|sinfon\\w*|symphon\\w*"
-                + "|kammermusik|chamber|streichquartett|string quartet|orchest\\w*|sonate|sonata|fuge|fugue|choral\\w*|menuett|nocturne"));
-        // Instruments that give a style away count as its name.
-        words.put(Mood.CLUB, both(words.get(Mood.CLUB), word("sax|saxophon\\w*|saxophone|vibraphon\\w*|vibraphone")));
-        words.put(Mood.LANTERN, both(words.get(Mood.LANTERN), word("banjo|steel guitar|steelgitarre|mundharmonika|harmonica|mandolin\\w*")));
         return words;
-    }
-
-    private static java.util.regex.Pattern both(java.util.regex.Pattern one, java.util.regex.Pattern two) {
-        return java.util.regex.Pattern.compile(one.pattern() + "|" + two.pattern(), one.flags());
     }
 
     private static java.util.regex.Pattern word(String any) {
@@ -127,11 +104,8 @@ public final class StageMood {
 
     private final GenreRecognizer recognizer;
     private GenreRecognizer.Heard heard = GenreRecognizer.Heard.NOTHING;
-    private Mood shown;
     private String readStyle = "";
     private Mood named;
-    private Mood wanted;
-    private double wantedSince;
 
     public StageMood() {
         this(new SimpleRecognizer());
@@ -152,7 +126,12 @@ public final class StageMood {
         return GenreRecognizer.Genre.of(named).label();
     }
 
-    /** The mood of the stage for this picture. */
+    /**
+     * The mood of the stage for this picture. Left to itself the stage shows fire only for a piece
+     * that is rock and lasers only for one that is techno, by what the piece says of itself or by a
+     * recognizer that names the genre and is sure of it; for everything else, and whenever in doubt,
+     * nothing. Never both: there is one mood at a time.
+     */
     public Mood at(SoundPicture sound, VisualSettings settings) {
         Mood fixed = fixed(settings.atmosphere());
         heard = recognizer.hear(sound, settings);
@@ -161,28 +140,20 @@ public final class StageMood {
             named = fromWords(readStyle);
         }
         if (fixed != null) {
-            shown = fixed;
-            wanted = fixed;
             return fixed;
         }
         if (named != null) {
-            // The piece says what it is: that is surer than anything heard in its sound.
-            shown = named;
-            wanted = named;
             return named;
         }
-        Mood asked = this.heard.atmosphere();
-        Mood heard = asked == null ? (shown == null ? Mood.CANDLE : shown) : asked;
-        if (shown == null) {
-            shown = heard;
-            wanted = heard;
-            wantedSince = sound.seconds;
-        } else if (heard != wanted) {
-            wanted = heard;
-            wantedSince = sound.seconds;
-        } else if (wanted != shown && sound.seconds - wantedSince >= settings.moodSeconds()) {
-            shown = wanted;
-        }
-        return shown;
+        Mood sure = heard.confidence() >= SURE ? heard.genre().mood() : null;
+        return sure == null ? Mood.OFF : sure;
     }
+
+    /** Whether the mood was set by hand: then it shows all the time, not only in the wildest moments. */
+    public static boolean byHand(VisualSettings settings) {
+        return fixed(settings.atmosphere()) != null;
+    }
+
+    /** How sure a recognizer must be of a genre before the stage follows it. */
+    static final double SURE = 0.8;
 }
