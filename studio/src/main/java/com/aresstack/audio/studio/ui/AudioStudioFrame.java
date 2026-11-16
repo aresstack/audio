@@ -6326,15 +6326,25 @@ public final class AudioStudioFrame extends JFrame {
      * What the studio knows in words about the style of the open piece: its description and the
      * style and description of its album. The stage of the player reads its atmosphere from it.
      */
+    private String styleFolder;
+    private String albumStyle = "";
+
     private String pieceStyle() {
         StringBuilder words = new StringBuilder(description.getText());
         String folder = directory.getText().trim();
-        if (!folder.isEmpty()) {
-            Album album = albumMembers.albumOf(Paths.get(folder)).orElse(null);
-            if (album != null && album.concept() != null) {
-                words.append('\n').append(album.concept().style()).append('\n').append(album.concept().description());
+        if (!folder.equals(styleFolder)) {
+            // The album is looked up once per piece: the lookup reads every album file, and this is
+            // asked from the timer of the visualizer.
+            styleFolder = folder;
+            albumStyle = "";
+            if (!folder.isEmpty()) {
+                Album album = albumMembers.albumOf(Paths.get(folder)).orElse(null);
+                if (album != null && album.concept() != null) {
+                    albumStyle = album.concept().style() + '\n' + album.concept().description();
+                }
             }
         }
+        words.append('\n').append(albumStyle);
         // The instruments tell too: a banjo or a saxophone gives a style away.
         for (MusicTrack track : trackTable.tracks()) {
             words.append('\n').append(track.instrument());
