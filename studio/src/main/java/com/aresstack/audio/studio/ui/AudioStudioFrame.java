@@ -303,6 +303,8 @@ public final class AudioStudioFrame extends JFrame {
     private final SketchFront sketchFront = new SketchFront();
     /** The arrangement as the AI has written it so far in the work going on; for "Vorhören" with Play. */
     private List<String> lastSketch = List.of();
+    /** The step of a long work that runs, in words, or empty: the tracks count as done for it. */
+    private String stepWords = "";
     private volatile boolean previewing;
     private final Map<String, javax.swing.JToggleButton> pageKeys = new java.util.LinkedHashMap<String, javax.swing.JToggleButton>();
     /** Beside the choice of the piece under the name of the studio: new, open, and what is seldom needed. */
@@ -5005,6 +5007,7 @@ public final class AudioStudioFrame extends JFrame {
         sketchFront.begin();
         scoreView.showBar(-1);
         lastSketch = List.of();
+        stepWords = "";
         notesDoneTold = false;
         statusLine.clearProgress();
         worker = new SwingWorker<Path, String>() {
@@ -5039,6 +5042,11 @@ public final class AudioStudioFrame extends JFrame {
                     @Override
                     public void planned(final List<String> chords) {
                         SwingUtilities.invokeLater(() -> showPlanned(chords));
+                    }
+
+                    @Override
+                    public void stepping(final String what) {
+                        SwingUtilities.invokeLater(() -> stepWords = what);
                     }
 
                     @Override
@@ -5568,6 +5576,11 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
+            public void stepping(String what) {
+                onOpen.accept(() -> stepWords = what);
+            }
+
+            @Override
             public void form(List<com.aresstack.audio.studio.progress.FormSection> sections) {
                 onOpen.accept(() -> showForm(sections));
             }
@@ -5981,8 +5994,10 @@ public final class AudioStudioFrame extends JFrame {
                 }
             }
         }
-        setStatus((trackStage == TrackProgress.Stage.COMPOSE ? "KI komponiert" : "Rendern") + ": "
-                + working + " gleichzeitig · " + done + " von " + trackStates.size() + " fertig" + atWork
+        boolean step = trackStage == TrackProgress.Stage.COMPOSE && !stepWords.isEmpty();
+        setStatus((trackStage == TrackProgress.Stage.COMPOSE ? "KI komponiert" + (step ? " " + stepWords : "") : "Rendern")
+                + ": " + working + " gleichzeitig · " + done + " von " + trackStates.size()
+                + (step ? " Stimmen fertig damit" : " fertig") + atWork
                 + (waiting > 0 ? " · " + waiting + " warten" : "") + (failed > 0 ? " · " + failed + " Fehler" : "")
                 + " · " + seconds + " s"
                 // Whether the service answers at all: nothing arrives while it lets the requests wait.

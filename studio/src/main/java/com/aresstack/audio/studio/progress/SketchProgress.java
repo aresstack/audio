@@ -56,4 +56,11 @@ public interface SketchProgress extends TrackProgress {
      */
     default void done(double share) {
     }
+
+    /**
+     * Which step of a longer work runs now, in words ("Takte 281–560 von 925"): what the tracks
+     * report as done is done for this step.
+     */
+    default void stepping(String what) {
+    }
 }

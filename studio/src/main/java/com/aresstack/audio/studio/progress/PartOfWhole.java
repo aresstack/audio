@@ -76,6 +76,11 @@ public final class PartOfWhole implements SketchProgress {
     }
 
     @Override
+    public void stepping(String what) {
+        whole.stepping(what);
+    }
+
+    @Override
     public void instruments(List<String[]> chosen) {
         whole.instruments(chosen);
     }

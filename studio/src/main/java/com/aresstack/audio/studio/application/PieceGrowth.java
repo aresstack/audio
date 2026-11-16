@@ -56,6 +56,10 @@ public final class PieceGrowth {
             boolean last = have + bars >= target;
             progress.update("Verlängere das Stück von " + have + " auf " + (have + bars) + " von " + target
                     + " Takten ...");
+            if (progress instanceof com.aresstack.audio.studio.progress.SketchProgress) {
+                ((com.aresstack.audio.studio.progress.SketchProgress) progress)
+                        .stepping("Takte " + (have + 1) + "–" + (have + bars) + " von " + target);
+            }
             // The bar under the status line shows the whole piece: this step is its share from here.
             Progress part = com.aresstack.audio.studio.progress.PartOfWhole.of(progress, have / (double) target,
                     (have + bars) / (double) target);
