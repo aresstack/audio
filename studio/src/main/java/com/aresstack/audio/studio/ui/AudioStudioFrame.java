@@ -124,6 +124,8 @@ public final class AudioStudioFrame extends JFrame {
             com.aresstack.audio.studio.ai.ChatSectionGenerator.LEAST_TOKENS, 256, 65536, 256));
     private final JSpinner answerTokensSmallest = new JSpinner(new SpinnerNumberModel(
             com.aresstack.audio.studio.ai.KipitzChatClient.SMALLEST_ANSWER, 128, 65536, 128));
+    private final JSpinner planTokens = new JSpinner(new SpinnerNumberModel(
+            com.aresstack.audio.studio.ai.AnswerRoom.PLAN, 256, 1000000, 256));
     private final javax.swing.JCheckBox detailedLog = new javax.swing.JCheckBox("Erweitertes Protokoll");
     private final JTextField proxyHost = new JTextField(16);
     private final JTextField proxyPort = new JTextField("", 5);
@@ -2066,6 +2068,13 @@ public final class AudioStudioFrame extends JFrame {
         addRow(ai, row++, "Takte je Planungsschritt",
                 line(growBars, note("Keine Obergrenze: lange Stücke wachsen in Schritten dieser Größe bis zur geplanten Länge.")));
         growBars.addChangeListener(event -> specFields.suggestBars((Integer) growBars.getValue()));
+        planTokens.setPreferredSize(new Dimension(110, 30));
+        planTokens.setToolTipText("So viele Token bekommt ein Plan oder Vorschlag der KI höchstens: der Plan einer "
+                + "Verlängerung, eines Arrangements, einer neuen Stimme, Instrumente, Abmischung, Bewegungen. "
+                + "Ein abgeschnittener Plan wird mit mehr Raum erneut angefragt");
+        addRow(ai, row++, "Max. Tokens für Pläne", line(planTokens, note("Tokens je Plan oder Vorschlag, höchstens.")));
+        planTokens.addChangeListener(event -> com.aresstack.audio.studio.ai.AnswerRoom.plan(
+                (Integer) planTokens.getValue()));
         lookBackBars.setPreferredSize(new Dimension(110, 30));
         lookBackBars.setToolTipText("Beim Verlängern eines langen Stücks: für so viele Takte vor dem Ende bekommt die KI "
                 + "Form, Akkorde und Stimmenübersicht. Anfang und Anschlussstelle bekommt sie immer Note für Note. "
@@ -4844,6 +4853,8 @@ public final class AudioStudioFrame extends JFrame {
             sectionBars.setValue(AiDefaults.sectionBars(saved));
             detailedLog.setSelected(Boolean.parseBoolean(saved.getProperty("detailedLog", "false")));
             growBars.setValue(AiDefaults.growBars(saved));
+            planTokens.setValue(AiDefaults.planTokens(saved));
+            com.aresstack.audio.studio.ai.AnswerRoom.plan((Integer) planTokens.getValue());
             lookBackBars.setValue(AiDefaults.lookBackBars(saved));
             answerTokensPerBar.setValue(AiDefaults.answerTokensPerBar(saved));
             answerTokensLeast.setValue(AiDefaults.answerTokensLeast(saved));
@@ -4965,6 +4976,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("sectionBars", sectionBars.getValue().toString());
             saved.setProperty("detailedLog", Boolean.toString(detailedLog.isSelected()));
             saved.setProperty("portionBars", growBars.getValue().toString());
+            saved.setProperty("planTokens", planTokens.getValue().toString());
             saved.setProperty("lookBackBars", lookBackBars.getValue().toString());
             saved.setProperty("answerTokensPerBar", answerTokensPerBar.getValue().toString());
             saved.setProperty("answerTokensLeast", answerTokensLeast.getValue().toString());

@@ -10,6 +10,10 @@ public final class AnswerRoom {
     public static final int NOTES = 16384;
     private static volatile int notes = NOTES;
 
+    /** The room of a plan while the setting was not read. */
+    public static final int PLAN = 4096;
+    private static volatile int plan = PLAN;
+
     private AnswerRoom() {
     }
 
@@ -21,5 +25,15 @@ public final class AnswerRoom {
     /** The most tokens an answer with notes may take. */
     public static int notes() {
         return notes;
+    }
+
+    /** Sets the most tokens a plan or a proposal may take (the setting "Max. Tokens für Pläne"). */
+    public static void plan(int tokens) {
+        plan = Math.max(1, tokens);
+    }
+
+    /** The most tokens a plan or a proposal (instruments, mix, movements) may take. */
+    public static int plan() {
+        return plan;
     }
 }

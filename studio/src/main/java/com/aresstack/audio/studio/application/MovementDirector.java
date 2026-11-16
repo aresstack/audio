@@ -173,7 +173,7 @@ public final class MovementDirector {
         final java.util.function.Consumer<Proposal> watcher = watching;
         final int bars = piece.bars();
         JsonObject response = client.generate("Return valid JSON only, no Markdown.",
-                prompt(description, piece, stage, movable), Math.min(maxTokens, 4096),
+                prompt(description, piece, stage, movable), Math.min(maxTokens, com.aresstack.audio.studio.ai.AnswerRoom.plan()),
                 directory.resolve(FILE_NAME), watcher == null ? null : new java.util.function.Consumer<String>() {
                     private long told;
 

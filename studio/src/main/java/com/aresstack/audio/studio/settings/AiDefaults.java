@@ -107,6 +107,11 @@ public final class AiDefaults {
                 128, 65536);
     }
 
+    /** The most tokens a plan or a proposal may take ({@code planTokens}). */
+    public static int planTokens(Properties settings) {
+        return number(settings, "planTokens", com.aresstack.audio.studio.ai.AnswerRoom.PLAN, 256, 1000000);
+    }
+
     /** How often an answer cut off at its limit is asked for again ({@code longerAnswers}, 0 to 6). */
     public static int longerAnswers(Properties settings) {
         return number(settings, "longerAnswers", com.aresstack.audio.studio.ai.KipitzChatClient.LONGER_ANSWERS, 0, 6);
