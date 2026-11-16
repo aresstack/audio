@@ -66,7 +66,7 @@ public final class ModelFollowsOnlyComposingAndRenamingTest {
                 new java.util.TreeSet<String>(callers(source, "pieceModel\\.of\\(")));
         assertEquals("only what the user asks for by name changes the saved piece",
                 new java.util.TreeSet<String>(List.of("addVoice", "composeAgain", "editForm", "extendPiece",
-                        "generateBars", "insertBars", "intensityOverBars", "performance", "pieceChanged", "reorchestrate", "reworkRegion", "sectionIntensity",
+                        "generateBars", "insertBars", "intensityOverBars", "performance", "pieceChanged", "reorchestrate", "resumePiece" /* Komponieren goes on with an unfinished piece */, "reworkRegion", "sectionIntensity",
                         "showRevisions", "showSections", "silent" /* only reads whether bars hold notes */,
                         "undoPiece",
                         "popupMenuWillBecomeVisible", "savedPiece" /* its own header */)),
