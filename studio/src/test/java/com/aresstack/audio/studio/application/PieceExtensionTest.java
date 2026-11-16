@@ -572,6 +572,7 @@ public final class PieceExtensionTest {
         final List<List<com.aresstack.audio.studio.progress.FormSection>> forms =
                 java.util.Collections.synchronizedList(
                         new java.util.ArrayList<List<com.aresstack.audio.studio.progress.FormSection>>());
+        final List<Double> shares = java.util.Collections.synchronizedList(new java.util.ArrayList<Double>());
         com.aresstack.audio.studio.progress.SketchProgress watcher =
                 new com.aresstack.audio.studio.progress.SketchProgress() {
                     @Override
@@ -582,6 +583,11 @@ public final class PieceExtensionTest {
                     @Override
                     public void preparing(String what, long characters) {
                         steps.add(what);
+                    }
+
+                    @Override
+                    public void done(double share) {
+                        shares.add(share);
                     }
 
                     @Override
@@ -631,5 +637,11 @@ public final class PieceExtensionTest {
                 .filter(line -> !original.contains(line))
                 .allMatch(line -> Long.parseLong(line.split("\t")[2]) >= ORIGINAL_END));
         assertEquals("watching changes nothing of the piece", before, session.composition());
+        // How far the new bars are, over all voices: it never runs back and ends full.
+        assertFalse("how far the notes are is told", shares.isEmpty());
+        for (int i = 1; i < shares.size(); i++) {
+            assertTrue("it never runs back", shares.get(i) >= shares.get(i - 1));
+        }
+        assertEquals("the last answer makes it full", 1.0, shares.get(shares.size() - 1), 0);
     }
 }

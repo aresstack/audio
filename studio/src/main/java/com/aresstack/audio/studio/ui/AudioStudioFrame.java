@@ -279,7 +279,12 @@ public final class AudioStudioFrame extends JFrame {
     private Path mixFactorFolder;
     private final DeckDisplays.Lcd lcd = new DeckDisplays.Lcd();
     /** The line at the lower edge of the window: what the studio is doing or did last. */
-    private final JLabel statusLine = new JLabel("Bereit");
+    private final StatusLine statusLine = new StatusLine("Bereit");
+    /** How long the full progress bar of the status line stays, in seconds; 0 lets it go at once. */
+    private final JSpinner progressLinger = new JSpinner(new SpinnerNumberModel(StatusLine.LINGER_SECONDS, 0,
+            StatusLine.MAX_LINGER_SECONDS, 1));
+    /** Whether the composer itself says how far the notes are; else the tracks that are done are counted. */
+    private boolean notesDoneTold;
     /** The keys under the display that choose the page, by the name of the page. */
     private final DeckWidgets.CornerKey settingsKey = new DeckWidgets.CornerKey(DeckWidgets.CornerKey.Sign.GEAR,
             "Einstellungen", AudioStudioTheme.ACCENT_SOFT);
@@ -479,7 +484,7 @@ public final class AudioStudioFrame extends JFrame {
         desk.add(work, BorderLayout.CENTER);
         statusLine.setFont(statusLine.getFont().deriveFont(12f));
         statusLine.setForeground(AudioStudioTheme.TEXT_DIM);
-        statusLine.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8));
+        statusLine.setBorder(BorderFactory.createEmptyBorder(3, 8, 3, 8));
         statusLine.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
         statusLine.setToolTipText("Klick: das ganze Protokoll zeigen");
         statusLine.addMouseListener(new java.awt.event.MouseAdapter() {
@@ -2170,6 +2175,14 @@ public final class AudioStudioFrame extends JFrame {
             }
         });
         addRow(looks, 2, "App-Icon", line(appIconChoice));
+        progressLinger.setToolTipText("Der Balken unter der Statuszeile wächst mit den Takten, die die KI geschrieben hat."
+                + " Ist er voll, bleibt er so viele Sekunden stehen; 0: er verschwindet sofort.");
+        progressLinger.addChangeListener(event -> {
+            statusLine.setLingerSeconds((Integer) progressLinger.getValue());
+            saveSettings(false);
+        });
+        addRow(looks, 3, "Fortschrittsbalken", line(new JLabel("bleibt bei 100 % noch"), progressLinger,
+                new JLabel("Sekunden stehen")));
         column.add(javax.swing.Box.createVerticalStrut(14));
         column.add(new DeckWidgets.Module("Ansicht", looks));
         JPanel top = new JPanel(new BorderLayout());
@@ -4714,6 +4727,8 @@ public final class AudioStudioFrame extends JFrame {
             proxyBasic.setSelected("BASIC".equalsIgnoreCase(saved.getProperty("proxyAuthMode", "")));
             proxyCredentialRef.setText(saved.getProperty("proxyCredentialRef", ""));
             fitArrangement.setSelected(!"false".equalsIgnoreCase(saved.getProperty("arrangementFit", "true")));
+            progressLinger.setValue(lingerSeconds(saved));
+            statusLine.setLingerSeconds((Integer) progressLinger.getValue());
             figureLook = com.aresstack.audio.studio.figure.FigureSettings.from(saved);
             figureBob = com.aresstack.audio.studio.figure.FigureSettings.bob(saved);
             stagePanel.setFigureLook(figureLook, figureBob);
@@ -4820,6 +4835,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("proxyAuthMode", proxyBasic.isSelected() ? "BASIC" : "");
             saved.setProperty("proxyCredentialRef", proxyCredentialRef.getText().trim());
             saved.setProperty("arrangementFit", String.valueOf(fitArrangement.isSelected()));
+            saved.setProperty("progressLingerSeconds", progressLinger.getValue().toString());
             figureLook.into(saved);
             saved.setProperty(com.aresstack.audio.studio.figure.FigureSettings.BOB, String.valueOf(figureBob));
             saved.setProperty("albumHeardPercent", Integer.toString(albumHeardPercent));
@@ -4891,6 +4907,8 @@ public final class AudioStudioFrame extends JFrame {
         trackTable.clearWork();
         arrived = 0;
         sketchNotes = 0;
+        notesDoneTold = false;
+        statusLine.clearProgress();
         worker = new SwingWorker<Path, String>() {
             @Override
             protected Path doInBackground() throws Exception {
@@ -4898,6 +4916,11 @@ public final class AudioStudioFrame extends JFrame {
                     @Override
                     public void sketch(final List<String> arrangement) {
                         SwingUtilities.invokeLater(() -> showSketch(arrangement));
+                    }
+
+                    @Override
+                    public void done(final double share) {
+                        SwingUtilities.invokeLater(() -> showNotesDone(share));
                     }
 
                     @Override
@@ -4975,6 +4998,7 @@ public final class AudioStudioFrame extends JFrame {
                 showAiLamp();
                 trackStates.clear();
                 trackTable.clearWork();
+                statusLine.endProgress(); // a bar that is not full says nothing any more
                 endChoosing(false); // a choice of instruments that did not get to its end
                 if (mixArriving) {
                     mixArriving = false;
@@ -5391,6 +5415,11 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
+            public void done(double share) {
+                onOpen.accept(() -> showNotesDone(share));
+            }
+
+            @Override
             public void arriving(long characters) {
                 onOpen.accept(() -> {
                     arrived = characters;
@@ -5438,6 +5467,7 @@ public final class AudioStudioFrame extends JFrame {
             preparingClock.stop();
             trackStates.clear();
             trackTable.clearWork();
+            statusLine.endProgress();
             endChoosing(true); // the instruments the production chose are the piece's now
         }
         if (piece.equals(Paths.get(directory.getText().trim())) && (worker == null || worker.isDone())) {
@@ -5459,6 +5489,7 @@ public final class AudioStudioFrame extends JFrame {
             trackStates.clear();
             trackTable.clearWork();
             trackStageBegan = System.currentTimeMillis();
+            notesDoneTold = false; // the next step counts for itself
         }
         trackStates.put(trackId, state);
         TrackLanes.Work work = state == TrackProgress.State.WAITING ? TrackLanes.Work.WAITING
@@ -5717,6 +5748,28 @@ public final class AudioStudioFrame extends JFrame {
         }
     }
 
+    /**
+     * How far the notes are, as the composer counts them: the bars written over all voices as a share
+     * of the bars to write. The status line shows it as a bar under its words.
+     */
+    private void showNotesDone(double share) {
+        if (!livePicture()) {
+            return; // a late word after the work ended
+        }
+        notesDoneTold = true;
+        statusLine.progress(share);
+    }
+
+    /** How long the full progress bar stays, as the settings say it ({@code progressLingerSeconds}). */
+    private static int lingerSeconds(Properties saved) {
+        try {
+            return Math.max(0, Math.min(StatusLine.MAX_LINGER_SECONDS,
+                    Integer.parseInt(saved.getProperty("progressLingerSeconds", "" + StatusLine.LINGER_SECONDS).trim())));
+        } catch (NumberFormatException odd) {
+            return StatusLine.LINGER_SECONDS;
+        }
+    }
+
     private boolean tracksAtWork() {
         for (TrackProgress.State state : trackStates.values()) {
             if (state == TrackProgress.State.WAITING || state == TrackProgress.State.WORKING) {
@@ -5741,6 +5794,10 @@ public final class AudioStudioFrame extends JFrame {
                 case DONE: done++; break;
                 default: failed++; break;
             }
+        }
+        if (!notesDoneTold && !trackStates.isEmpty()) {
+            // Nobody says how far the bars are (rendering, or a composer that does not): the tracks count.
+            statusLine.progress((done + failed) / (double) trackStates.size());
         }
         if (working + waiting == 0) {
             return; // the next line of the log takes the display again

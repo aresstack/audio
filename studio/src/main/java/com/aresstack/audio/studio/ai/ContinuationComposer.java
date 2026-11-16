@@ -280,6 +280,11 @@ public final class ContinuationComposer {
                 + threads + "); jede Stimme schreibt ihre Abschnitte nacheinander, weil jeder an den vorigen anschließt.");
         try {
             for (ContinuationVoice voice : voices) {
+                for (VoiceFrame frame : sketch == null ? List.<VoiceFrame>of() : frames) {
+                    sketch.expect(voice.key(), frame);
+                }
+            }
+            for (ContinuationVoice voice : voices) {
                 running.put(voice.key(), pool.submit(() -> writePart(piece, original, task, plan, frames, voice, cache,
                         progress, sketch)));
             }
@@ -319,6 +324,9 @@ public final class ContinuationComposer {
             ContinuationPlan.PlannedSection section = transition ? null : section(plan, frame.sectionId());
             if (transition ? voice.newPart() : !section.plays(voice.key())) {
                 connection = "";
+                if (sketch != null) {
+                    sketch.rests(voice.key(), frame);
+                }
                 continue;
             }
             progress.update("Komponiere " + voice.name() + " für " + frame.name() + " ...");

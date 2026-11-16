@@ -80,6 +80,11 @@ public final class RegionComposer {
         Map<String, List<NewNote>> passages = new LinkedHashMap<>();
         List<String> corrections = new ArrayList<>();
         final EditSketch sketch = EditSketch.of(piece, progress);
+        for (String partId : sketch == null ? List.<String>of() : request.selection().parts(piece)) {
+            for (VoiceFrame frame : RegionTask.of(piece, request, context, partId, attempt).frames()) {
+                sketch.expect(partId, frame);
+            }
+        }
         ContinuationPerformance performance = ContinuationPerformance.NONE;
         for (String partId : request.selection().parts(piece)) {
             RegionTask task = RegionTask.of(piece, request, context, partId, attempt);

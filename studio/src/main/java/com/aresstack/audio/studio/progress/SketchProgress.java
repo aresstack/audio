@@ -48,4 +48,12 @@ public interface SketchProgress extends TrackProgress {
      */
     default void instruments(List<String[]> chosen) {
     }
+
+    /**
+     * How much of the notes that are asked for is written, over all tracks: the bars written so far
+     * as a share of the bars to write, from 0 to 1 (see {@link NotesDone}). Told while the notes
+     * arrive; 1 when the last answer is whole.
+     */
+    default void done(double share) {
+    }
 }

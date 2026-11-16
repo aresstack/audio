@@ -2182,5 +2182,10 @@ final class AlbumsPanel extends JPanel {
         public void instruments(List<String[]> chosen) {
             shown.instruments(chosen);
         }
+
+        @Override
+        public void done(double share) {
+            shown.done(share);
+        }
     }
 }

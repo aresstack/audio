@@ -131,6 +131,11 @@ public final class OrchestrationComposer {
                 + threads + "); jede Stimme schreibt ihre Abschnitte nacheinander.");
         try {
             for (ContinuationVoice voice : voices) {
+                for (VoiceFrame frame : sketch == null ? List.<VoiceFrame>of() : task.frames()) {
+                    sketch.expect(voice.key(), frame);
+                }
+            }
+            for (ContinuationVoice voice : voices) {
                 running.put(voice.key(), pool.submit(() -> writePart(piece, task, plan, material, voice, cache,
                         progress, sketch)));
             }
@@ -167,6 +172,9 @@ public final class OrchestrationComposer {
             OrchestrationPlan.Assignment assignment = plan.frame(frame.sectionId()).of(voice.key());
             if (assignment == null) {
                 connection = "";
+                if (sketch != null) {
+                    sketch.rests(voice.key(), frame);
+                }
                 continue;
             }
             progress.update("Orchestriere " + voice.name() + " für " + frame.name() + " ...");

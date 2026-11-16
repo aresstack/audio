@@ -976,6 +976,9 @@ public final class GemmaMusicComposer {
         private final List<String> chords;
         private final SketchProgress shown;
         private final Map<String, List<JsonObject>> soFar = new HashMap<String, List<JsonObject>>();
+        /** How many of the bars to write are written: every section of every track is a job. */
+        private final com.aresstack.audio.studio.progress.NotesDone done =
+                new com.aresstack.audio.studio.progress.NotesDone();
         private long last;
 
         private Sketch(TrackArrangement tracks, CompositionSpec spec, List<int[]> sections, List<String> chords,
@@ -985,6 +988,28 @@ public final class GemmaMusicComposer {
             this.sections = sections;
             this.chords = chords;
             this.shown = shown;
+            for (MusicTrack track : tracks.tracks()) {
+                for (int s = 0; s < sections.size(); s++) {
+                    done.expect(track.id() + "/" + s, sections.get(s)[1]);
+                }
+            }
+        }
+
+        /** How many bars of a section the notes written so far reach into. */
+        private double reach(JsonObject answer) {
+            double end = 0;
+            JsonElement notes = answer.get("notes");
+            if (notes != null && notes.isJsonArray()) {
+                for (JsonElement element : notes.getAsJsonArray()) {
+                    try {
+                        JsonObject note = element.getAsJsonObject();
+                        end = Math.max(end, note.get("beat").getAsDouble() + note.get("duration").getAsDouble());
+                    } catch (RuntimeException odd) {
+                        // a note that cannot be read reaches nowhere
+                    }
+                }
+            }
+            return end / spec.quartersPerBar();
         }
 
         /** The text a model has written so far for a section of a track. */
@@ -1009,12 +1034,19 @@ public final class GemmaMusicComposer {
                 parts.add(null);
             }
             parts.set(section, answer);
+            if (now) {
+                done.whole(track + "/" + section);
+            }
             long time = System.currentTimeMillis();
             if (!now && time - last < EVERY) {
                 return;
             }
             last = time;
             try {
+                if (!now) {
+                    done.reached(track + "/" + section, reach(answer));
+                }
+                shown.done(done.fraction());
                 Progress silent = message -> { };
                 shown.sketch(lines(tracks, soFar, spec, sections, new CompositionNoteNormalizer(silent, spec, chords),
                         silent, true));

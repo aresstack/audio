@@ -36,6 +36,8 @@ public final class EditSketch {
     private final Map<String, String> newTracks = new LinkedHashMap<>();
     /** What was written so far, by part and frame: the frame and the lines of its notes. */
     private final Map<String, Object[]> written = new LinkedHashMap<>();
+    /** How many of the bars to write are written: every frame of every part that is asked for is a job. */
+    private final com.aresstack.audio.studio.progress.NotesDone done = new com.aresstack.audio.studio.progress.NotesDone();
     private long baseEnd;
     private long last;
 
@@ -143,6 +145,25 @@ public final class EditSketch {
         });
     }
 
+    /**
+     * A part will be asked for the notes of a frame. Told for all of them before the first request,
+     * so that the share of the work that is done ({@link SketchProgress#done}) counts from the whole.
+     */
+    public EditSketch expect(String partId, VoiceFrame frame) {
+        done.expect(partId + "\n" + frame.sectionId(), frame.bars());
+        return this;
+    }
+
+    /** A part is not asked for a frame after all: it rests there, or the frame is not its own. */
+    public synchronized void rests(String partId, VoiceFrame frame) {
+        done.whole(partId + "\n" + frame.sectionId());
+        try {
+            shown.done(done.fraction());
+        } catch (RuntimeException unshown) {
+            // a look at the work on its way
+        }
+    }
+
     /** Shows the piece as it is now, before the first new note: with the room the work will fill. */
     public EditSketch show() {
         try {
@@ -194,15 +215,39 @@ public final class EditSketch {
                 }
             }
             written.put(partId + "\n" + frame.sectionId(), new Object[]{partId, frame, lines});
+            if (now) {
+                done.whole(partId + "\n" + frame.sectionId());
+            }
             long at = System.currentTimeMillis();
             if (!now && at - last < EVERY) {
                 return;
             }
             last = at;
+            if (!now) {
+                done.reached(partId + "\n" + frame.sectionId(), reach(frame, answer));
+            }
+            shown.done(done.fraction());
             shown.sketch(lines());
         } catch (RuntimeException unshown) {
             // a picture of the piece on its way; the change itself does not depend on it
         }
+    }
+
+    /** How many bars of a frame the notes written so far reach into. */
+    private double reach(VoiceFrame frame, JsonArray answer) {
+        double quarters = (frame.endTick() - frame.startTick()) / (double) TimeMap.PPQ / Math.max(1, frame.bars());
+        double end = 0;
+        for (JsonElement element : answer) {
+            try {
+                JsonObject note = element.getAsJsonObject();
+                double bar = note.has("bar") ? note.get("bar").getAsDouble() : 1;
+                end = Math.max(end, bar - 1
+                        + (note.get("beat").getAsDouble() + note.get("duration").getAsDouble()) / quarters);
+            } catch (RuntimeException odd) {
+                // a note that cannot be read reaches nowhere
+            }
+        }
+        return end;
     }
 
     private String line(String partId, VoiceFrame frame, JsonElement element) {
