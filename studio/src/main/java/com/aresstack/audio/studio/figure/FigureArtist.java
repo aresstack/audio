@@ -173,7 +173,7 @@ public final class FigureArtist {
     }
 
     /** The SVG in an answer: its field {@code svg}, or any text in it that holds one. */
-    static String svgIn(JsonObject answer) {
+    public static String svgIn(JsonObject answer) {
         if (answer == null) {
             return "";
         }

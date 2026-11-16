@@ -1914,6 +1914,16 @@ public final class AudioStudioFrame extends JFrame {
             }
 
             @Override
+            public Path choosePicture(String title) {
+                JFileChooser chooser = new JFileChooser();
+                chooser.setDialogTitle(title);
+                chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Bilder (PNG, JPG)",
+                        "png", "jpg", "jpeg"));
+                return chooser.showOpenDialog(AudioStudioFrame.this) == JFileChooser.APPROVE_OPTION
+                        ? chooser.getSelectedFile().toPath() : null;
+            }
+
+            @Override
             public int[] voices() {
                 int fewest = (Integer) voicesMin.getValue();
                 return new int[]{fewest, Math.max(fewest, (Integer) voicesMax.getValue())};
@@ -4861,6 +4871,9 @@ public final class AudioStudioFrame extends JFrame {
     /** The role of the figures' model, known before the settings are read so that its own model is kept. */
     private static final com.aresstack.audio.studio.ai.ModelRole FIGURES_ROLE =
             com.aresstack.audio.studio.figure.FigureArtist.ROLE;
+    /** The role of the model that draws album covers, known before the settings are read as well. */
+    private static final com.aresstack.audio.studio.ai.ModelRole COVER_ROLE =
+            com.aresstack.audio.studio.album.CoverArtist.ROLE;
     /** How the figures stand on the stage, as the settings have it; kept so that saving does not lose it. */
     private com.aresstack.audio.studio.figure.FigureSettings figureLook =
             com.aresstack.audio.studio.figure.FigureSettings.DEFAULT;
