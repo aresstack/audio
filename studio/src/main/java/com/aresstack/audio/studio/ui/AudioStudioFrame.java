@@ -294,6 +294,7 @@ public final class AudioStudioFrame extends JFrame {
     /** The line at the lower edge of the window: what the studio is doing or did last. */
     private final StatusLine statusLine = new StatusLine("Bereit");
     /** How long the full progress bar of the status line stays, in seconds; 0 lets it go at once. */
+    private final JSpinner seekWheel = new JSpinner(new SpinnerNumberModel(SeekLine.WHEEL_SECONDS, 1, 120, 1));
     private final JCheckBox followWriting = new JCheckBox("Partitur läuft mit, während die KI schreibt", false);
     private final JSpinner progressLinger = new JSpinner(new SpinnerNumberModel(StatusLine.LINGER_SECONDS, 0,
             StatusLine.MAX_LINGER_SECONDS, 1));
@@ -417,6 +418,8 @@ public final class AudioStudioFrame extends JFrame {
     private Boolean composedShown;
     private final DeckDisplays.Meter masterLeft = new DeckDisplays.Meter(false);
     private final DeckDisplays.Meter masterRight = new DeckDisplays.Meter(false);
+    /** The place in the piece under the transport keys, to move the playback. */
+    private final SeekLine seekLine = new SeekLine(share -> seek(share));
     private final DeckWidgets.TransportKey playKey = new DeckWidgets.TransportKey(
             DeckWidgets.Symbol.PLAY, AudioStudioTheme.GREEN, "Abspielen, was unter Wiedergabe gewählt ist (Leertaste)");
     private final DeckWidgets.TransportKey stopKey = new DeckWidgets.TransportKey(
@@ -616,7 +619,11 @@ public final class AudioStudioFrame extends JFrame {
             label.setHorizontalAlignment(JLabel.CENTER);
             names.add(label);
         }
-        keysWithNames.add(names, BorderLayout.SOUTH);
+        JPanel underKeys = new JPanel(new BorderLayout(0, 3));
+        underKeys.setOpaque(false);
+        underKeys.add(names, BorderLayout.NORTH);
+        underKeys.add(seekLine, BorderLayout.SOUTH);
+        keysWithNames.add(underKeys, BorderLayout.SOUTH);
 
         JPanel master = new JPanel(new GridBagLayout());
         master.setOpaque(false);
@@ -2249,6 +2256,11 @@ public final class AudioStudioFrame extends JFrame {
         followWriting.setToolTipText("An: die Partitur blättert zu den Takten, die gerade entstehen, bis Sie selbst "
                 + "scrollen. Aus: die Ansicht bleibt, wo Sie sind.");
         addRow(looks, 4, "Beim Schreiben", followWriting);
+        seekWheel.setPreferredSize(new Dimension(80, 30));
+        seekWheel.setToolTipText("So weit springt die Wiedergabe je Raste des Mausrads über dem Positionsregler unter "
+                + "den Play-Tasten");
+        seekWheel.addChangeListener(event -> seekLine.setWheelSeconds((Integer) seekWheel.getValue()));
+        addRow(looks, 5, "Positionsregler", line(new JLabel("Mausrad springt je Raste"), seekWheel, new JLabel("s")));
         column.add(javax.swing.Box.createVerticalStrut(14));
         column.add(new DeckWidgets.Module("Ansicht", looks));
         JPanel top = new JPanel(new BorderLayout());
@@ -4902,6 +4914,13 @@ public final class AudioStudioFrame extends JFrame {
             fitArrangement.setSelected(!"false".equalsIgnoreCase(saved.getProperty("arrangementFit", "true")));
             progressLinger.setValue(lingerSeconds(saved));
             followWriting.setSelected("true".equalsIgnoreCase(saved.getProperty("scoreFollowsWriting", "false").trim()));
+            try {
+                seekWheel.setValue(Math.max(1, Math.min(120, Integer.parseInt(
+                        saved.getProperty("seekWheelSeconds", "" + SeekLine.WHEEL_SECONDS).trim()))));
+            } catch (NumberFormatException odd) {
+                seekWheel.setValue(SeekLine.WHEEL_SECONDS);
+            }
+            seekLine.setWheelSeconds((Integer) seekWheel.getValue());
             statusLine.setLingerSeconds((Integer) progressLinger.getValue());
             figureLook = com.aresstack.audio.studio.figure.FigureSettings.from(saved);
             stageFigures.houseOnly(Boolean.parseBoolean(saved.getProperty("stageFiguresHouse", "false")));
@@ -5026,6 +5045,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("arrangementFit", String.valueOf(fitArrangement.isSelected()));
             saved.setProperty("progressLingerSeconds", progressLinger.getValue().toString());
             saved.setProperty("scoreFollowsWriting", String.valueOf(followWriting.isSelected()));
+            saved.setProperty("seekWheelSeconds", seekWheel.getValue().toString());
             figureLook.into(saved);
             saved.setProperty("stageFiguresHouse", String.valueOf(stageFigures.houseOnly()));
             saved.setProperty("stageFigureClothes", com.aresstack.audio.studio.figure.HouseFigures.clothes());
@@ -7332,6 +7352,7 @@ public final class AudioStudioFrame extends JFrame {
         double length = player.length();
         lcd.setPlaying(playing);
         lcd.setTime(second, length);
+        seekLine.setTime(second, length);
         lcd.tick();
         arrangementView.setSecond(second);
         scoreView.setSecond(playing || second > 0 ? second : -1);
