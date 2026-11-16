@@ -61,11 +61,45 @@ public final class FigureArtist {
             "a woman with braided hair in an orange blouse",
             "a man with a moustache and a hat in a waistcoat");
 
+    /** The people of the figures as the studio comes. */
+    public static List<String> looks() {
+        return LOOKS;
+    }
+
+    /** The instruction to the AI as the studio comes, shown where the user may write their own. */
+    public static String style() {
+        return STYLE;
+    }
+
     private final ChatModel model;
+    private final String style;
 
     public FigureArtist(ChatModel model) {
-        this.model = model;
+        this(model, null);
     }
+
+    /** @param style the instruction to the AI in the user's own words; {@code null} or blank takes {@link #STYLE} */
+    public FigureArtist(ChatModel model, String style) {
+        this(model, style, null);
+    }
+
+    /**
+     * @param looks the people the figures are, one per line: the number of a figure picks one;
+     *              {@code null} or blank takes {@link #LOOKS}
+     */
+    public FigureArtist(ChatModel model, String style, String looks) {
+        this.model = model;
+        this.style = style == null || style.isBlank() ? STYLE : style;
+        List<String> own = new java.util.ArrayList<>();
+        for (String look : looks == null ? new String[0] : looks.split("\\R")) {
+            if (!look.isBlank()) {
+                own.add(look.strip());
+            }
+        }
+        this.looks = own.isEmpty() ? LOOKS : List.copyOf(own);
+    }
+
+    private final List<String> looks;
 
     public String modelName() {
         return model.name();
@@ -81,6 +115,11 @@ public final class FigureArtist {
      * @return the SVG, checked: it can be drawn and looks like a figure
      */
     public String draw(String instrument, String role, int variation, Path answers) throws IOException {
+        return draw(instrument, role, variation, null, answers);
+    }
+
+    /** @param colour the colour of the track as #RRGGBB, to dress the person in; {@code null} leaves the choice to the look */
+    public String draw(String instrument, String role, int variation, String colour, Path answers) throws IOException {
         String problem = null;
         Files.createDirectories(answers);
         String stem = FigureLibrary.kind(instrument) + "-" + System.currentTimeMillis();
@@ -88,13 +127,13 @@ public final class FigureArtist {
             if (Thread.currentThread().isInterrupted()) {
                 throw new IOException("Zeichnen abgebrochen.");
             }
-            String prompt = prompt(instrument, role, variation)
+            String prompt = prompt(instrument, role, looks.get(Math.floorMod(variation, looks.size())), colour)
                     + (problem == null ? "" : "\n\nYour previous answer was unusable: " + problem
                     + ". Follow the rules exactly and answer with the corrected JSON only.");
             JsonObject answer;
             try {
                 // A new file for every try: a kept answer must never stand in for a new drawing.
-                answer = model.generate(STYLE, prompt, MAX_TOKENS, answers.resolve(stem + "-" + attempt + ".json"));
+                answer = model.generate(style, prompt, MAX_TOKENS, answers.resolve(stem + "-" + attempt + ".json"));
             } catch (com.aresstack.audio.studio.ai.UnreadableAnswerException unreadable) {
                 problem = "it was not valid JSON with an \"svg\" field";
                 continue;
@@ -117,8 +156,17 @@ public final class FigureArtist {
     }
 
     static String prompt(String instrument, String role, int variation) {
-        String look = LOOKS.get(Math.floorMod(variation, LOOKS.size()));
+        return prompt(instrument, role, variation, null);
+    }
+
+    static String prompt(String instrument, String role, int variation, String colour) {
+        return prompt(instrument, role, LOOKS.get(Math.floorMod(variation, LOOKS.size())), colour);
+    }
+
+    static String prompt(String instrument, String role, String look, String colour) {
         return "Draw: a musician playing \"" + instrument + "\" (role in the piece: " + role + "), " + look + ". "
+                + (colour == null || colour.isBlank() ? "" : "The program shows this track in the colour " + colour
+                + ": dress the person mainly in this colour, whatever colour the description above names for the clothes. ")
                 + "If the name is a group or a sound rather than one instrument (an ensemble, a pad, a synth), "
                 + "draw one musician who stands for it with a fitting instrument (for strings a violin, "
                 + "for a synth or pad a keyboard).";
