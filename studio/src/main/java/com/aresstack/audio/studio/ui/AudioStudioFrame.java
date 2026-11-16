@@ -5710,6 +5710,11 @@ public final class AudioStudioFrame extends JFrame {
 
     /** A line on the paper of the score while it has no notes yet. */
     private void sayOnPaper(String line) {
+        if (sketchNotes > 0) {
+            // Notes are on the page already (the bars written before a continuation, or the piece an
+            // edit starts from): they stay while the AI plans the next ones; the status line says it.
+            return;
+        }
         try {
             List<String> ids = new ArrayList<String>();
             for (MusicTrack track : trackTable.tracks()) {
@@ -5749,6 +5754,9 @@ public final class AudioStudioFrame extends JFrame {
                 }
             }
             sketchNotes = notes;
+            if ("Noch nicht komponiert".equals(songFacts.getText())) {
+                songFacts.setText("Wird komponiert …"); // the facts of the plan are read when the work is over
+            }
             scoreView.setScore(com.aresstack.audio.studio.score.Score.of(arrangement), ids,
                     "Die KI schreibt · die ersten Noten erscheinen gleich");
             // The lanes of the arrangement grow as well: there the user asked for most of it.
