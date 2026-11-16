@@ -89,9 +89,9 @@ public final class AiDefaults {
         return number(settings, "lookBackBars", com.aresstack.audio.studio.ai.ContextTiers.NEAR_BARS, 0, 100000);
     }
 
-    /** The room for the answer of one section of a continuation in tokens per bar ({@code answerTokensPerBar}; 0: always the most). */
+    /** The room for the answer of one section of a continuation in tokens per bar ({@code answerRoomPerBar}; 0, the default: always "Max. Tokens"). */
     public static int answerTokensPerBar(Properties settings) {
-        return number(settings, "answerTokensPerBar", com.aresstack.audio.studio.ai.ChatSectionGenerator.TOKENS_PER_BAR,
+        return number(settings, "answerRoomPerBar", com.aresstack.audio.studio.ai.ChatSectionGenerator.TOKENS_PER_BAR,
                 0, 8192);
     }
 

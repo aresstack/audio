@@ -5000,7 +5000,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("charsPerToken", charsPerToken.getValue().toString());
             saved.setProperty("planTokens", planTokens.getValue().toString());
             saved.setProperty("lookBackBars", lookBackBars.getValue().toString());
-            saved.setProperty("answerTokensPerBar", answerTokensPerBar.getValue().toString());
+            saved.setProperty("answerRoomPerBar", answerTokensPerBar.getValue().toString());
             saved.setProperty("answerTokensLeast", answerTokensLeast.getValue().toString());
             saved.setProperty("answerTokensSmallest", answerTokensSmallest.getValue().toString());
             saved.setProperty("templateLines", templateLines.getValue().toString());
