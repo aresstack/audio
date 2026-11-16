@@ -180,6 +180,7 @@ final class AlbumsPanel extends JPanel {
     private final SuggestBox descriptionBox = new SuggestBox(description);
     private final SuggestBox styleBox = new SuggestBox(style);
     /** Description and style open into a large box: an album may need a long text, not one line. */
+    private final WideText titleWide = new WideText(title, titleBox, 3);
     private final WideText descriptionWide = new WideText(description, descriptionBox);
     private final WideText styleWide = new WideText(style, styleBox);
     private final JSpinner trackCount = new JSpinner(new SpinnerNumberModel(12, 1, AlbumConcept.MAX_TRACKS, 1));
@@ -274,7 +275,11 @@ final class AlbumsPanel extends JPanel {
     /** Something that belongs beside the concept of the album: the models that plan and compose it. */
     void setBesideConcept(javax.swing.JComponent component) {
         beside = component;
-        conceptRow.add(component, BorderLayout.EAST);
+        // At the top, also when a field of the concept is opened to a large box.
+        JPanel atTop = new JPanel(new BorderLayout());
+        atTop.setOpaque(false);
+        atTop.add(component, BorderLayout.NORTH);
+        conceptRow.add(atTop, BorderLayout.EAST);
         conceptRow.revalidate();
     }
 
@@ -319,29 +324,23 @@ final class AlbumsPanel extends JPanel {
 
         JPanel concept = new JPanel(new GridBagLayout());
         concept.setOpaque(false);
-        GridBagConstraints c = new GridBagConstraints();
-        c.insets = new Insets(0, 0, 6, 8);
-        c.anchor = GridBagConstraints.WEST;
-        c.fill = GridBagConstraints.HORIZONTAL;
         Assistant assistant = host.assistant();
-        java.awt.Component titled = titleBox;
-        if (assistant != null) {
-            JPanel withKey = new JPanel(new BorderLayout(4, 0));
-            withKey.setOpaque(false);
-            withKey.add(titleBox, BorderLayout.CENTER);
-            withKey.add(assistant.key("KI-Hilfe für den Titel des Albums", () -> textHelp("Titel", "title", title,
-                    "the title of the album, short and memorable.")), BorderLayout.EAST);
-            titled = withKey;
-            descriptionWide.aside(assistant.key("KI-Hilfe für „Worum geht es?“", () -> textHelp("Worum geht es?",
-                    "description", description, "what the album is about, in the user's words: the story or "
-                            + "theme, the pieces and their order, everything the AI that plans and composes the "
-                            + "album should know. It may be long.")));
-            styleWide.aside(assistant.key("KI-Hilfe für den Stil", () -> textHelp("Stil", "style", style,
-                    "how the album sounds: genre, instruments, sound, in a few lines.")));
-        }
-        row(concept, c, 0, "Titel", titled, 3);
-        row(concept, c, 1, "Worum geht es? Das bekommt die KI gesagt.", descriptionWide, 3);
-        row(concept, c, 2, "Stil", styleWide, 3);
+        // Every row is built alike: a short name (what it means is its tooltip), the field, and at the
+        // right the square keys, so that the fields have one width and the keys stand under each other.
+        formRow(concept, 0, "Titel", "Der Titel des Albums, kurz und einprägsam", titleWide, titleWide.toggleKey(),
+                assistant == null ? null : assistant.key("KI-Hilfe für den Titel des Albums", () -> textHelp("Titel",
+                        "title", title, "the title of the album, short and memorable.")));
+        formRow(concept, 1, "Beschreibung", "Worum geht es? Das bekommt die KI gesagt: die Geschichte oder das Thema, "
+                        + "die Stücke und ihre Reihenfolge, alles, was sie zum Planen und Komponieren wissen soll. Darf lang sein.",
+                descriptionWide, descriptionWide.toggleKey(),
+                assistant == null ? null : assistant.key("KI-Hilfe für die Beschreibung des Albums", () -> textHelp(
+                        "Beschreibung", "description", description, "what the album is about, in the user's words: "
+                                + "the story or theme, the pieces and their order, everything the AI that plans and "
+                                + "composes the album should know. It may be long.")));
+        formRow(concept, 2, "Stil", "Wie das Album klingt: Genre, Instrumente, Klang, in ein paar Zeilen",
+                styleWide, styleWide.toggleKey(),
+                assistant == null ? null : assistant.key("KI-Hilfe für den Stil", () -> textHelp("Stil", "style", style,
+                        "how the album sounds: genre, instruments, sound, in a few lines.")));
         // An empty list that is opened asks the AI (again): a request that failed is not the last word.
         for (final Field field : Field.values()) {
             box(field).addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
@@ -361,44 +360,37 @@ final class AlbumsPanel extends JPanel {
                 }
             });
         }
-        typed(title, afterTitle, title);
+        typed(title, afterTitle, titleWide.area());
         typed(description, afterDescription, descriptionWide.area());
         typed(style, afterStyle, styleWide.area());
-        c.gridy = 3;
-        c.gridwidth = 1;
-        c.gridx = 0;
-        c.weightx = 0;
-        concept.add(dim("Stücke"), c);
-        c.gridx = 1;
-        JPanel counted = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        JPanel counted = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         counted.setOpaque(false);
         countMode.setToolTipText("automatisch: die KI plant so viele Titel, wie hier steht. Aus der Trackliste: die "
-                + "Titel der Liste (oder einer Liste in „Worum geht es?“) sind das Album; die Zahl ergibt sich daraus.");
+                + "Titel der Liste (oder einer Liste in der Beschreibung) sind das Album; die Zahl ergibt sich daraus.");
+        trackCount.setToolTipText("So viele Titel hat das Album");
+        minutes.setToolTipText("So lang ist ein Stück mindestens, in Minuten");
+        minutesTo.setToolTipText("So lang ist ein Stück höchstens, in Minuten; die KI gibt jedem Titel eine eigene Länge dazwischen");
         counted.add(countMode);
+        counted.add(javax.swing.Box.createHorizontalStrut(8));
         counted.add(trackCount);
-        concept.add(counted, c);
+        counted.add(javax.swing.Box.createHorizontalStrut(20));
+        counted.add(dim("je"));
+        counted.add(javax.swing.Box.createHorizontalStrut(8));
+        counted.add(minutes);
+        counted.add(javax.swing.Box.createHorizontalStrut(8));
+        counted.add(dim("bis"));
+        counted.add(javax.swing.Box.createHorizontalStrut(8));
+        counted.add(minutesTo);
+        counted.add(javax.swing.Box.createHorizontalStrut(8));
+        counted.add(dim("Minuten"));
         countMode.addActionListener(event -> {
             if (!showing) {
                 showCountMode();
                 keepConcept();
             }
         });
-        c.gridx = 2;
-        concept.add(dim("Minuten je Stück"), c);
-        c.gridx = 3;
-        JPanel range = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
-        range.setOpaque(false);
-        minutes.setToolTipText("So lang ist ein Stück mindestens");
-        minutesTo.setToolTipText("So lang ist ein Stück höchstens; die KI gibt jedem Titel eine eigene Länge dazwischen");
-        range.add(dim("von"));
-        range.add(minutes);
-        range.add(dim("bis"));
-        range.add(minutesTo);
-        if (assistant != null) {
-            range.add(assistant.key("KI-Hilfe für Anzahl und Länge der Stücke", this::piecesHelp));
-        }
-        concept.add(range, c);
-        c.gridx = 4;
+        formRow(concept, 3, "Stücke", "Wie viele Titel das Album hat und wie lang jeder ungefähr wird", counted, null,
+                assistant == null ? null : assistant.key("KI-Hilfe für Anzahl und Länge der Stücke", this::piecesHelp));
         original.setOpaque(false);
         original.setForeground(AudioStudioTheme.TEXT_DIM);
         original.setToolTipText("Der Text nennt ein bestehendes Werk oder Quellen (z. B. Vivaldis Vier Jahreszeiten):"
@@ -411,9 +403,6 @@ final class AlbumsPanel extends JPanel {
                 keys();
             }
         });
-        c.gridx = 5;
-        c.weightx = 1;
-        concept.add(javax.swing.Box.createHorizontalGlue(), c);
 
         table.setRowHeight(28);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -482,8 +471,6 @@ final class AlbumsPanel extends JPanel {
         JScrollPane tableScroll = new JScrollPane(table);
         tableScroll.setBorder(BorderFactory.createLineBorder(AudioStudioTheme.STROKE, 1, true));
 
-        // The keys of the album stand in the head of its module, beside the name, as on the other
-        // pages: first what the AI does with the whole album, then the keys of the chosen title.
         headKeys.setOpaque(false);
         headKeys.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 0));
         hint(plan, "Die KI plant aus dem Konzept die Trackliste des Albums");
@@ -499,19 +486,37 @@ final class AlbumsPanel extends JPanel {
                 + " mehrere für die Titel ab dem gewählten, neue Titel nach Bedarf. Die KI komponiert diese Titel"
                 + " nicht frei, sondern übernimmt die Noten und berichtigt nur Format und offensichtliche Fehler.");
         hint(noScore, "Der gewählte Titel folgt keiner Notenvorlage mehr; er wird wieder frei komponiert");
-        if (assistant != null) {
-            headKeys.add(assistant.key("KI-Hilfe für die Trackliste: einen Text oder eine Liste hineinkopieren, "
-                    + "die KI legt die Titel an, ändert, sortiert sie und setzt das Hauptthema", this::tracksHelp));
-        }
-        for (java.awt.Component key : new java.awt.Component[]{plan, produce, cancel, export,
-                javax.swing.Box.createHorizontalStrut(10), add, remove, up, down, open, again,
-                javax.swing.Box.createHorizontalStrut(10), scores, noScore}) {
+        // The head carries what is done with the whole album; what concerns the list and the title
+        // chosen in it stands right over the list, where the eye is when a title is chosen.
+        for (java.awt.Component key : new java.awt.Component[]{plan, produce, cancel, export}) {
             headKeys.add(key);
         }
+        JPanel listKeysRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        listKeysRow.setOpaque(false);
+        JLabel listName = DeckWidgets.lettering("Trackliste");
+        listName.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 6));
+        listKeysRow.add(listName);
+        for (java.awt.Component key : new java.awt.Component[]{add, remove, up, down}) {
+            listKeysRow.add(key);
+        }
         if (assistant != null) {
-            headKeys.add(assistant.key("KI-Hilfe für die Noten des gewählten Titels: aus einer Beschreibung, Akkorden, "
+            listKeysRow.add(assistant.key("KI-Hilfe für die Trackliste: einen Text oder eine Liste hineinkopieren, "
+                    + "die KI legt die Titel an, ändert, sortiert sie und setzt das Hauptthema", this::tracksHelp));
+        }
+        JLabel titleName = DeckWidgets.lettering("Gewählter Titel");
+        titleName.setBorder(BorderFactory.createEmptyBorder(0, 22, 0, 6));
+        listKeysRow.add(titleName);
+        for (java.awt.Component key : new java.awt.Component[]{open, again, scores, noScore}) {
+            listKeysRow.add(key);
+        }
+        if (assistant != null) {
+            listKeysRow.add(assistant.key("KI-Hilfe für die Noten des gewählten Titels: aus einer Beschreibung, Akkorden, "
                     + "einer Melodie in Worten oder ABC schreibt die KI mit dir die Notenvorlage", this::scoreHelp));
         }
+        JPanel listHead = new JPanel(new BorderLayout());
+        listHead.setOpaque(false);
+        listHead.setBorder(BorderFactory.createEmptyBorder(0, 0, 8, 0));
+        listHead.add(listKeysRow, BorderLayout.WEST);
         status.setForeground(AudioStudioTheme.TEXT_DIM);
         JPanel bottom = new JPanel(new BorderLayout(0, 8));
         bottom.setOpaque(false);
@@ -547,6 +552,7 @@ final class AlbumsPanel extends JPanel {
         listed.add(tableScroll);
         JPanel listedWithSettings = new JPanel(new BorderLayout(0, 0));
         listedWithSettings.setOpaque(false);
+        listedWithSettings.add(listHead, BorderLayout.NORTH);
         listedWithSettings.add(listed, BorderLayout.CENTER);
         listedWithSettings.add(rowSettings, BorderLayout.SOUTH);
         right.add(listedWithSettings, BorderLayout.CENTER);
@@ -576,16 +582,48 @@ final class AlbumsPanel extends JPanel {
         return label;
     }
 
-    private static void row(JPanel panel, GridBagConstraints c, int y, String label, Component field, int span) {
+    /**
+     * One row of a form: a short name whose tooltip says what the field means, the field, which
+     * takes the width, and at the right the square keys of the row. Rows built with this have
+     * fields of one width and keys that stand under each other, whichever keys a row has.
+     *
+     * @param first  the key nearer the field (opening it to a large box), or {@code null}
+     * @param second the key at the edge (the AI help), or {@code null}
+     */
+    static void formRow(JPanel form, int y, String name, String meaning, Component field, Component first,
+                        Component second) {
+        GridBagConstraints c = new GridBagConstraints();
         c.gridy = y;
+        c.insets = new Insets(0, 0, 8, 12);
+        c.anchor = GridBagConstraints.NORTHWEST;
+        JLabel label = dim(name);
+        label.setToolTipText(meaning);
+        label.setBorder(BorderFactory.createEmptyBorder(5, 0, 0, 0));
         c.gridx = 0;
-        c.gridwidth = 1;
-        c.weightx = 0;
-        panel.add(dim(label), c);
+        form.add(label, c);
         c.gridx = 1;
-        c.gridwidth = span + 1;
         c.weightx = 1;
-        panel.add(field, c);
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.insets = new Insets(0, 0, 8, 6);
+        form.add(field, c);
+        JPanel keys = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
+        keys.setOpaque(false);
+        if (first != null) {
+            keys.add(first);
+            keys.add(javax.swing.Box.createHorizontalStrut(4));
+        }
+        if (second != null) {
+            keys.add(second);
+        }
+        JPanel top = new JPanel(new BorderLayout());
+        top.setOpaque(false);
+        top.add(keys, BorderLayout.NORTH);
+        c.gridx = 2;
+        c.weightx = 0;
+        c.fill = GridBagConstraints.HORIZONTAL; // the keys stand at the right edge, whatever the other rows have
+        c.anchor = GridBagConstraints.NORTHEAST;
+        c.insets = new Insets(1, 0, 8, 0);
+        form.add(top, c);
     }
 
     // ---- which album ----
@@ -697,7 +735,7 @@ final class AlbumsPanel extends JPanel {
         AlbumTrack selected = there && row >= 0 && row < album.tracks().size() ? album.tracks().get(row) : null;
         create.setEnabled(!busy);
         delete.setEnabled(free);
-        for (Component field : new Component[]{titleBox, descriptionWide, styleWide, countMode, minutes, minutesTo,
+        for (Component field : new Component[]{titleWide, descriptionWide, styleWide, countMode, minutes, minutesTo,
                 original}) {
             field.setEnabled(free);
         }
@@ -924,10 +962,12 @@ final class AlbumsPanel extends JPanel {
         rowSettingsShowing = true;
         try {
             com.aresstack.audio.studio.application.CompositionSpec spec = track.spec();
-            rowSpec.show(new SpecChoice.Values(track.targetSeconds() / 60.0, track.bpm(), spec.key(),
-                    spec.numerator(), spec.denominator()), track.fixed());
+            SpecChoice.Values planned = new SpecChoice.Values(track.targetSeconds() / 60.0, track.bpm(), spec.key(),
+                    spec.numerator(), spec.denominator());
+            rowSpec.show(planned, track.fixed());
+            rowSpec.showChosen(planned); // the automatic fields say what the plan has for them
             rowSpec.lock(!rowSettingsEditable());
-            rowSettingsTitle.setText("Erweitert für „" + track.title() + "“ – automatisch wählt die KI, "
+            rowSettingsTitle.setText("Vorgaben für „" + track.title() + "“ · automatisch wählt die KI, "
                     + "was du setzt, hält sie ein");
         } finally {
             rowSettingsShowing = false;

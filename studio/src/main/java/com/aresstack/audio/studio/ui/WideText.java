@@ -36,33 +36,33 @@ final class WideText extends JPanel {
         }
     };
     private final JTextArea area;
-    private final JButton toggle = new DeckWidgets.HeadKey("Groß");
+    private final DeckWidgets.IconKey toggle = new DeckWidgets.IconKey(DeckWidgets.IconKey.Sign.EXPAND, OPEN_HINT);
     private boolean open;
-    private final JPanel east = new JPanel(new BorderLayout());
-    private final JPanel keys = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 2, 0));
+    private static final String OPEN_HINT = "Öffnet das Feld als große Textbox für einen langen Text";
 
-    /** Puts a key beside "Groß", e.g. the AI help of this field. */
-    void aside(JButton key) {
-        keys.add(key);
-        revalidate();
+    /** The key that opens and folds the field; the form puts it beside the field, in line with the others. */
+    JButton toggleKey() {
+        return toggle;
     }
 
     WideText(JTextField field, Component line) {
+        this(field, line, OPEN_ROWS);
+    }
+
+    /** @param rows the lines the open box shows before it scrolls */
+    WideText(JTextField field, Component line, int rows) {
         super(new BorderLayout(6, 0));
         setOpaque(false);
         shown.setOpaque(false);
-        area = new JTextArea(field.getDocument(), null, OPEN_ROWS, 20);
+        area = new JTextArea(field.getDocument(), null, rows, 20);
         area.setLineWrap(true);
         area.setWrapStyleWord(true);
+        area.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 6, 4, 6));
         shown.add(line, "line");
-        shown.add(new JScrollPane(area), "box");
+        JScrollPane box = new JScrollPane(area);
+        box.setBorder(javax.swing.BorderFactory.createLineBorder(AudioStudioTheme.STROKE, 1, true));
+        shown.add(box, "box");
         add(shown, BorderLayout.CENTER);
-        east.setOpaque(false);
-        keys.setOpaque(false);
-        keys.add(toggle);
-        east.add(keys, BorderLayout.NORTH);
-        add(east, BorderLayout.EAST);
-        toggle.setToolTipText("Öffnet das Feld als große Textbox für einen langen Text");
         toggle.addActionListener(event -> open(!open));
     }
 
@@ -70,9 +70,8 @@ final class WideText extends JPanel {
     void open(boolean wanted) {
         open = wanted;
         cards.show(shown, wanted ? "box" : "line");
-        toggle.setText(wanted ? "Klein" : "Groß");
-        toggle.setToolTipText(wanted ? "Zeigt das Feld wieder in einer Zeile"
-                : "Öffnet das Feld als große Textbox für einen langen Text");
+        toggle.setSign(wanted ? DeckWidgets.IconKey.Sign.COLLAPSE : DeckWidgets.IconKey.Sign.EXPAND);
+        toggle.setToolTipText(wanted ? "Zeigt das Feld wieder in einer Zeile" : OPEN_HINT);
         revalidate();
         repaint();
         (wanted ? area : shown.getComponent(0)).requestFocusInWindow();
