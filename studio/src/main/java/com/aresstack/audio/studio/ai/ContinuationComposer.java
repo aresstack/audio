@@ -262,7 +262,7 @@ public final class ContinuationComposer {
     }
 
     /** What the generators wrote for one part: the shaped notes per frame, and the repairs. */
-    private record Written(Map<String, List<ShapedNote>> notes, List<String> corrections) {
+    private record Written(Map<String, List<ShapedNote>> notes, List<String> corrections, int empty, int played) {
     }
 
     private Map<String, Written> write(Composition piece, Composition original, ContinuationTask task,
@@ -320,9 +320,12 @@ public final class ContinuationComposer {
             throws IOException {
         try {
             Written written = writeFrames(piece, original, task, plan, frames, voice, cache, progress, sketch);
+            // A voice with sections that came back without notes where it plays is not done: it says so.
             com.aresstack.audio.studio.progress.TrackProgress.tell(progress, voice.key(),
                     com.aresstack.audio.studio.progress.TrackProgress.Stage.COMPOSE,
-                    com.aresstack.audio.studio.progress.TrackProgress.State.DONE, "");
+                    written.empty() == 0 ? com.aresstack.audio.studio.progress.TrackProgress.State.DONE
+                            : com.aresstack.audio.studio.progress.TrackProgress.State.FAILED,
+                    written.empty() == 0 ? "" : written.empty() + " von " + written.played() + " Abschnitten ohne Noten");
             return written;
         } catch (IOException | RuntimeException failed) {
             com.aresstack.audio.studio.progress.TrackProgress.tell(progress, voice.key(),
@@ -339,6 +342,8 @@ public final class ContinuationComposer {
         VoiceNormalizer normalizer = new VoiceNormalizer(task.time(), voice.range(), voice.drums());
         List<String> densities = new ArrayList<>();
         Map<String, List<ShapedNote>> notes = new LinkedHashMap<>();
+        int empty = 0;
+        int played = 0;
         // From the original: a note that sounds across an insertion point is told with its full length.
         String connection = voice.newPart() ? "" : before(original, voice.key(), frames.get(0).startTick());
         for (VoiceFrame frame : frames) {
@@ -371,10 +376,15 @@ public final class ContinuationComposer {
             progress.detail("Komponiert: " + voice.name() + " für " + frame.name() + " (" + generated.notes().size()
                     + " Noten, " + (System.currentTimeMillis() - asked + 500) / 1000 + " s)");
             List<ShapedNote> shaped = normalizer.shape(frame, generated, transition ? ringOut(task) : 0);
+            boolean nothing = shaped.isEmpty(); // thinned to nothing by the intensity is meant; this is not
             if (frame.intensity() != null) {
                 List<String> thinned = new ArrayList<>();
                 shaped = Dramaturgy.thin(frame, task.time(), frame.intensity(), voice.role(), shaped, thinned);
                 thinned.forEach(line -> densities.add(voice.key() + "\t" + line));
+            }
+            played++;
+            if (nothing) {
+                empty++;
             }
             if (shaped.isEmpty()) {
                 progress.update("WARN: keine spielbaren Noten für " + voice.name() + " in " + frame.name() + ".");
@@ -385,7 +395,7 @@ public final class ContinuationComposer {
         List<String> corrections = new ArrayList<>();
         normalizer.corrections().forEach(line -> corrections.add(voice.key() + "\t" + line));
         corrections.addAll(densities);
-        return new Written(notes, corrections);
+        return new Written(notes, corrections, empty, played);
     }
 
     /**

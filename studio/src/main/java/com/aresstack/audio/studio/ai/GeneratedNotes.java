@@ -53,6 +53,53 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
                 + "score (short notes, weight, bound lines); leave it out for plain notes.";
     }
 
+    /**
+     * The notes with their bars counted from the start of the frame. A model that counts the bars
+     * of the piece instead (it sees them so in the plan and in what the part played before) writes
+     * bar 297 for the first bar of a frame that begins at bar 297; such an answer is counted back
+     * to the frame when more of its notes lie in the frame by the bars of the piece than by its own.
+     * Unchanged when both counts would overlap (a frame near the start of the piece).
+     *
+     * @param firstBar the bar the frame begins with, counted from 0
+     */
+    public GeneratedNotes inFrame(int firstBar, int bars) {
+        if (firstBar < bars || notes.isEmpty()) {
+            return this;
+        }
+        int own = 0;
+        int ofPiece = 0;
+        for (RawNote note : notes) {
+            if (note.bar() >= 1 && note.bar() <= bars) {
+                own++;
+            } else if (note.bar() >= firstBar + 1 && note.bar() <= firstBar + bars) {
+                ofPiece++;
+            }
+        }
+        if (ofPiece <= own) {
+            return this;
+        }
+        List<RawNote> moved = new ArrayList<>();
+        for (RawNote note : notes) {
+            moved.add(new RawNote(note.index(), note.bar() - firstBar, note.beat(), note.duration(), note.pitch(),
+                    note.velocity(), note.voice(), note.articulation()));
+        }
+        List<String> said = new ArrayList<>(skipped);
+        said.add(sectionId + "\t-\tbar\t" + (firstBar + 1) + "\t1\tTakte des Stücks statt des Abschnitts gezählt;"
+                + " um " + firstBar + " zurückgerechnet");
+        return new GeneratedNotes(partId, sectionId, moved, said, answer);
+    }
+
+    /** How many notes begin in a frame of so many bars (bars counted from 1 at its start). */
+    public int inBars(int bars) {
+        int count = 0;
+        for (RawNote note : notes) {
+            if (note.bar() >= 1 && note.bar() <= bars && note.bar() == Math.rint(note.bar())) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     public GeneratedNotes {
         notes = List.copyOf(notes);
         skipped = List.copyOf(skipped);
@@ -74,10 +121,34 @@ public record GeneratedNotes(String partId, String sectionId, List<RawNote> note
      */
     public static GeneratedNotes ask(Asking asking, java.nio.file.Path cache, String partId, String sectionId)
             throws IOException {
+        return ask(asking, cache, partId, sectionId, null);
+    }
+
+    /** How often an answer turned down by a {@link Check} is asked for again before it is taken. */
+    public static final int CHECKED_TRIES = 3;
+
+    /** What makes an answer that could be read unusable for its request, or {@code null} if it is fine. */
+    public interface Check {
+        String problem(GeneratedNotes notes);
+    }
+
+    /**
+     * As {@link #ask(Asking, java.nio.file.Path, String, String)}, and an answer the check turns
+     * down is treated as one that cannot be read: thrown away and asked again, told why.
+     */
+    public static GeneratedNotes ask(Asking asking, java.nio.file.Path cache, String partId, String sectionId,
+                                     Check check) throws IOException {
         String problem = null;
         for (int asked = 1; ; asked++) {
             try {
-                return read(asking.ask(problem), partId, sectionId);
+                GeneratedNotes notes = read(asking.ask(problem), partId, sectionId);
+                // A check is a wish, not a must: after so many tries the answer is taken as it is
+                // (and the composer reports what is missing) instead of asking for ever.
+                String wrong = check == null || asked > CHECKED_TRIES ? null : check.problem(notes);
+                if (wrong != null) {
+                    throw new UnreadableAnswerException(wrong);
+                }
+                return notes;
             } catch (UnreadableAnswerException | ForeignPartException unusable) {
                 forget(cache);
                 if (Backoff.givesUp(asked)) {
