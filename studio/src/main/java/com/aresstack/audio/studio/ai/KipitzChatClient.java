@@ -69,8 +69,10 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
         AnswerOrigin origin = origin(instruction, prompt, maxTokens);
         JsonObject kept = AnswerCache.reuse(cache, origin, legacyModel);
         if (kept != null) {
+            LAST.set("aus dem Zwischenspeicher, Anfrage " + (instruction.length() + prompt.length()) + " Zeichen");
             return kept;
         }
+        LAST.remove();
         if (apiKey == null || apiKey.trim().isEmpty()) {
             throw new IOException("Enter an API key to generate the missing composition part.");
         }
@@ -81,6 +83,15 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
         } finally {
             busy(-1);
         }
+    }
+
+    /** Where the last answer given on this thread came from and how large request and answer were. */
+    private static final ThreadLocal<String> LAST = new ThreadLocal<>();
+
+    /** Where the last answer given on this thread came from, in words for the log; empty if unknown. */
+    public static String lastAnswer() {
+        String said = LAST.get();
+        return said == null ? "" : said;
     }
 
     /** Hears when a request to the model begins (+1) and ends (-1); e.g. the AI lamp of the studio. */
@@ -167,6 +178,8 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
                     parsed = null;
                 }
                 if (parsed != null) {
+                    LAST.set("frisch von " + name() + ", Anfrage " + (instruction.length() + prompt.length())
+                            + " Zeichen, Antwort " + content.length() + " Zeichen bei höchstens " + budget + " Token");
                     AnswerCache.store(cache, origin, gson.toJson(parsed));
                     return parsed;
                 }
