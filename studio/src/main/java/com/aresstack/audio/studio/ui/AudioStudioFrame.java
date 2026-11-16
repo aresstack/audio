@@ -6233,6 +6233,19 @@ public final class AudioStudioFrame extends JFrame {
             message(house.isSelected() ? "Die Bühne zeigt die Standardfiguren." : "Die Bühne zeigt wieder die gezeichneten Figuren.");
         });
         menu.add(house);
+        javax.swing.JMenuItem clear = new javax.swing.JMenuItem("Gezeichnete Figuren entfernen");
+        clear.setToolTipText("Nimmt alle von der KI gezeichneten Figuren aus der Bibliothek; sie werden in den Ordner "
+                + "figures-entfernt daneben verschoben, nicht vernichtet. Die Bühne zeigt dann die Standardfiguren");
+        clear.addActionListener(event -> {
+            try {
+                int gone = stageFigures.library().clear();
+                message(gone == 0 ? "Die Bibliothek hat keine gezeichneten Figuren."
+                        : gone + (gone == 1 ? " Figur" : " Figuren") + " aus der Bibliothek entfernt (verschoben nach figures-entfernt).");
+            } catch (IOException failed) {
+                message("Die Figuren ließen sich nicht entfernen: " + failed.getMessage());
+            }
+        });
+        menu.add(clear);
         menu.addSeparator();
         for (JButton key : new JButton[]{drawFigures, otherFigures, undoFigures}) {
             javax.swing.JMenuItem item = new javax.swing.JMenuItem(key == drawFigures ? "Figuren zeichnen"

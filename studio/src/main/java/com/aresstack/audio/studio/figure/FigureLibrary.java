@@ -141,6 +141,39 @@ public final class FigureLibrary {
         return picture;
     }
 
+    /**
+     * Takes every figure out of the library. They are not destroyed but moved into a folder beside
+     * the library ({@code figures-entfernt/<time>}), from where they can be put back by hand.
+     *
+     * @return how many figures were taken out
+     */
+    public synchronized int clear() throws IOException {
+        pictures.clear();
+        if (!Files.isDirectory(directory)) {
+            return 0;
+        }
+        List<Path> kinds = new ArrayList<>();
+        int count = 0;
+        try (Stream<Path> folders = Files.list(directory)) {
+            for (Path folder : (Iterable<Path>) folders::iterator) {
+                if (Files.isDirectory(folder) && !figures(folder.getFileName().toString()).isEmpty()) {
+                    kinds.add(folder);
+                    count += figures(folder.getFileName().toString()).size();
+                }
+            }
+        }
+        if (kinds.isEmpty()) {
+            return 0;
+        }
+        String time = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+        Path away = directory.resolveSibling(directory.getFileName() + "-entfernt").resolve(time);
+        Files.createDirectories(away);
+        for (Path kind : kinds) {
+            Files.move(kind, away.resolve(kind.getFileName()));
+        }
+        return count;
+    }
+
     private Path svgFile(String id) {
         return directory.resolve(kindOf(id)).resolve(id.substring(id.indexOf('/') + 1) + ".svg");
     }
