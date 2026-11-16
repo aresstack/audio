@@ -256,4 +256,34 @@ public final class KipitzStreamingTest {
             server.stop(0);
         }
     }
+
+    /**
+     * A long piece makes a long request: with the room for the answer it is more than the model
+     * takes, and the service refuses it. The room is halved until it fits; the answer still streams.
+     */
+    @Test
+    public void aRequestTooLargeForTheModelIsAskedAgainWithLessRoomForTheAnswer() throws Exception {
+        final List<String> asked = Collections.synchronizedList(new ArrayList<String>());
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            String body = read(exchange.getRequestBody());
+            asked.add(body);
+            if (!body.contains("\"max_tokens\":4096")) {
+                send(exchange, 400, "application/json", "{\"error\":{\"message\":\"This model's maximum context "
+                        + "length is 32768 tokens. However, you requested 36000 tokens.\"}}");
+            } else {
+                send(exchange, 200, "text/event-stream", FIRST, SECOND, END);
+            }
+        });
+        server.start();
+        try {
+            JsonObject answer = client(server).generate("Return JSON", "Compose", 16384,
+                    folder.getRoot().toPath().resolve("melody.json"));
+            Assert.assertEquals("melody", answer.get("part").getAsString());
+            Assert.assertEquals("16384, 8192, 4096", 3, asked.size());
+            Assert.assertTrue("still streamed", asked.get(2).contains("\"stream\":true"));
+        } finally {
+            server.stop(0);
+        }
+    }
 }

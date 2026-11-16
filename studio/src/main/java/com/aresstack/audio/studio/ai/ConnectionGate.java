@@ -20,6 +20,7 @@ public final class ConnectionGate {
     private int limit;
     private int inUse;
     private int held;
+    private int waiting;
     private long lastCut;
     private boolean cut;
 
@@ -61,19 +62,43 @@ public final class ConnectionGate {
      * {@link #leave}. Ends with an error when the thread is interrupted or {@code cancelled} says so.
      */
     public synchronized long enter(BooleanSupplier cancelled) throws InterruptedIOException {
-        while (inUse >= limit) {
-            if (Thread.currentThread().isInterrupted() || (cancelled != null && cancelled.getAsBoolean())) {
-                throw new InterruptedIOException("KI-Anfrage abgebrochen.");
+        waiting++;
+        try {
+            while (inUse >= limit) {
+                if (Thread.currentThread().isInterrupted() || (cancelled != null && cancelled.getAsBoolean())) {
+                    throw new InterruptedIOException("KI-Anfrage abgebrochen.");
+                }
+                try {
+                    wait(250);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new InterruptedIOException("KI-Anfrage abgebrochen.");
+                }
             }
-            try {
-                wait(250);
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                throw new InterruptedIOException("KI-Anfrage abgebrochen.");
-            }
+        } finally {
+            waiting--;
         }
         inUse++;
         return System.nanoTime();
+    }
+
+    /**
+     * Where the requests are held back, in words for the status line, or an empty text when none
+     * waits: a request that waits here has not reached the service yet, so no text can come for it.
+     */
+    public static String heldBack() {
+        StringBuilder said = new StringBuilder();
+        for (ConnectionGate gate : GATES.values()) {
+            synchronized (gate) {
+                if (gate.waiting > 0) {
+                    said.append(said.length() == 0 ? "" : "; ").append(gate.waiting)
+                            .append(gate.waiting == 1 ? " Anfrage wartet" : " Anfragen warten")
+                            .append(" auf eine freie Verbindung zu ").append(gate.model).append(" (unterwegs ")
+                            .append(gate.inUse).append(", höchstens ").append(gate.limit).append(" gleichzeitig)");
+                }
+            }
+        }
+        return said.toString();
     }
 
     /**

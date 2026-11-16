@@ -159,6 +159,16 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
                 // An answer without a JSON object is not kept; the model is asked again.
                 trouble = "Antwort ohne JSON-Objekt (\"" + glimpse(content) + "\")";
             } catch (Refused refused) {
+                if (tooLarge(refused.said) && longer == 0 && budget > SMALLEST_ANSWER
+                        && (refused.status == 400 || refused.status == 413 || refused.status == 422)) {
+                    // The request and the room for its answer together are more than the model takes
+                    // (a long piece makes a long request): asked again with half the room for the answer.
+                    budget = Math.max(SMALLEST_ANSWER, budget / 2);
+                    tell("Verbindung zur KI: die Anfrage samt Antwortraum ist dem Modell zu groß (HTTP "
+                            + refused.status + ": " + glimpse(refused.said) + ") · noch einmal mit " + budget
+                            + " Token für die Antwort (" + name() + ").");
+                    continue;
+                }
                 if (longer > 0) {
                     throw new IOException("The model output was not complete (finish_reason=length), and the "
                             + "service refused a longer answer of " + budget + " tokens (HTTP " + refused.status
@@ -171,11 +181,17 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
                 }
                 if (refused.status != 408 && refused.status != 429 && refused.status < 500) {
                     throw new IOException("KIPITZ returned HTTP " + refused.status
+                            + (refused.said.isEmpty() ? "" : " (" + glimpse(refused.said) + ")")
                             + ". Check endpoint, proxy, credentials and model.");
                 }
                 trouble = "HTTP " + refused.status; // busy or a gateway in between: asked again later
             } catch (Unusable unusable) {
                 trouble = unusable.getMessage(); // an answer that cannot be read is not kept
+                if (trouble != null && trouble.startsWith("KIPITZ reported") && tooLarge(trouble) && longer == 0
+                        && budget > SMALLEST_ANSWER) {
+                    budget = Math.max(SMALLEST_ANSWER, budget / 2); // as for a refusal: half the room for the answer
+                    trouble += " · weiter mit " + budget + " Token für die Antwort";
+                }
             } catch (IOException broken) {
                 if (broken.getMessage() != null && broken.getMessage().startsWith("The model output was not complete")) {
                     throw broken;
@@ -519,13 +535,27 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
         }
     }
 
+    /** The least room for an answer that is still asked for when the service finds a request too large. */
+    static final int SMALLEST_ANSWER = 1024;
+
+    /** Whether the words of the service say that request and answer together exceed what the model takes. */
+    static boolean tooLarge(String said) {
+        String words = said == null ? "" : said.toLowerCase(java.util.Locale.ROOT);
+        return words.contains("context") || words.contains("max_tokens") || words.contains("max_completion_tokens")
+                || words.contains("too long") || words.contains("too many tokens") || words.contains("token limit")
+                || words.contains("maximum input length");
+    }
+
     /** The service answered with an error status: sending the same request again would not help. */
     private static final class Refused extends IOException {
         private final int status;
+        /** What the service wrote with the status, as far as it could be read; never {@code null}. */
+        private final String said;
 
-        Refused(int status) {
-            super("HTTP " + status);
+        Refused(int status, String said) {
+            super("HTTP " + status + (said == null || said.isEmpty() ? "" : ": " + glimpse(said)));
             this.status = status;
+            this.said = said == null ? "" : said;
         }
     }
 
@@ -537,8 +567,29 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
     }
 
     /** Sends one request and reads its answer, streamed or whole, whichever the service sends. */
+    /** Requests on their way: sent and waiting for the service to accept them, and accepted (HTTP 200) with the answer open. */
+    private static final java.util.concurrent.atomic.AtomicInteger UNANSWERED = new java.util.concurrent.atomic.AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicInteger OPEN = new java.util.concurrent.atomic.AtomicInteger();
+
+    /**
+     * Where the requests to the service are, in words for the status line; empty when none is on
+     * its way. Tells a service that has not even accepted the requests from one that accepted
+     * them and does not write.
+     */
+    public static String onTheWay() {
+        int unanswered = UNANSWERED.get();
+        int open = OPEN.get();
+        if (unanswered + open <= 0) {
+            return "";
+        }
+        return "beim Dienst: " + (unanswered > 0 ? unanswered + " gesendet, noch nicht angenommen" : "")
+                + (unanswered > 0 && open > 0 ? ", " : "") + (open > 0 ? open + " angenommen (Antwort offen)" : "");
+    }
+
     private Answer exchange(byte[] body, java.util.function.Consumer<String> heard) throws IOException {
         final HttpURLConnection connection = openConnection();
+        boolean accepted = false;
+        UNANSWERED.incrementAndGet();
         activeConnections.add(connection);
         final Pulse pulse = new Pulse();
         final Thread asking = Thread.currentThread();
@@ -574,10 +625,19 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
             }
             int status = connection.getResponseCode();
             if (status != 200) {
-                throw new Refused(status);
+                String said = "";
+                try (InputStream error = connection.getErrorStream()) {
+                    said = error == null ? "" : readText(error, 20_000);
+                } catch (IOException unread) {
+                    // the status alone is told
+                }
+                throw new Refused(status, said);
             }
             String type = String.valueOf(connection.getContentType());
             pulse.alive(); // the service answered; the text may still wait in its queue
+            accepted = true;
+            UNANSWERED.decrementAndGet();
+            OPEN.incrementAndGet();
             try (InputStream input = new Watched(connection.getInputStream(), pulse)) {
                 if (type.contains("event-stream")) {
                     return readStream(input, heard);
@@ -598,6 +658,7 @@ public final class KipitzChatClient implements ChatModel, ToolChat {
             }
             throw broken;
         } finally {
+            (accepted ? OPEN : UNANSWERED).decrementAndGet();
             watch.cancel(false);
             activeConnections.remove(connection);
             connection.disconnect();

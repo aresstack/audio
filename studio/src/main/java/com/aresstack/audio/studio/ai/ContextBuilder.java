@@ -97,7 +97,7 @@ public final class ContextBuilder {
         StringBuilder text = new StringBuilder();
         profile(text, piece, pieceBars);
         form(text, piece);
-        parts(text, piece, pieceBars, highlightPartId, 1);
+        parts(text, piece, pieceBars, highlightPartId, 1, 0);
         notes(text, piece, windowFrom, windowTo, highlightPartId, region);
         String written = text.toString();
         return new MusicalContext(written, sha256(written), windowFrom, windowTo);
@@ -113,8 +113,12 @@ public final class ContextBuilder {
         int pieceBars = time.barsCovering(Math.max(piece.endTick(), 1));
         StringBuilder text = new StringBuilder();
         profile(text, piece, pieceBars);
-        form(text, piece);
-        parts(text, piece, pieceBars, highlightPartId, tiers.compact() ? ContextTiers.COMPACT_BARS : 1);
+        // A long piece: form and summaries from here on only, so that the context stays as long as it is
+        // however far the piece has grown (bar counted from 0; 0 tells everything).
+        int near = tiers.compact() && pieceBars > ContextTiers.NEAR_BARS
+                ? (pieceBars - ContextTiers.NEAR_BARS) / ContextTiers.COMPACT_BARS * ContextTiers.COMPACT_BARS : 0;
+        form(text, piece, near);
+        parts(text, piece, pieceBars, highlightPartId, tiers.compact() ? ContextTiers.COMPACT_BARS : 1, near);
         for (ContextTiers.Window window : tiers.windows()) {
             if (window.label() != null) {
                 text.append("# ").append(window.label().toUpperCase(Locale.ROOT)).append('\n');
@@ -153,15 +157,35 @@ public final class ContextBuilder {
     }
 
     private static void form(StringBuilder text, Composition piece) {
+        form(text, piece, 0);
+    }
+
+    /** The form; sections that end at or before bar {@code near} (counted from 0) are told in one line together. */
+    private static void form(StringBuilder text, Composition piece, int near) {
         TimeMap time = piece.timeMap();
         text.append("# FORM\n");
         if (piece.sections().isEmpty()) {
             text.append("(no sections)\n\n");
             return;
         }
+        int left = 0;
+        int leftUntil = 0;
+        for (var section : piece.sections()) {
+            if (near > 0 && time.barsCovering(section.endTick()) <= near) {
+                left++;
+                leftUntil = Math.max(leftUntil, time.barsCovering(section.endTick()));
+            }
+        }
+        if (left > 0) {
+            text.append("(bars 1-").append(leftUntil).append(": ").append(left)
+                    .append(" earlier sections, not listed; the piece is long)\n");
+        }
         for (var section : piece.sections()) {
             int first = time.barOf(section.startTick()) + 1;
             int last = time.barsCovering(section.endTick());
+            if (near > 0 && last <= near) {
+                continue;
+            }
             text.append("section ").append(section.id()).append(" \"").append(clean(section.name())).append("\" bars ")
                     .append(first).append('-').append(last);
             if (section.function() != null) {
@@ -181,7 +205,8 @@ public final class ContextBuilder {
         text.append('\n');
     }
 
-    private static void parts(StringBuilder text, Composition piece, int bars, String highlight, int group) {
+    private static void parts(StringBuilder text, Composition piece, int bars, String highlight, int group,
+                              int near) {
         TimeMap time = piece.timeMap();
         text.append("# PARTS\n");
         for (Part part : piece.parts()) {
@@ -217,9 +242,10 @@ public final class ContextBuilder {
                     perBar[bar / group]++;
                 }
             }
-            text.append(group == 1 ? "  notes per bar:" : "  notes per " + group + " bars:");
-            for (int count : perBar) {
-                text.append(' ').append(count);
+            text.append(group == 1 ? "  notes per bar" : "  notes per " + group + " bars")
+                    .append(near > 0 ? " from bar " + (near + 1) + ":" : ":");
+            for (int i = near / group; i < perBar.length; i++) {
+                text.append(' ').append(perBar[i]);
             }
             text.append('\n');
         }

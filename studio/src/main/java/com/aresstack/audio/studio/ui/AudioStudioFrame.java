@@ -5646,6 +5646,13 @@ public final class AudioStudioFrame extends JFrame {
             trackStageBegan = System.currentTimeMillis();
             notesDoneTold = false; // the next step counts for itself
         }
+        if (stage == TrackProgress.Stage.COMPOSE && preparing != null
+                && (state == TrackProgress.State.WAITING || state == TrackProgress.State.WORKING)) {
+            // The voices are asked for their notes: the plan is there. The line of the planning must
+            // not stay ("Die KI plant ...") while the notes are awaited; the voices have the display.
+            preparing = null;
+            preparingClock.stop();
+        }
         trackStates.put(trackId, state);
         trackDetails.put(trackId, detail == null ? "" : detail);
         TrackLanes.Work work = state == TrackProgress.State.WAITING ? TrackLanes.Work.WAITING
@@ -6056,7 +6063,15 @@ public final class AudioStudioFrame extends JFrame {
                 + (trackStage != TrackProgress.Stage.COMPOSE ? ""
                 : arrived == 0 ? (done == 0 ? " · noch kein Text von der KI angekommen" : "")
                 : " · " + arrived + " Zeichen von der KI" + (sketchNotes > 0 ? ", " + sketchNotes + " Noten" : ""))
-                + (lastTrouble == null ? "" : " · " + lastTrouble));
+                + (lastTrouble == null ? "" : " · " + lastTrouble)
+                + (trackStage != TrackProgress.Stage.COMPOSE || heldBack().isEmpty() ? "" : " · " + heldBack()));
+    }
+
+    /** Requests that have not left for the service yet, in words; empty when none waits. */
+    private static String heldBack() {
+        String held = com.aresstack.audio.studio.ai.ConnectionGate.heldBack();
+        String sent = com.aresstack.audio.studio.ai.KipitzChatClient.onTheWay();
+        return held.isEmpty() ? sent : sent.isEmpty() ? held : sent + "; " + held;
     }
 
     private void listenAlone(String trackId) {
