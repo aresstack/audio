@@ -1153,23 +1153,6 @@ public final class AudioStudioFrame extends JFrame {
         remixTimer.setRepeats(false);
         stagePanel = new StagePanel(new StagePanel.Host() {
             @Override
-            public Path pieceDirectory() {
-                String folder = directory.getText().trim();
-                return folder.isEmpty() ? null : Paths.get(folder);
-            }
-
-            @Override
-            public com.aresstack.audio.studio.figure.FigureArtist figureArtist() {
-                try {
-                    return new com.aresstack.audio.studio.figure.FigureArtist(
-                            startModels().model(com.aresstack.audio.studio.figure.FigureArtist.ROLE));
-                } catch (RuntimeException failed) {
-                    message("Die KI kann keine Figuren zeichnen: " + failed.getMessage());
-                    return null;
-                }
-            }
-
-            @Override
             public void sceneChanged(com.aresstack.audio.studio.stage.SpatialScene changed, boolean settled) {
                 AudioStudioFrame.this.sceneChanged(changed, settled, false);
             }
@@ -4828,7 +4811,7 @@ public final class AudioStudioFrame extends JFrame {
             statusLine.setLingerSeconds((Integer) progressLinger.getValue());
             figureLook = com.aresstack.audio.studio.figure.FigureSettings.from(saved);
             figureBob = com.aresstack.audio.studio.figure.FigureSettings.bob(saved);
-            stagePanel.setFigureLook(figureLook, figureBob);
+            player.figuresFrom(this::figureOf, figureLook.height());
             // The player of the album page: when a title counts as heard, only new titles, overlap.
             albumHeardPercent = (int) Math.round(number(saved, "albumHeardPercent",
                     com.aresstack.audio.studio.application.HeardTitles.DEFAULT_PERCENT));
@@ -6157,6 +6140,7 @@ public final class AudioStudioFrame extends JFrame {
         playerPanel.setVisualizer(visualizer);
         playerPanel.addHeadKeys(visualizer.headKeys());
         player.styleFrom(this::pieceStyle);
+        wireFigureKeys();
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
         DeckWidgets.Module module = new DeckWidgets.Module("Player", playerPanel);
@@ -6439,6 +6423,99 @@ public final class AudioStudioFrame extends JFrame {
      * What the studio knows in words about the style of the open piece: its description and the
      * style and description of its album. The stage of the player reads its atmosphere from it.
      */
+    // ---- the figures of the musicians on the stage of the player ----
+
+    /** The figures of the open piece; what they tell comes on their own thread and is shown on this one. */
+    private final com.aresstack.audio.studio.figure.StageFigures stageFigures =
+            new com.aresstack.audio.studio.figure.StageFigures(
+                    com.aresstack.audio.studio.figure.FigureLibrary.standard(),
+                    new com.aresstack.audio.studio.figure.StageFigures.Listener() {
+                        @Override
+                        public void cast(com.aresstack.audio.studio.figure.FigureCast cast) {
+                            SwingUtilities.invokeLater(() -> undoFigures.setEnabled(stageFigures.canUndo()));
+                        }
+
+                        @Override
+                        public void said(String text) {
+                            SwingUtilities.invokeLater(() -> message(text));
+                        }
+
+                        @Override
+                        public void busy(boolean busy) {
+                            SwingUtilities.invokeLater(() -> drawFigures.setEnabled(!busy));
+                        }
+                    });
+    private final JButton drawFigures = new DeckWidgets.HeadKey("Figuren");
+    private final JButton otherFigures = new DeckWidgets.HeadKey("Andere Figuren");
+    private final JButton undoFigures = new DeckWidgets.HeadKey("↶");
+    /** The piece and tracks the figures were opened for last: opening again is needed only when they change. */
+    private String figuresOpenedFor = "";
+
+    /** The figure of a track of the open piece, or {@code null}; opens the figures of the piece when it changed. */
+    private java.awt.image.BufferedImage figureOf(String trackId) {
+        if (!figureLook.shown()) {
+            return null;
+        }
+        openFigures();
+        return stageFigures.picture(trackId);
+    }
+
+    /** Shows the figures the open piece keeps, and for the other tracks figures of the library; draws and writes nothing. */
+    private void openFigures() {
+        String folder = directory.getText().trim();
+        List<MusicTrack> tracks = trackTable.tracks();
+        StringBuilder key = new StringBuilder(folder);
+        for (MusicTrack track : tracks) {
+            key.append('|').append(track.id()).append('=').append(track.instrument());
+        }
+        if (key.toString().equals(figuresOpenedFor)) {
+            return;
+        }
+        figuresOpenedFor = key.toString();
+        List<com.aresstack.audio.studio.figure.FigureCast.Seat> seats =
+                new ArrayList<com.aresstack.audio.studio.figure.FigureCast.Seat>();
+        Map<String, String> roles = new HashMap<String, String>();
+        for (MusicTrack track : tracks) {
+            seats.add(new com.aresstack.audio.studio.figure.FigureCast.Seat(track.id(), track.instrument()));
+            roles.put(track.id(), track.role());
+        }
+        stageFigures.roles(roles);
+        stageFigures.open(folder.isEmpty() ? null : Paths.get(folder), seats);
+    }
+
+    /** The AI that draws figures, with the model of the settings; {@code null} (and a word why) if there is none. */
+    private com.aresstack.audio.studio.figure.FigureArtist figureArtist() {
+        try {
+            return new com.aresstack.audio.studio.figure.FigureArtist(
+                    startModels().model(com.aresstack.audio.studio.figure.FigureArtist.ROLE));
+        } catch (RuntimeException failed) {
+            message("Die KI kann keine Figuren zeichnen: " + failed.getMessage());
+            return null;
+        }
+    }
+
+    /** The keys of the figures in the head of the player, there while its stage is shown. */
+    private void wireFigureKeys() {
+        drawFigures.setToolTipText("Figuren: jede Spur bekommt eine Figur ihres Instruments; "
+                + "aus der Bibliothek, und was fehlt, zeichnet die KI");
+        otherFigures.setToolTipText("Andere Figuren: jede Spur bekommt eine andere Figur aus der Bibliothek, wo es eine gibt");
+        undoFigures.setToolTipText("Den letzten Schritt an den Figuren zurücknehmen");
+        drawFigures.addActionListener(event -> {
+            openFigures();
+            stageFigures.drawMissing(this::figureArtist);
+        });
+        otherFigures.addActionListener(event -> {
+            openFigures();
+            for (MusicTrack track : trackTable.tracks()) {
+                stageFigures.swap(track.id());
+            }
+        });
+        undoFigures.addActionListener(event -> stageFigures.undo());
+        undoFigures.setEnabled(false);
+        visualizer.addStageKeys(drawFigures, otherFigures, undoFigures);
+        player.figuresFrom(this::figureOf, figureLook.height());
+    }
+
     private String styleFolder;
     private String albumStyle = "";
 

@@ -30,10 +30,11 @@ import java.util.Properties;
  * @param gpuVsync        whether the full screen waits for the refresh of the screen
  * @param gpuOpenSeconds  how long the graphics card may take to open the full screen
  * @param doubleClickMs   the longest time between the two clicks of a double-click on the full screen
- * @param atmosphere      what the stage shows around its lights: auto (the music chooses), fire, laser, candle or off
- * @param laserBpm        from how many beats per minute on the music calls for lasers
- * @param fireBass        from which average low end on (0 to 1) slower music calls for fire
- * @param moodSeconds     how long the music must ask for another atmosphere before the stage changes
+ * @param atmosphere      the surprise of the stage: auto (fire for rock, lasers for techno, in their wildest moments), fire, laser or off
+ * @param laserBpm        from how many beats per minute on music counts as fast
+ * @param fireBass        how heavy the low end must be (0 to 1) for a beat to set off the fire
+ * @param moodSeconds     how long a wild moment must last before the lasers come, and how long they stay after it
+ * @param wildRatio       how much louder than the piece is as a rule a moment must be to count as wild (1.25 = a quarter louder)
  * @param atmosphereStrength how bright the atmosphere is drawn, 0 (not at all) to 1
  */
 public record VisualSettings(int framesPerSecond, int windowFrames, int bands, double lowestHz, double highestHz,
@@ -41,12 +42,12 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
                              double beatDecay, double beatGap, double bassHz, double trebleHz, int particles, int tunnelRings, double trail, String effect,
                              boolean gpu, String gpuBackend, boolean gpuVsync, double gpuOpenSeconds,
                              int doubleClickMs, String atmosphere, double laserBpm, double fireBass,
-                             double moodSeconds, double atmosphereStrength) {
+                             double moodSeconds, double wildRatio, double atmosphereStrength) {
     public static final String PREFIX = "visualizer.";
 
     public static final VisualSettings DEFAULTS = new VisualSettings(30, 2048, 48, 30, 16000, -72, 0.6, 0.12,
             1.45, 0.05, 0.86, 0.18, 250, 4000, 700, 22, 0.82, "spectrum", true, "auto", true, 6, 450,
-            StageMood.AUTO, 124, 0.55, 4, 0.8);
+            StageMood.AUTO, 124, 0.7, 4, 1.25, 0.9);
 
     public VisualSettings {
         framesPerSecond = clamp(framesPerSecond, 5, 120);
@@ -74,6 +75,7 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
         laserBpm = clamp(laserBpm, 40, 400);
         fireBass = clamp(fireBass, 0, 1);
         moodSeconds = clamp(moodSeconds, 0, 60);
+        wildRatio = clamp(wildRatio, 1, 4);
         atmosphereStrength = clamp(atmosphereStrength, 0, 1);
     }
 
@@ -111,6 +113,7 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
                 number(saved, "laserBpm", d.laserBpm),
                 number(saved, "fireBass", d.fireBass),
                 number(saved, "moodSeconds", d.moodSeconds),
+                number(saved, "wildRatio", d.wildRatio),
                 number(saved, "atmosphereStrength", d.atmosphereStrength));
     }
 
@@ -143,6 +146,7 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
         saved.setProperty(PREFIX + "laserBpm", text(laserBpm));
         saved.setProperty(PREFIX + "fireBass", text(fireBass));
         saved.setProperty(PREFIX + "moodSeconds", text(moodSeconds));
+        saved.setProperty(PREFIX + "wildRatio", text(wildRatio));
         saved.setProperty(PREFIX + "atmosphereStrength", text(atmosphereStrength));
     }
 
@@ -151,7 +155,7 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
         return new VisualSettings(framesPerSecond, windowFrames, bands, lowestHz, highestHz, floorDb, attack,
                 release, beatRatio, beatAverage, beatDecay, beatGap, bassHz, trebleHz, particles, tunnelRings, trail, key, gpu, gpuBackend,
                 gpuVsync, gpuOpenSeconds, doubleClickMs, atmosphere, laserBpm, fireBass, moodSeconds,
-                atmosphereStrength);
+                wildRatio, atmosphereStrength);
     }
 
     /** The same settings with another atmosphere of the stage. */
@@ -159,7 +163,7 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
         return new VisualSettings(framesPerSecond, windowFrames, bands, lowestHz, highestHz, floorDb, attack,
                 release, beatRatio, beatAverage, beatDecay, beatGap, bassHz, trebleHz, particles, tunnelRings, trail, effect, gpu,
                 gpuBackend, gpuVsync, gpuOpenSeconds, doubleClickMs, choice, laserBpm, fireBass, moodSeconds,
-                atmosphereStrength);
+                wildRatio, atmosphereStrength);
     }
 
     private static int integer(Properties saved, String key, int fallback) {

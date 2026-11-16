@@ -174,6 +174,17 @@ final class StageDeck {
         }
 
         @Override
+        public java.awt.image.BufferedImage figure(String trackId) {
+            java.util.function.Function<String, java.awt.image.BufferedImage> from = figuresFrom;
+            return from == null ? null : from.apply(trackId);
+        }
+
+        @Override
+        public double figureHeight() {
+            return figureHeight;
+        }
+
+        @Override
         public boolean lightsComing() {
             if (live != null) {
                 return false;
@@ -194,6 +205,15 @@ final class StageDeck {
     private volatile java.util.function.Supplier<String> styleFrom;
     private String style = "";
     private long styleReadAt;
+
+    private volatile java.util.function.Function<String, java.awt.image.BufferedImage> figuresFrom;
+    private volatile double figureHeight = 3.0;
+
+    /** Where the figures of the musicians come from, and how tall they stand in metres; asked on the event thread. */
+    void figuresFrom(java.util.function.Function<String, java.awt.image.BufferedImage> pictures, double metres) {
+        figuresFrom = pictures;
+        figureHeight = metres;
+    }
 
     /** Where the words about the style of the heard piece come from; asked on the event thread, now and then. */
     void styleFrom(java.util.function.Supplier<String> words) {

@@ -5,8 +5,8 @@ import java.util.Locale;
 /**
  * The character of the music from three things that are easy to hear: how fast the beats follow
  * each other, how heavy the low end is over a few seconds, and whether there is a beat at all.
- * Fast beats call for lasers, a heavy low end with a beat for fire, everything else for candle
- * light. It names no genre: jazz, country and pop cannot be told apart this way.
+ * It says them in words and names no genre: tempo and low end alone do not tell rock or techno
+ * from other loud music, so the stage is never set on fire by this.
  */
 public final class SimpleRecognizer implements GenreRecognizer {
     /** How many beats the tempo is read from. */
@@ -37,18 +37,10 @@ public final class SimpleRecognizer implements GenreRecognizer {
             return last; // silence changes nothing
         }
         double tempo = beatsPerMinute();
-        StageMood.Mood mood;
-        String character;
-        if (tempo >= settings.laserBpm()) {
-            mood = StageMood.Mood.LASER;
-            character = "schnell";
-        } else if (bass >= settings.fireBass() && gapCount >= 3) {
-            mood = StageMood.Mood.FIRE;
-            character = "basslastig";
-        } else {
-            mood = StageMood.Mood.CANDLE;
-            character = "ruhig";
-        }
+        // No genre and no atmosphere from this alone: tempo and low end do not tell rock from anything else loud.
+        StageMood.Mood mood = null;
+        String character = tempo >= settings.laserBpm() ? "schnell"
+                : bass >= settings.fireBass() && gapCount >= 3 ? "basslastig" : "ruhig";
         String words = tempo > 0 ? String.format(Locale.ROOT, "%.0f BPM · %s", tempo, character) : character;
         last = new Heard(Genre.UNKNOWN, 0, tempo, mood, words);
         return last;
