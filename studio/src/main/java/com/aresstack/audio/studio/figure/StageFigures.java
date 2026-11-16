@@ -93,8 +93,10 @@ public final class StageFigures {
      * The figure of a track as a picture: the one the piece or the library gives it, and where
      * they have none, the one the studio brings along for its instrument ({@link HouseFigures}).
      * So every track has a figure from the first moment, without a key and without the AI.
+     *
+     * @param colour the colour of the track on the stage, for a figure that is dressed in it
      */
-    public BufferedImage picture(String trackId) {
+    public BufferedImage picture(String trackId, java.awt.Color colour) {
         String figure;
         String instrument;
         synchronized (this) {
@@ -103,7 +105,7 @@ public final class StageFigures {
             instrument = seat == null ? "" : seat.instrument();
         }
         BufferedImage drawn = houseOnly ? null : library.picture(figure);
-        return drawn != null ? drawn : HouseFigures.picture(instrument + " " + trackId, trackId);
+        return drawn != null ? drawn : HouseFigures.picture(instrument + " " + trackId, trackId, colour);
     }
 
     public synchronized FigureCast cast() {
@@ -213,7 +215,8 @@ public final class StageFigures {
     private boolean drawFor(FigureArtist drawer, FigureCast.Seat seat, java.nio.file.Path asked) {
         try {
             int variation = library.figures(seat.kind()).size();
-            String svg = drawer.draw(seat.instrument(), role(seat), variation, library.directory().resolve("answers"));
+            String svg = drawer.draw(seat.instrument(), role(seat), variation, colour(seat),
+                    library.directory().resolve("answers"));
             String figure = library.add(seat.kind(), svg, drawer.modelName(), seat.instrument());
             synchronized (this) {
                 // Another piece was opened meanwhile: the figure stays in the library, its tracks are not ours.
@@ -234,6 +237,18 @@ public final class StageFigures {
     public synchronized void roles(java.util.Map<String, String> byTrack) {
         roles.clear();
         roles.putAll(byTrack);
+    }
+
+    private final java.util.Map<String, String> colours = new java.util.HashMap<>();
+
+    /** Tells the colour of each track (#RRGGBB) for the AI to dress its figure in; an empty map leaves it out. */
+    public synchronized void colours(java.util.Map<String, String> byTrack) {
+        colours.clear();
+        colours.putAll(byTrack);
+    }
+
+    private synchronized String colour(FigureCast.Seat seat) {
+        return colours.get(seat.trackId());
     }
 
     private synchronized String role(FigureCast.Seat seat) {

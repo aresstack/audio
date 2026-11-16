@@ -174,9 +174,9 @@ final class StageDeck {
         }
 
         @Override
-        public java.awt.image.BufferedImage figure(String trackId) {
-            java.util.function.Function<String, java.awt.image.BufferedImage> from = figuresFrom;
-            return from == null ? null : from.apply(trackId);
+        public java.awt.image.BufferedImage figure(String trackId, java.awt.Color colour) {
+            java.util.function.BiFunction<String, java.awt.Color, java.awt.image.BufferedImage> from = figuresFrom;
+            return from == null ? null : from.apply(trackId, colour);
         }
 
         @Override
@@ -206,11 +206,11 @@ final class StageDeck {
     private String style = "";
     private long styleReadAt;
 
-    private volatile java.util.function.Function<String, java.awt.image.BufferedImage> figuresFrom;
+    private volatile java.util.function.BiFunction<String, java.awt.Color, java.awt.image.BufferedImage> figuresFrom;
     private volatile double figureHeight = 3.0;
 
     /** Where the figures of the musicians come from, and how tall they stand in metres; asked on the event thread. */
-    void figuresFrom(java.util.function.Function<String, java.awt.image.BufferedImage> pictures, double metres) {
+    void figuresFrom(java.util.function.BiFunction<String, java.awt.Color, java.awt.image.BufferedImage> pictures, double metres) {
         figuresFrom = pictures;
         figureHeight = metres;
     }

@@ -23,9 +23,58 @@ public final class HouseFigures {
             {"bass", "bass"},
             {"strings", "violin", "viola", "geige", "cello", "string", "streich", "bratsche", "harp", "harfe", "fiddle", "harmony"},
             {"voice", "vocal", "voice", "choir", "chor", "stimme", "gesang", "sing", "sopran", "tenor", "alt"}};
-    private static final String[] SKIN = {"#e8b48c", "#c98d62", "#f1c9a5", "#8d5a3b", "#d9a273"};
-    private static final String[] HAIR = {"#3b2a20", "#151515", "#7a4a22", "#c9a04a", "#5a5a66", "#8a2f2f"};
-    private static final String[] CLOTH = {"#4a1d3f", "#1f3a5f", "#2f5a3a", "#6a2a2a", "#3a3a4a", "#5f4a1f", "#2a5560", "#56306e"};
+    public static final String DEFAULT_SKIN = "#E8B48C,#C98D62,#F1C9A5,#8D5A3B,#D9A273";
+    public static final String DEFAULT_HAIR = "#3B2A20,#151515,#7A4A22,#C9A04A,#5A5A66,#8A2F2F";
+    private static String skins = DEFAULT_SKIN;
+    private static String hairs = DEFAULT_HAIR;
+
+    /** Sets the colours of skin and hair the figures come in (#RRGGBB, separated by commas); anything else keeps those of the studio. */
+    public static synchronized void people(String skin, String hair) {
+        String list = "#[0-9a-fA-F]{6}(,#[0-9a-fA-F]{6})*";
+        String wantedSkin = skin != null && skin.replace(" ", "").matches(list) ? skin.replace(" ", "") : DEFAULT_SKIN;
+        String wantedHair = hair != null && hair.replace(" ", "").matches(list) ? hair.replace(" ", "") : DEFAULT_HAIR;
+        if (!wantedSkin.equals(skins) || !wantedHair.equals(hairs)) {
+            skins = wantedSkin;
+            hairs = wantedHair;
+            PICTURES.clear();
+        }
+    }
+
+    public static synchronized String skin() {
+        return skins;
+    }
+
+    public static synchronized String hair() {
+        return hairs;
+    }
+    /** The clothes as the studio comes: clear colours that stand out before a dark red curtain. */
+    public static final String MIXED_CLOTHES = "#2F6FB5,#2E8B6E,#D9A520,#3AA0B8,#E07A2F,#7A8A99,#4F7F3A,#C9C1A6";
+    /** The setting that dresses every figure in the colour of its track. */
+    public static final String TRACK_COLOUR = "track";
+    public static final String DEFAULT_CLOTHES = TRACK_COLOUR;
+    private static String[] cloth = MIXED_CLOTHES.split(",");
+    private static String clothes = DEFAULT_CLOTHES;
+
+    /**
+     * Sets the colours the figures are dressed in: {@link #TRACK_COLOUR} for the colour of each
+     * track, or #RRGGBB separated by commas, of which every track takes one. Anything else is the colour of the track.
+     */
+    public static synchronized void clothes(String colours) {
+        String wanted = colours == null ? "" : colours.replace(" ", "");
+        if (!wanted.matches("#[0-9a-fA-F]{6}(,#[0-9a-fA-F]{6})*")) {
+            wanted = TRACK_COLOUR;
+        }
+        if (!wanted.equals(clothes)) {
+            clothes = wanted;
+            cloth = (wanted.equals(TRACK_COLOUR) ? MIXED_CLOTHES : wanted).split(",");
+            PICTURES.clear();
+        }
+    }
+
+    public static synchronized String clothes() {
+        return clothes;
+    }
+
 
     private static final Map<String, BufferedImage> PICTURES = new HashMap<>();
 
@@ -51,16 +100,28 @@ public final class HouseFigures {
      * @param words what is known of the track: its instrument and its name
      * @param who   what tells this track from others, so that two violins do not look alike
      */
-    public static synchronized BufferedImage picture(String words, String who) {
+    public static BufferedImage picture(String words, String who) {
+        return picture(words, who, null);
+    }
+
+    /**
+     * The figure for a track, dressed in the colour of the track where the setting says so; another
+     * colour gives another figure, in skin and hair too.
+     *
+     * @param colour the colour of the track on the stage, or {@code null} if it is not known
+     */
+    public static synchronized BufferedImage picture(String words, String who, java.awt.Color colour) {
         String family = family(words);
-        int look = Math.floorMod((who == null ? "" : who).hashCode(), 240);
-        String key = family + "/" + look;
+        String own = colour != null && clothes.equals(TRACK_COLOUR)
+                ? String.format("#%06X", colour.getRGB() & 0xFFFFFF) : null;
+        int look = Math.floorMod(((who == null ? "" : who) + (own == null ? "" : own)).hashCode(), 240);
+        String key = family + "/" + look + (own == null ? "" : own);
         if (PICTURES.containsKey(key)) {
             return PICTURES.get(key);
         }
         BufferedImage picture;
         try {
-            picture = SvgRasterizer.render(svg(family, look), FigureLibrary.PICTURE_WIDTH, FigureLibrary.PICTURE_HEIGHT);
+            picture = SvgRasterizer.render(svg(family, look, own), FigureLibrary.PICTURE_WIDTH, FigureLibrary.PICTURE_HEIGHT);
         } catch (SvgRasterizer.UnreadableSvgException | RuntimeException unreadable) {
             picture = null;
         }
@@ -70,9 +131,16 @@ public final class HouseFigures {
 
     /** The figure of a family as SVG, 256 wide and 512 high, standing on the bottom edge. */
     static String svg(String family, int look) {
-        String skin = SKIN[look % SKIN.length];
-        String hair = HAIR[(look / 5) % HAIR.length];
-        String cloth = CLOTH[(look / 3) % CLOTH.length];
+        return svg(family, look, null);
+    }
+
+    /** @param dress the colour of the clothes as #RRGGBB, or {@code null} for one of the set colours */
+    static String svg(String family, int look, String dress) {
+        String[] skinTones = skins.split(",");
+        String[] hairTones = hairs.split(",");
+        String skin = skinTones[look % skinTones.length];
+        String hair = hairTones[(look / 5) % hairTones.length];
+        String cloth = dress != null ? dress : HouseFigures.cloth[(look / 3) % HouseFigures.cloth.length];
         boolean longHair = look % 2 == 1;
         StringBuilder svg = new StringBuilder("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 512'>");
         boolean sits = family.equals("drums") || family.equals("keys");

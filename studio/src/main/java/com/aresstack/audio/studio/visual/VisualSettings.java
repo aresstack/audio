@@ -35,6 +35,9 @@ import java.util.Properties;
  * @param fireBass        how heavy the low end must be (0 to 1) for a beat to set off the fire
  * @param moodSeconds     how long a wild moment must last before the lasers come, and how long they stay after it
  * @param wildRatio       how much louder than the piece is as a rule a moment must be to count as wild (1.25 = a quarter louder)
+ * @param figureFeather   how softly the figures of the stage fade out at their edges (not at the feet), 0 (hard) to 1
+ * @param figureOpacity   how solid the figures of the stage are, 0.1 (a faint hologram) to 1 (solid)
+ * @param curtain         the colour of the curtains of the stage, as #RRGGBB
  * @param atmosphereStrength how bright the atmosphere is drawn, 0 (not at all) to 1
  */
 public record VisualSettings(int framesPerSecond, int windowFrames, int bands, double lowestHz, double highestHz,
@@ -42,12 +45,14 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
                              double beatDecay, double beatGap, double bassHz, double trebleHz, int particles, int tunnelRings, double trail, String effect,
                              boolean gpu, String gpuBackend, boolean gpuVsync, double gpuOpenSeconds,
                              int doubleClickMs, String atmosphere, double laserBpm, double fireBass,
-                             double moodSeconds, double wildRatio, double atmosphereStrength) {
+                             double moodSeconds, double wildRatio, double atmosphereStrength, String curtain, double figureFeather, double figureOpacity) {
     public static final String PREFIX = "visualizer.";
+    /** The dark red of the curtains as the studio comes. */
+    public static final String DEFAULT_CURTAIN = "#8E1B4A";
 
     public static final VisualSettings DEFAULTS = new VisualSettings(30, 2048, 48, 30, 16000, -72, 0.6, 0.12,
             1.45, 0.05, 0.86, 0.18, 250, 4000, 700, 22, 0.82, "spectrum", true, "auto", true, 6, 450,
-            StageMood.AUTO, 124, 0.7, 4, 1.25, 0.9);
+            StageMood.AUTO, 124, 0.7, 4, 1.25, 0.9, DEFAULT_CURTAIN, 0.5, 0.8);
 
     public VisualSettings {
         framesPerSecond = clamp(framesPerSecond, 5, 120);
@@ -77,6 +82,10 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
         moodSeconds = clamp(moodSeconds, 0, 60);
         wildRatio = clamp(wildRatio, 1, 4);
         atmosphereStrength = clamp(atmosphereStrength, 0, 1);
+        figureFeather = clamp(figureFeather, 0, 1);
+        figureOpacity = clamp(figureOpacity, 0.1, 1);
+        curtain = curtain != null && curtain.trim().matches("#[0-9a-fA-F]{6}") ? curtain.trim().toUpperCase(java.util.Locale.ROOT)
+                : DEFAULT_CURTAIN;
     }
 
     /** The settings kept in these properties, defaults where none are. */
@@ -114,7 +123,10 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
                 number(saved, "fireBass", d.fireBass),
                 number(saved, "moodSeconds", d.moodSeconds),
                 number(saved, "wildRatio", d.wildRatio),
-                number(saved, "atmosphereStrength", d.atmosphereStrength));
+                number(saved, "atmosphereStrength", d.atmosphereStrength),
+                saved.getProperty(PREFIX + "curtain", d.curtain),
+                number(saved, "figureFeather", d.figureFeather),
+                number(saved, "figureOpacity", d.figureOpacity));
     }
 
     /** Writes every value into the properties, so that a user finds them all in the file. */
@@ -148,6 +160,9 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
         saved.setProperty(PREFIX + "moodSeconds", text(moodSeconds));
         saved.setProperty(PREFIX + "wildRatio", text(wildRatio));
         saved.setProperty(PREFIX + "atmosphereStrength", text(atmosphereStrength));
+        saved.setProperty(PREFIX + "curtain", curtain);
+        saved.setProperty(PREFIX + "figureFeather", text(figureFeather));
+        saved.setProperty(PREFIX + "figureOpacity", text(figureOpacity));
     }
 
     /** The same settings showing another effect. */
@@ -155,7 +170,7 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
         return new VisualSettings(framesPerSecond, windowFrames, bands, lowestHz, highestHz, floorDb, attack,
                 release, beatRatio, beatAverage, beatDecay, beatGap, bassHz, trebleHz, particles, tunnelRings, trail, key, gpu, gpuBackend,
                 gpuVsync, gpuOpenSeconds, doubleClickMs, atmosphere, laserBpm, fireBass, moodSeconds,
-                wildRatio, atmosphereStrength);
+                wildRatio, atmosphereStrength, curtain, figureFeather, figureOpacity);
     }
 
     /** The same settings with another atmosphere of the stage. */
@@ -163,7 +178,31 @@ public record VisualSettings(int framesPerSecond, int windowFrames, int bands, d
         return new VisualSettings(framesPerSecond, windowFrames, bands, lowestHz, highestHz, floorDb, attack,
                 release, beatRatio, beatAverage, beatDecay, beatGap, bassHz, trebleHz, particles, tunnelRings, trail, effect, gpu,
                 gpuBackend, gpuVsync, gpuOpenSeconds, doubleClickMs, choice, laserBpm, fireBass, moodSeconds,
-                wildRatio, atmosphereStrength);
+                wildRatio, atmosphereStrength, curtain, figureFeather, figureOpacity);
+    }
+
+    /** The same settings with figures that fade out more or less softly at their edges. */
+    public VisualSettings withFigureFeather(double feather) {
+        return new VisualSettings(framesPerSecond, windowFrames, bands, lowestHz, highestHz, floorDb, attack,
+                release, beatRatio, beatAverage, beatDecay, beatGap, bassHz, trebleHz, particles, tunnelRings, trail, effect, gpu,
+                gpuBackend, gpuVsync, gpuOpenSeconds, doubleClickMs, atmosphere, laserBpm, fireBass, moodSeconds,
+                wildRatio, atmosphereStrength, curtain, feather, figureOpacity);
+    }
+
+    /** The same settings with figures that are more or less solid. */
+    public VisualSettings withFigureOpacity(double opacity) {
+        return new VisualSettings(framesPerSecond, windowFrames, bands, lowestHz, highestHz, floorDb, attack,
+                release, beatRatio, beatAverage, beatDecay, beatGap, bassHz, trebleHz, particles, tunnelRings, trail, effect, gpu,
+                gpuBackend, gpuVsync, gpuOpenSeconds, doubleClickMs, atmosphere, laserBpm, fireBass, moodSeconds,
+                wildRatio, atmosphereStrength, curtain, figureFeather, opacity);
+    }
+
+    /** The same settings with curtains of another colour (#RRGGBB). */
+    public VisualSettings withCurtain(String colour) {
+        return new VisualSettings(framesPerSecond, windowFrames, bands, lowestHz, highestHz, floorDb, attack,
+                release, beatRatio, beatAverage, beatDecay, beatGap, bassHz, trebleHz, particles, tunnelRings, trail, effect, gpu,
+                gpuBackend, gpuVsync, gpuOpenSeconds, doubleClickMs, atmosphere, laserBpm, fireBass, moodSeconds,
+                wildRatio, atmosphereStrength, colour, figureFeather, figureOpacity);
     }
 
     private static int integer(Properties saved, String key, int fallback) {

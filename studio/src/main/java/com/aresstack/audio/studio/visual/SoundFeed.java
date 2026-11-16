@@ -53,8 +53,12 @@ public interface SoundFeed {
         return "";
     }
 
-    /** The figure of the musician of a track as a picture standing on its bottom edge, or {@code null} if it has none. */
-    default java.awt.image.BufferedImage figure(String trackId) {
+    /**
+     * The figure of the musician of a track as a picture standing on its bottom edge, or {@code null} if it has none.
+     *
+     * @param colour the colour the stage shows the track in: a figure may be dressed in it
+     */
+    default java.awt.image.BufferedImage figure(String trackId, java.awt.Color colour) {
         return null;
     }
 

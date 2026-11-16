@@ -35,9 +35,13 @@ final class StageLightEffect implements Effect {
     static final double DEPTH = 8;
     static final double HIGH = 6.2;
 
-    private static final Color CURTAIN_DEEP = new Color(0x2A0716);
-    private static final Color CURTAIN = new Color(0x8E1B4A);
-    private static final Color CURTAIN_LIGHT = new Color(0xD9508A);
+    /** The cloth in its folds, in the open and where the light catches it: all from the colour of the settings. */
+    private Color curtainDeep = new Color(0x2A0716);
+    private Color curtain = new Color(0x8E1B4A);
+    private Color curtainLight = new Color(0xD9508A);
+    private String curtainSet = VisualSettings.DEFAULT_CURTAIN;
+    private double feather;
+    private double opacity = 1;
 
     /**
      * Lights from the spectrum, for a sound whose tracks are not known (a file from elsewhere):
@@ -160,6 +164,15 @@ final class StageLightEffect implements Effect {
         flow += passed * (IDLE_FLOW + FLOW * loud * 2 + (sound.sounding ? sound.beat : 0f) * FLOW);
         flash = sound.sounding ? sound.beat : 0f;
         t = flow;
+        if (!settings.curtain().equals(curtainSet)) {
+            curtainSet = settings.curtain();
+            curtain = Color.decode(curtainSet);
+            float[] hsb = Color.RGBtoHSB(curtain.getRed(), curtain.getGreen(), curtain.getBlue(), null);
+            curtainDeep = Color.getHSBColor(hsb[0], Math.min(1f, hsb[1] * 1.05f), hsb[2] * 0.3f);
+            curtainLight = Color.getHSBColor(hsb[0], hsb[1] * 0.78f, Math.min(1f, hsb[2] * 1.55f));
+        }
+        feather = settings.figureFeather();
+        opacity = settings.figureOpacity();
         paintFloor(g, camera, warm);
         // The curtain at the back wall.
         paintCloth(g, camera, t, -HALF - 0.6, HIGH, DEPTH, 2 * HALF + 1.2, 0, HIGH, 22, 0, 0.0, 0.62f + 0.3f * warm, 88, 12);
@@ -283,7 +296,7 @@ final class StageLightEffect implements Effect {
                 double length = Math.sqrt(nx * nx + ny * ny + nz * nz);
                 double facing = length == 0 ? 0 : Math.abs((nx * -0.42 + ny * 0.25 + nz * -0.87) / length);
                 double light = Math.pow(facing, 2.2);
-                Color cloth = mix(mix(CURTAIN_DEEP, CURTAIN, Math.min(1, light * 1.5)), CURTAIN_LIGHT,
+                Color cloth = mix(mix(curtainDeep, curtain, Math.min(1, light * 1.5)), curtainLight,
                         Math.max(0, light * 2.4 - 1.5));
                 cloth = scale(cloth, bright * (float) (0.55 + 0.45 * v) * (1f + 0.3f * flash));
                 double[] a = camera.at(p[0], p[1], p[2]);
@@ -331,12 +344,12 @@ final class StageLightEffect implements Effect {
             double metre = camera.scale(foot[2]);
             // The light the track throws on the boards around its place.
             pool(g, camera, x, z, 0.7 + 1.1 * level, color, 0.16f + 0.4f * level);
-            BufferedImage picture = light.trackId().isEmpty() ? null : sound.figures.apply(light.trackId());
+            BufferedImage picture = light.trackId().isEmpty() ? null : sound.figures.apply(light.trackId(), color);
             if (picture != null) {
                 double tall = sound.figureHeight * metre * (1 + 0.05 * level);
                 double wide = tall * picture.getWidth() / picture.getHeight();
                 Rectangle2D box = new Rectangle2D.Double(foot[0] - wide / 2, foot[1] - tall, wide, tall);
-                figures.paint(g, picture, box, color, Math.min(1f, level * 1.6f), 0, false, false);
+                figures.paint(g, picture, box, color, Math.min(1f, level * 1.6f), 0, false, false, (float) feather, (float) opacity);
             } else {
                 // No figure: a light at the height of a musician, lifted by the height of the track.
                 double[] at = camera.at(x, 1.3 + light.height() * 2.5, z);

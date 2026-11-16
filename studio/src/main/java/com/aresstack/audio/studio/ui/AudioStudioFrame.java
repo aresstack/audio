@@ -4776,6 +4776,12 @@ public final class AudioStudioFrame extends JFrame {
     private com.aresstack.audio.studio.figure.FigureSettings figureLook =
             com.aresstack.audio.studio.figure.FigureSettings.DEFAULT;
     private double figureBob = com.aresstack.audio.studio.figure.FigureSettings.DEFAULT_BOB;
+    /** The instruction to the AI that draws figures, in the user's words; empty takes the one of the studio. */
+    private String figurePrompt = "";
+    /** The people the AI draws, one per line, in the user's words; empty takes those of the studio. */
+    private String figureLooks = "";
+    /** Whether the AI is told the colour of the track, to dress the figure in it. */
+    private boolean figureTrackColour = true;
 
     private void loadSettings() {
         try {
@@ -4811,6 +4817,13 @@ public final class AudioStudioFrame extends JFrame {
             statusLine.setLingerSeconds((Integer) progressLinger.getValue());
             figureLook = com.aresstack.audio.studio.figure.FigureSettings.from(saved);
             stageFigures.houseOnly(Boolean.parseBoolean(saved.getProperty("stageFiguresHouse", "false")));
+            com.aresstack.audio.studio.figure.HouseFigures.clothes(saved.getProperty("stageFigureClothes",
+                    com.aresstack.audio.studio.figure.HouseFigures.DEFAULT_CLOTHES));
+            com.aresstack.audio.studio.figure.HouseFigures.people(saved.getProperty("stageFigureSkin"),
+                    saved.getProperty("stageFigureHair"));
+            figurePrompt = saved.getProperty("stageFigurePrompt", "");
+            figureLooks = saved.getProperty("stageFigureLooks", "");
+            figureTrackColour = !"false".equals(saved.getProperty("stageFigureTrackColour", "true").trim());
             figureBob = com.aresstack.audio.studio.figure.FigureSettings.bob(saved);
             player.figuresFrom(this::figureOf, figureLook.height());
             // The player of the album page: when a title counts as heard, only new titles, overlap.
@@ -4919,6 +4932,12 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("progressLingerSeconds", progressLinger.getValue().toString());
             figureLook.into(saved);
             saved.setProperty("stageFiguresHouse", String.valueOf(stageFigures.houseOnly()));
+            saved.setProperty("stageFigureClothes", com.aresstack.audio.studio.figure.HouseFigures.clothes());
+            saved.setProperty("stageFigureSkin", com.aresstack.audio.studio.figure.HouseFigures.skin());
+            saved.setProperty("stageFigureHair", com.aresstack.audio.studio.figure.HouseFigures.hair());
+            saved.setProperty("stageFigurePrompt", figurePrompt);
+            saved.setProperty("stageFigureLooks", figureLooks);
+            saved.setProperty("stageFigureTrackColour", String.valueOf(figureTrackColour));
             saved.setProperty(com.aresstack.audio.studio.figure.FigureSettings.BOB, String.valueOf(figureBob));
             saved.setProperty("albumHeardPercent", Integer.toString(albumHeardPercent));
             saved.setProperty("albumCrossfadeSeconds", Double.toString(albumCrossfadeSeconds));
@@ -6233,6 +6252,108 @@ public final class AudioStudioFrame extends JFrame {
             message(house.isSelected() ? "Die Bühne zeigt die Standardfiguren." : "Die Bühne zeigt wieder die gezeichneten Figuren.");
         });
         menu.add(house);
+        javax.swing.JCheckBoxMenuItem inColour = new javax.swing.JCheckBoxMenuItem("KI zeichnet in der Farbe der Spur",
+                figureTrackColour);
+        inColour.setToolTipText("Gibt der KI beim Zeichnen die Farbe der Spur mit, damit sie die Figur darin kleidet");
+        inColour.addActionListener(event -> {
+            figureTrackColour = inColour.isSelected();
+            saveSettings(false);
+        });
+        menu.add(inColour);
+        javax.swing.JMenuItem prompt = new javax.swing.JMenuItem("Figuren einstellen (Auftrag an die KI, Deckkraft)");
+        prompt.setToolTipText("Der Text, mit dem die KI Figuren zeichnet: frei änderbar; leer gilt der Text des Studios");
+        prompt.addActionListener(event -> editFigurePrompt());
+        menu.add(prompt);
+        // How the stage looks: both are kept in the settings file, where any other colour can be written.
+        javax.swing.JMenu clothes = new javax.swing.JMenu("Kleidung der Standardfiguren");
+        clothes.setToolTipText("Die Farben, in denen die mitgelieferten Figuren gekleidet sind: die Farbe ihrer Spur oder eine Auswahl; "
+                + "eigene Farben: stageFigureClothes in der Einstellungsdatei (#RRGGBB, mit Komma getrennt)");
+        String[][] wardrobes = {
+                {"Farbe der Spur", com.aresstack.audio.studio.figure.HouseFigures.TRACK_COLOUR},
+                {"Bunt", com.aresstack.audio.studio.figure.HouseFigures.MIXED_CLOTHES},
+                {"Hell", "#E6E6EA,#F2E6C9,#CFE3F2,#D9F0DC,#F2D9C9"},
+                {"Kühl", "#2F6FB5,#3AA0B8,#2E8B6E,#7A8A99,#5FC9F2"},
+                {"Schwarz und Weiß", "#1E1E24,#F0F0F2"},
+                {"Dunkel", "#4A1D3F,#1F3A5F,#2F5A3A,#6A2A2A,#3A3A4A,#5F4A1F,#2A5560,#56306E"}};
+        for (String[] wardrobe : wardrobes) {
+            javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem(wardrobe[0],
+                    wardrobe[1].equals(com.aresstack.audio.studio.figure.HouseFigures.clothes()));
+            item.addActionListener(event -> {
+                com.aresstack.audio.studio.figure.HouseFigures.clothes(wardrobe[1]);
+                saveSettings(false);
+            });
+            clothes.add(item);
+        }
+        clothes.add(ownColours("Eigene Farben (#RRGGBB, mit Komma)", com.aresstack.audio.studio.figure.HouseFigures.clothes(),
+                text -> com.aresstack.audio.studio.figure.HouseFigures.clothes(text)));
+        menu.add(clothes);
+        javax.swing.JMenu people = new javax.swing.JMenu("Haut und Haare der Standardfiguren");
+        people.setToolTipText("Die Farben von Haut und Haaren der mitgelieferten Figuren (#RRGGBB, mit Komma getrennt)");
+        people.add(ownColours("Haut", com.aresstack.audio.studio.figure.HouseFigures.skin(),
+                text -> com.aresstack.audio.studio.figure.HouseFigures.people(text,
+                        com.aresstack.audio.studio.figure.HouseFigures.hair())));
+        people.add(ownColours("Haare", com.aresstack.audio.studio.figure.HouseFigures.hair(),
+                text -> com.aresstack.audio.studio.figure.HouseFigures.people(
+                        com.aresstack.audio.studio.figure.HouseFigures.skin(), text)));
+        menu.add(people);
+        javax.swing.JMenu rims = new javax.swing.JMenu("Weiche Ränder der Figuren");
+        rims.setToolTipText("Wie weich die Figuren an ihren Rändern auslaufen, damit das Licht dahinter durchscheint; "
+                + "die Füße bleiben fest");
+        Object[][] softness = {{"Aus", 0.0}, {"Leicht", 0.25}, {"Mittel", 0.5}, {"Stark", 0.75}, {"Sehr stark", 1.0}};
+        for (Object[] each : softness) {
+            double value = (Double) each[1];
+            javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem((String) each[0],
+                    Math.abs(visualizer.settings().figureFeather() - value) < 0.01);
+            item.addActionListener(event -> {
+                visualizer.setFigureFeather(value);
+                saveSettings(false);
+            });
+            rims.add(item);
+        }
+        rims.add(ownColours("Eigener Wert (0 bis 1)", String.valueOf(visualizer.settings().figureFeather()), text -> {
+            try {
+                visualizer.setFigureFeather(Double.parseDouble(text.replace(',', '.')));
+            } catch (NumberFormatException noNumber) {
+                message("Das ist keine Zahl: " + text);
+            }
+        }));
+        menu.add(rims);
+        javax.swing.JMenu holo = new javax.swing.JMenu("Deckkraft der Figuren");
+        holo.setToolTipText("Wie fest die Figuren sind: 100 % fest, darunter durchscheinend wie ein Hologramm");
+        for (int percent : new int[]{100, 90, 80, 65, 50, 35}) {
+            javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem(percent + " %",
+                    Math.abs(visualizer.settings().figureOpacity() - percent / 100.0) < 0.005);
+            item.addActionListener(event -> {
+                visualizer.setFigureOpacity(percent / 100.0);
+                saveSettings(false);
+            });
+            holo.add(item);
+        }
+        holo.add(ownColours("Eigener Wert (0,1 bis 1)", String.valueOf(visualizer.settings().figureOpacity()), text -> {
+            try {
+                visualizer.setFigureOpacity(Double.parseDouble(text.replace(',', '.')));
+            } catch (NumberFormatException noNumber) {
+                message("Das ist keine Zahl: " + text);
+            }
+        }));
+        menu.add(holo);
+        javax.swing.JMenu curtains = new javax.swing.JMenu("Vorhangfarbe");
+        curtains.setToolTipText("Die Farbe der Vorhänge der Bühne; "
+                + "eigene Farbe: visualizer.curtain in der Einstellungsdatei (#RRGGBB)");
+        String[][] cloths = {{"Rot", com.aresstack.audio.studio.visual.VisualSettings.DEFAULT_CURTAIN}, {"Weinrot", "#6E1220"},
+                {"Blau", "#1F3F8E"}, {"Grün", "#1F6B45"}, {"Violett", "#5A2A8E"}, {"Gold", "#9A7420"}, {"Grau", "#555A66"},
+                {"Schwarz", "#1A1A1E"}};
+        for (String[] each : cloths) {
+            javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem(each[0],
+                    each[1].equals(visualizer.settings().curtain()));
+            item.addActionListener(event -> {
+                visualizer.setCurtain(each[1]);
+                saveSettings(false);
+            });
+            curtains.add(item);
+        }
+        curtains.add(ownColours("Eigene Farbe (#RRGGBB)", visualizer.settings().curtain(), text -> visualizer.setCurtain(text)));
+        menu.add(curtains);
         // One figure at a time: every figure of the library with its picture, by kind of instrument.
         javax.swing.JMenu remove = new javax.swing.JMenu("Figur aus der Bibliothek entfernen");
         remove.setToolTipText("Nimmt eine einzelne gezeichnete Figur aus der Bibliothek; sie wird in den Ordner "
@@ -6241,7 +6362,14 @@ public final class AudioStudioFrame extends JFrame {
         for (String kind : library.kinds()) {
             javax.swing.JMenu ofKind = new javax.swing.JMenu(kind);
             for (String id : library.figures(kind)) {
-                javax.swing.JMenuItem item = new javax.swing.JMenuItem(id.substring(id.indexOf('/') + 1));
+                // A key, not a menu item: a click on it leaves the menu open, so that several can go in one visit.
+                JButton item = new JButton(id.substring(id.indexOf('/') + 1) + "  entfernen");
+                item.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
+                item.setBorderPainted(false);
+                item.setContentAreaFilled(false);
+                item.setFocusPainted(false);
+                item.setRolloverEnabled(true);
+                item.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
                 java.awt.image.BufferedImage picture = library.picture(id);
                 if (picture != null) {
                     item.setIcon(new javax.swing.ImageIcon(picture.getScaledInstance(40, 80, java.awt.Image.SCALE_SMOOTH)));
@@ -6250,6 +6378,16 @@ public final class AudioStudioFrame extends JFrame {
                     try {
                         message(library.remove(id) ? "Figur " + id + " aus der Bibliothek entfernt (verschoben nach figures-entfernt)."
                                 : "Figur " + id + " ist nicht mehr in der Bibliothek.");
+                        // Gone from the list too; the menu stays open for the next one.
+                        java.awt.Container list = item.getParent();
+                        if (list != null) {
+                            list.remove(item);
+                            list.revalidate();
+                            list.repaint();
+                            if (list instanceof javax.swing.JPopupMenu) {
+                                ((javax.swing.JPopupMenu) list).pack();
+                            }
+                        }
                     } catch (IOException failed) {
                         message("Die Figur ließ sich nicht entfernen: " + failed.getMessage());
                     }
@@ -6270,6 +6408,165 @@ public final class AudioStudioFrame extends JFrame {
             menu.add(item);
         }
         return menu;
+    }
+
+    /** A line in a menu to type colours of one's own: a name and a field; Enter takes what is typed and keeps it. */
+    private javax.swing.JComponent ownColours(String name, String now, java.util.function.Consumer<String> take) {
+        JPanel line = new JPanel(new BorderLayout(8, 0));
+        line.setOpaque(false);
+        line.setBorder(BorderFactory.createEmptyBorder(4, 10, 4, 10));
+        JLabel label = new JLabel(name);
+        label.setForeground(AudioStudioTheme.TEXT_DIM);
+        JTextField field = new JTextField(now, 22);
+        field.setToolTipText("Farben als #RRGGBB; mit Enter übernehmen. Was keine Farbe ist, setzt auf die Vorgabe zurück");
+        field.addActionListener(event -> {
+            take.accept(field.getText().trim());
+            saveSettings(false);
+            javax.swing.MenuSelectionManager.defaultManager().clearSelectedPath();
+        });
+        line.add(label, BorderLayout.WEST);
+        line.add(field, BorderLayout.CENTER);
+        return line;
+    }
+
+    /**
+     * Shows the instruction to the AI that draws figures in place of the picture of the player, to be
+     * changed freely. While the field is empty it shows the text of the studio, faintly, and that
+     * one is used; what the user writes is used instead. "Fertig" keeps it and shows the picture again.
+     */
+    private void editFigurePrompt() {
+        final JTextArea ghost = new JTextArea(com.aresstack.audio.studio.figure.FigureArtist.style());
+        ghost.setLineWrap(true);
+        ghost.setWrapStyleWord(true);
+        ghost.setOpaque(false);
+        ghost.setForeground(AudioStudioTheme.TEXT_FAINT);
+        JTextArea text = new JTextArea(figurePrompt) {
+            @Override
+            protected void paintComponent(java.awt.Graphics g) {
+                super.paintComponent(g);
+                if (getText().isEmpty()) {
+                    ghost.setFont(getFont());
+                    ghost.setBorder(getBorder());
+                    ghost.setSize(getSize());
+                    ghost.paint(g);
+                }
+            }
+
+            @Override
+            public Dimension getPreferredSize() {
+                Dimension own = super.getPreferredSize();
+                if (getText().isEmpty()) {
+                    ghost.setFont(getFont());
+                    ghost.setSize(Math.max(1, getWidth()), Short.MAX_VALUE);
+                    own.height = Math.max(own.height, ghost.getPreferredSize().height);
+                }
+                return own;
+            }
+        };
+        text.setLineWrap(true);
+        text.setWrapStyleWord(true);
+        text.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
+        text.setToolTipText("Leer: der blasse Text des Studios gilt. Sobald hier etwas steht, gilt dein Text");
+        JButton done = new DeckWidgets.HeadKey("Fertig");
+        done.setToolTipText("Behält den Text und zeigt wieder das Bild des Players");
+        JButton standard = new DeckWidgets.HeadKey("Standardtext");
+        standard.setToolTipText("Leert das Feld: es gilt wieder der Text des Studios");
+        JButton copy = new DeckWidgets.HeadKey("Standardtext übernehmen");
+        copy.setToolTipText("Schreibt den Text des Studios ins Feld, um ihn von dort aus zu ändern");
+        JLabel name = new JLabel("Figuren: Auftrag an die KI und Aussehen");
+        name.setForeground(AudioStudioTheme.TEXT_DIM);
+        JPanel keys = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
+        keys.setOpaque(false);
+        keys.add(name);
+        keys.add(copy);
+        keys.add(standard);
+        keys.add(done);
+        // Below it the people the figures are, one per line; empty shows and takes those of the studio.
+        final String studioLooks = String.join("\n", com.aresstack.audio.studio.figure.FigureArtist.looks());
+        final JTextArea looksGhost = new JTextArea(studioLooks);
+        looksGhost.setOpaque(false);
+        looksGhost.setForeground(AudioStudioTheme.TEXT_FAINT);
+        JTextArea looks = new JTextArea(figureLooks, 9, 20) {
+            @Override
+            protected void paintComponent(java.awt.Graphics g) {
+                super.paintComponent(g);
+                if (getText().isEmpty()) {
+                    looksGhost.setFont(getFont());
+                    looksGhost.setBorder(getBorder());
+                    looksGhost.setSize(getSize());
+                    looksGhost.paint(g);
+                }
+            }
+        };
+        looks.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
+        looks.setToolTipText("Wer die Figuren sind, eine Person je Zeile; die KI nimmt für jede neue Figur die nächste. "
+                + "Leer: die blassen Zeilen des Studios gelten");
+        JLabel looksName = new JLabel("Die Personen, eine je Zeile");
+        looksName.setForeground(AudioStudioTheme.TEXT_DIM);
+        looksName.setBorder(BorderFactory.createEmptyBorder(8, 8, 6, 8));
+        JPanel below = new JPanel(new BorderLayout());
+        below.setOpaque(false);
+        below.add(looksName, BorderLayout.NORTH);
+        below.add(new JScrollPane(looks), BorderLayout.CENTER);
+        // And how the figures stand on the stage: how solid they are and how soft their rims.
+        javax.swing.JSlider solid = new javax.swing.JSlider(10, 100,
+                (int) Math.round(visualizer.settings().figureOpacity() * 100));
+        javax.swing.JSlider soft = new javax.swing.JSlider(0, 100,
+                (int) Math.round(visualizer.settings().figureFeather() * 100));
+        JLabel solidName = new JLabel();
+        JLabel softName = new JLabel();
+        Runnable names = () -> {
+            solidName.setText("Deckkraft der Figuren: " + solid.getValue() + " %");
+            softName.setText("Weiche Ränder: " + soft.getValue() + " %");
+        };
+        names.run();
+        solid.setToolTipText("100 % fest, darunter durchscheinend wie ein Hologramm");
+        soft.setToolTipText("Wie weit die Figuren zum Rand hin durchsichtig werden; die Füße bleiben fest");
+        solid.addChangeListener(event -> {
+            names.run();
+            if (!solid.getValueIsAdjusting()) {
+                visualizer.setFigureOpacity(solid.getValue() / 100.0);
+            }
+        });
+        soft.addChangeListener(event -> {
+            names.run();
+            if (!soft.getValueIsAdjusting()) {
+                visualizer.setFigureFeather(soft.getValue() / 100.0);
+            }
+        });
+        JPanel look = new JPanel(new java.awt.GridLayout(2, 2, 12, 2));
+        look.setOpaque(false);
+        look.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        for (javax.swing.JComponent part : new javax.swing.JComponent[]{solidName, softName, solid, soft}) {
+            part.setOpaque(false);
+            part.setForeground(AudioStudioTheme.TEXT_DIM);
+            look.add(part);
+        }
+        below.add(look, BorderLayout.SOUTH);
+        JPanel editor = new JPanel(new BorderLayout());
+        editor.setOpaque(false);
+        editor.add(keys, BorderLayout.NORTH);
+        editor.add(new JScrollPane(text), BorderLayout.CENTER);
+        editor.add(below, BorderLayout.SOUTH);
+        standard.addActionListener(event -> {
+            text.setText("");
+            looks.setText("");
+        });
+        copy.addActionListener(event -> {
+            text.setText(com.aresstack.audio.studio.figure.FigureArtist.style());
+            looks.setText(studioLooks);
+        });
+        done.addActionListener(event -> {
+            figurePrompt = text.getText().strip().equals(com.aresstack.audio.studio.figure.FigureArtist.style().strip())
+                    ? "" : text.getText();
+            figureLooks = looks.getText().strip().equals(studioLooks) ? "" : looks.getText();
+            saveSettings(false);
+            playerPanel.setVisualizer(visualizer);
+            message(figurePrompt.isBlank() ? "Die KI zeichnet Figuren nach dem Text des Studios."
+                    : "Die KI zeichnet Figuren nach deinem Text.");
+        });
+        playerPanel.setVisualizer(editor);
+        text.requestFocusInWindow();
     }
 
     /** Sets the model that draws the figures ({@code null}: as planning) and keeps it in the settings. */
@@ -6582,18 +6879,25 @@ public final class AudioStudioFrame extends JFrame {
     private String figuresOpenedFor = "";
 
     /** The figure of a track of the open piece, or {@code null}; opens the figures of the piece when it changed. */
-    private java.awt.image.BufferedImage figureOf(String trackId) {
+    private java.awt.image.BufferedImage figureOf(String trackId, java.awt.Color colour) {
         if (!figureLook.shown()) {
             return null;
         }
         openFigures();
-        return stageFigures.picture(trackId);
+        return stageFigures.picture(trackId, colour);
     }
 
     /** Shows the figures the open piece keeps, and for the other tracks figures of the library; draws and writes nothing. */
     private void openFigures() {
         String folder = directory.getText().trim();
         List<MusicTrack> tracks = trackTable.tracks();
+        // The colour of every track for the AI, if the user wants it told: asked anew each time, the choice may have changed.
+        Map<String, String> trackColours = new HashMap<String, String>();
+        for (int index = 0; figureTrackColour && index < tracks.size(); index++) {
+            trackColours.put(tracks.get(index).id(),
+                    String.format("#%06X", AudioStudioTheme.channel(index).getRGB() & 0xFFFFFF));
+        }
+        stageFigures.colours(trackColours);
         StringBuilder key = new StringBuilder(folder);
         for (MusicTrack track : tracks) {
             key.append('|').append(track.id()).append('=').append(track.instrument());
@@ -6617,7 +6921,7 @@ public final class AudioStudioFrame extends JFrame {
     private com.aresstack.audio.studio.figure.FigureArtist figureArtist() {
         try {
             return new com.aresstack.audio.studio.figure.FigureArtist(
-                    startModels().model(com.aresstack.audio.studio.figure.FigureArtist.ROLE));
+                    startModels().model(com.aresstack.audio.studio.figure.FigureArtist.ROLE), figurePrompt, figureLooks);
         } catch (RuntimeException failed) {
             message("Die KI kann keine Figuren zeichnen: " + failed.getMessage());
             return null;

@@ -53,6 +53,25 @@ public final class HouseFiguresTest {
     }
 
     @Test
+    public void aFigureWearsTheColourOfItsTrackOrTheColoursTheUserSet() {
+        HouseFigures.clothes(HouseFigures.TRACK_COLOUR);
+        assertNotSame(HouseFigures.picture("violin", "v1", java.awt.Color.RED), HouseFigures.picture("violin", "v1", java.awt.Color.BLUE));
+        assertEquals(true, HouseFigures.svg("strings", 0, "#FF0000").contains("#FF0000"));
+        HouseFigures.clothes("#112233");
+        assertEquals("#112233", HouseFigures.clothes());
+        assertEquals(true, HouseFigures.svg("strings", 0).contains("#112233"));
+        assertSame(HouseFigures.picture("violin", "v1", java.awt.Color.RED), HouseFigures.picture("violin", "v1", java.awt.Color.BLUE));
+        HouseFigures.clothes("nonsense");
+        assertEquals(HouseFigures.TRACK_COLOUR, HouseFigures.clothes());
+    }
+
+    @Test
+    public void theAiIsToldTheColourOfTheTrackOnlyWhenItIsGiven() {
+        assertEquals(true, FigureArtist.prompt("Violine", "melody", 0, "#5FC9F2").contains("#5FC9F2"));
+        assertEquals(false, FigureArtist.prompt("Violine", "melody", 0, null).contains("colour #"));
+    }
+
+    @Test
     public void aTrackKeepsItsFigureAndTwoTracksDiffer() {
         assertSame(HouseFigures.picture("violin", "v1"), HouseFigures.picture("violin", "v1"));
         assertNotSame(HouseFigures.picture("violin", "v1"), HouseFigures.picture("violin", "v2"));

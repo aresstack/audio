@@ -185,6 +185,24 @@ final class VisualizerPanel extends JPanel {
     }
 
     /** The settings of the visualizer as they stand, for the settings file. */
+    /** How softly the figures of the stage fade out at their edges, 0 to 1; kept. */
+    void setFigureFeather(double feather) {
+        settings = settings.withFigureFeather(feather);
+        save();
+    }
+
+    /** How solid the figures of the stage are, 0.1 to 1; kept. */
+    void setFigureOpacity(double opacity) {
+        settings = settings.withFigureOpacity(opacity);
+        save();
+    }
+
+    /** Gives the curtains of the stage another colour (#RRGGBB) and keeps it. */
+    void setCurtain(String colour) {
+        settings = settings.withCurtain(colour);
+        save();
+    }
+
     VisualSettings settings() {
         return settings;
     }

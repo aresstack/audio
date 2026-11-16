@@ -90,9 +90,9 @@ public final class TapFeed implements SoundFeed {
             }
 
             @Override
-            public java.awt.image.BufferedImage figure(String trackId) {
-                java.awt.image.BufferedImage known = first.figure(trackId);
-                return known == null ? second.figure(trackId) : known;
+            public java.awt.image.BufferedImage figure(String trackId, java.awt.Color colour) {
+                java.awt.image.BufferedImage known = first.figure(trackId, colour);
+                return known == null ? second.figure(trackId, colour) : known;
             }
 
             @Override
