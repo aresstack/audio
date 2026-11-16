@@ -294,6 +294,7 @@ public final class AudioStudioFrame extends JFrame {
     /** The line at the lower edge of the window: what the studio is doing or did last. */
     private final StatusLine statusLine = new StatusLine("Bereit");
     /** How long the full progress bar of the status line stays, in seconds; 0 lets it go at once. */
+    private final JCheckBox followWriting = new JCheckBox("Partitur läuft mit, während die KI schreibt", false);
     private final JSpinner progressLinger = new JSpinner(new SpinnerNumberModel(StatusLine.LINGER_SECONDS, 0,
             StatusLine.MAX_LINGER_SECONDS, 1));
     /** Whether the composer itself says how far the notes are; else the tracks that are done are counted. */
@@ -2244,6 +2245,10 @@ public final class AudioStudioFrame extends JFrame {
         });
         addRow(looks, 3, "Fortschrittsbalken", line(new JLabel("bleibt bei 100 % noch"), progressLinger,
                 new JLabel("Sekunden stehen")));
+        followWriting.setOpaque(false);
+        followWriting.setToolTipText("An: die Partitur blättert zu den Takten, die gerade entstehen, bis Sie selbst "
+                + "scrollen. Aus: die Ansicht bleibt, wo Sie sind.");
+        addRow(looks, 4, "Beim Schreiben", followWriting);
         column.add(javax.swing.Box.createVerticalStrut(14));
         column.add(new DeckWidgets.Module("Ansicht", looks));
         JPanel top = new JPanel(new BorderLayout());
@@ -4896,6 +4901,7 @@ public final class AudioStudioFrame extends JFrame {
             proxyCredentialRef.setText(saved.getProperty("proxyCredentialRef", ""));
             fitArrangement.setSelected(!"false".equalsIgnoreCase(saved.getProperty("arrangementFit", "true")));
             progressLinger.setValue(lingerSeconds(saved));
+            followWriting.setSelected("true".equalsIgnoreCase(saved.getProperty("scoreFollowsWriting", "false").trim()));
             statusLine.setLingerSeconds((Integer) progressLinger.getValue());
             figureLook = com.aresstack.audio.studio.figure.FigureSettings.from(saved);
             stageFigures.houseOnly(Boolean.parseBoolean(saved.getProperty("stageFiguresHouse", "false")));
@@ -5019,6 +5025,7 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("proxyCredentialRef", proxyCredentialRef.getText().trim());
             saved.setProperty("arrangementFit", String.valueOf(fitArrangement.isSelected()));
             saved.setProperty("progressLingerSeconds", progressLinger.getValue().toString());
+            saved.setProperty("scoreFollowsWriting", String.valueOf(followWriting.isSelected()));
             figureLook.into(saved);
             saved.setProperty("stageFiguresHouse", String.valueOf(stageFigures.houseOnly()));
             saved.setProperty("stageFigureClothes", com.aresstack.audio.studio.figure.HouseFigures.clothes());
@@ -6046,7 +6053,7 @@ public final class AudioStudioFrame extends JFrame {
                 arrangementView.setArrangement(lanes, withAudioLanes(ids), "");
                 // The score runs along: the bars that arise come into view, also far from the start.
                 final int written = sketchFront.next(arrangement, lanes.barTicks);
-                if (written >= 0) {
+                if (written >= 0 && followWriting.isSelected()) {
                     SwingUtilities.invokeLater(() -> scoreView.showBar(written)); // once the paper has its new size
                 }
             }

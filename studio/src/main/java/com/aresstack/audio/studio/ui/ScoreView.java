@@ -246,18 +246,33 @@ final class ScoreView extends JComponent implements Scrollable {
         }
         if (bar < 0) {
             writtenSystem = -1;
+            followedY = -1;
+            followLeft = false;
             return;
         }
         if (score == null || !isShowing()) {
             return;
         }
+        if (followLeft) {
+            return; // the user looks around on their own: the view is theirs until the next work
+        }
         int system = Math.min(score.bars() - 1, bar) / barsPerSystem();
         if (system != writtenSystem) {
+            if (followedY >= 0 && getVisibleRect().y != followedY) {
+                followLeft = true; // scrolled away from where the view was brought: no more following
+                return;
+            }
             writtenSystem = system;
             scrollRectToVisible(new Rectangle(0, TOP + band() - 30 + system * systemHeight(), 10,
                     Math.min(systemHeight() + 30, getVisibleRect().height)));
+            followedY = getVisibleRect().y;
         }
     }
+
+    /** Where the view stood after it was last brought to the bars being written; negative before that. */
+    private int followedY = -1;
+    /** Whether the user scrolled away since: then the view stays theirs until the next work begins. */
+    private boolean followLeft;
 
     /** Where the playback is, in seconds; negative when nothing plays. */
     void setSecond(double played) {
