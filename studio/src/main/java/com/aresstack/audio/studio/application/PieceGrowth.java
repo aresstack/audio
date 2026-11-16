@@ -56,8 +56,10 @@ public final class PieceGrowth {
             boolean last = have + bars >= target;
             progress.update("Verlängere das Stück von " + have + " auf " + (have + bars) + " von " + target
                     + " Takten ...");
-            ExtensionOffer offer = ExtensionOffer.start(session, composer.get(), step(asked, bars, first, last),
-                    progress);
+            // The bar under the status line shows the whole piece: this step is its share from here.
+            Progress part = com.aresstack.audio.studio.progress.PartOfWhole.of(progress, have / (double) target,
+                    (have + bars) / (double) target);
+            ExtensionOffer offer = ExtensionOffer.start(session, composer.get(), step(asked, bars, first, last), part);
             if (last) {
                 return offer;
             }
