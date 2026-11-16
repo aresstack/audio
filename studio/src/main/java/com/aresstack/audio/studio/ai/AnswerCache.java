@@ -77,8 +77,29 @@ public final class AnswerCache {
         }
         try {
             return JsonParser.parseString(Files.readString(cache, StandardCharsets.UTF_8)).getAsJsonObject();
-        } catch (RuntimeException invalidCache) {
-            throw new IOException("Cached JSON is invalid: " + cache, invalidCache);
+        } catch (RuntimeException | IOException invalidCache) {
+            // Cut off by a crash, empty or broken: as if nothing were kept; the model is asked again.
+            putAside(cache);
+            return null;
+        }
+    }
+
+    /**
+     * Puts a kept answer aside that turned out unusable for its request (an empty plan, a section
+     * without notes), so that it is asked for again; nothing happens when there is none.
+     */
+    public static void discard(Path cache) {
+        if (cache == null || !Files.isRegularFile(cache)) {
+            return;
+        }
+        try {
+            putAside(cache);
+        } catch (IOException stuck) {
+            try {
+                Files.deleteIfExists(cache);
+            } catch (IOException ignored) {
+                // the next store writes it anew
+            }
         }
     }
 
@@ -87,10 +108,25 @@ public final class AnswerCache {
         if (cache == null) {
             return; // an answer that is not kept (e.g. proposals for the fields of an album)
         }
-        Files.createDirectories(cache.toAbsolutePath().getParent());
-        Files.writeString(cache, json, StandardCharsets.UTF_8);
-        Files.writeString(originOf(cache), new GsonBuilder().setPrettyPrinting().create().toJson(origin.toJson()),
-                StandardCharsets.UTF_8);
+        // Whole or not there: a crash while writing leaves no half answer. The origin comes first,
+        // the answer last, since a kept answer counts once its file is there.
+        atomically(originOf(cache), new GsonBuilder().setPrettyPrinting().create().toJson(origin.toJson()));
+        atomically(cache, json);
+    }
+
+    private static void atomically(Path target, String text) throws IOException {
+        Path folder = Files.createDirectories(target.toAbsolutePath().getParent());
+        Path temporary = Files.createTempFile(folder, target.getFileName().toString(), ".tmp");
+        try {
+            Files.writeString(temporary, text, StandardCharsets.UTF_8);
+            try {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException notAtomic) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
     }
 
     /** Moves an answer and its origin into {@code earlier/}, so that nothing is lost. */

@@ -128,4 +128,21 @@ public final class AnswerCacheTest {
         assertFalse(one.key().equals(new AnswerOrigin(GEMMA, "i", "p", 2048, 0.7, 0.9, 40).key()));
         assertFalse(one.key().equals(new AnswerOrigin(GPT, "i", "p", 2048, 0.55, 0.9, 40).key()));
     }
+
+    @Test
+    public void anAnswerCutOffByACrashCountsAsNotKept() throws Exception {
+        // Test Techno, 2026-11-16: the program ended while answers were written; they are asked again.
+        Path cache = Files.createTempDirectory("cut").resolve("bass-s3-abc.json");
+        AnswerOrigin origin = new AnswerOrigin(GEMMA, "i", "p", 2048, 0.55, 0.9, 40);
+        AnswerCache.store(cache, origin, "{\"notes\":[]}");
+        Files.writeString(cache, "{\"notes\":[{\"bar\":1,\"be", StandardCharsets.UTF_8);
+        assertEquals(null, AnswerCache.reuse(cache, origin, null));
+        assertFalse(Files.exists(cache));
+        // Written whole or not at all: no temporary file stays beside it.
+        AnswerCache.store(cache, origin, "{\"notes\":[]}");
+        try (java.util.stream.Stream<Path> files = Files.list(cache.getParent())) {
+            assertFalse(files.anyMatch(file -> file.toString().endsWith(".tmp")));
+        }
+        assertTrue(AnswerCache.reuse(cache, origin, null).has("notes"));
+    }
 }
