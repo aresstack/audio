@@ -92,14 +92,22 @@ public final class ContinuationContextTest {
 
     /** A piece grows step by step: what a step is told must not grow with the piece (Angelo, 2026-11-16). */
     @Test
-    public void theContextOfAVeryLongPieceDoesNotGrowWithIt() {
+    public void withALookBackSetTheContextOfAVeryLongPieceDoesNotGrowWithIt() {
         ContinuationRequest request = ContinuationRequest.of(16, ContinuationPreset.STANDALONE, ContinuationEnding.OPEN);
-        String shorter = ContinuationTask.of(piece(280), request, 1).context().text();
-        String longer = ContinuationTask.of(piece(840), request, 1).context().text();
-        assertTrue("840 bars are told in about as many letters as 280: " + shorter.length() + " and "
-                + longer.length(), longer.length() < shorter.length() + 300);
-        assertTrue(longer, longer.contains("notes per 4 bars from bar 713:"));
-        assertTrue(longer.contains("# NOTES bars 1-4"));
+        String whole = ContinuationTask.of(piece(840), request, 1).context().text();
+        assertTrue("without the setting the whole piece is told", whole.contains("notes per 4 bars:"));
+        ContextTiers.lookBack(128); // the setting "Rückblick beim Verlängern"
+        try {
+            String shorter = ContinuationTask.of(piece(280), request, 1).context().text();
+            String longer = ContinuationTask.of(piece(840), request, 1).context().text();
+            assertTrue("840 bars are told in about as many letters as 280: " + shorter.length() + " and "
+                    + longer.length(), longer.length() < shorter.length() + 300);
+            assertTrue(longer, longer.contains("notes per 4 bars from bar 713:"));
+            assertTrue(longer.contains("# NOTES bars 1-4"));
+            assertTrue(longer.length() < whole.length());
+        } finally {
+            ContextTiers.lookBack(ContextTiers.NEAR_BARS);
+        }
     }
 
     @Test

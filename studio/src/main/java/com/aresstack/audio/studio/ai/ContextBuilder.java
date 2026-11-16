@@ -115,8 +115,9 @@ public final class ContextBuilder {
         profile(text, piece, pieceBars);
         // A long piece: form and summaries from here on only, so that the context stays as long as it is
         // however far the piece has grown (bar counted from 0; 0 tells everything).
-        int near = tiers.compact() && pieceBars > ContextTiers.NEAR_BARS
-                ? (pieceBars - ContextTiers.NEAR_BARS) / ContextTiers.COMPACT_BARS * ContextTiers.COMPACT_BARS : 0;
+        int back = ContextTiers.lookBack(); // the setting "Rückblick"; 0 tells the whole piece
+        int near = tiers.compact() && back > 0 && pieceBars > back
+                ? (pieceBars - back) / ContextTiers.COMPACT_BARS * ContextTiers.COMPACT_BARS : 0;
         form(text, piece, near);
         parts(text, piece, pieceBars, highlightPartId, tiers.compact() ? ContextTiers.COMPACT_BARS : 1, near);
         for (ContextTiers.Window window : tiers.windows()) {

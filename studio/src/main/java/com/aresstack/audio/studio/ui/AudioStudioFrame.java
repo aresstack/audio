@@ -116,6 +116,14 @@ public final class AudioStudioFrame extends JFrame {
     private final javax.swing.JCheckBox originalWork = new javax.swing.JCheckBox("Original nachbilden");
     private final JSpinner growBars = new JSpinner(new SpinnerNumberModel(PieceAutopilot.GROW_BARS,
             PieceAutopilot.MIN_GROW_BARS, PieceAutopilot.MAX_GROW_BARS, 1));
+    private final JSpinner lookBackBars = new JSpinner(new SpinnerNumberModel(
+            com.aresstack.audio.studio.ai.ContextTiers.NEAR_BARS, 0, 100000, 8));
+    private final JSpinner answerTokensPerBar = new JSpinner(new SpinnerNumberModel(
+            com.aresstack.audio.studio.ai.ChatSectionGenerator.TOKENS_PER_BAR, 0, 8192, 64));
+    private final JSpinner answerTokensLeast = new JSpinner(new SpinnerNumberModel(
+            com.aresstack.audio.studio.ai.ChatSectionGenerator.LEAST_TOKENS, 256, 65536, 256));
+    private final JSpinner answerTokensSmallest = new JSpinner(new SpinnerNumberModel(
+            com.aresstack.audio.studio.ai.KipitzChatClient.SMALLEST_ANSWER, 128, 65536, 128));
     private final javax.swing.JCheckBox detailedLog = new javax.swing.JCheckBox("Erweitertes Protokoll");
     private final JTextField proxyHost = new JTextField(16);
     private final JTextField proxyPort = new JTextField("", 5);
@@ -2054,6 +2062,34 @@ public final class AudioStudioFrame extends JFrame {
         addRow(ai, row++, "Takte je Planungsschritt",
                 line(growBars, note("Keine Obergrenze: lange Stücke wachsen in Schritten dieser Größe bis zur geplanten Länge.")));
         growBars.addChangeListener(event -> specFields.suggestBars((Integer) growBars.getValue()));
+        lookBackBars.setPreferredSize(new Dimension(110, 30));
+        lookBackBars.setToolTipText("Beim Verlängern eines langen Stücks: für so viele Takte vor dem Ende bekommt die KI "
+                + "Form, Akkorde und Stimmenübersicht. Anfang und Anschlussstelle bekommt sie immer Note für Note. "
+                + "0 = das ganze Stück (Standard; die Anfrage wächst dann mit dem Stück)");
+        addRow(ai, row++, "Rückblick beim Verlängern",
+                line(lookBackBars, note("Takte; 0 = ganzes Stück. Mehr Rückblick, größere Anfrage.")));
+        lookBackBars.addChangeListener(event -> com.aresstack.audio.studio.ai.ContextTiers.lookBack(
+                (Integer) lookBackBars.getValue()));
+        answerTokensPerBar.setPreferredSize(new Dimension(110, 30));
+        answerTokensPerBar.setToolTipText("Beim Verlängern: so viele Token Antwortraum je Takt eines Abschnitts, höchstens "
+                + "„Max. Tokens“. Eine abgeschnittene Antwort wird mit mehr Raum erneut angefragt. 0 = immer der volle Raum");
+        addRow(ai, row++, "Antwortraum je Takt",
+                line(answerTokensPerBar, note("Token; 0 = immer der volle Raum.")));
+        answerTokensPerBar.addChangeListener(event -> com.aresstack.audio.studio.ai.ChatSectionGenerator.tokensPerBar(
+                (Integer) answerTokensPerBar.getValue()));
+        answerTokensLeast.setPreferredSize(new Dimension(110, 30));
+        answerTokensLeast.setToolTipText("Beim Verlängern: so viele Token Antwortraum bekommt ein Abschnitt mindestens, "
+                + "auch wenn er nur wenige Takte hat");
+        answerTokensSmallest.setPreferredSize(new Dimension(110, 30));
+        answerTokensSmallest.setToolTipText("Lehnt der Dienst eine Anfrage als zu groß ab, wird der Antwortraum halbiert "
+                + "und erneut gefragt, bis hinunter zu so vielen Token");
+        addRow(ai, row++, "Antwortraum mindestens",
+                line(answerTokensLeast, note("Token je Abschnitt;"), answerTokensSmallest,
+                        note("Token als unterste Grenze, wenn der Dienst die Anfrage zu groß findet.")));
+        answerTokensLeast.addChangeListener(event -> com.aresstack.audio.studio.ai.ChatSectionGenerator.leastTokens(
+                (Integer) answerTokensLeast.getValue()));
+        answerTokensSmallest.addChangeListener(event -> com.aresstack.audio.studio.ai.KipitzChatClient.smallestAnswer(
+                (Integer) answerTokensSmallest.getValue()));
         templateLines.setPreferredSize(new Dimension(110, 30));
         templateLines.setToolTipText("So viele Zeilen einer Notenvorlage in Textform (ABC, LilyPond …) überträgt die KI je Anfrage, "
                 + com.aresstack.audio.studio.template.TextTemplate.MIN_LINES + " bis "
@@ -4803,6 +4839,14 @@ public final class AudioStudioFrame extends JFrame {
             sectionBars.setValue(AiDefaults.sectionBars(saved));
             detailedLog.setSelected(Boolean.parseBoolean(saved.getProperty("detailedLog", "false")));
             growBars.setValue(AiDefaults.growBars(saved));
+            lookBackBars.setValue(AiDefaults.lookBackBars(saved));
+            answerTokensPerBar.setValue(AiDefaults.answerTokensPerBar(saved));
+            answerTokensLeast.setValue(AiDefaults.answerTokensLeast(saved));
+            answerTokensSmallest.setValue(AiDefaults.answerTokensSmallest(saved));
+            com.aresstack.audio.studio.ai.ChatSectionGenerator.leastTokens((Integer) answerTokensLeast.getValue());
+            com.aresstack.audio.studio.ai.KipitzChatClient.smallestAnswer((Integer) answerTokensSmallest.getValue());
+            com.aresstack.audio.studio.ai.ContextTiers.lookBack((Integer) lookBackBars.getValue());
+            com.aresstack.audio.studio.ai.ChatSectionGenerator.tokensPerBar((Integer) answerTokensPerBar.getValue());
             templateLines.setValue(AiDefaults.templateLines(saved));
             originalWork.setSelected(Boolean.parseBoolean(saved.getProperty("originalWork", "false")));
             longerAnswers = AiDefaults.longerAnswers(saved);
@@ -4916,6 +4960,10 @@ public final class AudioStudioFrame extends JFrame {
             saved.setProperty("sectionBars", sectionBars.getValue().toString());
             saved.setProperty("detailedLog", Boolean.toString(detailedLog.isSelected()));
             saved.setProperty("portionBars", growBars.getValue().toString());
+            saved.setProperty("lookBackBars", lookBackBars.getValue().toString());
+            saved.setProperty("answerTokensPerBar", answerTokensPerBar.getValue().toString());
+            saved.setProperty("answerTokensLeast", answerTokensLeast.getValue().toString());
+            saved.setProperty("answerTokensSmallest", answerTokensSmallest.getValue().toString());
             saved.setProperty("templateLines", templateLines.getValue().toString());
             saved.setProperty("originalWork", Boolean.toString(originalWork.isSelected()));
             saved.setProperty("longerAnswers", Integer.toString(longerAnswers));
