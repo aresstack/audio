@@ -1,0 +1,158 @@
+{
+  "format": 1,
+  "title": "Liebliche Weihnacht",
+  "concept": {
+    "description": "Ein liebevolles, besinnliches Weihnachtsfest an einem verschneiten Winterabend. Kerzenschein, geschmückte Tannenbäume, leise fallender Schnee und die Wärme eines gemütlichen Zuhauses vermitteln Geborgenheit, Frieden und Vorfreude auf Weihnachten. Die Musik beginnt sanft und verträumt, entwickelt sich zu einem festlichen, emotionalen Höhepunkt und klingt ruhig und harmonisch aus.",
+    "style": "Romantische klassische Weihnachtsmusik, orchestrale Ballade mit Streichorchester, sanftem Klavier, Harfe, Flöten, Oboe, warmen Hörnern und dezenten Glocken. Langsames bis gemäßigtes Tempo, 6/8-Takt, ausdrucksstarke gesangliche Melodie, warme Dur-Harmonien mit gelegentlichen Moll-Passagen, sanfte Dynamik und festlicher orchestraler Höhepunkt.",
+    "trackCount": 12,
+    "secondsPerTrack": 300,
+    "minSeconds": 240,
+    "maxSeconds": 360
+  },
+  "tracks": [
+    {
+      "id": "t1",
+      "title": "Sternenstill",
+      "mood": "calm, dreamy, introspective",
+      "tempoBpm": 60,
+      "key": "G major",
+      "meter": "6/8",
+      "instrumentation": "solo piano, harp, warm strings (violins, violas)",
+      "form": "intro, main theme, gentle development, quiet outro",
+      "targetSeconds": 300,
+      "piece": "sternenstill"
+    },
+    {
+      "id": "t2",
+      "title": "Flockentanz",
+      "mood": "playful, light, sparkling",
+      "tempoBpm": 120,
+      "key": "D minor",
+      "meter": "3/4",
+      "instrumentation": "flute, oboe, pizzicato strings, glockenspiel, light percussion",
+      "form": "intro, theme, variation, bridge, reprise, coda",
+      "targetSeconds": 300,
+      "piece": "flockentanz"
+    },
+    {
+      "id": "t3",
+      "title": "Kerzenlicht",
+      "mood": "warm, lyrical, comforting",
+      "tempoBpm": 80,
+      "key": "F major",
+      "meter": "4/4",
+      "instrumentation": "French horn, cello, piano, harp, soft strings",
+      "form": "intro, melody, middle section, recapitulation, gentle outro",
+      "targetSeconds": 300,
+      "piece": "kerzenlicht"
+    },
+    {
+      "id": "t4",
+      "title": "Winterhauch",
+      "mood": "mysterious, flowing, cool",
+      "tempoBpm": 70,
+      "key": "E minor",
+      "meter": "5/4",
+      "instrumentation": "solo oboe, low strings, subtle tubular bells, muted brass",
+      "form": "intro, theme, development, subtle climax, fade-out",
+      "targetSeconds": 300,
+      "piece": "winterhauch"
+    },
+    {
+      "id": "t5",
+      "title": "Tannenduft",
+      "mood": "bright, festive, buoyant",
+      "tempoBpm": 100,
+      "key": "A major",
+      "meter": "6/8",
+      "instrumentation": "full string section, flutes, glockenspiel, light percussion",
+      "form": "intro, main theme, trio, variation, lively coda",
+      "targetSeconds": 300,
+      "piece": "tannenduft"
+    },
+    {
+      "id": "t6",
+      "title": "Schneekristall",
+      "mood": "delicate, crystalline, serene",
+      "tempoBpm": 65,
+      "key": "C minor",
+      "meter": "3/8",
+      "instrumentation": "harp, solo violin, celesta, soft strings",
+      "form": "intro, arpeggiated theme, middle passage, return, quiet outro",
+      "targetSeconds": 300,
+      "piece": "schneekristall"
+    },
+    {
+      "id": "t7",
+      "title": "Morgenröte",
+      "mood": "hopeful, uplifting, radiant",
+      "tempoBpm": 90,
+      "key": "Bb major",
+      "meter": "4/4",
+      "instrumentation": "French horns, woodwinds, strings, piano",
+      "form": "intro, theme, development, bridge, recapitulation, coda",
+      "targetSeconds": 300,
+      "piece": "morgenroete"
+    },
+    {
+      "id": "t8",
+      "title": "Glockenklang",
+      "mood": "festive, bright, rhythmic",
+      "tempoBpm": 110,
+      "key": "D major",
+      "meter": "2/4",
+      "instrumentation": "handbells, tubular bells, full orchestra, percussion",
+      "form": "fanfare intro, main melody, rhythmic interlude, climax, brisk outro",
+      "targetSeconds": 300,
+      "piece": "glockenklang"
+    },
+    {
+      "id": "t9",
+      "title": "Heimkehr",
+      "mood": "nostalgic, warm, reflective",
+      "tempoBpm": 78,
+      "key": "G minor",
+      "meter": "6/8",
+      "instrumentation": "piano, cello, warm strings, soft harp",
+      "form": "intro, theme, middle section, variation, quiet ending",
+      "targetSeconds": 300,
+      "piece": "heimkehr"
+    },
+    {
+      "id": "t10",
+      "title": "Samtige Nacht",
+      "mood": "serene, velvety, tranquil",
+      "tempoBpm": 55,
+      "key": "Eb major",
+      "meter": "4/4",
+      "instrumentation": "solo French horn, strings, harp, gentle percussion",
+      "form": "slow intro, lyrical theme, development, gentle fade",
+      "targetSeconds": 300,
+      "piece": "samtige-nacht"
+    },
+    {
+      "id": "t11",
+      "title": "Festlicher Glanz",
+      "mood": "grand, triumphant, celebratory",
+      "tempoBpm": 130,
+      "key": "C major",
+      "meter": "4/4",
+      "instrumentation": "full orchestra, brass fanfare, timpani, glockenspiel",
+      "form": "opening fanfare, main theme, development, climactic buildup, triumphant coda",
+      "targetSeconds": 300,
+      "piece": "festlicher-glanz"
+    },
+    {
+      "id": "t12",
+      "title": "Stille Geborgenheit",
+      "mood": "peaceful, intimate, concluding",
+      "tempoBpm": 50,
+      "key": "A minor",
+      "meter": "3/4",
+      "instrumentation": "solo piano, soft strings, harp, distant bells",
+      "form": "intro, reminiscence, gentle resolution, quiet outro",
+      "targetSeconds": 300,
+      "piece": "stille-geborgenheit"
+    }
+  ]
+}
